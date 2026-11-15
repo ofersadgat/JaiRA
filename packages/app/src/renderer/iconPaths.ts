@@ -29,7 +29,7 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
   | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause"
-  | "eyeOff" | "layers" | "placeMain" | "placeSplit" | "placePanel", string[]> = {
+  | "eyeOff" | "layers" | "placeMain" | "placeSplit" | "placePanel" | "flip", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -170,6 +170,9 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   placeMain: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"],
   placeSplit: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z", "M12 5v14"],
   placePanel: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z", "M15 5v14"],
+  // An agent's lane moving to the other side of the trunk (`AgentRail.tsx`): bring it into the
+  // conversation, or send it back to the background. Two arrows passing, one each way.
+  flip: ["M4 8h14l-3-3", "M20 16H6l3 3"],
   play: ["M7 5v14l11-7Z"],
   stop: ["M7 7h10v10H7Z"],
   // A conversation waiting for you (the status line, 2026-10-24): the board's waiting pill's two bars.

@@ -55,6 +55,7 @@ export function ChildRunLine({
   open,
   onToggle,
   onWalkIn,
+  nest = true,
   children,
 }: {
   /** What the line says the run is — "entered" a workflow, an "agent" — and its name, in bold after it. */
@@ -73,6 +74,11 @@ export function ChildRunLine({
   onToggle: () => void;
   /** Going in; a host with nowhere to go has none, and the line draws no button for it. */
   onWalkIn?: (() => void) | undefined;
+  /**
+   * `false`: the line alone — its host draws what it opens elsewhere (an agent's lane on the rail,
+   * `AgentRail.tsx`), so the chevron says open or shut and nothing is nested here.
+   */
+  nest?: boolean;
   children: ReactNode;
 }): JSX.Element {
   const t = useTokens();
@@ -175,7 +181,7 @@ export function ChildRunLine({
           )}
         </Press>
       </View>
-      {open ? (
+      {open && nest ? (
         <View flexBasis="100%" flexShrink={1} minWidth={0} marginTop={4} marginBottom={8} marginLeft={18} paddingLeft={8} {...(edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) as object)}>
           <InNoteContext.Provider value={true}>{children}</InNoteContext.Provider>
         </View>

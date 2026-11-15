@@ -85,6 +85,7 @@ export function SidechainConversation({
             live={liveTurn}
             working={working}
             empty="This subagent has not said anything yet."
+            agentRail
             {...(open !== undefined && host !== undefined ? { onOpenSidechain: (nested: string, name: string) => open(host, nested, name) } : {})}
           />
         </Paper>

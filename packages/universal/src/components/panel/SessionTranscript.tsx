@@ -1,4 +1,4 @@
-import { Fragment, memo, useContext, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { Fragment, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { MessageAuthor, SessionView, ViewId } from "@jaira/shared/browser";
@@ -29,6 +29,7 @@ import { Virtual } from "../Virtual";
 import { Icon } from "./Icon";
 import { Empty } from "./RunTranscript";
 import { MessageRail } from "./MessageRail";
+import { AgentLaneRow, RailProvider, useLaneMarks, useRailFrame } from "./AgentRail";
 import { baselineOf } from "./SessionBands";
 
 /**
@@ -78,6 +79,8 @@ export const Transcript = memo(function Transcript({
   onOpenSidechain,
   artifacts,
   padding = [12, 16, 22, 16],
+  agentRail = false,
+  lane,
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
@@ -105,6 +108,14 @@ export const Transcript = memo(function Transcript({
   artifacts?: ArtifactSurface | undefined;
   /** The column's padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
   padding?: readonly [number, number, number, number];
+  /**
+   * Draw the agents this conversation started on a rail beside it (`AgentRail.tsx`): a lane each, to the
+   * right for one it waited for, to the left for one that ran in the background. Off, an agent is its
+   * call's row and the doorway under it.
+   */
+  agentRail?: boolean | undefined;
+  /** This conversation is an agent's, opened beside its lane: its trunk is that lane, in this colour. */
+  lane?: string | undefined;
 }): JSX.Element {
   // With no pointer that hovers, the message whose rail a press opened (its block), and the message the
   // touch now landing is on: a touch anywhere else in the window puts the rail away. The shell's root
@@ -125,6 +136,30 @@ export const Transcript = memo(function Transcript({
     });
   }, [pressed]);
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
+  // The rail, where it is asked for: measured over the column, its rows drawn by `AgentLaneRow`.
+  const railChains = session !== null && session !== undefined ? session.sidechains : undefined;
+  const railSidechainOf = useMemo(
+    () => (railChains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call], live?.sidechains) : undefined),
+    [session, railChains, live],
+  );
+  const streaming = useMemo(() => new Set(Object.keys(live?.sidechains ?? {})), [live]);
+  const railWorking = writingOf(working, session);
+  const nestedLane = useCallback(
+    (inner: TranscriptEntry[], innerWorking: boolean, hue: string) => (
+      <Transcript session={session} entries={inner} live={live} working={innerWorking} onOpenSidechain={onOpenSidechain} artifacts={artifacts} agentRail lane={hue} />
+    ),
+    [session, live, onOpenSidechain, artifacts],
+  );
+  const frame = useRailFrame({
+    entries: agentRail || lane !== undefined ? shown : NO_ENTRIES,
+    working: railWorking,
+    streaming,
+    sidechainOf: railSidechainOf,
+    onOpenSidechain,
+    lane,
+    artifacts,
+    nested: nestedLane,
+  });
   // A view opened from a publish's card goes on to a later publish in the same run, as the card does
   // (`publishSuccessorsOf`): told whenever a publish lands that replaces another.
   const successors = publishSuccessorsOf(shown);
@@ -147,7 +182,8 @@ export const Transcript = memo(function Transcript({
   let lastContext: ContextReading | undefined;
   let compactedSince = false;
   return (
-    <View flexDirection="column" width="100%" paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>
+    <View flexDirection="column" width="100%" paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={frame.on ? frame.gutter + 6 : padding[3]} minWidth={0} {...frame.columnProps}>
+      <RailProvider ctx={frame.ctx}>
       {blocks.map((block, i) => {
         // Once a doomed message has gone by, everything under it goes too.
         const crossed = !doomed && doomedFrom !== undefined && block.kind === "message" && block.turn !== undefined && block.turn >= doomedFrom;
@@ -233,9 +269,13 @@ export const Transcript = memo(function Transcript({
           </View>
         );
       })}
+      </RailProvider>
+      {frame.overlay}
     </View>
   );
 });
+
+const NO_ENTRIES: TranscriptEntry[] = [];
 
 /** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on. */
 const Inner: TranscriptOf = ({ entries, working, onOpenSidechain, artifacts }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} artifacts={artifacts} />;
@@ -280,12 +320,20 @@ function WorkBlockView({
   calls?: CallSurface | undefined;
 }): JSX.Element | null {
   const look = useContext(WorkLookContext);
-  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} transcript={Inner} />;
+  // On a rail, an agent's start, its crossover and its return are its lane's rows (`AgentRail.tsx`).
+  const marks = useLaneMarks();
+  const rowOf = (index: number): ReactNode => {
+    const entry = entries[index]!;
+    const mark = marks?.get(entry);
+    if (mark !== undefined) return <AgentLaneRow entry={entry} mark={mark} />;
+    return <Work entry={entry} open={working} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} transcript={Inner} />;
+  };
+  const marked = marks !== undefined && entries.some((entry) => marks.has(entry));
   // A stretch of nothing but rate limits and notes did no work: hidden, it is not drawn at all.
-  if ((look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
+  if (!marked && (look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise.
   if (entries.length === 1) return <WorkColumn>{rowOf(0)}</WorkColumn>;
-  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) ? [index] : []));
+  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) || marks?.has(entry) === true ? [index] : []));
   return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }
 

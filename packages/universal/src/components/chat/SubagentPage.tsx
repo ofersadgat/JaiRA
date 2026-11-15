@@ -58,7 +58,7 @@ export function SubagentPage({
       >
         <ApprovalAskContext.Provider value={ask}>
           <Paper minHeight={viewport}>
-            <Transcript session={session} entries={sub.entries} live={live} working={sub.running} empty="This subagent has not said anything yet." />
+            <Transcript session={session} entries={sub.entries} live={live} working={sub.running} empty="This subagent has not said anything yet." agentRail />
             {ask !== undefined && !atItsCall ? (
               <InlineHost>
                 <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} />

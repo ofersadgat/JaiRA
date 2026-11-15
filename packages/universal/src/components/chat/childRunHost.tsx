@@ -18,6 +18,12 @@ import { View } from "@tamagui/core";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { nodeAt } from "@jaira/ui/trail";
 import { LIVE_PILL_HEIGHT } from "./Paper";
+import type { AgentHost } from "../panel/AgentRail";
+import type { PanelEntry } from "@jaira/ui/panelStack";
+import { topOfPath } from "@jaira/ui/splitModel";
+import { placeEntry } from "../../app/places";
+import { splitView } from "../../app/viewState";
+import { panelTop } from "../panel/panelBridge";
 
 /** "9:37 PM": when a wait began, on a pill. */
 const shortClock = (at: number): string => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -50,6 +56,8 @@ export function useChildRunHost(
   outcomeHost: ((outcome: WorkflowOutcome) => ReactNode | undefined) | undefined;
   /** A subagent's line under the call that started it, the way a run's is drawn (`subagentHost.ts`). */
   subagentHost: ((call: string) => ReactNode | undefined) | undefined;
+  /** An agent's lane on the rail (`AgentRail.tsx`): what it is doing, and where it can be opened. */
+  agentHost: AgentHost;
   walkedIn: ReactNode | null;
   pills: ReactNode | null;
   /** What the thread leaves free at its end so the pills cover none of it. */
@@ -211,6 +219,53 @@ export function useChildRunHost(
           );
         };
 
+  // An agent on the rail: what its line says, and the three places besides in place it opens in — the
+  // main view (walked into, as a substate), a pane beside this one, the side panel.
+  const split = splitView.use();
+  const panelOnTop = panelTop.use();
+  const agentEntry = (call: string, name: string): PanelEntry | undefined =>
+    threadSession === null || surface.taskId === null || surface.taskId === undefined
+      ? undefined
+      : {
+          kind: "subagent",
+          key: `subagent:${threadSession.instanceId}:${call}`,
+          taskId: surface.taskId,
+          ...(surface.project !== null && surface.project !== undefined ? { project: surface.project } : {}),
+          step: { instanceId: threadSession.instanceId, stateId: threadSession.stateId, sidechain: call, name },
+        };
+  const shownKeys = new Set([topOfPath(split.panes[1])?.key, panelOnTop?.key].filter((key): key is string => key !== undefined));
+  const agentHost: AgentHost = {
+    info: (call) => {
+      const sub = subagents.get(call);
+      if (sub === undefined) return undefined;
+      const own = chainScopedWaits(waits, sub.chain);
+      return {
+        name: sub.name,
+        ...(sub.kind !== undefined ? { kind: sub.kind } : {}),
+        waits: own,
+        ...(own.length === 0 && sub.step !== undefined ? { running: { step: sub.step.step, path: sub.step.path } } : {}),
+        steps: sub.steps,
+        took: tookOf(sub),
+      };
+    },
+    walkIn: (call) => {
+      const sub = subagents.get(call);
+      if (sub !== undefined) walkInto(sub);
+    },
+    beside: (call, name) => {
+      const entry = agentEntry(call, name);
+      if (entry !== undefined) placeEntry("split", entry, false);
+    },
+    panel: (call, name) => {
+      const entry = agentEntry(call, name);
+      if (entry !== undefined) placeEntry("panel", entry, false);
+    },
+    litOf: (call) => {
+      const key = threadSession !== null ? `subagent:${threadSession.instanceId}:${call}` : "";
+      return { beside: topOfPath(split.panes[1])?.key === key, panel: panelOnTop?.key === key && shownKeys.has(key) };
+    },
+  };
+
   // What is waited for, from where you stand; while nothing is, the step a run in scope works on — or,
   // walked into a subagent, the call it is on. A run's scope holds no subagent's wait, nor the reverse.
   const here = walkedSub !== undefined ? chainScopedWaits(waits, walkedSub.chain) : scopedWaits(walked !== undefined ? waits.filter((wait) => wait.chain === undefined) : waits, scope);
@@ -302,5 +357,5 @@ export function useChildRunHost(
       </OutcomeHostContext.Provider>
     );
 
-  return { outcomeHost, subagentHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
+  return { outcomeHost, subagentHost, agentHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
 }

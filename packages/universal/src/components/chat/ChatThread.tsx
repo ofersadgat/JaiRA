@@ -30,6 +30,7 @@ import { useChatEnvironment } from "./environment";
 import { useChildRunHost } from "./childRunHost";
 import { OutcomeHostContext } from "../panel/outcomeHost";
 import { SubagentHostContext } from "../panel/subagentHost";
+import { AgentHostContext } from "../panel/AgentRail";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrolled, settled, type EdgeState } from "./liveEdge";
 
@@ -274,6 +275,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <OutcomeHostContext.Provider value={runs.outcomeHost}>
         <SubagentHostContext.Provider value={runs.subagentHost}>
+        <AgentHostContext.Provider value={runs.agentHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
@@ -299,6 +301,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               onEdit={m.edit}
               scope={m.taskId}
               rails
+              agentRail
               {...narrated}
               {...doomed}
             />
@@ -313,7 +316,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             </ChatFork>
             {m.seam.own.length > 0 ? (
               <Paper minHeight={viewport}>
-                <Transcript session={m.thread?.session ?? null} entries={m.seam.own} live={live} working={m.answering} artifacts={m.artifacts} onEdit={m.edit} scope={m.taskId} rails {...narrated} {...doomed} />
+                <Transcript session={m.thread?.session ?? null} entries={m.seam.own} live={live} working={m.answering} artifacts={m.artifacts} onEdit={m.edit} scope={m.taskId} rails agentRail {...narrated} {...doomed} />
                 {asking}
               </Paper>
             ) : null}
@@ -330,6 +333,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                 entries={m.shown.entries}
                 artifacts={m.artifacts}
                 rails
+                agentRail
                 {...(m.shown.key === KEPT ? { live, working: m.answering, onEdit: m.edit } : {})}
                 {...(m.status !== null && m.shown.key === KEPT ? { narrated: true } : {})}
                 {...(m.shown.key === KEPT ? doomed : {})}
@@ -339,6 +343,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           </>
         ) : null}
         </ApprovalAskContext.Provider>
+        </AgentHostContext.Provider>
         </SubagentHostContext.Provider>
         </OutcomeHostContext.Provider>
         {/* The end the pills over the box would cover, left free while they show. */}
