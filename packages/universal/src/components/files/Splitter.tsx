@@ -1,9 +1,23 @@
-import { useMemo, useRef, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { PanResponder, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { clampSplit, splitKey } from "@jaira/ui/splitterModel";
 import { NO_STACK, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
+
+/**
+ * While a divider is dragged on web: no frame takes the pointer, and the cursor stays the divider's
+ * wherever it is. A frame (an artifact's page, a canvas) is a document of its own — the moves over it
+ * go to it, not to this window — so a drag that crossed into a pane drawing one stopped dead there, and
+ * the divider could not be brought back over it.
+ */
+function holdPointer(horizontal: boolean): () => void {
+  if (!isWeb || typeof document === "undefined") return () => undefined;
+  const style = document.createElement("style");
+  style.textContent = `iframe, webview { pointer-events: none !important; } * { cursor: ${horizontal ? "row-resize" : "col-resize"} !important; }`;
+  document.head.appendChild(style);
+  return () => style.remove();
+}
 
 /**
  * The divider between two panes, dragged to resize the one before it (the size clamped by
@@ -52,6 +66,14 @@ export function Splitter({
   live.current = { value, onChange, min, max, reserve, extent, reset, invert };
   const from = useRef(0);
   const lastTap = useRef(0);
+  const release = useRef<(() => void) | null>(null);
+  const end = (): void => {
+    release.current?.();
+    release.current = null;
+    setDragging(false);
+  };
+  // Unmounted mid-drag (the split closed under it): the pointer is given back.
+  useEffect(() => () => release.current?.(), []);
   const pan = useMemo(
     () =>
       PanResponder.create({
@@ -67,6 +89,8 @@ export function Splitter({
           if (reset !== undefined) l.onChange(reset);
           lastTap.current = now;
           from.current = reset ?? l.value;
+          release.current?.();
+          release.current = holdPointer(horizontal);
           setDragging(true);
         },
         onPanResponderMove: (_e, g) => {
@@ -74,8 +98,8 @@ export function Splitter({
           const moved = horizontal ? g.dy : g.dx;
           l.onChange(clampSplit(from.current + (l.invert ? -moved : moved), l.min, l.max, l.reserve, l.extent));
         },
-        onPanResponderRelease: () => setDragging(false),
-        onPanResponderTerminate: () => setDragging(false),
+        onPanResponderRelease: end,
+        onPanResponderTerminate: end,
       }),
     [horizontal],
   );
