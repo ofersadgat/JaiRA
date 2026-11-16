@@ -307,6 +307,15 @@ export const DRAG_REGION: Record<string, unknown> = isWeb ? { WebkitAppRegion: "
 export const NO_DRAG: Record<string, unknown> = isWeb ? { WebkitAppRegion: "no-drag" } : {};
 
 /**
+ * `user-select: none` for a whole strip a drag region stands in (the title bar, a pane's head): a press
+ * that misses the filler — the bar's padding, the gap between two crumbs, the title's words — reached
+ * the page, and a move from it selected the text beside it where the person meant to move the window.
+ * It inherits, so nothing in the strip starts a selection (a text box still selects its own text). In a
+ * `style`; nothing on a phone.
+ */
+export const NO_SELECT: Record<string, unknown> = isWeb ? { userSelect: "none" } : {};
+
+/**
  * A region of the window by what it is — the sidebar (`navigation`, a `<nav>`'s role), the title bar
  * (`banner`, a `<header>`'s), the side panel (`complementary`, an `<aside>`'s) and the inbox strip
  * (`contentinfo`, a `<footer>`'s) — for a reader moving by landmark. Web only: a phone's screen reader

@@ -37,7 +37,7 @@ import { ContextMenu, type MenuAt } from "../components/Menu";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { PanelEmpty } from "../components/panel/PanelViews";
 import { SpIcon } from "../components/panel/SidePanel";
-import { DRAG_REGION, Press, Txt, WINDOW_GUTTER, edge } from "../primitives";
+import { DRAG_REGION, NO_SELECT, Press, Txt, WINDOW_GUTTER, edge } from "../primitives";
 import { useTokens } from "../tokens";
 import { useColumnsFit, useRoomWidth } from "./columnsFit";
 import { PaneBody } from "./PaneBody";
@@ -194,7 +194,7 @@ function PaneHead({ pane, path, crumbs, closable, gutter, onStep, onPath, onMenu
 }): JSX.Element {
   const t = useTokens();
   return (
-    <View role="toolbar" aria-label="Pane" {...((isWeb ? { "data-pane-head": String(pane) } : {}) as object)} flexDirection="row" alignItems="center" gap={4} minHeight={40} paddingHorizontal={6} flexShrink={0} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
+    <View role="toolbar" aria-label="Pane" {...((isWeb ? { "data-pane-head": String(pane) } : {}) as object)} flexDirection="row" alignItems="center" gap={4} minHeight={40} paddingHorizontal={6} flexShrink={0} minWidth={0} {...(edge(t, { bottom: 1 }) as object)} style={NO_SELECT as never}>
       <SpIcon icon="back" label="Back" disabled={path.entries.length <= 1} onPress={() => onStep(paneBack)} onLongPress={onPath} />
       <SpIcon icon="back" flip label="Forward" disabled={path.ahead.length === 0} onPress={() => onStep(paneForward)} />
       <View role="navigation" aria-label="This pane's path" flexDirection="row" alignItems="center" gap={5} paddingLeft={4} minWidth={0} flexShrink={1} flexGrow={crumbs.at(-1)?.address === true ? 1 : 0} overflow="hidden">
