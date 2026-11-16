@@ -14,7 +14,8 @@ import type { FunctionInputs } from "@declarative-ai/exec";
 import { claudeProjectsDir } from "@declarative-ai/agents-api";
 import { createToolGate, PermissionLedger } from "@declarative-ai/permissions";
 import { linePlaces, lowerPermissionSet, parsePermissionSet, permissionsOfPermissionSet, type PermissionSet } from "@jaira/shared";
-import { compilePolicy } from "../src/policy";
+import { compilePolicy, decideCommand } from "../src/policy";
+import { shellPermissionSetOf } from "../src/commandParts";
 import { placeNarrowingFor } from "../src/tools";
 import { compileClaudePlaceRules, namedPlacesOf } from "../src/linePlaces";
 import { CLAUDE_TOOLS, CODEX_TOOLS, planAgentTools } from "../src/agentTools";
@@ -105,6 +106,20 @@ describe("read-only-scratch", () => {
       expect(write(tool, `${claudeFolder}/memory/notes.md`), tool).toBe("deny");
       // A credential by name is refused inside the agent's folder too.
       expect(write(tool, `${claudeFolder}/.env`, CLAUDE_TOOLS), tool).toBe("deny");
+    }
+  });
+});
+
+describe("git ls-remote, in read-only and read-only-scratch", () => {
+  // It reads a remote's refs and writes nothing; but `--upload-pack` names the program run as the remote
+  // end, so a line that sets it is a line that runs anything.
+  it.each([["read-only", READ_ONLY], ["read-only-scratch", SCRATCH]] as const)("%s lets it read refs and refuses a program for the remote end", (_name, set) => {
+    const shell = shellPermissionSetOf(set)!;
+    const verdict = (line: string) => decideCommand({}, line, "posix", { permissionSet: shell }).action;
+    expect(verdict("git ls-remote --tags https://github.com/a/b.git")).toBe("allow");
+    expect(verdict("git ls-remote --heads origin")).toBe("allow");
+    for (const line of ["git ls-remote --upload-pack=./x origin", "git ls-remote --upload-pack ./x origin", "git ls-remote -u ./x origin", "git ls-remote -u./x origin"]) {
+      expect(verdict(line), line).toBe("deny");
     }
   });
 });
