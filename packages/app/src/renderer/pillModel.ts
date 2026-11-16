@@ -184,7 +184,16 @@ export function unseenTasks(
 }
 
 /** The least a row has to know about a task to be counted: what it is doing, and when it last did. */
-export type CountedTask = { taskId: string; status: TaskStatus; updatedAt: number };
+export type CountedTask = { taskId: string; status: TaskStatus; updatedAt: number; lastMessageAt?: number | undefined };
+
+/**
+ * The clock a read mark is compared with, and what opening a task marks it read up to: the row's own,
+ * or its conversation's newest reply where that is later. A typed turn moves no task row, so without
+ * the reply a conversation that finished answering was news nobody was told about.
+ */
+export function seenClockOf(row: { updatedAt: number; lastMessageAt?: number | undefined }): number {
+  return Math.max(row.updatedAt, row.lastMessageAt ?? 0);
+}
 
 /**
  * A named LIST of tasks as pills — what a view row counts, where a project row counts a summary.
@@ -208,7 +217,7 @@ export function taskCounts(rows: readonly CountedTask[], seen: Readonly<Record<s
   for (const row of rows) {
     const kind = pillKindOf(row.status);
     if (kind === null) continue;
-    if (pillFill(kind) === "status" && (seen[row.taskId] ?? 0) >= row.updatedAt) continue;
+    if (pillFill(kind) === "status" && (seen[row.taskId] ?? 0) >= seenClockOf(row)) continue;
     counts[kind] = (counts[kind] ?? 0) + 1;
   }
   return counts;
@@ -223,9 +232,9 @@ export function unseenRows(
     .filter((row) => {
       // `queued` has no pill at all, so there is nothing about it to have seen — see `pillKindOf`.
       const kind = pillKindOf(row.status);
-      return kind !== null && pillFill(kind) === "status" && (seen[row.taskId] ?? 0) < row.updatedAt;
+      return kind !== null && pillFill(kind) === "status" && (seen[row.taskId] ?? 0) < seenClockOf(row);
     })
-    .map((row) => ({ taskId: row.taskId, at: row.updatedAt }));
+    .map((row) => ({ taskId: row.taskId, at: seenClockOf(row) }));
 }
 
 /** Two tallies added — how a root row sums the projects under it. */

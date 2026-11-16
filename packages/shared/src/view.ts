@@ -1277,7 +1277,10 @@ export interface LiveTask {
 export interface EndedTask {
   taskId: string;
   status: TaskStatus;
-  /** The task ROW's clock — the same one `ui.seen` watermarks against. */
+  /**
+   * The clock `ui.seen` watermarks against: the task row's, or its conversation's newest reply where that
+   * is later (a typed turn moves no row; `seenClockOf`).
+   */
   updatedAt: number;
 }
 

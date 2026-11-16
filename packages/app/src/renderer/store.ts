@@ -155,7 +155,7 @@ import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
-import { unseenTasks } from "./pillModel";
+import { seenClockOf, unseenTasks } from "./pillModel";
 import { sessionKey } from "./sessionCache";
 import { SyncCache, type SyncOptions } from "./syncCache";
 import { alreadyFolded, foldLiveTurn, LiveDraw, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
@@ -2057,7 +2057,7 @@ export function useApp() {
     const row =
       cur().tasks.find((t) => t.taskId === taskId) ??
       cur().allConversations.find((t) => t.taskId === taskId);
-    if (row !== undefined) return row.updatedAt;
+    if (row !== undefined) return seenClockOf(row);
     for (const project of cur().projects) {
       const ended = project.ended.find((t) => t.taskId === taskId);
       if (ended !== undefined) return ended.updatedAt;

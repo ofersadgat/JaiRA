@@ -10,6 +10,11 @@ import { Svg, type Shape } from "./panel/Svg";
 /** Each kind's colour, as the pills and the rail's badge colour it. */
 export const RING_INK: Record<PillKind, string> = { running: "accent", waiting: "warn", error: "bad", warning: "warn", success: "ok" };
 
+/** The middle's fill: its tint kind's colour, a quarter strength over what it stands on. `null`: no fill. */
+export function tintOf(t: ReturnType<typeof useTokens>, ring: Ring): string | null {
+  return ring.tint === null ? null : String(t.mix(t.v(RING_INK[ring.tint]), 26, "transparent"));
+}
+
 /**
  * A clock for a ring: by the second while something on it works, by the half minute while it holds only
  * waits (their number moves by the minute), and still while it is empty.
@@ -45,22 +50,28 @@ function roundRect(x: number, y: number, side: number, r: number): { d: string; 
  * ground a tile or a row stands on) and every segment but the working ones — and the working segments,
  * which breathe (the mockup, board 11: a segment of work goes from full to a third and back).
  */
-function ringShapes(ring: Ring, size: number, radius: number, stroke: number, t: ReturnType<typeof useTokens>): { still: Shape[]; working: Shape[] } {
+function ringShapes(ring: Ring, size: number, radius: number, stroke: number, t: ReturnType<typeof useTokens>, fill: boolean): { still: Shape[]; working: Shape[] } {
   const inset = stroke / 2 + 0.5;
   const { d, length } = roundRect(inset, inset, size - inset * 2, Math.max(0, radius - inset));
   const per = length / 100;
   // `0 start length rest`: an empty dash, the gap up to the segment, the segment, the rest of the way round.
   const shape = (s: Ring["segments"][number]): Shape => ({ kind: "path", d, stroke: String(t.v(RING_INK[s.kind])), strokeWidth: stroke, linecap: "butt", dash: `0 ${s.start * per} ${s.length * per} ${length}` });
+  const tint = fill ? tintOf(t, ring) : null;
   return {
-    still: [{ kind: "path", d, stroke: String(t.mix(t.v("dim"), 28, "transparent")), strokeWidth: stroke }, ...ring.segments.filter((s) => s.kind !== "running").map(shape)],
+    still: [
+      // The middle, filled in its tint kind's colour, inside the stroke.
+      ...(tint !== null ? [{ kind: "circle" as const, cx: size / 2, cy: size / 2, r: size / 2 - stroke - 0.5, fill: tint, stroke: "none" }] : []),
+      { kind: "path", d, stroke: String(t.mix(t.v("dim"), 28, "transparent")), strokeWidth: stroke },
+      ...ring.segments.filter((s) => s.kind !== "running").map(shape),
+    ],
     working: ring.segments.filter((s) => s.kind === "running").map(shape),
   };
 }
 
 /** The drawn ring, `size` square: its still part, and over it its working part breathing. */
-function RingDrawing({ ring, size, radius, stroke }: { ring: Ring; size: number; radius: number; stroke: number }): JSX.Element {
+function RingDrawing({ ring, size, radius, stroke, fill = false }: { ring: Ring; size: number; radius: number; stroke: number; fill?: boolean }): JSX.Element {
   const t = useTokens();
-  const { still, working } = useMemo(() => ringShapes(ring, size, radius, stroke, t), [ring, size, radius, stroke, t]);
+  const { still, working } = useMemo(() => ringShapes(ring, size, radius, stroke, t, fill), [ring, size, radius, stroke, t, fill]);
   const viewBox = `0 0 ${size} ${size}`;
   return (
     <>
@@ -90,7 +101,8 @@ function Middle({ children }: { children: ReactNode }): JSX.Element {
  * it, and in the tile its two letters over what the ring's middle says — the oldest wait the person owes,
  * or how long the work has run. With nothing to say the tile is its letters alone, as it was.
  */
-export function TileRing({ items, size, tile, letters, on }: { items: readonly RingItem[]; size: number; tile: (body: ReactNode) => JSX.Element; letters: string; on: boolean }): JSX.Element {
+export function TileRing({ items, size, tile, letters, on }: { items: readonly RingItem[]; size: number; tile: (body: ReactNode, tint: string | null) => JSX.Element; letters: string; on: boolean }): JSX.Element {
+  const t = useTokens();
   const now = useRingClock(items);
   const ring = useMemo(() => ringOf(items, now), [items, now]);
   const body =
@@ -106,7 +118,7 @@ export function TileRing({ items, size, tile, letters, on }: { items: readonly R
     <View width={size} height={size} position="relative" {...((isWeb && items.length > 0 ? { title: ringLabel(items, now) } : {}) as object)}>
       {/* Always drawn: an empty ring is the tile saying nothing is going on (the mockup, board 11). */}
       <RingDrawing ring={ring} size={size} radius={13} stroke={2.5} />
-      <Middle>{tile(body)}</Middle>
+      <Middle>{tile(body, tintOf(t, ring))}</Middle>
     </View>
   );
 }
@@ -121,7 +133,7 @@ export function RowRing({ items, size = 22 }: { items: readonly RingItem[]; size
   const middle = ring.center !== null ? { kind: ring.center.kind, text: ring.center.text } : ring.done ? { kind: "success" as const, text: "✓" } : null;
   return (
     <View width={size} height={size} flexShrink={0} position="relative" {...((isWeb && items.length > 0 ? { title: ringLabel(items, now) } : {}) as object)}>
-      <RingDrawing ring={ring} size={size} radius={size / 2} stroke={2.2} />
+      <RingDrawing ring={ring} size={size} radius={size / 2} stroke={2.2} fill />
       {middle !== null ? (
         <Middle>
           <Txt spec={{ voice: "data", scale: middle.text === "✓" ? 0.75 : 0.56, weight: 700, color: RING_INK[middle.kind] as never, lineHeight: { px: 9 }, tabular: true }}>{middle.text}</Txt>

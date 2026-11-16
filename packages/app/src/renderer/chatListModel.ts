@@ -4,6 +4,7 @@
  */
 import type { TaskSummary } from "@jaira/shared/browser";
 import type { AskSpec, MenuItem } from "./menuTypes";
+import { seenClockOf } from "./pillModel";
 
 export type ChatRow = TaskSummary & { project?: string };
 
@@ -17,12 +18,13 @@ export function shownConversations<T extends ChatRow>(conversations: readonly T[
 /**
  * Whether the newest thing this conversation said has been read.
  *
- * Compared against the row's own `updatedAt` rather than held as a flag, which is what makes it
+ * Compared against the row's own clock (`seenClockOf`: its `updatedAt`, or its newest reply where that is
+ * later) rather than held as a flag, which is what makes it
  * self-clearing: a thread marked read stops being read the moment the agent says something else,
  * and nothing has to notice that and go clear anything. See {@link JairaUiState.seen}.
  */
 export function isUnread(task: TaskSummary, seen: Readonly<Record<string, number>>): boolean {
-  return (seen[task.taskId] ?? 0) < task.updatedAt;
+  return (seen[task.taskId] ?? 0) < seenClockOf(task);
 }
 
 /**

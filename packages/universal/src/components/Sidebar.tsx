@@ -378,7 +378,7 @@ function ProjectTile({ p, on }: { p: SidebarProject; on: boolean }): JSX.Element
         size={44}
         on={on}
         letters={p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}
-        tile={(body) => (
+        tile={(body, tint) => (
           <View
             width={34}
             height={34}
@@ -386,7 +386,9 @@ function ProjectTile({ p, on }: { p: SidebarProject; on: boolean }): JSX.Element
             alignItems="center"
             justifyContent="center"
             {...(edge(t, { top: on ? 1.5 : 1, right: on ? 1.5 : 1, bottom: on ? 1.5 : 1, left: on ? 1.5 : 1 }, on ? hue : "line") as object)}
-            backgroundColor={(on ? t.mix(hue, 22, "transparent") : t.v("panel")) as never}
+            // The state's colour fills the tile (the person, 2026-11-15); the open project keeps its hue
+            // on the tile's edge, and its ground where nothing is going on.
+            backgroundColor={(tint ?? (on ? t.mix(hue, 22, "transparent") : t.v("panel"))) as never}
           >
             {body}
           </View>

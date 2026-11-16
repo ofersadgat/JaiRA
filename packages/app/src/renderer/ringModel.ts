@@ -1,17 +1,18 @@
 /**
  * The ring round a project's tile and a conversation's row (the activity mockups, 2026-11-14: the person
  * picked round 3, board 11): one segment per thing that is working, waiting on the person, or has
- * stopped since they last looked, each as long as it has been so; and in the middle, how long the
- * oldest thing that wants the person has waited, or, where nothing does, how long the work has run.
- * Pure: `Sidebar.tsx` and `ChatListPanel.tsx` draw it (`StatusRing.tsx`).
+ * stopped since they last looked; and in the middle, how long the oldest thing that wants the person has
+ * waited, or, where nothing does, how long the work has run. Pure: `Sidebar.tsx` and `ChatListPanel.tsx`
+ * draw it (`StatusRing.tsx`).
  *
- * A segment's LENGTH is its age on a fixed scale ({@link RING_SPAN_MS} is the whole ring), so a glance
- * reads "old" and "new" without reading the number. When the ages add up to more than the ring, every
- * segment is shrunk by the same factor: the order and the proportions still hold, and the number in
- * the middle still says the real age.
+ * A segment's LENGTH is its SHARE of the time on the ring (the person, 2026-11-15: "each line segment of
+ * the ring represent what percent of the total time of all segments it is. this way, if there is only
+ * one, it fills the circle"): its age over every segment's age together. One thing fills the ring; a
+ * thing much younger than the rest is held at {@link MIN_LENGTH} so it is still seen. The number in the
+ * middle says the real age.
  */
 import type { LiveTask, ProjectSummary, TaskSummary } from "@jaira/shared/browser";
-import { pillKindOf, type PillKind } from "./pillModel";
+import { pillKindOf, seenClockOf, type PillKind } from "./pillModel";
 
 /** One thing on a ring: what it is, and since when. */
 export interface RingItem {
@@ -37,13 +38,17 @@ export interface Ring {
   also: { kind: "running"; text: string } | null;
   /** All it holds is what finished: a row says so with a ✓ in the middle, where a tile keeps its letters. */
   done: boolean;
+  /**
+   * The colour the middle is filled with, so the whole state reads at a glance (the person, 2026-11-15):
+   * the first kind on the ring in {@link TINT_ORDER} — asking (yellow), failed (red), done (green),
+   * working (blue). `null` for an empty ring.
+   */
+  tint: PillKind | null;
   /** Something on it is working: its clock moves by the second. */
   live: boolean;
 }
 
-/** The whole ring: thirty minutes. */
-export const RING_SPAN_MS = 30 * 60_000;
-/** A segment never shorter than this, so a thing that began a second ago is still seen. */
+/** A segment, beside others, never shorter than this, so a thing that began a second ago is still seen. */
 const MIN_LENGTH = 8;
 /** The gap between two segments. */
 const GAP = 1.5;
@@ -51,29 +56,50 @@ const GAP = 1.5;
 const ORDER: readonly PillKind[] = ["error", "waiting", "warning", "running", "success"];
 /** What the middle prefers to tell: a wait the person owes, before work that is merely going on. */
 const OWED: ReadonlySet<PillKind> = new Set<PillKind>(["waiting", "error", "warning"]);
+/**
+ * Which kind colours the middle, first to last (the person, 2026-11-15: "yellow, red, green, blue"). A
+ * run that stopped without failing is the warning yellow, after red: it is owed less than a failure.
+ */
+export const TINT_ORDER: readonly PillKind[] = ["waiting", "error", "warning", "success", "running"];
 
-export const EMPTY_RING: Ring = { segments: [], center: null, also: null, done: false, live: false };
+export const EMPTY_RING: Ring = { segments: [], center: null, also: null, done: false, tint: null, live: false };
+
+/** Each age's share of `room`, the ones under `floor` raised to it and the rest shrunk to make room. */
+function shares(ages: readonly number[], room: number, floor: number): number[] {
+  const total = ages.reduce((sum, a) => sum + a, 0);
+  const raw = total === 0 ? ages.map(() => room / ages.length) : ages.map((a) => (a / total) * room);
+  const small = raw.map((s) => s < floor);
+  const smallCount = small.filter(Boolean).length;
+  const bigTotal = raw.reduce((sum, s, i) => (small[i] ? sum : sum + s), 0);
+  if (smallCount === 0 || bigTotal === 0) return raw;
+  const left = room - floor * smallCount;
+  return raw.map((s, i) => (small[i] ? floor : (s / bigTotal) * left));
+}
 
 export function ringOf(items: readonly RingItem[], now: number): Ring {
   if (items.length === 0) return EMPTY_RING;
   const sorted = [...items].sort((a, b) => ORDER.indexOf(a.kind) - ORDER.indexOf(b.kind) || a.since - b.since);
   const gap = sorted.length > 1 ? GAP : 0;
-  const wanted = sorted.map((item) => Math.min(100, Math.max(MIN_LENGTH, ((now - item.since) / RING_SPAN_MS) * 100)));
   const room = 100 - gap * sorted.length;
-  const total = wanted.reduce((sum, n) => sum + n, 0);
-  const scale = total > room ? room / total : 1;
+  const lengths = shares(
+    sorted.map((item) => Math.max(0, now - item.since)),
+    room,
+    sorted.length > 1 ? Math.min(MIN_LENGTH, room / sorted.length) : 0,
+  );
   let at = 0;
   const segments = sorted.map((item, i) => {
-    const segment = { kind: item.kind, start: at, length: wanted[i]! * scale };
+    const segment = { kind: item.kind, start: at, length: lengths[i]! };
     at += segment.length + gap;
     return segment;
   });
+  const tint = TINT_ORDER.find((kind) => sorted.some((i) => i.kind === kind)) ?? null;
   const oldest = (keep: (kind: PillKind) => boolean): RingItem | undefined => sorted.filter((i) => keep(i.kind)).sort((a, b) => a.since - b.since)[0];
-  const owed = oldest((kind) => OWED.has(kind));
+  // The number says the age of what the colour names: the oldest of the tint's kind where that is owed.
+  const owed = tint !== null && OWED.has(tint) ? oldest((kind) => kind === tint) : undefined;
   const running = oldest((kind) => kind === "running");
   const center = owed !== undefined ? { kind: owed.kind, text: ageText(now - owed.since) } : running !== undefined ? { kind: "running" as const, text: elapsedText(now - running.since) } : null;
   const also = owed !== undefined && running !== undefined ? { kind: "running" as const, text: elapsedText(now - running.since) } : null;
-  return { segments, center, also, done: center === null && sorted.every((i) => i.kind === "success"), live: running !== undefined };
+  return { segments, center, also, done: center === null && sorted.every((i) => i.kind === "success"), tint, live: running !== undefined };
 }
 
 /** How long something has waited, in what fits a tile: `now`, `4m`, `2h`, `3d`. */
@@ -93,7 +119,10 @@ export function elapsedText(ms: number): string {
   return `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}`;
 }
 
-/** What a project's ring holds: its live work and parked asks, and what stopped since the person looked. */
+/**
+ * What a project's ring holds: its live work and parked asks, and what stopped since the person looked
+ * — a finish green until it is opened (opening marks it read: `select`, `useReadMark`).
+ */
 export function projectRingItems(summary: Pick<ProjectSummary, "ended"> & { live?: readonly LiveTask[] }, seen: Readonly<Record<string, number>> = {}): RingItem[] {
   const live = summary.live ?? [];
   const items: RingItem[] = live.map((t) => ({ kind: t.kind, since: t.since }));
@@ -110,7 +139,7 @@ export function projectRingItems(summary: Pick<ProjectSummary, "ended"> & { live
 /**
  * What a conversation's ring holds — at most two things: what it is doing (answering since its last
  * message, or asking the person since they were asked) and, once it has stopped, how it stopped while
- * that is unread. A completed conversation the person has read has an empty ring.
+ * that is unread: a reply finished is green until the conversation is opened. Read, the ring is empty.
  */
 export function chatRingItems(
   task: Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt">,
@@ -119,10 +148,11 @@ export function chatRingItems(
   const items: RingItem[] = [];
   if (facts.askedAt !== undefined) items.push({ kind: "waiting", since: facts.askedAt });
   const answering = task.status === "running" || (facts.producing[task.taskId] ?? 0) > 0;
+  const clock = seenClockOf(task);
   if (answering) items.push({ kind: "running", since: task.lastMessageAt ?? task.updatedAt });
-  else if ((facts.seen[task.taskId] ?? 0) < task.updatedAt) {
+  else if ((facts.seen[task.taskId] ?? 0) < clock) {
     const kind = pillKindOf(task.status);
-    if (kind !== null && kind !== "running" && kind !== "waiting") items.push({ kind, since: task.updatedAt });
+    if (kind !== null && kind !== "running" && kind !== "waiting") items.push({ kind, since: clock });
   }
   return items;
 }

@@ -5301,7 +5301,9 @@ export class AppService {
         // for the same reason it has no pill: it has not stopped, because it has not started.
         ended: tasks
           .filter((t) => t.status !== "running" && t.status !== "queued")
-          .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: t.updatedAt })),
+          // The clock a read mark is held against: the row's, or its conversation's newest reply where
+          // that is later — a typed turn moves no row, and its finish is news (`seenClockOf`).
+          .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: Math.max(t.updatedAt, t.lastMessageAt ?? 0) })),
         // A run, and a conversation answering a typed turn (`answering`: a turn moves no task status,
         // so this conversation, mid-answer, reads `completed` on its row). One that asks is `waiting`.
         live: tasks

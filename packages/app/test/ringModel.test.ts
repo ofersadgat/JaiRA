@@ -1,26 +1,49 @@
 /**
- * The ring round a project's tile and a conversation's row (`ringModel.ts`): a segment per thing,
- * as long as it is old on a thirty-minute ring, and in the middle the oldest wait the person owes —
+ * The ring round a project's tile and a conversation's row (`ringModel.ts`): a segment per thing, its
+ * share of the time on the ring, and in the middle the oldest wait the person owes —
  * or, where nothing is owed, how long the work has run.
  */
 import { describe, expect, it } from "vitest";
-import { ageText, askedAtOf, chatRingItems, elapsedText, projectRingItems, ringLabel, ringOf, RING_SPAN_MS } from "../src/renderer/ringModel";
+import { ageText, askedAtOf, chatRingItems, elapsedText, projectRingItems, ringLabel, ringOf } from "../src/renderer/ringModel";
+import { seenClockOf, taskCounts } from "../src/renderer/pillModel";
 
 const MIN = 60_000;
 const now = 10_000_000;
 
 describe("ringOf", () => {
   it("is empty with nothing on it", () => {
-    expect(ringOf([], now)).toEqual({ segments: [], center: null, also: null, done: false, live: false });
+    expect(ringOf([], now)).toEqual({ segments: [], center: null, also: null, done: false, tint: null, live: false });
   });
 
-  it("makes a segment as long as its age on a thirty-minute ring", () => {
-    const ring = ringOf([{ kind: "error", since: now - 15 * MIN }], now);
-    expect(ring.segments).toEqual([{ kind: "error", start: 0, length: 50 }]);
+  it("fills the ring with one thing, however old", () => {
+    expect(ringOf([{ kind: "error", since: now - 15 * MIN }], now).segments).toEqual([{ kind: "error", start: 0, length: 100 }]);
+    expect(ringOf([{ kind: "running", since: now - 1000 }], now).segments).toEqual([{ kind: "running", start: 0, length: 100 }]);
   });
 
-  it("keeps a thing that began a moment ago visible", () => {
-    expect(ringOf([{ kind: "running", since: now - 1000 }], now).segments[0]!.length).toBe(8);
+  it("gives each thing its share of the time on the ring, less the gaps", () => {
+    const ring = ringOf(
+      [
+        { kind: "error", since: now - 30 * MIN },
+        { kind: "waiting", since: now - 10 * MIN },
+      ],
+      now,
+    );
+    const [a, b] = ring.segments;
+    expect(a!.length).toBeCloseTo(97 * 0.75);
+    expect(b!.length).toBeCloseTo(97 * 0.25);
+    expect(b!.start + b!.length + 1.5).toBeCloseTo(100);
+  });
+
+  it("keeps a thing that began a moment ago visible beside an old one", () => {
+    const ring = ringOf(
+      [
+        { kind: "error", since: now - 60 * MIN },
+        { kind: "running", since: now - 1000 },
+      ],
+      now,
+    );
+    expect(ring.segments[1]!.length).toBe(8);
+    expect(ring.segments[0]!.length).toBeCloseTo(97 - 8);
   });
 
   it("orders failed, asking, stopped, working, done — and the older first within a kind", () => {
@@ -38,19 +61,6 @@ describe("ringOf", () => {
     expect(ring.segments[2]!.length).toBeGreaterThan(ring.segments[3]!.length);
   });
 
-  it("shrinks every segment alike when the ages add up to more than the ring, leaving its gaps", () => {
-    const ring = ringOf(
-      [
-        { kind: "error", since: now - RING_SPAN_MS },
-        { kind: "waiting", since: now - RING_SPAN_MS },
-      ],
-      now,
-    );
-    const [a, b] = ring.segments;
-    expect(a!.length).toBeCloseTo(b!.length);
-    expect(b!.start + b!.length + 1.5).toBeCloseTo(100);
-  });
-
   it("says the oldest wait the person owes in the middle, before any work", () => {
     const ring = ringOf(
       [
@@ -60,8 +70,20 @@ describe("ringOf", () => {
       ],
       now,
     );
-    expect(ring.center).toEqual({ kind: "error", text: "12m" });
+    // Yellow before red: the asking colours the middle, and the number is its age.
+    expect(ring.tint).toBe("waiting");
+    expect(ring.center).toEqual({ kind: "waiting", text: "4m" });
     expect(ring.live).toBe(true);
+  });
+
+  it("colours the middle asking, then failed, then done, then working", () => {
+    const tint = (...kinds: Array<"running" | "waiting" | "error" | "warning" | "success">): unknown => ringOf(kinds.map((kind) => ({ kind, since: now - MIN })), now).tint;
+    expect(tint("running", "success", "error", "waiting")).toBe("waiting");
+    expect(tint("running", "success", "error")).toBe("error");
+    expect(tint("running", "success")).toBe("success");
+    expect(tint("running")).toBe("running");
+    expect(tint()).toBeNull();
+    expect(ringOf([{ kind: "error", since: now - 12 * MIN }], now).center).toEqual({ kind: "error", text: "12m" });
   });
 
   it("says how long the longest work has run when nothing is owed", () => {
@@ -142,6 +164,16 @@ describe("what a conversation's ring holds", () => {
   it("is how it stopped while that is unread, and nothing once read", () => {
     expect(chatRingItems({ ...task, status: "failed" }, { seen: {}, producing: {} })).toEqual([{ kind: "error", since: 500 }]);
     expect(chatRingItems(task, { seen: { t: 500 }, producing: {} })).toEqual([]);
+  });
+
+  it("turns green when a typed turn's reply lands, and clears once read up to that reply", () => {
+    // A typed turn moves no row: the reply's clock is past the row's, and what the person read.
+    const replied = { ...task, updatedAt: 300, lastMessageAt: 900 };
+    expect(seenClockOf(replied)).toBe(900);
+    expect(chatRingItems(replied, { seen: { t: 300 }, producing: {} })).toEqual([{ kind: "success", since: 900 }]);
+    expect(chatRingItems(replied, { seen: { t: 900 }, producing: {} })).toEqual([]);
+    expect(taskCounts([replied], { t: 300 })).toEqual({ success: 1 });
+    expect(taskCounts([replied], { t: 900 })).toEqual({});
   });
 
   it("dates an ask by the oldest open request", () => {

@@ -17,6 +17,7 @@ import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from
 import { contextTotalOf } from "./runConversationModel";
 import { conversationAnswering, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
+import { seenClockOf } from "./pillModel";
 import type { CutSide } from "./transcriptViewTypes";
 
 /**
@@ -751,7 +752,7 @@ export function useReadMark(surface: Pick<ChatSurface, "taskId" | "conversations
   useEffect(() => {
     if (taskId === null) return;
     const row = conversations.find((task) => task.taskId === taskId);
-    if (row !== undefined) onSeen(row.taskId, row.updatedAt);
+    if (row !== undefined) onSeen(row.taskId, seenClockOf(row));
   }, [taskId, conversations, onSeen]);
 }
 
