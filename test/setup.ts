@@ -20,7 +20,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll } from "vitest";
+import { afterAll, afterEach } from "vitest";
 import { setBuiltInDir } from "@jaira/shared";
 
 export const BASE_DIR = mkdtempSync(join(tmpdir(), "jaira-base-"));
@@ -50,6 +50,22 @@ setBuiltInDir(EMPTY_BUILT_IN_DIR);
 // conventional names is what keeps a test from ever signing in to a real forge by accident.
 delete process.env["GITLAB_TOKEN"];
 delete process.env["GITHUB_TOKEN"];
+
+/**
+ * Every test gives the event loop a turn before the next one starts.
+ *
+ * A worker tells vitest's main process how its tests are going and waits at most 60 s for the reply,
+ * which it can only read on the event loop. A file whose tests never reach the loop (each `await` in
+ * them settles at once: SQLite and the file system are synchronous here) leaves that reply unread for
+ * as long as the file runs. schemas.test.ts was one (2026-11-15): its 70 tests, each opening and
+ * closing a project, held the loop for 21 s alone and 117 s under the full suite, and every full run
+ * ended in `[vitest-worker]: Timeout calling "onTaskUpdate"`, an unhandled error that made `npm test`
+ * exit 1 with every test passing. With a turn after each test, the reply waits one test at most.
+ *
+ * `setImmediate` as it was when this file loaded, not one a test has faked since.
+ */
+const realSetImmediate = globalThis.setImmediate;
+afterEach(() => new Promise<void>((resolve) => realSetImmediate(() => resolve())));
 
 afterAll(() => {
   rmSync(BASE_DIR, { recursive: true, force: true });

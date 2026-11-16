@@ -46,6 +46,7 @@ import {
   handleOfRow,
   parseRemoteUrl,
   remoteBranchName,
+  sessionKey,
   signComment,
   type Changeset,
   type ForgeAnchor,
@@ -408,7 +409,11 @@ export class RemotePrimitives {
     const repo = this.git(repoDir);
     const listed = await repo.listWorktrees();
     const resolved = resolve(dir);
-    if (!listed.some((entry) => resolve(entry.path) === resolved)) {
+    // Compared as directories, not as strings: git lists a worktree by its real path, so one kept
+    // under a symlink (macOS's temporary directory is `/var/…`, which is `/private/var/…`) never
+    // matched, and round two tried to add it again ("already exists").
+    const kept = sessionKey(dir);
+    if (!listed.some((entry) => sessionKey(entry.path) === kept)) {
       await mkdir(dirname(dir), { recursive: true });
       const local = `jaira-scratch/${row.taskId}/${row.key.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
       await repo.addWorktree(dir, local, row.target);
@@ -575,7 +580,7 @@ export class RemotePrimitives {
       if (holder === undefined) {
         await git.run(["update-ref", `refs/heads/${row.target}`, landed, local]);
         report.target = "fast-forwarded";
-      } else if (resolve(holder.path) === resolve(workspace) && report.reset) {
+      } else if (sessionKey(holder.path) === sessionKey(workspace) && report.reset) {
         report.target = "up-to-date"; // the reset above already moved it
       } else {
         const there = this.git(holder.path);

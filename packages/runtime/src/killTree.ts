@@ -34,7 +34,9 @@
  *
  * Best-effort throughout, and deliberately so — every failure path falls back to `child.kill()`,
  * which is what the caller would have done anyway. A tree kill that threw would leave the caller
- * worse off than the single-process kill it replaces.
+ * worse off than the single-process kill it replaces. The one exception is a child that never
+ * started: it is not signalled at all, since `child.kill()` on it can signal JaiRA's own process
+ * group (see {@link killTree}).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 
@@ -224,8 +226,14 @@ export function killTree(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"
       // Already gone, or never started. Either way there is nothing left to stop.
     }
   };
-  // No pid means the spawn itself failed; there is no tree, only the error the caller will see.
-  if (pid === undefined) return single();
+  // No pid means the spawn itself failed; there is no tree, only the error the caller will see — and
+  // nothing to signal, so nothing is. NOT `child.kill()`: until Node delivers the failed spawn's
+  // `error` (next tick), it holds the process handle with pid 0, and `child.kill()` is `kill(0, …)`,
+  // which signals this process's WHOLE GROUP (macOS, Node 22, where libuv spawns with posix_spawn).
+  // Measured 2026-11-15: the test below killed the vitest run around it and the shell that had
+  // started that, at a different file each time. A stop arriving as a program failed to start would
+  // have taken JaiRA's own group with it.
+  if (pid === undefined) return;
 
   if (process.platform === "win32") {
     // Taken NOW, before any helper has had seconds to spend: the walk refuses a root younger than

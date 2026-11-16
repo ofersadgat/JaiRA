@@ -8,7 +8,7 @@
  * So the test is the shape of that, not the shim: a parent that spawns a grandchild, killed from the
  * top, with the grandchild's death as the assertion.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -161,9 +161,15 @@ describe("killTree", () => {
     }
   }, 40_000);
 
-  it("does not throw when the child never started", () => {
+  // Until the failed spawn's `error` arrives (next tick), Node holds its handle with pid 0, and
+  // `kill()` is `kill(0, …)`: this whole process group. Before the fix, this test killed the vitest
+  // run around it and the shell that started that. The spy stands in for `kill()`, so a regression
+  // fails here rather than taking the run down.
+  it("does not signal a child that never started", () => {
     const missing = spawn("a-program-that-does-not-exist-jaira", [], { stdio: "ignore", windowsHide: true });
     missing.on("error", () => undefined);
+    const kill = vi.spyOn(missing, "kill").mockImplementation(() => false);
     expect(() => killTree(missing)).not.toThrow();
+    expect(kill).not.toHaveBeenCalled();
   });
 });

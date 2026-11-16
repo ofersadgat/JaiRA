@@ -598,7 +598,8 @@ the workspace specific stuff remains in the the workspace".
     (about 110 MB) and local models (10 to 175 MB) are. `buildTailnet.mjs` compiles it while the app is
     packaged, with the `go` on the PATH or a Go release it downloads, and the installer ships it as
     `resources/tailnet`; `helperBinary` looks there and beside the built-in layer (a development build
-    after `npm --workspace @jaira/app run tailnet`). The `tailnet` plugin, its manifest root, the
+    builds it there whenever it is missing or older than its sources: `build:main` runs
+    `buildTailnet.mjs --if-stale`, amended 2026-11-15). The `tailnet` plugin, its manifest root, the
     Download line on Settings → Machines and the npm publishing are gone; the tailnet workflow only
     checks that it compiles for six platforms. Verified: `npm run dist -- --dir` puts
     `resources/tailnet/jaira-tailnet.exe` in the Windows app, whose smoke test passes.

@@ -6,7 +6,8 @@
  *
  * Found at `JAIRA_TAILNET_HELPER`, or beside the built-in layer: the installer ships it as
  * `resources/tailnet` next to `resources/builtin` (`packages/app/buildTailnet.mjs`), and a development
- * build puts it in `packages/app/dist/tailnet` next to `dist/builtin` (`npm run tailnet`).
+ * build puts it in `packages/app/dist/tailnet` next to `dist/builtin` (`build:main` builds it when it is
+ * missing or older than its sources).
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";

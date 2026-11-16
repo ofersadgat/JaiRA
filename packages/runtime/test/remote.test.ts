@@ -5,7 +5,7 @@
  * repository in a temp directory (`remoteRig.ts`). The forge half is the fixture replay, which throws
  * on any request it has no answer for. Nothing here can push, open or comment anywhere real.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FunctionInputs, JsonValue } from "@declarative-ai/exec";
@@ -244,6 +244,21 @@ describe("remote_push", () => {
       await call("remote_push", { tree: "base", changeset: changeset("# plan, revised\n") as unknown as JsonValue, message: "revise" });
       expect(rig.git(rig.bare, "rev-parse", `${REVIEW}~1`)).toBe(first);
       expect(rig.git(rig.bare, "show", `${REVIEW}:docs/plan.md`)).toBe("# plan, revised");
+    });
+
+    // git lists a worktree by its real path. macOS's temporary directory is behind one (`/var` is
+    // `/private/var`), which is how the test above first failed there; this puts one in on purpose.
+    it("finds that worktree again when the scratch directory is reached through a symlink", async () => {
+      rig.git(rig.work, "checkout", "--", "app.txt");
+      const real = join(rig.root, "scratch-real");
+      mkdirSync(real);
+      const linked = join(rig.root, "scratch-link");
+      symlinkSync(real, linked, process.platform === "win32" ? "junction" : "dir");
+      const { call } = functions({ ...allow, scratchDir: linked });
+      expect((await call("remote_push", { tree: "base", changeset: changeset("# plan\n") as unknown as JsonValue })).error).toBeUndefined();
+      const first = rig.git(rig.bare, "rev-parse", REVIEW);
+      expect((await call("remote_push", { tree: "base", changeset: changeset("# plan, revised\n") as unknown as JsonValue, message: "revise" })).error).toBeUndefined();
+      expect(rig.git(rig.bare, "rev-parse", `${REVIEW}~1`)).toBe(first);
     });
   });
 });

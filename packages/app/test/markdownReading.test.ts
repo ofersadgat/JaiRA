@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { EditorState } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
 import { fenceLanguage, marks } from "../src/renderer/markdownEditor";
+import { fullyParsed } from "./fullyParsed";
 
 /**
  * The text an unfocused editor actually shows, reconstructed from the decorations.
@@ -12,7 +12,7 @@ import { fenceLanguage, marks } from "../src/renderer/markdownEditor";
  * a mounted component rather than text.
  */
 function shown(text: string, caret?: number): string {
-  const state = EditorState.create({
+  const state = fullyParsed({
     doc: text,
     ...(caret === undefined ? {} : { selection: { anchor: caret } }),
     extensions: [markdown({ base: markdownLanguage, codeLanguages: fenceLanguage })],
@@ -79,7 +79,7 @@ describe("the README, as the editor draws it", () => {
 
   it("shows the source again on the lines being edited", () => {
     const text = "- [SPEC.md](SPEC.md) — spec";
-    const state = EditorState.create({
+    const state = fullyParsed({
       doc: text,
       selection: { anchor: 4 },
       extensions: [markdown({ base: markdownLanguage, codeLanguages: fenceLanguage })],
@@ -114,7 +114,7 @@ describe("decoration hygiene", () => {
       "",
       "- item one that is\n  wrapped",
     ].join("\n");
-    const state = EditorState.create({
+    const state = fullyParsed({
       doc: text,
       extensions: [markdown({ base: markdownLanguage, codeLanguages: fenceLanguage })],
     });

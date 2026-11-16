@@ -11,11 +11,12 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import type { Decoration } from "@codemirror/view";
 import { CodeFence, columnAlign, fenceLanguage, marks, rowCells, TableBlock } from "../src/renderer/markdownEditor";
+import { fullyParsed } from "./fullyParsed";
 
 const LANGUAGE = markdown({ base: markdownLanguage, codeLanguages: fenceLanguage });
 
 function stateOf(text: string, caret?: number): EditorState {
-  return EditorState.create({
+  return fullyParsed({
     doc: text,
     ...(caret === undefined ? {} : { selection: { anchor: caret } }),
     extensions: [LANGUAGE],

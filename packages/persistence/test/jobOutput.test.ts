@@ -9,7 +9,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openDb, type JairaDb } from "../src/db";
 import { JobOutputSink, jobOutput } from "../src/jobOutput";
 
@@ -84,5 +84,17 @@ describe("JobOutputSink", () => {
     // Forgotten, so a later flush cannot resurrect a finished process's buffer.
     s.flush();
     expect(jobOutput(db, { jobId: 2 })).toHaveLength(1);
+  });
+
+  // The flush due on its timer after the project, and its database, closed. Before the fix it threw
+  // from the timer, which no test can catch: vitest reports it as an unhandled error and fails the run.
+  it("drops what is pending when its timer finds the database closed", async () => {
+    const s = sink();
+    const discard = vi.spyOn(s, "discard");
+    s.write(3, "stdout", "printed as the project closed");
+    db.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(discard).toHaveBeenCalledTimes(1);
   });
 });
