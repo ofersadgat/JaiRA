@@ -130,6 +130,12 @@ export class JobOutputSink {
     if (this.timer !== undefined) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
+      // A project can close under a child still printing, and its database with it. Nothing can be
+      // written then, and a throw from a timer reaches no caller: it is an uncaught exception in the
+      // process (2026-11-15, the full suite: "The database connection is not open", from a flush
+      // due after remoteGate.test.ts closed its project). What was pending is dropped, as `discard`
+      // would. A child's exit after the close fails in `end`, where the observer reports it.
+      if (!this.db.open) return this.discard();
       this.flush();
     }, this.flushMs);
     this.timer.unref?.();
