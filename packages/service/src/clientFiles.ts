@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
+import { FONTS, FONTS_CSS } from "@jaira/shared";
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -49,6 +50,10 @@ const TYPES: Record<string, string> = {
  *   before it is fetched. It admits that scheme and nothing else: a static artifact is still shown from
  *   `srcdoc`, which needs no allowance here and gets no scripts — the page's own `script-src` is
  *   inherited by such a frame, which is precisely why an interactive one cannot use `srcdoc` at all.
+ * - `style-src` and `font-src` admit Google Fonts, for the static preview of an HTML artifact
+ *   (`htmlFrame.tsx`): a `srcdoc` frame has no policy of its own and inherits this one, and a page
+ *   written to the artifact contract links its fonts from there. Stylesheets and font files only, never
+ *   code — `script-src` names no address.
  * - `connect-src 'self'` is what lets a browser's page reach the engine that served it and no other:
  *   over HTTP(S), `'self'` covers the same host's WebSocket.
  */
@@ -57,10 +62,10 @@ export function clientPolicy(html: string): string {
   return [
     "default-src 'none'",
     `script-src 'self' 'wasm-unsafe-eval' ${hashes.join(" ")}`.trim(),
-    "style-src 'self' 'unsafe-inline'",
+    `style-src 'self' 'unsafe-inline' ${FONTS_CSS}`,
     "img-src 'self' data:",
     "worker-src 'self' blob:",
-    "font-src 'self'",
+    `font-src 'self' ${FONTS}`,
     "connect-src 'self'",
     "frame-src jaira-artifact:",
   ].join("; ");
@@ -84,6 +89,10 @@ const isFile = (file: string): boolean => {
  * - A file is itself.
  * - A route with a page of its own (`/native` → `native.html`) gets that page, with only the
  *   stylesheets it links.
+ * - A missing file under `/assets/` is a `404`, never the page. Those are the bundle's own chunks, and a
+ *   page asks for one it does not have only when the client was rebuilt under it: answered with
+ *   `index.html`, a module script fails as "a MIME type of text/html", which names the wrong fault. One's
+ *   skew protection reloads the page on either answer.
  * - Anything else — a folder too — is `index.html`.
  * - Nothing outside `root`, whatever a path carries: an encoded `..`, a backslash Windows reads as a
  *   separator, a NUL.
@@ -101,6 +110,7 @@ export function clientFile(root: string, path: string): ClientFile {
   const inside = file === base || file.startsWith(base.endsWith(sep) ? base : base + sep);
   if (!inside) return { status: 403, reason: "that path is outside the client" };
   const index = join(base, "index.html");
+  if (!isFile(file) && file.startsWith(join(base, "assets") + sep)) return { status: 404, reason: "no such file in this build of the client" };
   const target = isFile(file) ? file : file !== base && isFile(`${file}.html`) ? `${file}.html` : index;
   if (target === index && !isFile(index)) return { status: 404, reason: "the One client is not built (npm --workspace @jaira/app run build:client)" };
   const extension = extname(target).toLowerCase();

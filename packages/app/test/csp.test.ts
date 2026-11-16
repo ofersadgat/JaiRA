@@ -48,4 +48,13 @@ describe("the renderer's content policy", () => {
     expect(app).not.toMatch(/script-src[^;]*'unsafe-inline'/);
     expect(app.match(/'sha256-[^']+'/g)).toHaveLength(2);
   });
+
+  it("admits Google Fonts' stylesheets and files, which a static HTML preview inherits", () => {
+    // The preview is a `srcdoc` frame (`htmlFrame.tsx`), so this policy is its policy: a page linking
+    // its fonts from Google drew in fallback fonts until both directives named them.
+    const app = clientPolicy(PAGE);
+    expect(app).toMatch(/style-src [^;]*https:\/\/fonts\.googleapis\.com/);
+    expect(app).toMatch(/font-src [^;]*https:\/\/fonts\.gstatic\.com/);
+    expect(app).not.toMatch(/connect-src[^;]*https?:/);
+  });
 });

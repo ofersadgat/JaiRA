@@ -936,9 +936,14 @@ async function createWindow(): Promise<BrowserWindow> {
    * find. Distinct messages only, and a hard ceiling: past it the interesting one has already been
    * recorded, and what follows is the same failure repeating.
    */
+  //
+  // Not a shown artifact's frame, either: a `srcdoc` page or one on the artifact scheme is the model's
+  // markup, and its own failures (a web font the frame's policy refuses, a script error in a mockup)
+  // are the page's, not the app's — filed here they read as the window crashing.
   const printed = new Set<string>();
   win.webContents.on("console-message", ({ level, message, lineNumber, sourceId }) => {
     if (level !== "error" || printed.size >= RENDERER_CONSOLE_LIMIT) return;
+    if (sourceId.startsWith("about:srcdoc") || sourceId.startsWith(`${ARTIFACT_SCHEME}:`)) return;
     const at = `${message} (${sourceId}:${lineNumber})`;
     if (printed.has(at)) return;
     printed.add(at);

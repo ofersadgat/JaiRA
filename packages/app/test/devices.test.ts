@@ -370,5 +370,8 @@ describe("the client's files", { timeout: 60_000 }, () => {
       expect([path, (clientFile(client, path) as { status?: number }).status]).toEqual([path, 403]);
     }
     expect(clientFile(join(client, "nowhere"), "/")).toMatchObject({ status: 404 });
+    // A chunk an older build named: a 404, not the page answering for a module script.
+    expect(clientFile(client, "/assets/canvasEditor-gone0000.js")).toMatchObject({ status: 404 });
+    expect(clientFile(client, "/some/route")).toMatchObject({ file: join(client, "index.html") });
   });
 });

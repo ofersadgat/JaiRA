@@ -18,8 +18,13 @@
 export type ArtifactPolicy = "static" | "scripts" | "page" | "canvas";
 
 const CDNS = "https://cdnjs.cloudflare.com https://unpkg.com https://cdn.tailwindcss.com https://code.jquery.com https://cdn.jsdelivr.net/npm/";
-const FONTS_CSS = "https://fonts.googleapis.com";
-const FONTS = "https://fonts.gstatic.com";
+/**
+ * Google Fonts: its stylesheets, and the font files they name. Exported because the window's own policy
+ * admits them too (`clientPolicy`): a static preview drawn from `srcdoc` inherits that policy, not one of
+ * these.
+ */
+export const FONTS_CSS = "https://fonts.googleapis.com";
+export const FONTS = "https://fonts.gstatic.com";
 
 export function artifactPolicy(policy: ArtifactPolicy, options: { sandbox?: boolean } = {}): string {
   /*
