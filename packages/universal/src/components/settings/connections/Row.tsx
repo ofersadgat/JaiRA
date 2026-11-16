@@ -28,7 +28,8 @@ import { usePhone } from "../../../app/phone";
  *   its sentence          30 in, app 11.5/12.5, line 1.45, --dim; its state --text (--bad not working,
  *                         --warn not signed in); the fix a line of its own, app 11/12.5, line 1.4,
  *                         --accent, 2 above
- *   the version           data 10.5/12 --dim, 30 in
+ *   the version           data 10.5/12 --dim, 30 in; what follows it (how it was installed, Update)
+ *                         a row with it, wrapping, centred, gap 2 8
  *   the boxes             row, wraps, to the right, gap 8; each box 200 wide. With none they are not
  *                         there, and the controls stand 14 in from the row's right
  *   the controls          row, centred, gap 6, 1 down, at least 52 wide, to the right
@@ -193,12 +194,19 @@ export function Say({ state, word, detail, fix }: { state: ProviderState; word: 
   );
 }
 
-/** The build, under the sentence. */
-export function Version({ children }: { children: string }): JSX.Element {
-  return (
-    <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim" }} marginLeft={30} alignSelf="flex-start">
+/** The build, under the sentence — and what follows it on that line (how it was installed, Update). */
+export function Version({ children, after }: { children: string; after?: ReactNode }): JSX.Element {
+  const text = (
+    <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim" }} {...(after === undefined ? { marginLeft: 30, alignSelf: "flex-start" } : {})}>
       {children}
     </Txt>
+  );
+  if (after === undefined) return text;
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={8} rowGap={2} marginLeft={30}>
+      {text}
+      {after}
+    </View>
   );
 }
 

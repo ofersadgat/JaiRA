@@ -49,6 +49,10 @@ export function ConnectionsPage(): JSX.Element {
     onSignIn: (name) => void actions.signIn(name),
     onCancelSignIn: (name) => void actions.cancelSignIn(name),
     onSignOut: (name) => void actions.signOut(name),
+    installing: new Set(state.installing),
+    onInstall: (name, method) => void actions.installAgent(name, method),
+    onCancelInstall: (name) => void actions.cancelInstall(name),
+    onUseCommand: (name, path) => void actions.useAgentCommand(name, path),
     localServers: local.localServers,
     // The ports now, and the local route's own check — which is what turns its row from "not
     // reachable" to ready, and refreshes the catalog's local models.

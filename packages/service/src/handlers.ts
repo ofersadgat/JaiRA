@@ -11,7 +11,7 @@
 import { resolve } from "node:path";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import type { HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
+import type { AgentInstallMethod, HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
@@ -283,6 +283,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
     "executor:cancelSignIn": ((request: { name: string }) => service.cancelSignIn(request.name)) as Handler,
     "executor:signOut": ((request: { name: string }) => service.signOutExecutor(request.name)) as Handler,
+    "executor:install": ((request: { name: string; method?: AgentInstallMethod }) => service.installExecutor(request.name, request.method)) as Handler,
+    "executor:cancelInstall": ((request: { name: string }) => service.cancelInstall(request.name)) as Handler,
     "forge:signIn": ((request: { connection: string }) => service.signInForge(request.connection)) as Handler,
     "forge:cancelSignIn": ((request: { connection: string }) => service.cancelForgeSignIn(request.connection)) as Handler,
     "forge:signIns": (() => service.pendingForgeSignIns()) as Handler,

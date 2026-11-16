@@ -25,6 +25,7 @@ import {
   BUILTIN_EXECUTORS,
   EXECUTOR_KINDS,
   type AgentAccount,
+  type AgentInstall,
   type SignInOutcome,
   type CredentialUse,
   type ExecutorInfo,
@@ -38,6 +39,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK } from "./agents";
+import { agentInstallOf, agentPackageOf, gatherInstallFacts, type InstallDeps } from "./agentInstall";
 import { SIGN_IN_COMMANDS, signInCommand } from "./agentOutcome";
 import { AGENT_GENERIC_CLI } from "./genericAgent";
 import type { Exec } from "./exec";
@@ -163,6 +165,12 @@ export interface ProbeOptions {
   timeoutMs?: number;
   /** Resolve a module id — injected so a test can check the SDK branch without installing it. */
   resolve?: (id: string) => string;
+  /**
+   * Also report how the agents JaiRA can install (claude, codex, gemini, agy, muse, opencode) got here and
+   * what installs or updates them (`agentInstall.ts`). Absent, nothing is looked up: the lookup is file checks on this machine (one
+   * `sh` inside WSL), and only a caller that will offer the install asks for it.
+   */
+  install?: InstallDeps;
 }
 
 /** The package the `claude-code` runtime drives in process. */
@@ -251,7 +259,20 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     return { name: info.name, status: "not-checked", detail: "no command is configured to check", ...credential };
   }
 
-  const missing = `'${info.command}' was not found — install it, or point this executor at its full path`;
+  // Where the binary is and how it got there, for an agent JaiRA can install — asked beside the
+  // version, since a missing binary's row offers the install and a present one's the update.
+  const pkg = options.install !== undefined ? agentPackageOf(info) : undefined;
+  const facts = pkg !== undefined ? await gatherInstallFacts(info.command, pkg, { exec: options.exec, deps: options.install!, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) }) : undefined;
+  const install = pkg !== undefined && facts !== undefined ? agentInstallOf(pkg, facts) : undefined;
+  const withInstall = install !== undefined ? { install } : {};
+
+  const missing =
+    install?.install !== undefined
+      ? `install it from Settings → Connections → Agents, or point this executor at its full path`
+      : `'${info.command}' was not found — install it, or point this executor at its full path`;
+  // What the binary's absence MEANS, when the lookup found more than the run did: installed where this
+  // app's PATH does not reach, or a link left behind by an install half-removed.
+  const notRunnable = notRunnableOf(info.command, install);
   let result;
   try {
     result = await options.exec.run(info.command, ["--version"], {
@@ -262,9 +283,10 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     return {
       name: info.name,
       status: "failed",
-      detail: `'${info.command}' could not be started: ${(e as Error).message}`,
-      fix: missing,
+      detail: notRunnable?.detail ?? `'${info.command}' could not be started: ${(e as Error).message}`,
+      fix: notRunnable?.fix ?? missing,
       ...credential,
+      ...withInstall,
     };
   }
 
@@ -275,6 +297,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
       detail: `'${info.command} --version' did not answer in time`,
       fix: missing,
       ...credential,
+      ...withInstall,
     };
   }
   if (result.code !== 0) {
@@ -284,9 +307,10 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     return {
       name: info.name,
       status: "failed",
-      detail: `'${info.command} --version' exited ${result.code}${said ? `: ${said}` : ""}`,
-      fix: missing,
+      detail: notRunnable?.detail ?? `'${info.command} --version' exited ${result.code}${said ? `: ${said}` : ""}`,
+      fix: notRunnable?.fix ?? missing,
       ...credential,
+      ...withInstall,
     };
   }
 
@@ -303,7 +327,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     // A warning, not a failure: the connector works, and the logins under it say who is missing. The
     // detail stays about the CONNECTOR; signing in is the logins list's to offer.
     if (read?.signedIn === false) {
-      return { name: info.name, status: "needs-sign-in", detail: `'${info.command}' responded`, ...(version ? { version } : {}), accounts: [] };
+      return { name: info.name, status: "needs-sign-in", detail: `'${info.command}' responded`, ...(version ? { version } : {}), accounts: [], ...withInstall };
     }
   }
 
@@ -315,6 +339,7 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
       fix: `store a value for '${credential.credentialMissing}', or clear the field to let the binary sign itself in`,
       ...(version ? { version } : {}),
       ...credential,
+      ...withInstall,
     };
   }
   return {
@@ -328,7 +353,30 @@ export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): 
     ...(version ? { version } : {}),
     ...credential,
     ...(accounts !== undefined ? { accounts } : {}),
+    ...withInstall,
   };
+}
+
+/**
+ * Why a binary that would not run is not runnable, when the install lookup knows better than the
+ * spawn's ENOENT: it is installed where this app's PATH does not reach (a Mac app started from the
+ * Finder reaches none of `~/.local/bin`, Homebrew's or nvm's), or it is a link whose target is gone.
+ */
+function notRunnableOf(command: string, install: AgentInstall | undefined): { detail: string; fix: string } | undefined {
+  if (install?.path === undefined) return undefined;
+  if (install.broken === true) {
+    return {
+      detail: `'${install.path}' is a link to a file that is gone — what is left of an install`,
+      fix: install.update !== undefined ? `reinstall it (${install.update.display}) from Settings → Connections → Agents` : `install it again, or point this executor at its full path`,
+    };
+  }
+  if (install.onPath === false) {
+    return {
+      detail: `'${command}' is installed at ${install.path}, which this app's PATH does not reach`,
+      fix: `point this executor at ${install.path} — Settings → Connections → Agents offers it`,
+    };
+  }
+  return undefined;
 }
 
 /** What a sign-in status said: whether it is signed in, and as whom. */

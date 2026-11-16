@@ -102,6 +102,31 @@ export const EXECUTOR_TITLES: Readonly<Record<string, string>> = {
   "claude-code": "Claude",
   "claude-cli": "Claude (cli)",
   "codex-cli": "Codex (cli)",
+  "gemini-cli": "Gemini (cli)",
+  "antigravity-cli": "Antigravity (cli)",
+  "muse-code": "Muse Code",
+  opencode: "OpenCode",
+};
+
+/**
+ * The agent CLIs JaiRA ships set up as generic CLIs — `builtin/settings.json`'s `agents.genericCli`,
+ * the bottom configuration layer — and what each is, for its row. Generic because none has an adapter
+ * of its own: each is driven by an argv template, so none enforces JaiRA's permissions (DESIGN §16).
+ * A built-in one can be turned off and its arguments changed, but not removed.
+ */
+export const BUILTIN_GENERIC_AGENTS: Readonly<Record<string, { hint: string }>> = {
+  "gemini-cli": {
+    hint: "Google's `gemini` binary, now for Gemini Code Assist and paid API keys — individual plans moved to Antigravity CLI. Run headless (`gemini -p`) with edits approved and shell commands not. Signs itself in, or reads GEMINI_API_KEY. A generic CLI: it enforces none of JaiRA's permissions.",
+  },
+  "antigravity-cli": {
+    hint: "Google's `agy` binary, run headless (`agy -p`) with edits accepted and anything else declined. Sign in once by running `agy` in a terminal — or a GEMINI_API_KEY, with `modelProvider: \"gemini\"` in its own settings. A generic CLI: it enforces none of JaiRA's permissions.",
+  },
+  "muse-code": {
+    hint: "Meta's `muse` binary, run headless (`muse exec`) in its own sandbox without asking. Signs itself in with `muse login`, or reads META_API_KEY. A generic CLI: it enforces none of JaiRA's permissions.",
+  },
+  opencode: {
+    hint: "The `opencode` binary, run headless (`opencode run`) with whatever provider it is signed in to (`opencode auth login`). A generic CLI: it enforces none of JaiRA's permissions.",
+  },
 };
 
 /** Which link of the secret chain supplied a credential. */
@@ -191,7 +216,54 @@ export interface ProbeResult {
    * executor has no sign-in to read (a key, an SDK).
    */
   accounts?: AgentAccount[];
+  /**
+   * How the agent's binary got onto this machine, and the command that installs or updates it — only
+   * for an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode — a generic CLI by
+   * its program), and only when the check looked.
+   */
+  install?: AgentInstall;
 }
+
+/**
+ * The ways an agent's binary is installed. Each updates differently — `claude update` is wrong for a
+ * Homebrew cask, `npm i -g` is wrong for the native build — so the way is read off where the binary
+ * lives rather than guessed.
+ */
+export type AgentInstallMethod = "native" | "homebrew" | "npm" | "bun" | "pnpm" | "winget";
+
+/** One command that installs, updates or repairs an agent — what the person is shown before it runs. */
+export interface AgentInstallCommand {
+  method: AgentInstallMethod;
+  /** The way, as a person names it: "the native installer", "Homebrew", "npm". */
+  via: string;
+  /** The command as a person would type it in a terminal. What actually runs is decided in main. */
+  display: string;
+}
+
+/** Where an agent's binary is, how it was installed, and what installs or updates it. */
+export interface AgentInstall {
+  /** The binary as found — on the PATH, or in a usual place for its installer. */
+  path?: string;
+  /**
+   * False when the binary was found only in a usual place this app's PATH does not reach (the native
+   * installer's `~/.local/bin`, Homebrew's prefix): installed, and the bare command still fails here.
+   */
+  onPath?: boolean;
+  /** Found as a link whose target is gone: an install half-removed, which only a reinstall mends. */
+  broken?: boolean;
+  /** How it was installed, when where it lives says so. */
+  method?: AgentInstallMethod;
+  /** Brings it to the latest by the way it was installed — or reinstalls it, when `broken`. */
+  update?: AgentInstallCommand;
+  /** Not installed: the ways to install it from here, the recommended one first. */
+  install?: AgentInstallCommand[];
+}
+
+/**
+ * What an install or update came to. `path` is where the binary is now, and `onPath` whether the bare
+ * command reaches it from this app — false is an install that worked and a command that still will not.
+ */
+export type AgentInstallOutcome = { ok: true; path?: string; onPath?: boolean } | { ok: false; reason: string };
 
 /**
  * Why an agent a check looked at cannot answer, in words for the person — or `undefined` when it can,

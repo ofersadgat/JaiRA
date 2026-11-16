@@ -3,6 +3,7 @@
  * (`packages/universal/src/components/settings/connections/ProviderRows.tsx`) takes. A type only.
  */
 import type {
+  AgentInstallMethod,
   ConfigLayer,
   ConfigView,
   ExecutorInfo,
@@ -48,6 +49,13 @@ export interface ProvidersPaneProps {
   onSignIn: (name: string) => void;
   onCancelSignIn: (name: string) => void;
   onSignOut: (name: string) => void;
+  /** Agents whose install or update is running. */
+  installing: ReadonlySet<string>;
+  /** Install an agent the way named, or — none named — update it the way it was installed. */
+  onInstall: (name: string, method?: AgentInstallMethod) => void;
+  onCancelInstall: (name: string) => void;
+  /** Run an agent from this path: installed where this app's PATH does not reach. */
+  onUseCommand: (name: string, path: string) => void;
   /** What answered on the usual local ports, when the page last asked. Absent ⇒ not asked yet. */
   localServers?: LocalServerProbe[] | undefined;
   /**

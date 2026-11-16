@@ -76,6 +76,7 @@ export * from "./eventHub";
 export * from "./eventsTask";
 export * from "./repoWatch";
 export * from "./executors";
+export * from "./agentInstall";
 export * from "./agentOutcome";
 export * from "./executorStack";
 export * from "./executorTree";

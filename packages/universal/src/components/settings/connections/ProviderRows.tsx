@@ -1,6 +1,7 @@
 import { useContext, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import {
+  BUILTIN_GENERIC_AGENTS,
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
   type AgentAccount,
@@ -13,6 +14,7 @@ import {
 import {
   emptyLevelWords,
   fieldControlOf,
+  installPanelOf,
   keyBoxWords,
   keyEntryExecutor,
   keyEntryName,
@@ -26,8 +28,10 @@ import {
   providerSayState,
   readAt,
   secretTargetsOf,
+  updateOf,
   useProviderRow,
   weightsSize,
+  type InstallPanelRow,
 } from "@jaira/ui/connectionsModel";
 import { checkCredentialName } from "@jaira/ui/executorConfig";
 import { accountFor, useLimits } from "@jaira/ui/limitsStore";
@@ -236,12 +240,17 @@ function ProviderRow(
     effective: unknown;
   },
 ): JSX.Element {
-  const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, localServers, onScanLocal, scanningLocal, weights } = props;
+  const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, installing, onInstall, onCancelInstall, onUseCommand, localServers, onScanLocal, scanningLocal, weights } = props;
   const [open, setOpen] = useState(false);
   const { here, merged, form, setForm, problem, locked, enabled, state, dirty, write, save, revert } = useProviderRow(props);
   // The key's store form opens under the row, across its width, from the key box on the right.
   const [keyOpen, setKeyOpen] = useState(false);
   const agentLogins = probe?.accounts !== undefined && state !== "off";
+  // How the agent got here and what installs or updates it — for claude and codex, while they are on.
+  const install = state !== "off" ? probe?.install : undefined;
+  const running = installing.has(spec.id);
+  const installPanel = installPanelOf(install);
+  const update = updateOf(install);
 
   const boxes = [
     ...(agentLogins
@@ -262,6 +271,19 @@ function ProviderRow(
   ];
 
   const wide = [
+    installPanel !== undefined ? (
+      <Wide key="install">
+        <InstallPanel
+          panel={installPanel}
+          running={running}
+          busy={busy}
+          locked={locked}
+          onInstall={(method) => onInstall(spec.id, method)}
+          onCancel={() => onCancelInstall(spec.id)}
+          onUse={(path) => onUseCommand(spec.id, path)}
+        />
+      </Wide>
+    ) : null,
     keyOpen ? (
       <Wide key="key">
         <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
@@ -309,7 +331,7 @@ function ProviderRow(
             <Button kind="ghost" onPress={revert} disabled={!dirty}>
               Revert
             </Button>
-            {spec.location.kind === "agent" && spec.location.executorKind === "generic" ? (
+            {spec.location.kind === "agent" && spec.location.executorKind === "generic" && BUILTIN_GENERIC_AGENTS[spec.id] === undefined ? (
               <Button kind="danger" disabled={locked} title="delete this CLI from the layer being edited — a built-in can only be turned off" onPress={() => onRemove(spec.id, layer)}>
                 Remove
               </Button>
@@ -328,7 +350,9 @@ function ProviderRow(
         <>
           <RowHead brand={spec.id} state={state} title={spec.title} />
           <Say state={state} word={providerSayState(probe, state)} detail={probe && state !== "off" && probe.detail ? probe.detail : undefined} fix={probe && state !== "off" && probe.fix ? probe.fix : undefined} />
-          {probe?.version ? <Version>{probe.version}</Version> : null}
+          {probe?.version ? (
+            <Version after={update !== undefined ? <UpdateAfter via={update.via} title={update.title} running={running} disabled={busy} onUpdate={() => onInstall(spec.id)} onCancel={() => onCancelInstall(spec.id)} /> : undefined}>{probe.version}</Version>
+          ) : null}
         </>
       }
       boxes={boxes}
@@ -346,6 +370,85 @@ function ProviderRow(
       }
       wide={wide}
     />
+  );
+}
+
+/** After an agent's version: how it was installed, and Update — or, while it runs, that it does and Cancel. */
+function UpdateAfter({ via, title, running, disabled, onUpdate, onCancel }: { via: string; title: string; running: boolean; disabled: boolean; onUpdate: () => void; onCancel: () => void }): JSX.Element {
+  const words = { voice: "app", scale: 11 / 12.5, color: "dim" } as const;
+  return running ? (
+    <View flexDirection="row" alignItems="center" gap={6} role="status">
+      <Spin />
+      <Txt spec={words}>{`updating with ${via}…`}</Txt>
+      <SmallButton kind="ghost" onPress={onCancel}>
+        Cancel
+      </SmallButton>
+    </View>
+  ) : (
+    <View flexDirection="row" alignItems="center" gap={6}>
+      <Txt spec={words}>{via}</Txt>
+      <SmallButton kind="ghost" disabled={disabled} onPress={onUpdate} title={title}>
+        Update
+      </SmallButton>
+    </View>
+  );
+}
+
+/**
+ * Under an agent whose binary will not run here: the ways to install it, each with the command it runs,
+ * the reinstall of what is left of one, or the path it was found at to use. The command is shown before
+ * it runs — it downloads and installs a program — and while one runs, the head says so with Cancel.
+ */
+function InstallPanel({
+  panel,
+  running,
+  busy,
+  locked,
+  onInstall,
+  onCancel,
+  onUse,
+}: {
+  panel: { head: string; right: string; rows: InstallPanelRow[] };
+  running: boolean;
+  busy: boolean;
+  locked: boolean;
+  onInstall: (method: InstallPanelRow["method"]) => void;
+  onCancel: () => void;
+  onUse: (path: string) => void;
+}): JSX.Element {
+  const last = useColumn();
+  return (
+    <ProbeList>
+      <ProbeHead
+        left={panel.head}
+        right={running ? "installing — this can take a minute…" : panel.right}
+        {...(running ? { action: { label: "Cancel", title: "stop the installer", disabled: false, onPress: onCancel } } : {})}
+      />
+      {panel.rows.map((row) => (
+        <ProbeRow
+          key={row.key}
+          id={row.key}
+          weights
+          name={row.name}
+          at={
+            <Txt spec={{ voice: "data", scale: 11 / 12 }} numberOfLines={1} {...({ title: row.at } as object)}>
+              {row.at}
+            </Txt>
+          }
+          nameWidth={130}
+          last={last}
+          end={
+            <RowButton
+              disabled={row.path !== undefined ? locked : busy || running}
+              title={row.title}
+              onPress={() => (row.path !== undefined ? onUse(row.path) : onInstall(row.method))}
+            >
+              {row.button}
+            </RowButton>
+          }
+        />
+      ))}
+    </ProbeList>
   );
 }
 

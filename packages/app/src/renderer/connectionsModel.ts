@@ -17,6 +17,8 @@ import {
   parseMcp,
   toolsInCategory,
   type AgentAccount,
+  type AgentInstall,
+  type AgentInstallMethod,
   type ConfigLayer,
   type ConfigView,
   type EmbeddedWeightsReport,
@@ -107,6 +109,69 @@ export function loginCommandOf(agent: string, command: string | undefined): { bi
   const binary = command ?? agent.replace(/-cli$/, "");
   const login = agent === "claude-cli" ? `${binary} auth login` : `${binary} login`;
   return { binary, login };
+}
+
+// --- installing an agent ------------------------------------------------------------------------
+
+/** A way of installing, as the install panel's first column and the version line name it. */
+const INSTALLED_WITH: Record<AgentInstallMethod, string> = {
+  native: "Native installer",
+  homebrew: "Homebrew",
+  npm: "npm",
+  bun: "Bun",
+  pnpm: "pnpm",
+  winget: "WinGet",
+};
+
+/** One line of an agent's install panel: a way and its command, or the place it was found. */
+export interface InstallPanelRow {
+  key: string;
+  name: string;
+  /** The command it runs, or the path it would use. */
+  at: string;
+  button: string;
+  title: string;
+  /** Install this way; absent with `path` absent is the update (here, the reinstall). */
+  method?: AgentInstallMethod;
+  /** Use this path as the agent's command. */
+  path?: string;
+}
+
+/**
+ * The panel under an agent's row when its binary will not run here, from what the probe found: not
+ * installed (the ways to install it, the vendor's recommendation first), what is left of an install (the
+ * reinstall), or installed where this app's PATH does not reach (that path, to use). Nothing for an
+ * agent that runs, or one the probe did not look for.
+ */
+export function installPanelOf(install: AgentInstall | undefined): { head: string; right: string; rows: InstallPanelRow[] } | undefined {
+  if (install === undefined) return undefined;
+  const ways = (verb: string): InstallPanelRow[] =>
+    (install.install ?? []).map((one) => ({ key: one.method, name: INSTALLED_WITH[one.method], at: one.display, button: verb, title: `runs ${one.display}`, method: one.method }));
+  if (install.broken === true) {
+    if (install.update !== undefined) {
+      const one = install.update;
+      return { head: `What is left of an install — ${install.path ?? "its link"} points at nothing`, right: "", rows: [{ key: "reinstall", name: INSTALLED_WITH[one.method], at: one.display, button: "Reinstall", title: `runs ${one.display}` }] };
+    }
+    return { head: "What is left of an install. Install it again with:", right: install.install !== undefined && install.install.length > 1 ? "the first is recommended" : "", rows: ways("Install") };
+  }
+  if (install.path !== undefined && install.onPath === false) {
+    return {
+      head: "Installed where this app's PATH does not reach",
+      right: "",
+      rows: [{ key: "use", name: "Found at", at: install.path, button: "Use it", title: "run it from this path — saved in Just you, since the path is this machine's", path: install.path }],
+    };
+  }
+  if (install.path !== undefined) return undefined;
+  if (install.install === undefined || install.install.length === 0) {
+    return { head: "Not installed — and none of the ways it is installed is on this machine", right: "", rows: [] };
+  }
+  return { head: "Not installed here. Install it with:", right: install.install.length > 1 ? "the first is recommended" : "", rows: ways("Install") };
+}
+
+/** What the version line says of an agent that runs: how it was installed, and its Update — or nothing. */
+export function updateOf(install: AgentInstall | undefined): { via: string; title: string } | undefined {
+  if (install?.update === undefined || install.broken === true || install.onPath === false) return undefined;
+  return { via: INSTALLED_WITH[install.update.method], title: `update it: runs ${install.update.display}` };
 }
 
 /** The words of an agent's + box: "Sign in" when there is nobody, "Switch account" when there is somebody. */

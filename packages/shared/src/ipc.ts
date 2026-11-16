@@ -26,6 +26,8 @@ import type {
   ProbeResult,
   SecretTarget,
   SignInOutcome,
+  AgentInstallMethod,
+  AgentInstallOutcome,
 } from "./executors";
 import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
@@ -2264,6 +2266,16 @@ export interface IpcContract {
   /** Sign an agent out (`claude auth logout`, `codex logout`) — machine-wide, the agent's terminal included. */
   "executor:signOut": { request: { name: string }; response: SignInOutcome };
   /**
+   * Install an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode) the way named — one of its probe's
+   * `install.install` — or, with no way named, update it the way it was installed (its probe's
+   * `install.update`; a broken install is reinstalled). Main decides the command from what is on the
+   * machine; the request never carries one. Answers when the installer exits — a download, so a minute
+   * or more — with where the binary is now, and a fresh availability check follows it.
+   */
+  "executor:install": { request: { name: string; method?: AgentInstallMethod }; response: AgentInstallOutcome };
+  /** Give up on an install or update still running: the installer is killed. */
+  "executor:cancelInstall": { request: { name: string }; response: void };
+  /**
    * Sign in to a forge connection through the browser (RFC 8628's device flow), beside pasting a token.
    *
    * Answers as soon as the forge hands out a code — with the code, the page to type it on (already
@@ -2818,6 +2830,8 @@ export const IPC_CHANNELS = [
   "executor:signIn",
   "executor:cancelSignIn",
   "executor:signOut",
+  "executor:install",
+  "executor:cancelInstall",
   "forge:signIn",
   "forge:cancelSignIn",
   "forge:signIns",

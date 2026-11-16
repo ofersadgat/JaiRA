@@ -244,6 +244,10 @@ import {
   listExecutors,
   probeExecutor,
   withSignInRefusal,
+  installAgent,
+  nodeInstallDeps,
+  agentPackageOf,
+  type InstallDeps,
   signInAgent,
   signOutAgent,
   signInCommand,
@@ -626,7 +630,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { downAgentsOf, EXECUTOR_TITLES } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES, type AgentInstallMethod, type AgentInstallOutcome } from "@jaira/shared";
 import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
@@ -930,6 +934,11 @@ export interface AppServiceOptions {
   openExternal?: (url: string) => void;
   /** How `model:probeLocal` reaches a local server. Absent ⇒ the platform `fetch`; a test passes a fake. */
   localFetch?: LocalFetch;
+  /**
+   * Where the agents' binaries and their installers are looked for (`agentInstall.ts`). Absent ⇒ this
+   * machine's file system and PATH; a test passes a table.
+   */
+  installDeps?: InstallDeps;
   /**
    * What answers {@link AppService.checkFile} — the TypeScript language service, wherever it runs.
    *
@@ -11352,7 +11361,11 @@ export class AppService {
     const secrets = this.secretResolver();
     const results = await Promise.all(
       wanted.map(async (info) =>
-        withSignInRefusal(info, await probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets }), this.signInRefusals.get(info.name)),
+        withSignInRefusal(
+          info,
+          await probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets, install: this.options.installDeps ?? nodeInstallDeps() }),
+          this.signInRefusals.get(info.name),
+        ),
       ),
     );
     // Remembered so a state view can say "this executor is not available" without probing again.
@@ -11422,6 +11435,41 @@ export class AppService {
     } finally {
       await this.refreshAvailability().catch(() => undefined);
     }
+  }
+
+  /** Installs and updates still running, by agent — what Cancel aborts. */
+  private readonly installs = new Map<string, AbortController>();
+
+  /**
+   * Install an agent the way named (`method`), or update it the way it was installed (none named), and
+   * re-check once the installer exits. Which command runs is decided from what is on this machine —
+   * the request names a way, never a command. One at a time per agent.
+   */
+  async installExecutor(name: string, method?: AgentInstallMethod): Promise<AgentInstallOutcome> {
+    const info = this.listExecutors().find((candidate) => candidate.name === name);
+    if (info === undefined) throw this.refusal("config", `unknown executor '${name}'`);
+    if (agentPackageOf(info) === undefined) throw this.refusal("config", `JaiRA does not know how to install '${name}'`);
+    if (this.installs.has(name)) return { ok: false, reason: `${EXECUTOR_TITLES[name] ?? name} is already being installed` };
+    const config = this.effectiveConfig();
+    const controller = new AbortController();
+    this.installs.set(name, controller);
+    try {
+      return await installAgent(info, method, {
+        exec: new NodeExec({ execEnv: config.execEnvironment }),
+        execEnv: config.execEnvironment,
+        deps: this.options.installDeps ?? nodeInstallDeps(),
+        abortSignal: controller.signal,
+      });
+    } finally {
+      this.installs.delete(name);
+      // Awaited, so the caller's next read is the check that saw the new binary.
+      await this.refreshAvailability().catch(() => undefined);
+    }
+  }
+
+  /** Give up on an install or update still running: the installer is killed. */
+  cancelInstall(name: string): void {
+    this.installs.get(name)?.abort();
   }
 
   /** The executor, refused unless it is one that signs itself in. */

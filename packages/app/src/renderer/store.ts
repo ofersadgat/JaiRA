@@ -91,6 +91,7 @@ import {
   SHARED_SESSION,
   WORKFLOW_JSON,
   parseRemoteProjectKey,
+  type AgentInstallMethod,
   type WritingTool,
 } from "@jaira/shared/browser";
 import {
@@ -351,6 +352,8 @@ export interface AppState {
   rechecking: boolean;
   /** Agents whose sign-in is waiting on the browser — their login cards say so and offer Cancel. */
   signingIn: string[];
+  /** Agents whose install or update is running — their rows say so and offer Cancel. */
+  installing: string[];
   /** What the secret store can do here — decides which "save key to…" options are offered. */
   secrets: SecretCapabilities;
   /**
@@ -919,6 +922,7 @@ const EMPTY: AppState = {
   availability: { routes: [], executors: [], checkedAt: 0 },
   rechecking: false,
   signingIn: [],
+  installing: [],
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
@@ -4117,6 +4121,41 @@ export function useApp() {
         } finally {
           patch({ busy: false });
         }
+      },
+
+      /**
+       * Install an agent the way named, or (none named) update it the way it was installed; the row
+       * waits until the installer exits. Main has re-checked by the time it answers. An install that
+       * lands where this app's PATH does not reach would leave the bare command failing, so the agent
+       * is pointed at the binary — in the person's own layer, since a path is this machine's.
+       */
+      installAgent: async (name: string, method?: AgentInstallMethod) => {
+        if (ref.current.installing.includes(name)) return;
+        patch({ installing: [...ref.current.installing, name], error: null });
+        try {
+          const outcome = await invoke("executor:install", { name, ...(method !== undefined ? { method } : {}) });
+          // A cancel is the person's own doing, and says nothing they need told.
+          if (!outcome.ok && !/cancelled$/.test(outcome.reason)) patch({ error: outcome.reason });
+          if (outcome.ok && outcome.onPath === false && outcome.path !== undefined) await actionsRef.current.useAgentCommand(name, outcome.path);
+          applyAvailability(patch, await invoke("availability:read", undefined));
+        } catch (e) {
+          fail(e);
+        } finally {
+          patch({ installing: ref.current.installing.filter((running) => running !== name) });
+        }
+      },
+      cancelInstall: async (name: string) => {
+        try {
+          await invoke("executor:cancelInstall", { name });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /** Run an agent from this path — installed where the PATH does not reach. The person's own layer: the path is this machine's. */
+      useAgentCommand: async (name: string, path: string) => {
+        const executor = ref.current.executors.find((candidate) => candidate.name === name);
+        if (executor === undefined) return;
+        await actionsRef.current.setExecutorConfig({ name, kind: executor.kind }, { command: path }, "you");
       },
 
       // --- executors --------------------------------------------------------

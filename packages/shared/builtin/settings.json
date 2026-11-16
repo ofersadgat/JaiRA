@@ -20,6 +20,14 @@
       }
     }
   },
+  "agents": {
+    "genericCli": [
+      { "name": "gemini-cli", "command": "gemini", "args": ["--approval-mode", "auto_edit", "-p", "{prompt}"] },
+      { "name": "antigravity-cli", "command": "agy", "args": ["--mode", "accept-edits", "-p", "{prompt}"] },
+      { "name": "muse-code", "command": "muse", "args": ["exec", "--approval-mode", "never"] },
+      { "name": "opencode", "command": "opencode", "args": ["run"] }
+    ]
+  },
   "functions": {
     "smart": { "model": "simple" }
   },

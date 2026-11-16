@@ -31,7 +31,7 @@
  *
  * Pure data plus pure functions — no React, no IPC — so the hierarchy is testable without either.
  */
-import { EXECUTOR_KINDS, EXECUTOR_TITLES, type CredentialUse, type ExecutorInfo, type ExecutorKind } from "@jaira/shared/browser";
+import { BUILTIN_GENERIC_AGENTS, EXECUTOR_KINDS, EXECUTOR_TITLES, type CredentialUse, type ExecutorInfo, type ExecutorKind } from "@jaira/shared/browser";
 import {
   EXECUTOR_CONFIG_KEYS,
   checkCredentialName,
@@ -338,7 +338,7 @@ export function agentProviders(executors: ExecutorInfo[]): ProviderSpec[] {
   return executors.map((info) => ({
     id: info.name,
     title: EXECUTOR_TITLES[info.name] ?? info.name,
-    hint: EXECUTOR_KINDS[info.kind].hint,
+    hint: BUILTIN_GENERIC_AGENTS[info.name]?.hint ?? EXECUTOR_KINDS[info.kind].hint,
     family: "agent" as const,
     location: { kind: "agent" as const, name: info.name, executorKind: info.kind },
     credential: info.credentialUse,
