@@ -26,7 +26,9 @@ import { TileRing } from "./StatusRing";
  *                        right; its own variables (`TokenScope`); ground --panel-2, or --chrome under any
  *                        named palette
  *   the rail             `SIDEBAR_RAIL` wide, column, centred, gap 4; --panel-3 (classic) with a --line on
- *                        its right; its head 34 tall (44 on a phone), the window's drag handle
+ *                        its right; its head 34 tall (44 on a phone), the window's drag handle, empty
+ *                        on the desktop (macOS's window buttons stand there; the toggle leads the
+ *                        window's top row), the toggle on a phone
  *   a rail item          `SIDEBAR_RAIL` - 8 wide, radius 8, padding 6 0 5, column, gap 3: its icon (a
  *                        34×30 box) or a project's tile (34 square, radius 10), its name under it (app at
  *                        0.78, --dim; --text and 600 on the one you are on), one line
@@ -88,6 +90,38 @@ export function Sidebar(props: SidebarProps): JSX.Element {
     <TokenScope scope="sidebar">
       <Column {...props} />
     </TokenScope>
+  );
+}
+
+/**
+ * The sidebar's toggle: `|◂` folds the column to its rail, `▸|` opens it again. 26 square, radius 6, the
+ * glyph app at 11 in --dim (--text pointed at, on --fill-ghost-hover); out of the window's drag region. On
+ * the desktop it leads the window's top row (`ShellSidebarToggle` in `TitleBar.tsx`); on a phone it stands
+ * in the rail's head and closes the drawer.
+ */
+export function SidebarToggle({ collapsed, onCollapsed }: { collapsed: boolean; onCollapsed: (collapsed: boolean) => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={() => onCollapsed(!collapsed)}
+      label={collapsed ? "Show the sidebar" : "Hide the sidebar"}
+      title={collapsed ? "show the sidebar" : "hide the sidebar"}
+      {...({ "aria-expanded": !collapsed } as object)}
+      style={NO_DRAG}
+      width={26}
+      height={26}
+      flexShrink={0}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={6}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      {({ hovered }) => (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: -0.05, color: hovered ? "text" : "dim" }} whiteSpace="nowrap">
+          {collapsed ? "▸|" : "|◂"}
+        </Txt>
+      )}
+    </Press>
   );
 }
 
@@ -207,27 +241,12 @@ function Column({
         backgroundColor={(named ? t.v("chrome") : t.v("panel-3")) as never}
         {...((collapsed ? {} : edge(t, { right: 1 })) as object)}
       >
-        {/* The rail's head is the window's drag handle on the desktop (`DRAG_REGION`); its button opts out. */}
+        {/* The rail's head is the window's drag handle on the desktop (`DRAG_REGION`) and holds nothing:
+            macOS draws the window's three buttons over it (x 8–67 of the rail's 68), so the toggle leads
+            the window's top row instead (`ShellSidebarToggle`, the window buttons mockups, 2026-11-16: A).
+            A phone's drawer has no window buttons, and its head is where the drawer is closed from. */}
         <View height={phone ? 44 : 34} alignSelf="stretch" flexShrink={0} alignItems="center" justifyContent="center" style={DRAG_REGION as never}>
-          <Press
-            onPress={() => onCollapsed(!collapsed)}
-            label={collapsed ? "Show the sidebar" : "Hide the sidebar"}
-            title={collapsed ? "show the sidebar" : "hide the sidebar"}
-            {...({ "aria-expanded": !collapsed } as object)}
-            style={NO_DRAG}
-            width={26}
-            height={26}
-            alignItems="center"
-            justifyContent="center"
-            borderRadius={6}
-            box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
-          >
-            {({ hovered }) => (
-              <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: -0.05, color: hovered ? "text" : "dim" }} whiteSpace="nowrap">
-                {collapsed ? "▸|" : "|◂"}
-              </Txt>
-            )}
-          </Press>
+          {phone ? <SidebarToggle collapsed={collapsed} onCollapsed={onCollapsed} /> : null}
         </View>
         <View
           flex={1}

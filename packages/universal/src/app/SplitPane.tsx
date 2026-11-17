@@ -43,7 +43,7 @@ import { useColumnsFit, useRoomWidth } from "./columnsFit";
 import { PaneBody } from "./PaneBody";
 import { openInPanel, placeEntry } from "./places";
 import { useShell } from "./shell";
-import { RoomAddress } from "./TitleBar";
+import { RoomAddress, ShellSidebarToggle } from "./TitleBar";
 import { paneFaces, paneTitles, panelOpenWidth, splitView } from "./viewState";
 import { usePhone } from "./phone";
 
@@ -57,6 +57,7 @@ import { usePhone } from "./phone";
  * top of it. How it looks:
  *
  *   a pane's head    row, centred, gap 4, at least 40 tall, padding 0 6, a --line under (`PaneHead`):
+ *                    on the pane at the window's left the sidebar's toggle (`|◂` / `▸|`, 26 square),
  *                    ‹ and › (26 square; --dim, at 0.4 where there is nowhere to go), the path as crumbs,
  *                    what stands on top's own controls, ⋯, and ✕ while split. Drawn while split, or while
  *                    the pane's path is more than the room; else the window's title bar says the room's
@@ -180,11 +181,13 @@ interface Crumb {
  * A pane's head (boards 07 and 09): ‹ › and the pane's path as crumbs, what is on top's own controls,
  * then ⋯ and (split) ✕. The same for every pane.
  */
-function PaneHead({ pane, path, crumbs, closable, gutter, onStep, onPath, onMenu, onClose }: {
+function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, onMenu, onClose }: {
   pane: number;
   path: PanePath;
   crumbs: readonly Crumb[];
   closable: boolean;
+  /** The pane at the window's left: its head leads with the sidebar's toggle (`ShellSidebarToggle`). */
+  lead: boolean;
   /** Where the OS draws the window's buttons over this head (`WINDOW_GUTTER`), kept clear. */
   gutter: number | string;
   onStep: (step: (path: PanePath) => PanePath) => void;
@@ -195,6 +198,7 @@ function PaneHead({ pane, path, crumbs, closable, gutter, onStep, onPath, onMenu
   const t = useTokens();
   return (
     <View role="toolbar" aria-label="Pane" {...((isWeb ? { "data-pane-head": String(pane) } : {}) as object)} flexDirection="row" alignItems="center" gap={4} minHeight={40} paddingHorizontal={6} flexShrink={0} minWidth={0} {...(edge(t, { bottom: 1 }) as object)} style={NO_SELECT as never}>
+      {lead ? <ShellSidebarToggle /> : null}
       <SpIcon icon="back" label="Back" disabled={path.entries.length <= 1} onPress={() => onStep(paneBack)} onLongPress={onPath} />
       <SpIcon icon="back" flip label="Forward" disabled={path.ahead.length === 0} onPress={() => onStep(paneForward)} />
       <View role="navigation" aria-label="This pane's path" flexDirection="row" alignItems="center" gap={5} paddingLeft={4} minWidth={0} flexShrink={1} flexGrow={crumbs.at(-1)?.address === true ? 1 : 0} overflow="hidden">
@@ -256,7 +260,7 @@ function PaneHead({ pane, path, crumbs, closable, gutter, onStep, onPath, onMenu
  * One pane: its head, and what its path stands on — the room (kept mounted under anything on top of
  * it, when this pane holds it) or an entry drawn as the main view draws it (`PaneBody`).
  */
-function Pane({ pane, room, roomBox, narrow, width, gutter }: { pane: number; room: ReactNode | null; roomBox: Record<string, unknown>; narrow: boolean; width: number | null; gutter: number | string }): JSX.Element | null {
+function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: number; room: ReactNode | null; roomBox: Record<string, unknown>; narrow: boolean; width: number | null; lead: boolean; gutter: number | string }): JSX.Element | null {
   const t = useTokens();
   const { state } = useShell();
   const split = splitView.use();
@@ -356,7 +360,7 @@ function Pane({ pane, room, roomBox, narrow, width, gutter }: { pane: number; ro
           along the pane's foot. The panes on one path are the same picture but for this row. */}
       <View height={2} flexShrink={0} backgroundColor={(splitOn && !narrow && split.focus === pane ? t.v("accent") : "transparent") as never} />
       {splitOn && narrow ? <SplitTabs shown={pane} /> : null}
-      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} gutter={gutter} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
+      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} lead={lead} gutter={gutter} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
       <View flex={1} minWidth={0} minHeight={0} position="relative" flexDirection="column">
         {room !== null ? (
           // The room, kept mounted under what is put on top of it: back finds it where it was.
@@ -418,7 +422,9 @@ export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: P
           {pane === 1 && splitOn && !narrow ? (
             <Splitter label="Resize the split" value={width} reset={paneDefault(PANE.splitRight)} invert min={SPLIT_PANE_MIN} max={Math.max(SPLIT_PANE_MIN, roomWidth - SPLIT_PANE_MIN - 6)} onChange={(size) => actions.setPane(PANE.splitRight, size)} />
           ) : null}
-          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} gutter={pane === split.panes.length - 1 ? gutter : 0} />
+          {/* The sidebar's toggle leads the pane at the window's left: the first, or, while the two
+              are tabs (`narrow`), whichever is shown. */}
+          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} lead={pane === 0 || narrow} gutter={pane === split.panes.length - 1 ? gutter : 0} />
         </Fragment>
       ))}
       {/* No pane holds the room: kept mounted out of sight, until it is put on one again. */}

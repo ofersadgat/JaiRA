@@ -6,25 +6,64 @@ import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { HiddenColumns } from "../components/HiddenColumns";
 import { NewTask } from "../components/NewTask";
 import { RunModeToggle } from "../components/RunModeToggle";
+import { SidebarToggle } from "../components/Sidebar";
 import { TaskAddressBar } from "../components/TaskAddressBar";
 import { FilesAddress } from "./FilesView";
 import { DRAG_REGION, WINDOW_GUTTER } from "../primitives";
 import { useShell } from "./shell";
+import { useColumnsFit } from "./columnsFit";
 import { usePhone } from "./phone";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
 import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
 
 /**
- * What stands in the title bar: the ADDRESS of what is open. In Tasks, the task address bar
- * (`TaskAddressBar.tsx`, with `Crumbs.tsx`); in Files, the file address bar; in Chat, the conversation's
- * name. Then the drag filler ({@link TitleDrag}). The bar itself — 34 tall at least, `--panel`, a
- * `--line` under it — is `UniversalApp`'s.
+ * What stands in the title bar: on the desktop the sidebar's toggle first ({@link TitleLead}), then the
+ * ADDRESS of what is open. In Tasks, the task address bar (`TaskAddressBar.tsx`, with `Crumbs.tsx`); in
+ * Files, the file address bar; in Chat, the conversation's name. Then the drag filler ({@link TitleDrag}).
+ * The bar itself — 34 tall at least, `--panel`, a `--line` under it — is `UniversalApp`'s.
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
   // A phone has no window to drag: the bar is its address alone, which may take the whole width.
   if (usePhone() && state.view === "tasks") return <TasksAddress />;
+  return (
+    <>
+      <TitleLead />
+      <BarAddress />
+    </>
+  );
+}
+
+/**
+ * The sidebar's toggle on the store (`SidebarToggle`), leading the window's top row on the desktop: the
+ * title bar's first control, and over a room with panes the first in the head of the pane at the
+ * window's left (`SplitPane.tsx`). Not in the rail's head, where macOS draws the window's three buttons
+ * over it (the window buttons mockups, 2026-11-16: the person picked A). `▸|` while the column is its
+ * rail, folded by the person or by a narrow window (`columnsFit.ts`). A phone draws none: its drawer is
+ * closed from the drawer.
+ */
+export function ShellSidebarToggle(): JSX.Element | null {
+  const { actions } = useShell();
+  const fit = useColumnsFit();
+  const phone = usePhone();
+  if (phone) return null;
+  return <SidebarToggle collapsed={!fit.sidebar} onCollapsed={(shut) => actions.setFold(FOLD.shellSidebar, !shut)} />;
+}
+
+/** The title bar's lead: the sidebar's toggle, centred in the bar's height, 6 in from its left as a pane head's is. */
+function TitleLead(): JSX.Element | null {
+  if (usePhone()) return null;
+  return (
+    <View flexDirection="row" alignItems="center" paddingLeft={6} flexShrink={0}>
+      <ShellSidebarToggle />
+    </View>
+  );
+}
+
+/** The title bar after its lead: the address of what is open, then the drag filler. */
+function BarAddress(): JSX.Element {
+  const { state } = useShell();
   if (state.view === "chat") return <ChatAddress />;
   if (state.view === "files") {
     return (
