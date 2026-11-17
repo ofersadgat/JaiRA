@@ -2,13 +2,13 @@
 id: ui/components/provider-row
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-16
 realizes: [ux/patterns/checked-status-with-the-fix, ux/patterns/secret-goes-in-never-comes-back, ux/patterns/inherited-unless-set-here]
 serves: [product/bring-your-own-models-and-agents]
 surfaces: [ui/surfaces/settings-connections]
 reuses: [ui/components/icon, ui/components/switch, ui/components/settings-field]
-implemented_by: [packages/universal/src/components/settings/connections/Row.tsx, packages/universal/src/components/settings/connections/ProviderRows.tsx, packages/universal/src/components/settings/connections/ForgeRows.tsx, packages/app/src/renderer/connectionsModel.ts, packages/app/src/renderer/providerSpecs.ts]
-verified_by: [packages/app/test/providerSpecs.test.ts, packages/app/test/executorConfig.test.ts, packages/app/test/integrations.test.ts, packages/app/test/settingsPages.test.ts, packages/app/shots/parityWorld.mts#settings]
+implemented_by: [packages/universal/src/components/settings/connections/Row.tsx, packages/universal/src/components/settings/connections/ProviderRows.tsx, packages/universal/src/components/settings/connections/AgentRows.tsx, packages/universal/src/components/settings/connections/ForgeRows.tsx, packages/app/src/renderer/connectionsModel.ts, packages/app/src/renderer/providerSpecs.ts]
+verified_by: [packages/app/test/agentRows.test.ts, packages/app/test/agentInstallPanel.test.ts, packages/app/shots/agent-install.mts, packages/app/test/providerSpecs.test.ts, packages/app/test/executorConfig.test.ts, packages/app/test/integrations.test.ts, packages/app/test/settingsPages.test.ts, packages/app/shots/parityWorld.mts#settings]
 mockups: [ui/assets/provider-row/status.html, ui/assets/provider-row/open.html, ui/assets/provider-row/dirty.html, ui/assets/provider-row/disabled.html]
 siblings: [ui/components/executor-tree, ui/components/settings-field, ui/components/status-pill]
 ---
@@ -19,7 +19,7 @@ A row of a settings card in three columns: on the left a vendor mark with a smal
 
 ## A provider row is one thing this machine can connect to, with its last check and who it connects as
 
-**Use when.** One agent, model API, local model route or forge connection is listed with what its last check found, who it connects as, a switch to stop using it in the layer being edited, and its settings behind a chevron. Every row of [Settings → Connections](../surfaces/settings-connections.md) is one.
+**Use when.** One agent, model API, local model route or forge connection is listed with what its last check found, who it connects as, a switch to stop using it in the layer being edited, and its settings behind a chevron. Every row of [Settings → Connections](../surfaces/settings-connections.md) is one. An agent's row is closed to one line, one button or chip, the switch and the chevron, and opened shows its boxes and folds its settings — the surface's *An agent row is one line until it is opened*.
 
 **Do not use when.** The thing is a route that decides which provider answers a call: that is a route card in [executor-tree](executor-tree.md). The status is a run's or a task's: use [status-pill](status-pill.md). A setting stands on its own outside a provider: use [settings-field](settings-field.md).
 

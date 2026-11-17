@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BUILTIN_FORGES,
   FORGE_LABELS,
+  SECRET_SOURCE_LABELS,
   FORGE_PROVIDERS,
   SCREEN_MAPPING,
   TOOL_SPECS,
@@ -172,6 +173,87 @@ export function installPanelOf(install: AgentInstall | undefined): { head: strin
 export function updateOf(install: AgentInstall | undefined): { via: string; title: string } | undefined {
   if (install?.update === undefined || install.broken === true || install.onPath === false) return undefined;
   return { via: INSTALLED_WITH[install.update.method], title: `update it: runs ${install.update.display}` };
+}
+
+// --- Connections → Agents: the rows and the shelf -----------------------------------------------
+
+/**
+ * Where an agent is drawn in Connections → Agents: a row of its own once its binary is on this machine
+ * (running, half removed, or found where this app's PATH does not reach), and a tile on the shelf under
+ * the card while it is not — the check looked for the binary, found none, and could not start one. An
+ * agent the check did not look for (the SDK, a CLI JaiRA cannot install, one turned off) is a row.
+ */
+export function agentPlaceOf(probe: ProbeResult | undefined): "row" | "shelf" {
+  return probe?.status === "failed" && probe.install !== undefined && probe.install.path === undefined ? "shelf" : "row";
+}
+
+/** A shelf tile's line under its name, and the ways to install it — the recommended one first. */
+export function shelfTileOf(install: AgentInstall | undefined): { sub: string; ways: InstallPanelRow[] } {
+  const ways = (installPanelOf(install)?.rows ?? []).filter((row) => row.method !== undefined);
+  const first = install?.install?.[0];
+  return { sub: first !== undefined ? `installs with ${first.via}` : "nothing here installs it", ways };
+}
+
+/**
+ * A closed agent row's one line: the state's word, then — ready — its version and how it was installed,
+ * or else what the check found. Drawn on one line; the opened row says the check whole, with its fix.
+ */
+export function agentLineOf(probe: ProbeResult | undefined, state: ProviderState, install: AgentInstall | undefined): { word: string; rest: string | undefined } {
+  const word = providerSayState(probe, state);
+  if (probe === undefined || state === "off" || state === "unchecked") return { word, rest: undefined };
+  if (state === "available") {
+    const via = install?.method !== undefined ? INSTALLED_WITH[install.method] : undefined;
+    const parts = [probe.version, via].filter((part): part is string => part !== undefined && part !== "");
+    return { word, rest: parts.length > 0 ? parts.join(" · ") : undefined };
+  }
+  return { word, rest: probe.detail !== "" ? probe.detail : undefined };
+}
+
+/** The one button a closed agent row carries beside its switch: what would make it work. */
+export type AgentAction =
+  | { kind: "install"; label: string; title: string; method?: AgentInstallMethod; path?: string }
+  | { kind: "sign-in"; label: string; title: string }
+  | { kind: "add-key"; label: string; title: string };
+
+/**
+ * What fixes an agent row, as its one button: the reinstall of what is left of an install, the path it
+ * was found at to use, the sign-in it needs or that was refused, the key it cannot run without — or
+ * nothing, for a row that works, is off, or has not been checked.
+ */
+export function agentActionOf(spec: ProviderSpec, probe: ProbeResult | undefined, state: ProviderState, install: AgentInstall | undefined, merged: Record<string, unknown>): AgentAction | undefined {
+  if (probe === undefined || state === "off" || state === "unchecked") return undefined;
+  const fix = installPanelOf(install)?.rows[0];
+  if (fix !== undefined) {
+    return { kind: "install", label: fix.button, title: fix.title, ...(fix.method !== undefined ? { method: fix.method } : {}), ...(fix.path !== undefined ? { path: fix.path } : {}) };
+  }
+  if (probe.accounts?.some((account) => account.refused !== undefined) === true) return { kind: "sign-in", label: "Sign in again", title: "opens the sign-in page" };
+  if (state === "needs-sign-in" && probe.accounts !== undefined) return { kind: "sign-in", label: "Sign in", title: "opens the sign-in page" };
+  if ((state === "unavailable" || state === "unconfigured") && spec.credential === "required" && probe.credential === undefined && probe.accounts === undefined) {
+    const { plusTitle, plusSub } = keyBoxWords(spec, merged);
+    return { kind: "add-key", label: plusTitle, title: `store ${plusSub}` };
+  }
+  return undefined;
+}
+
+/** Who a closed agent row runs as, in a chip: the login in use, or the key it names and where that was found. */
+export type AgentChip = { kind: "login"; who: string; fact: string | undefined; more: number } | { kind: "key"; name: string; where: string | undefined; missing: boolean };
+
+export function agentChipOf(probe: ProbeResult | undefined, state: ProviderState, merged: Record<string, unknown>): AgentChip | undefined {
+  if (probe === undefined || state === "off") return undefined;
+  const accounts = probe.accounts ?? [];
+  const account = accounts.find((one) => one.active) ?? accounts[0];
+  if (account !== undefined) return { kind: "login", who: account.label, fact: loginFacts(account)[0], more: accounts.length - 1 };
+  const named = typeof merged["credential"] === "string" ? merged["credential"] : undefined;
+  if (named === undefined) return undefined;
+  const missing = probe.credentialMissing !== undefined;
+  return { kind: "key", name: named, where: probe.credential !== undefined ? `in ${SECRET_SOURCE_LABELS[probe.credential.source]}` : missing ? "not found anywhere" : undefined, missing };
+}
+
+/** What an agent's folded settings hold, for the line that opens them: its first fields, by label. */
+export function settingsGistOf(spec: ProviderSpec): string | undefined {
+  const labels = allFields(spec).map((field) => field.label);
+  if (labels.length === 0) return undefined;
+  return labels.length <= 3 ? labels.join(", ") : `${labels.slice(0, 3).join(", ")} and ${labels.length - 3} more`;
 }
 
 /** The words of an agent's + box: "Sign in" when there is nobody, "Switch account" when there is somebody. */

@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-connections
 type: ui-surface
 status: shipped
-updated: 2026-09-23
+updated: 2026-11-16
 kind: screen
 realizes: [ux/patterns/checked-status-with-the-fix, ux/patterns/inherited-unless-set-here, ux/patterns/secret-goes-in-never-comes-back, ux/patterns/name-it-where-it-will-live, ux/patterns/verbs-on-the-thing-itself, ux/patterns/absence-is-stated]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/review-changes-before-they-land]
@@ -18,7 +18,7 @@ The Connections page of the [Settings view](settings-view.md): everything JaiRA 
 ## The page is five sections, in the order a person sets them up
 
 - **Head.** `Connections`, the lead `What JaiRA can reach, and as whom.` followed by the layer sentence, and the [layer switch](../components/settings-header.md) at the head's top-right.
-- **Agents.** The built-in `claude-code`, `claude-cli` and `codex-cli`, then every agent program registered in either layer, named as registered. The section head carries, at its right edge, when the checks last ran in `--dim` and a ghost `Re-check`. The card ends in a closed `Add an agent CLI` disclosure, `· any other coding-agent binary`: a hint, `Registry name` and `Command` as [settings fields](../components/settings-field.md), and `Add it`.
+- **Agents.** A card of the agents on this machine — the built-in `claude-code`, and every agent program, built-in or registered in either layer, whose binary the check found (running, half removed, or where this app's PATH does not reach) or did not look for — then, under the card, the shelf `More agents` · `not on this machine yet — none is used until it is installed`: a tile per agent whose binary the check looked for and found nowhere, and a last dashed tile, `Another agent CLI` · `any other binary`. The section head carries, at its right edge, when the checks last ran in `--dim` and a ghost `Re-check`. An agent row is closed by default (see *An agent row is one line until it is opened*); a tile is the agent's name, what its Install uses (`installs with npm`), and `Install` with a `▾` joined to it that lists every way to install it, each with the command it runs, and `It is installed elsewhere — set its command…`. Installed, the tile goes and the agent is a row. `Another agent CLI` opens, across the shelf, a hint, `Registry name` and `Command` as [settings fields](../components/settings-field.md), `Add it` and `Cancel`; `set its command…` opens that agent's own settings there.
 - **Model APIs.** `Anthropic` and `OpenRouter`.
 - **Local models.** `Local server`, with the servers the usual ports answered listed under it, and `Embedded weights`, with each named weights file and whether it is there.
 - **MCP servers.** One row per server any layer configures, named as configured, then an `Add a server` row, and under it the servers other tools on this machine already run. The section head carries, at its right edge, when the servers were last asked for their tools and its own `Re-check`.
@@ -43,6 +43,13 @@ The weights are rows of a model id, the `.gguf` path in `--dim`, and `found · {
 
 An MCP server's row says `ready` — `stdio · {command} · {n} tools` or `HTTP · {address} · answered with {n} tools` (`SSE` for an older server) — `failed` with the reason and `→ {fix}`, `not started` for one waiting for a secret, `not checked` before the first answer, or `turned off`. Opened, its settings are the [schema form](../components/schema-form.md) for how it is reached — `command`, `arguments`, `environment` and `working directory` for a server JaiRA starts, `address` and `headers` for one it calls — each value a string or the name of a stored secret — then, once the probe has listed its tools, `What its tools count as`: per tool, `Counts as` (every standard tool, then `screen`) and, for one that reads a place, `Where it reads a place`, its places picked from the tool's own arguments (decision 0019, ruling 5); then `Remove`. A tool whose own description claims what it counts as, with nothing in settings for it, is offered above the form — `{tool} counts as {what}` with `Accept`, and `Accept all {n}` — under `Nothing counts until you accept it: a server could say that a tool which deletes files only reads them.`; while the row is shut, a box says `{n} tools say what they count as` · `open to accept`. `Add a server` opens the same form with `name`, `command`, `arguments` and `address`, and `Add it`. Under it, a bordered table headed `Servers other tools on this machine already run` · `read when this page opens — none is started`: one line per place looked — Claude Code's own list and this project's entry, `.mcp.json`, Claude Desktop, Cursor, VS Code, Figma's Dev Mode port — with where it is and the servers it lists, and `Add` or `Add {n}` for the ones not configured yet, `added` once they all are.
 
+## An agent row is one line until it is opened
+
+The agents are the rows a person looks at most and fixes least, so a closed agent row says only what it is and whether it works, with one way to make it work:
+
+- **Closed.** The head, then one line cut with `…`: the state word, then ` · ` and the version and how it was installed for a ready agent (`ready · 2.1.900 (Claude Code) · npm`), or ` — ` and what the check found. In the boxes' place, the one button that would make it work — `Reinstall`, `Install` or `Use it` (titled with what it runs), `Sign in` or `Sign in again`, or `Add a key` — or, for a row that works, a chip of who it runs as: the login in use with its plan (and `+{n}` for more), or the key's name and where it was found (`not found anywhere` in `--bad`). While an install or a sign-in it started runs, the button is a spinner, `installing…` or `finish in your browser`, and `Cancel`. Then the switch, and a chevron titled `Show more` / `Show less`.
+- **Opened.** The button and chip go. The sentence is whole, with its fix (none when the install panel below is the fix), and the version line with how it was installed and `Update`. Across the row: the install panel when the binary will not run; `Runs as` over the login and key boxes; the key's entry; and a folded `Settings` · `{its first fields}` that opens the agent's form.
+
 ## The page shows the last checks, a sign-in waiting on the browser, an entry open, or that it cannot read
 
 | State | Surface shows |
@@ -53,7 +60,8 @@ An MCP server's row says `ready` — `stdio · {command} · {n} tools` or `HTTP 
 | entry open | A + box's entry spans the row under it: what the value is filed under, a masked value, the store, then `Store the key` or `Store the token` and `Cancel`. A key with no conventional name first asks for `Secret name`. |
 | refused sign-in | A login box in the warning look with the reason and `Sign in again`; the row's sentence reads `sign-in expired`. |
 | forge sign-in refused | The reason and its fix in `--warn` across the row, such as the OAuth app it needs. |
-| just you | On `Just you` · `What you changed`: only the agent, model, local, MCP server and forge rows the personal layer states, and no agent CLI, MCP server or forge host to add. |
+| just you | On `Just you` · `What you changed`: only the agent rows and tiles, model, local, MCP server and forge rows the personal layer states, and no `Another agent CLI`, MCP server or forge host to add. |
+| installing | A tile reads `installing — this can take a minute` with a spinner and `Cancel`; a closed row's button reads `installing…` with `Cancel`; an opened row's install panel says it is installing. |
 | writing | While a settings change is being written: every switch, box button, field and `Add it` at half strength and inert. Chevrons and the disclosure still open and close. |
 | error | The settings cannot be read: `The configuration could not be read.` in `--dim` in place of each section's rows. |
 | empty | Cannot occur: the built-in agents, the two model APIs, the two local routes and the two built-in forges are always listed. MCP servers with none configured holds only `Add a server` and the servers other tools run. |
@@ -77,7 +85,10 @@ An MCP server's row says `ready` — `stdio · {command} · {n} tools` or `HTTP 
 | Add a server | `Add a server` · `not set up — a command JaiRA starts (stdio), or a URL it calls (HTTP)` · `a name, and a command or an address` · `Add it` · `Cancel` · `give the server a name` · `there is already a server called '{name}'` |
 | Other tools' servers | `Servers other tools on this machine already run` · `read when this page opens — none is started` · `Add` · `Add {n}` · `added` |
 | Another host | `Another host` · `not set up — a self-hosted GitLab or GitHub Enterprise` · `Add it` · `Cancel` · `give the connection a name` · `there is already a connection called '{name}'` |
-| Add an agent CLI | `Add an agent CLI` · `· any other coding-agent binary` · `Registry name`, hint `How a workflow will name it.` · `Command`, hint `The executable, or a full path.` · `Add it` |
+| Agent row, closed | `ready · {version} · {how it was installed}` · `{state word} — {what the check found}` · `Reinstall` · `Install` · `Use it` · `Sign in` · `Sign in again` · `Add a key` · `installing…` · `finish in your browser` · `Cancel` · chevron `Show more` / `Show less`, announced `open {name}` / `close {name}` |
+| Agent row, opened | `Runs as` · `Settings` · `{its first fields}` |
+| Shelf | `More agents` · `not on this machine yet — none is used until it is installed` · `installs with {way}` · `nothing here installs it` · `Install` · `Set its command` · `▾`, announced `ways to install {name}` · `Install {name} with` · `recommended` · `It is installed elsewhere — set its command…` · `installing — this can take a minute` · `{name} settings` · `Done` |
+| Another agent CLI | `Another agent CLI` · `any other binary` · `Registry name`, hint `How a workflow will name it.` · `Command`, hint `The executable, or a full path.` · `Add it` · `Cancel` |
 | Unreadable | `The configuration could not be read.` |
 
 ## A person arrives from the sidebar, and every change but a typed value is written at once
@@ -96,7 +107,7 @@ An MCP server's row says `ready` — `stdio · {command} · {n} tools` or `HTTP 
 - **Resize.** Sections stop at 740px. Boxes wrap onto a second line, still right-aligned, before the left column gives up its words; the sentence wraps anywhere.
 - **Theme.** Dots, tags, box grounds, the dashed + box and the probe table are tokens in both themes. Vendor logos keep their own colours.
 - **Focus.** Nothing takes focus on entry. Tab moves down the rows: each box's buttons, then the switch and the chevron, then anything open across the row.
-- **Unsaved work.** A row's opened settings, a key, token or secret being typed, and the `Add an agent CLI` and `Add a server` boxes are dropped on leaving the page or switching the layer, without a prompt.
+- **Unsaved work.** A row's opened settings, a key, token or secret being typed, and the `Another agent CLI` and `Add a server` boxes are dropped on leaving the page or switching the layer, without a prompt.
 
 ## The page departs from the direction in its logos and a registry name
 

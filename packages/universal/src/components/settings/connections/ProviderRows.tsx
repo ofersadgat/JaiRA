@@ -39,7 +39,7 @@ import { providerBlockPath, type FieldSpec, type ProviderSpec } from "@jaira/ui/
 import { layerRowOf } from "@jaira/ui/settingsRows";
 import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { Txt } from "../../../primitives";
-import { Disclosure, Field, FieldGrid, Level } from "../../form/Field";
+import { Field, FieldGrid, Level } from "../../form/Field";
 import { FormInput, TextArea } from "../../form/inputs";
 import { AccountAllowance, KeyUsage } from "../../usage/Figures";
 import { Code, Hint, PaneActions, Stack } from "../bits";
@@ -50,23 +50,28 @@ import { CardActions, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMa
 import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
 
 /**
- * The provider rows of Connections: one row per agent, model API and local model — what it is and
- * whether it works, who it connects as (its logins and its key, as boxes, with a + box to add one),
- * its switch and its chevron — and, opened, its own form. What each says and writes is
+ * The provider rows of Connections: one row per model API and local model — what it is and whether
+ * it works, who it connects as (its key, as boxes, with a + box to add one), its switch and its
+ * chevron — and, opened, its own form. The agents' rows are `AgentRows.tsx`'s, built of the pieces
+ * exported here (the login and key boxes, the install panel, the form). What each says and writes is
  * `connectionsModel.ts`'s.
  */
+
+/** The providers drawn in the layer view being shown: on Just you, only those whose block the layer states. */
+export function useShownSpecs(specs: ProviderSpec[]): ProviderSpec[] {
+  const at = useContext(SettingsLayerContext);
+  return specs.filter((spec) => {
+    const blockPath = providerBlockPath(spec);
+    return !layerRowOf(at, blockPath !== null ? [blockPath.join(".")] : ["agents.genericCli"]).hidden;
+  });
+}
 
 /** One group of provider rows, as the card of a Connections section. */
 export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.Element {
   const { config, routeProbes, executorProbes, layer, specs } = props;
-  const at = useContext(SettingsLayerContext);
+  const shown = useShownSpecs(specs);
   if (config === null) return <Hint card>The configuration could not be read.</Hint>;
   const layerDoc = config[layer];
-  // The Just you view: a provider is a row the layer states when its block says anything there.
-  const shown = specs.filter((spec) => {
-    const blockPath = providerBlockPath(spec);
-    return !layerRowOf(at, blockPath !== null ? [blockPath.join(".")] : ["agents.genericCli"]).hidden;
-  });
   return (
     <ConnRows>
       {shown.map((spec, i) => (
@@ -82,13 +87,6 @@ export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[]
       ))}
     </ConnRows>
   );
-}
-
-/** Declare another agent CLI — the last row of Connections → Agents. */
-export function AddAgentRow(props: Pick<ProvidersPaneProps, "layer" | "busy" | "editable" | "onAdd">): JSX.Element | null {
-  // Adding is setting something, which "What you changed" is not showing — Every row is.
-  if (useContext(SettingsLayerContext)?.onlyStated === true) return null;
-  return <AddProvider layer={props.layer} busy={props.busy || !props.editable} onAdd={props.onAdd} />;
 }
 
 /** The logins an agent holds, one box each, and the + box after them. */
@@ -242,7 +240,8 @@ function ProviderRow(
 ): JSX.Element {
   const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, installing, onInstall, onCancelInstall, onUseCommand, localServers, onScanLocal, scanningLocal, weights } = props;
   const [open, setOpen] = useState(false);
-  const { here, merged, form, setForm, problem, locked, enabled, state, dirty, write, save, revert } = useProviderRow(props);
+  const row = useProviderRow(props);
+  const { merged, locked, enabled, state, write } = row;
   // The key's store form opens under the row, across its width, from the key box on the right.
   const [keyOpen, setKeyOpen] = useState(false);
   const agentLogins = probe?.accounts !== undefined && state !== "off";
@@ -303,40 +302,7 @@ function ProviderRow(
       // The row's own form: what is in it is this provider's, drawn whole once the row is.
       <SettingsLayerContext.Provider key="form" value={null}>
         <Wide body>
-          <Hint>{spec.hint}</Hint>
-          {spec.levels.map((level, depth) => {
-            const fieldsHere = levelFieldsOf(spec, level.fields);
-            return (
-              <Level key={level.title} title={level.title} hint={level.hint} depth={depth + 1}>
-                {fieldsHere.length === 0 ? (
-                  <Hint>{emptyLevelWords(level.fields)}</Hint>
-                ) : (
-                  <FieldGrid>
-                    {fieldsHere.map((field) => (
-                      <Field key={field.path} label={field.label} param={paramOf(spec, field)} hint={field.hint} set={readAt(here, field.path) !== undefined}>
-                        <FieldControl field={field} value={form[field.path] ?? ""} placeholder={placeholderFor(field, merged)} disabled={locked} onChange={(v) => setForm((f) => ({ ...f, [field.path]: v }))} />
-                      </Field>
-                    ))}
-                  </FieldGrid>
-                )}
-              </Level>
-            );
-          })}
-          <Hint>An empty box removes the setting from this layer, so it goes back to whatever the other layer or the built-in default says.</Hint>
-          {problem ? <Problem>{problem}</Problem> : null}
-          <PaneActions>
-            <Button kind="primary" onPress={save} disabled={locked || !dirty}>
-              Save
-            </Button>
-            <Button kind="ghost" onPress={revert} disabled={!dirty}>
-              Revert
-            </Button>
-            {spec.location.kind === "agent" && spec.location.executorKind === "generic" && BUILTIN_GENERIC_AGENTS[spec.id] === undefined ? (
-              <Button kind="danger" disabled={locked} title="delete this CLI from the layer being edited — a built-in can only be turned off" onPress={() => onRemove(spec.id, layer)}>
-                Remove
-              </Button>
-            ) : null}
-          </PaneActions>
+          <ProviderForm spec={spec} row={row} layer={layer} onRemove={onRemove} />
         </Wide>
       </SettingsLayerContext.Provider>
     ) : null,
@@ -373,8 +339,54 @@ function ProviderRow(
   );
 }
 
+/**
+ * A provider's own form, as a row opens it: its description, a band per level of what it is with that
+ * level's fields, the empty-box note, a problem, and Save, Revert and — for a CLI someone added — Remove.
+ */
+export function ProviderForm({ spec, row, layer, onRemove }: { spec: ProviderSpec; row: ReturnType<typeof useProviderRow>; layer: ProvidersPaneProps["layer"]; onRemove: ProvidersPaneProps["onRemove"] }): JSX.Element {
+  const { here, merged, form, setForm, problem, locked, dirty, save, revert } = row;
+  return (
+    <>
+      <Hint>{spec.hint}</Hint>
+      {spec.levels.map((level, depth) => {
+        const fieldsHere = levelFieldsOf(spec, level.fields);
+        return (
+          <Level key={level.title} title={level.title} hint={level.hint} depth={depth + 1}>
+            {fieldsHere.length === 0 ? (
+              <Hint>{emptyLevelWords(level.fields)}</Hint>
+            ) : (
+              <FieldGrid>
+                {fieldsHere.map((field) => (
+                  <Field key={field.path} label={field.label} param={paramOf(spec, field)} hint={field.hint} set={readAt(here, field.path) !== undefined}>
+                    <FieldControl field={field} value={form[field.path] ?? ""} placeholder={placeholderFor(field, merged)} disabled={locked} onChange={(v) => setForm((f) => ({ ...f, [field.path]: v }))} />
+                  </Field>
+                ))}
+              </FieldGrid>
+            )}
+          </Level>
+        );
+      })}
+      <Hint>An empty box removes the setting from this layer, so it goes back to whatever the other layer or the built-in default says.</Hint>
+      {problem ? <Problem>{problem}</Problem> : null}
+      <PaneActions>
+        <Button kind="primary" onPress={save} disabled={locked || !dirty}>
+          Save
+        </Button>
+        <Button kind="ghost" onPress={revert} disabled={!dirty}>
+          Revert
+        </Button>
+        {spec.location.kind === "agent" && spec.location.executorKind === "generic" && BUILTIN_GENERIC_AGENTS[spec.id] === undefined ? (
+          <Button kind="danger" disabled={locked} title="delete this CLI from the layer being edited — a built-in can only be turned off" onPress={() => onRemove(spec.id, layer)}>
+            Remove
+          </Button>
+        ) : null}
+      </PaneActions>
+    </>
+  );
+}
+
 /** After an agent's version: how it was installed, and Update — or, while it runs, that it does and Cancel. */
-function UpdateAfter({ via, title, running, disabled, onUpdate, onCancel }: { via: string; title: string; running: boolean; disabled: boolean; onUpdate: () => void; onCancel: () => void }): JSX.Element {
+export function UpdateAfter({ via, title, running, disabled, onUpdate, onCancel }: { via: string; title: string; running: boolean; disabled: boolean; onUpdate: () => void; onCancel: () => void }): JSX.Element {
   const words = { voice: "app", scale: 11 / 12.5, color: "dim" } as const;
   return running ? (
     <View flexDirection="row" alignItems="center" gap={6} role="status">
@@ -399,7 +411,7 @@ function UpdateAfter({ via, title, running, disabled, onUpdate, onCancel }: { vi
  * the reinstall of what is left of one, or the path it was found at to use. The command is shown before
  * it runs — it downloads and installs a program — and while one runs, the head says so with Cancel.
  */
-function InstallPanel({
+export function InstallPanel({
   panel,
   running,
   busy,
@@ -460,7 +472,7 @@ function FieldControl({ field, value, placeholder, disabled, onChange }: { field
 }
 
 /** A provider's key, as boxes: the key it names (and where it was found, or that it was not), then the + box. */
-function KeyBoxes({ spec, probe, merged, busy, open, warn, onOpen }: { spec: ProviderSpec; probe: ProbeResult | undefined; merged: Record<string, unknown>; busy: boolean; open: boolean; warn: boolean; onOpen: () => void }): JSX.Element[] {
+export function KeyBoxes({ spec, probe, merged, busy, open, warn, onOpen }: { spec: ProviderSpec; probe: ProbeResult | undefined; merged: Record<string, unknown>; busy: boolean; open: boolean; warn: boolean; onOpen: () => void }): JSX.Element[] {
   if (spec.credential === "none") return [];
   const { named, plusTitle, plusSub } = keyBoxWords(spec, merged);
   const boxes: JSX.Element[] = [];
@@ -488,7 +500,7 @@ function RouteKeyUsage({ route }: { route: string }): JSX.Element | null {
 }
 
 /** Store a provider's key: its name (when nothing names one), its value, and the store it goes to. */
-function KeyEntry({
+export function KeyEntry({
   spec,
   merged,
   layer,
@@ -694,37 +706,40 @@ export function WeightsRows({ weights, checks, locked, onChange }: { weights: Re
   );
 }
 
-/** Declare a new agent CLI in the layer being edited (DESIGN §8.1's `generic-cli`). */
-function AddProvider({ layer, busy, onAdd }: { layer: ProvidersPaneProps["layer"]; busy: boolean; onAdd: ProvidersPaneProps["onAdd"] }): JSX.Element {
+/** Declare a new agent CLI in the layer being edited (DESIGN §8.1's `generic-cli`) — what the shelf's last tile opens. */
+export function AddAgentForm({ layer, busy, onAdd, onClose }: { layer: ProvidersPaneProps["layer"]; busy: boolean; onAdd: ProvidersPaneProps["onAdd"]; onClose: () => void }): JSX.Element {
   const [name, setName] = useState("");
   const [command, setCommand] = useState("");
   return (
-    <Disclosure card summary="Add an agent CLI" desc="any other coding-agent binary">
-      <Stack>
-        <Hint>
-          It is registered under the name you give it, which is what a state&apos;s <Code>function</Code> then names and what a model prefix routes to. It enforces no permissions of its own, so while JaiRA&apos;s built-in refusals are on (Settings → Tools → bash) a run will refuse to hand it a state.
-        </Hint>
-        <FieldGrid>
-          <Field label="Registry name" param="agents.genericCli[].name" hint="How a workflow will name it.">
-            <FormInput value={name} placeholder="opencode" disabled={busy} onChange={setName} />
-          </Field>
-          <Field label="Command" param="agents.genericCli[].command" hint="The executable, or a full path.">
-            <FormInput value={command} placeholder="opencode" disabled={busy} onChange={setCommand} />
-          </Field>
-        </FieldGrid>
-        <PaneActions>
-          <Button
-            disabled={busy || name.trim().length === 0 || command.trim().length === 0}
-            onPress={() => {
-              onAdd({ name: name.trim(), command: command.trim() }, layer);
-              setName("");
-              setCommand("");
-            }}
-          >
-            Add it
-          </Button>
-        </PaneActions>
-      </Stack>
-    </Disclosure>
+    <Stack>
+      <Hint>
+        It is registered under the name you give it, which is what a state&apos;s <Code>function</Code> then names and what a model prefix routes to. It enforces no permissions of its own, so while JaiRA&apos;s built-in refusals are on (Settings → Tools → bash) a run will refuse to hand it a state.
+      </Hint>
+      <FieldGrid>
+        <Field label="Registry name" param="agents.genericCli[].name" hint="How a workflow will name it.">
+          <FormInput value={name} placeholder="aider" disabled={busy} onChange={setName} />
+        </Field>
+        <Field label="Command" param="agents.genericCli[].command" hint="The executable, or a full path.">
+          <FormInput value={command} placeholder="aider" disabled={busy} onChange={setCommand} />
+        </Field>
+      </FieldGrid>
+      <PaneActions>
+        <Button
+          kind="primary"
+          disabled={busy || name.trim().length === 0 || command.trim().length === 0}
+          onPress={() => {
+            onAdd({ name: name.trim(), command: command.trim() }, layer);
+            setName("");
+            setCommand("");
+            onClose();
+          }}
+        >
+          Add it
+        </Button>
+        <Button kind="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+      </PaneActions>
+    </Stack>
   );
 }

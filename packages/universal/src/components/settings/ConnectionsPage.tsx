@@ -6,7 +6,8 @@ import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { useShell } from "../../app/shell";
 import { Txt } from "../../primitives";
 import { Button } from "./Button";
-import { AddAgentRow, ProviderRows } from "./connections/ProviderRows";
+import { AgentRows } from "./connections/AgentRows";
+import { ProviderRows } from "./connections/ProviderRows";
 import { ForgeRows } from "./connections/ForgeRows";
 import { McpServerRows } from "./connections/McpServerRows";
 import { Problem } from "./connections/Row";
@@ -15,7 +16,8 @@ import { SettingsSection } from "./SettingsPage";
 
 /**
  * Settings → Connections: what JaiRA can reach, and as whom — the agents, the model APIs, the local
- * models, the MCP servers and the forges, each a card of rows. Its rows are built from the store; what
+ * models, the MCP servers and the forges, each a card of rows (the agents' with a shelf of the ones not
+ * installed under it: `connections/AgentRows.tsx`). Its rows are built from the store; what
  * is asked of main (the local ports, the weights, the MCP servers) is `connectionsModel.ts`'s and
  * `mcpData.ts`'s. How the re-check line looks:
  *
@@ -71,11 +73,10 @@ export function ConnectionsPage(): JSX.Element {
         title="Agents"
         info="They answer by RUNNING — reading files, executing commands — on their own subscription or key. A model id's prefix names one: claude-cli/sonnet."
         action={<RecheckLine checkedAt={state.availability.checkedAt} rechecking={state.rechecking} busy={state.busy} onRecheck={actions.recheckAvailability} />}
+        // The card is AgentRows' own, with the shelf of agents not installed under it.
+        plain
       >
-        <>
-          <ProviderRows {...rows} specs={groups.agents} />
-          <AddAgentRow layer={layer} busy={state.busy} editable={editable} onAdd={actions.addExecutor} />
-        </>
+        <AgentRows {...rows} specs={groups.agents} />
       </SettingsSection>
       <SettingsSection id="model-apis" title="Model APIs" info="They return a completion for a key. A model id's prefix names one — anthropic/claude-sonnet-5 goes to the first of these.">
         <ProviderRows {...rows} specs={groups.apis} />

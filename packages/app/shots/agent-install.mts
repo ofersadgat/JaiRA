@@ -10,11 +10,14 @@
  * stand-in `claude` into that prefix (it answers `--version`, and `auth status` says signed out); each
  * run after the first bumps its version, as `@latest` would. Codex is whatever this machine has.
  *
- *   1. Claude (cli) not installed: the ways to install it under its row — the native installer first,
- *      npm among them — each with the command it runs. Gemini (cli), Antigravity (cli), Muse Code and OpenCode are rows
- *      of their own, each offering its vendor's installers (none is installed on the machine this ran on).
- *   2. Install with npm pressed: the row says it is installing, with Cancel.
- *   3. Installed: the row has its version, "npm" and Update; the panel is gone.
+ *   1. Claude (cli) not installed: a tile on the shelf under the Agents card, saying what Install uses; its
+ *      ▾ lists the ways — the native installer first, npm among them — each with the command it runs.
+ *      Gemini (cli), Antigravity (cli), Muse Code and OpenCode are tiles of their own, each offering its
+ *      vendor's installers (none is installed on the machine this ran on). Since 2026-11-16 (the person:
+ *      "I like 2, but the rows should be able to expand as well") no agent that is not here is a row.
+ *   2. Install with npm pressed: the tile says it is installing, with Cancel.
+ *   3. Installed: the tile is gone and Claude (cli) is a row of the card, offering Sign in (the stand-in
+ *      is signed out); opened, it has its version, "npm" and Update.
  *   4. Update pressed: the stand-in's version goes up — the update went through the npm that installed it.
  *
  * Only the stand-in npm is ever pressed: the native installer, Homebrew and any Reinstall would act on
@@ -93,14 +96,14 @@ async function main(): Promise<void> {
     const before = await probes();
     console.log(`agent-install: probes ${JSON.stringify(before.map((p) => ({ name: p.name, status: p.status, install: p.install })))}`);
 
-    // 1. Not installed.
+    // 1. Not installed: a tile on the shelf under the card, its ways under its ▾.
     await app.clickText("Settings");
-    await app.until(`document.body.innerText.includes("Install it with")`, "the install panel to be drawn", 60);
+    await app.until(`document.body.innerText.includes("More agents") && !!document.querySelector('[aria-label="ways to install Claude (cli)"]')`, "Claude (cli)'s tile on the shelf", 60);
     await settle(600);
     await app.shot("1-not-installed");
     const page = await app.evaluate<string>("document.body.innerText");
-    check(page.includes("curl -fsSL https://claude.ai/install.sh | bash"), "the native installer is offered, with its command");
-    check(page.includes("npm install -g @anthropic-ai/claude-code"), "npm is offered, with its command");
+    check(page.includes("installs with the native installer"), "the tile says what Install uses");
+    check(!page.includes("curl -fsSL https://claude.ai/install.sh | bash"), "no command is drawn until the ways are asked for");
     for (const [name, command] of [
       ["gemini-cli", "npm install -g @google/gemini-cli"],
       ["antigravity-cli", "curl -fsSL https://antigravity.google/cli/install.sh | bash"],
@@ -108,45 +111,59 @@ async function main(): Promise<void> {
       ["opencode", "curl -fsSL https://opencode.ai/v2/install | bash"],
     ] as const) {
       const probe = before.find((p) => p.name === name);
-      check(probe?.install?.install?.some((one) => one.display === command) === true, `${name} is a row of its own, offering ${command} (${JSON.stringify(probe?.install)})`);
-      check(page.includes(command), `${name}'s install is drawn`);
+      check(probe?.install?.install?.some((one) => one.display === command) === true, `${name} offers ${command} (${JSON.stringify(probe?.install)})`);
     }
-    check(["Gemini (cli)", "Antigravity (cli)", "Muse Code", "OpenCode"].every((title) => page.includes(title)), "the four are titled");
-    // Their key boxes name the variable each binary reads — what a stored key is handed to it as.
-    check(page.includes("GEMINI_API_KEY") && page.includes("META_API_KEY"), "Gemini's and Muse Code's key boxes suggest GEMINI_API_KEY and META_API_KEY");
+    check(["Gemini (cli)", "Antigravity (cli)", "Muse Code", "OpenCode"].every((title) => page.includes(title)), "the four are tiles, titled");
+    check(["Gemini (cli)", "Antigravity (cli)", "Muse Code", "OpenCode"].every((title) => !page.includes(`not working — '${title}`)), "none of them is a failing row");
     const codex = before.find((p) => p.name === "codex-cli");
     console.log(`agent-install: codex here is ${JSON.stringify(codex?.install)}`);
 
-    // 2. Install with npm — the stand-in's row, found by its command.
+    // The ways, each with the command it runs.
+    await app.evaluate(`document.querySelector('[aria-label="ways to install Claude (cli)"]').click()`);
+    await app.until(`[...document.querySelectorAll("[role=menu]")].some((m) => (m.textContent ?? "").includes("npm install -g @anthropic-ai/claude-code"))`, "the ways to install Claude (cli)");
+    await settle(400);
+    const menu = await app.evaluate<string>(`[...document.querySelectorAll("[role=menu]")].map((m) => m.innerText).join("\\n")`);
+    check(menu.includes("curl -fsSL https://claude.ai/install.sh | bash") && menu.includes("recommended"), "the native installer is offered first, with its command");
+    check(menu.includes("npm install -g @anthropic-ai/claude-code"), "npm is offered, with its command");
+    // Within the viewport: a capture beyond it resizes the page, and a menu closes when the window does.
+    await app.shot("1-ways", undefined, false);
+
+    // 2. Install with npm — the way found by its command.
     const pressed = await app.evaluate<boolean>(`(() => {
-      const rows = [...document.querySelectorAll("*")].filter((e) => e.children.length > 0 && (e.textContent ?? "").includes("npm install -g @anthropic-ai/claude-code") && (e.textContent ?? "").includes("Install") && !(e.textContent ?? "").includes("curl"));
-      const row = rows.pop();
-      const button = row && [...row.querySelectorAll("button, [role=button]")].find((b) => (b.textContent ?? "").trim() === "Install");
-      if (!button) return false;
-      button.click();
+      const way = [...document.querySelectorAll("[role=menuitem]")].find((e) => (e.textContent ?? "").includes("npm install -g @anthropic-ai/claude-code"));
+      if (!way) return false;
+      way.click();
       return true;
     })()`);
-    check(pressed, "the npm row's Install is there to press");
+    check(pressed, "the npm way is there to press");
     await settle(900);
     await app.shot("2-installing");
-    check((await app.evaluate<string>("document.body.innerText")).includes("installing"), "the panel says it is installing");
+    check((await app.evaluate<string>("document.body.innerText")).includes("installing"), "the tile says it is installing");
 
-    // 3. Installed.
+    // 3. Installed: a row of its own in the card; its tile is gone.
     for (let i = 0; ; i++) {
       const now = await claude();
       if (now?.version !== undefined) break;
       if (i > 60) throw new Error(`claude never came up after the install: ${JSON.stringify(now)}`);
       await settle(500);
     }
+    await app.until(`!document.querySelector('[aria-label="ways to install Claude (cli)"]') && !!document.querySelector('[aria-label="open Claude (cli)"]')`, "Claude (cli) to move from the shelf to a row", 30);
     await settle(800);
     await app.shot("3-installed");
     const installed = await claude();
     check(installed?.version === "2.1.900 (Claude Code)", `the stand-in answers (${installed?.version})`);
     check(installed?.install?.method === "npm" && installed.install.update?.display === "npm install -g @anthropic-ai/claude-code@latest", `it reads as installed with npm (${JSON.stringify(installed?.install)})`);
-    const after = await app.evaluate<string>("document.body.innerText");
-    // Claude's own panel — the other agents' rows still offer theirs.
-    check(!after.includes("curl -fsSL https://claude.ai/install.sh | bash"), "Claude's install panel is gone");
-    check(/Update/.test(after), "Update is offered");
+    // The stand-in is signed out: the closed row's one button signs it in.
+    check(await app.evaluate<boolean>(`[...document.querySelectorAll("[title='opens the sign-in page']")].some((e) => (e.textContent ?? "").trim() === "Sign in")`), "the closed row offers Sign in");
+
+    // Opened: the version line, how it was installed, and Update; who it runs as; the folded settings.
+    await app.evaluate(`document.querySelector('[aria-label="open Claude (cli)"]').click()`);
+    await app.until(`document.body.innerText.includes("Runs as")`, "Claude (cli)'s row to open");
+    await settle(600);
+    await app.shot("3-opened");
+    const opened = await app.evaluate<string>("document.body.innerText");
+    check(opened.includes("2.1.900 (Claude Code)") && /\bnpm\b/.test(opened), "the opened row has its version and npm");
+    check(opened.includes("Settings"), "its settings are folded in it");
 
     // 4. Update.
     const updated = await app.evaluate<boolean>(`(() => {

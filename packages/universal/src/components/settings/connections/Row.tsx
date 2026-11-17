@@ -220,14 +220,14 @@ export function RowControls({ on, label, disabled, onToggle, open, title, onOpen
   );
 }
 
-/** The chevron, a quiet button: configure, and Done when open. */
-export function Chevron({ open, label, onPress }: { open: boolean; label: string; onPress: () => void }): JSX.Element {
+/** The chevron, a quiet button: configure, and Done when open — or the tooltips a row names. */
+export function Chevron({ open, label, onPress, tips = ["Configure", "Done"] }: { open: boolean; label: string; onPress: () => void; tips?: readonly [closed: string, open: string] }): JSX.Element {
   const t = useTokens();
   return (
     <Press
       onPress={onPress}
       label={label}
-      title={open ? "Done" : "Configure"}
+      title={open ? tips[1] : tips[0]}
       {...({ "aria-expanded": open } as object)}
       flexShrink={0}
       padding={2}
