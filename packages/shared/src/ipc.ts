@@ -2611,6 +2611,12 @@ export interface IpcContract {
   "machines:refresh": { request: void; response: MachinesView };
   /** What of the other machines' tasks to keep a copy of here (decision 0013 §6). */
   "machines:copy": { request: CopyChoice; response: MachinesView };
+  /**
+   * Keep this machine's settings in step with the other machines, or stop (decision 0026): the Shared
+   * and Just you settings, the keys in JaiRA's keychain, the forge sign-ins and the agents' sign-ins.
+   * Turned on, it asks every machine online for what it holds newer at once.
+   */
+  "machines:syncSettings": { request: { on: boolean }; response: MachinesView };
   /** How much the copies take, and where: what the Machines page's On disk row says. */
   "machines:copies": { request: undefined; response: { bytes: number; machines: number; dir: string } };
   /**
@@ -2875,6 +2881,7 @@ export const IPC_CHANNELS = [
   "machines:removeCancel",
   "machines:refresh",
   "machines:copy",
+  "machines:syncSettings",
   "machines:copies",
   "machines:pairAsk",
   "machines:pair",

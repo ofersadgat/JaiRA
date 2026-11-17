@@ -250,6 +250,7 @@ import {
   agentPackageOf,
   type InstallDeps,
   signInAgent,
+  parseEnvFile,
   signOutAgent,
   signInCommand,
   isSignInRefused,
@@ -631,7 +632,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { downAgentsOf, EXECUTOR_TITLES, type AgentInstallMethod, type AgentInstallOutcome } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES, type AgentInstallMethod, type AgentInstallOutcome, type MachinesView } from "@jaira/shared";
 import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
@@ -803,6 +804,8 @@ import type { AnnouncePort } from "./lanPairing";
 import type { TailnetPort } from "./tailnet";
 import { Federation } from "./federation";
 import { Replicator } from "./replicator";
+import { SettingsSync, type SettingsSyncPorts, type SyncSecretStore } from "./settingsSync";
+import { nativeAgentLogins, type AgentLoginStore } from "./agentLogins";
 import { machineTags } from "./machine";
 import { candidatesOf, Placement, queuedView, waitsForWords, workspaceKey, type HeldStart, type MachineCapacity, type PlacementRules, type PlacementThresholds, type QueuedTask } from "./placement";
 import { ResourceSampler } from "./resources";
@@ -870,6 +873,13 @@ export interface AppServiceOptions {
    * test drive the secret paths with an in-memory store.
    */
   keychain?: KeychainPort;
+  /**
+   * Where the agents JaiRA signs in keep their sign-ins (decision 0026 §4). Absent: this machine's own
+   * (`nativeAgentLogins`) — a seam so a test signs nobody in or out of the real agents.
+   */
+  agentLogins?: AgentLoginStore[];
+  /** Tests: the settings sync's timings (`SettingsSyncOptions`). */
+  settingsSyncTimings?: { settleMs?: number; scanMs?: number; pullMs?: number };
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
   baseDir?: string;
   /**
@@ -983,6 +993,8 @@ export interface KeychainPort {
   get(name: string): string | undefined;
   set(name: string, value: string): void;
   remove(name: string): void;
+  /** Every name stored — what follows the person to their other machines (decision 0026). Absent: none is listed. */
+  names?(): string[];
 }
 
 /**
@@ -1620,7 +1632,29 @@ export class AppService {
       ...(options.lanBindHost !== undefined ? { lanBindHost: options.lanBindHost } : {}),
       openPage: (url) => this.openPage(url),
       copyByDefault: options.replicate === true ? "not-archived" : "nothing",
+      // Read late: the sync is made just below, and the fleet's first view may come before it.
+      settingsSync: () => {
+        try {
+          return this.settingsSync?.view();
+        } catch {
+          return undefined;
+        }
+      },
     });
+    this.agentLogins =
+      options.agentLogins ??
+      nativeAgentLogins({
+        // Agents in WSL keep their sign-ins inside the distro: read and written there.
+        wsl: () => {
+          try {
+            const env = this.effectiveConfig().execEnvironment;
+            return typeof env === "object" && env !== null && "wsl" in env ? env.wsl : undefined;
+          } catch {
+            return undefined;
+          }
+        },
+      });
+    this.settingsSync = new SettingsSync({ baseDir: this.baseDir, fleet: this.fleet, ports: this.settingsSyncPorts(), ...(options.settingsSyncTimings ?? {}) });
     this.resources = new ResourceSampler();
     this.placement = new Placement({
       baseDir: this.baseDir,
@@ -2743,6 +2777,9 @@ export class AppService {
   readonly federation: Federation;
   /** This machine's copy of the fleet's tasks (decision 0013 §6). */
   readonly replicator: Replicator;
+  /** Settings that follow the person across the fleet (decision 0026). */
+  readonly settingsSync: SettingsSync;
+  private readonly agentLogins: AgentLoginStore[];
   /** Copies of other machines' workspaces, opened to be read while their machine is offline — by remote key. */
   private readonly replicaSessions = new Map<string, ProjectSession>();
 
@@ -3293,6 +3330,8 @@ export class AppService {
   peerHandlers(caller: { id: string; label: string }): Record<string, (request: never) => unknown> {
     return {
       ...this.fleet.handlersFor(caller),
+      // Settings that follow the person (decision 0026): what this machine holds newer, and what another changed.
+      ...this.settingsSync.handlersFor(caller),
       "fleet:capacity": () => this.capacity(),
       // Its half of an environment (`environment:view` on the machine that asks): its room to run, and
       // what its workspaces' checkouts say of themselves.
@@ -3777,6 +3816,7 @@ export class AppService {
     clearInterval(this.syncTimer);
     this.resources.close();
     this.replicator.close();
+    this.settingsSync.close();
     for (const replica of this.replicaSessions.values()) replica.project.close();
     this.replicaSessions.clear();
     this.fleet.close();
@@ -11053,6 +11093,7 @@ export class AppService {
     if (Object.keys(marks).length > 0) next.forgeSignIns = marks;
     else delete next.forgeSignIns;
     this.saveSettings(next);
+    this.settingsSync?.kick();
   }
 
   // --- configuration ---------------------------------------------------------
@@ -11109,6 +11150,42 @@ export class AppService {
    */
   writeConfig(request: WriteConfigRequest): ConfigView {
     this.forges.clear();
+    this.checkConfigWrite(request);
+    const base = jairaBasePaths(this.baseDir);
+    let file: string;
+    if (request.layer === "project") {
+      file = this.p(request.project).paths.settingsFile;
+    } else {
+      initBase(base.baseDir);
+      file = request.layer === "base" ? base.settingsFile : base.personalSettingsFile;
+    }
+    writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
+    // The open project holds a PARSED copy, and everything downstream of this write reads that copy
+    // rather than the file: the executor inventory, the probes, and the registry a run is built
+    // from. Re-layering it here is what makes a settings change take effect now instead of at the
+    // next reopen — the settings screen would otherwise answer a save by re-reporting the old
+    // configuration, which reads as a write that did not happen.
+    for (const open of this.sessions.values()) open.project.config = loadLayeredConfig(open.project.paths);
+    this.publish({ type: "store:invalidate", scope: "config" });
+    this.publish({ type: "store:invalidate", scope: "workflows" });
+    // The write may have named a credential, moved a server, or turned a route on. Whatever the
+    // settings screen was showing about availability described the configuration BEFORE this, so it
+    // is re-observed rather than left to be corrected by hand.
+    if (this.options.probeOnStart === true) this.kickAvailability();
+    // An event switched on or off, a branch glob, a connection: which remotes are watched for what.
+    this.kickRepoWatch();
+    // Shared and Just you follow the person to their other machines (decision 0026).
+    if (request.layer !== "project") this.settingsSync?.kick();
+    return this.readConfig(request.project);
+  }
+
+  /**
+   * Refuse, naming the field, a layer write that would not load: merged with every other layer, and —
+   * for the shared root and the personal layer, which lie under or over every project — with each open
+   * project laid in as well. What {@link writeConfig} checks before it writes, and what a change from
+   * another machine is checked with before it is laid in (decision 0026).
+   */
+  private checkConfigWrite(request: WriteConfigRequest): void {
     const base = jairaBasePaths(this.baseDir);
     // Before validating, not after: a document reported field by field and THEN refused for having
     // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
@@ -11142,29 +11219,6 @@ export class AppService {
         }
       }
     }
-    let file: string;
-    if (request.layer === "project") {
-      file = this.p(request.project).paths.settingsFile;
-    } else {
-      initBase(base.baseDir);
-      file = request.layer === "base" ? base.settingsFile : base.personalSettingsFile;
-    }
-    writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
-    // The open project holds a PARSED copy, and everything downstream of this write reads that copy
-    // rather than the file: the executor inventory, the probes, and the registry a run is built
-    // from. Re-layering it here is what makes a settings change take effect now instead of at the
-    // next reopen — the settings screen would otherwise answer a save by re-reporting the old
-    // configuration, which reads as a write that did not happen.
-    for (const open of this.sessions.values()) open.project.config = loadLayeredConfig(open.project.paths);
-    this.publish({ type: "store:invalidate", scope: "config" });
-    this.publish({ type: "store:invalidate", scope: "workflows" });
-    // The write may have named a credential, moved a server, or turned a route on. Whatever the
-    // settings screen was showing about availability described the configuration BEFORE this, so it
-    // is re-observed rather than left to be corrected by hand.
-    if (this.options.probeOnStart === true) this.kickAvailability();
-    // An event switched on or off, a branch glob, a connection: which remotes are watched for what.
-    this.kickRepoWatch();
-    return this.readConfig(request.project);
   }
 
   // --- executors -------------------------------------------------------------
@@ -11415,6 +11469,8 @@ export class AppService {
         this.signInRefusals.delete(name);
         // Read even when it is the same login as before: the check below reads it.
         this.limits.signedIn(accountOfRoute(name));
+        // The new sign-in follows the person to their other machines (decision 0026).
+        this.settingsSync.kick();
       }
       return outcome;
     } finally {
@@ -11435,7 +11491,11 @@ export class AppService {
     const config = this.effectiveConfig();
     try {
       const outcome = await signOutAgent(info, { exec: new NodeExec({ execEnv: config.execEnvironment }), execEnv: config.execEnvironment });
-      if (outcome.ok) this.signInRefusals.delete(name);
+      if (outcome.ok) {
+        this.signInRefusals.delete(name);
+        // Signed out here, signed out on every machine that took this sign-in (decision 0026).
+        this.settingsSync.removed("login", name);
+      }
       return outcome;
     } finally {
       await this.refreshAvailability().catch(() => undefined);
@@ -11942,6 +12002,7 @@ export class AppService {
       }
       if (request.value.length === 0) keychain.remove(request.name);
       else keychain.set(request.name, request.value);
+      this.secretWritten(request);
       return { name: request.name, target: request.target };
     }
     // The project's `.jaira/.env.local`, which is the FIRST project link of the chain (DESIGN §8.1)
@@ -11953,7 +12014,99 @@ export class AppService {
         ? join(jairaBasePaths(this.baseDir).baseDir, ".env.local")
         : join(this.requireProjectDir(request.project), JAIRA_DIR_NAME, ".env.local");
     writeEnvEntry(file, request.name, request.value);
+    if (request.target === "base-env-local") this.secretWritten(request);
     return { name: request.name, target: request.target };
+  }
+
+  /**
+   * A key stored or cleared where JaiRA keeps the person's own — the keychain, the shared root's
+   * `.env.local` — follows them to their other machines (decision 0026): a cleared one is cleared there.
+   */
+  private secretWritten(request: SetSecretRequest): void {
+    if (request.value.length === 0) this.settingsSync?.removed("secret", request.name);
+    else this.settingsSync?.kick();
+  }
+
+  // --- settings that follow the person (decision 0026) -----------------------
+
+  /** Keep this machine's settings in step with the others, or stop; turned on, it asks them at once. */
+  setSyncSettings(on: boolean): MachinesView {
+    const view = this.fleet.setSyncSettings(on);
+    if (on) for (const peer of this.fleet.peers()) if (peer.state === "online") void this.settingsSync.pullFrom(peer.id).then(() => this.fleet.changed());
+    return view;
+  }
+
+  /** What the settings sync reads and writes here. */
+  private settingsSyncPorts(): SettingsSyncPorts {
+    const fileOf = (layer: "base" | "you"): string => (layer === "base" ? jairaBasePaths(this.baseDir).settingsFile : jairaBasePaths(this.baseDir).personalSettingsFile);
+    const envFile = (): string => join(jairaBasePaths(this.baseDir).baseDir, ".env.local");
+    const readEnv = (): Record<string, string> => {
+      try {
+        return parseEnvFile(readFileSync(envFile(), "utf8"));
+      } catch {
+        return {};
+      }
+    };
+    const readJson = (file: string): { doc: JsonValue | null; at: number } | undefined => {
+      if (!existsSync(file)) return { doc: null, at: 0 };
+      try {
+        return { doc: JSON.parse(readFileSync(file, "utf8")) as JsonValue, at: statSync(file).mtimeMs };
+      } catch {
+        return undefined;
+      }
+    };
+    return {
+      readLayer: (layer) => readJson(fileOf(layer)),
+      checkLayer: (layer, doc) => this.checkConfigWrite({ layer, config: doc }),
+      writeLayer: (layer, doc) => void this.writeConfig({ layer, config: doc }),
+      secrets: (): SyncSecretStore => {
+        // The keychain where there is one, and the shared root's `.env.local` beside it: the two
+        // places JaiRA keeps the person's own keys (`secret:set`'s machine-wide targets).
+        const keychain = this.options.keychain?.available() === true ? this.options.keychain : undefined;
+        return {
+          names: () => [...new Set([...(keychain?.names?.() ?? []), ...Object.keys(readEnv())])],
+          get: (name) => keychain?.get(name) ?? readEnv()[name],
+          set: (name, value) => {
+            this.forges.clear();
+            if (keychain !== undefined) keychain.set(name, value);
+            else writeEnvEntry(envFile(), name, value);
+          },
+          remove: (name) => {
+            this.forges.clear();
+            keychain?.remove(name);
+            if (readEnv()[name] !== undefined) writeEnvEntry(envFile(), name, "");
+          },
+        };
+      },
+      readMarks: () => {
+        const found = readJson(jairaBasePaths(this.baseDir).userSettingsFile);
+        if (found === undefined) return undefined;
+        const marks: Record<string, JsonValue> = {};
+        for (const [name, mark] of Object.entries(parseSettings(found.doc).forgeSignIns ?? {})) {
+          // Where the token is kept is this machine's to say.
+          const { source: _here, ...rest } = mark;
+          marks[name] = rest as unknown as JsonValue;
+        }
+        return { marks, at: found.at };
+      },
+      writeMarks: (marks) => {
+        const source: SecretSource = this.options.keychain?.available() === true ? "keychain" : "base-env-local";
+        const next: Record<string, ForgeSignInMark> = {};
+        for (const [name, mark] of Object.entries(marks)) next[name] = { ...(mark as unknown as Omit<ForgeSignInMark, "source">), source };
+        this.saveForgeMarks(next);
+      },
+      logins: () => this.agentLogins,
+      changed: (kinds) => {
+        if (kinds.has("secret") || kinds.has("mark") || kinds.has("login")) {
+          this.forges.clear();
+          this.kickRepoWatch();
+          if (this.options.probeOnStart === true) this.kickAvailability();
+          this.publish({ type: "store:invalidate", scope: "config" });
+        }
+        this.fleet.changed();
+      },
+      log: (level, message) => this.log({ level, source: "machines", message }),
+    };
   }
 
   // --- workflow authoring ----------------------------------------------------

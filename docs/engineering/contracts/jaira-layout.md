@@ -64,6 +64,7 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | `system/sync.json` | JSON file | no | the last agreed state of each description: [sync-record](sync-record.md) |
 | `system/limits.json` | JSON file | shared root only | `{version: 1, accounts: {<account>: LimitState}, spend?, credit?, refused?}`: what the limits board last knew about each account's allowance, so a restart starts from it — and, for an API key, what each call cost in the last seven days (`[at ms, usd]`), the last credit read, and when a call was last refused for an empty balance ([usage-readings](usage-readings.md)) |
 | `system/waiting.json` | JSON file | shared root only | `{version: 1, items: WaitingItem[]}`: messages and runs waiting for an account's allowance, re-armed at start |
+| `system/settings-sync.json` | JSON file | shared root only | `{clock, looked?, at?, pieces: {<key>: {at, by, hash?}}, passed?, refused?}`: each setting, key, forge sign-in and agent sign-in kept in step with the paired machines — when and by which machine it last changed, and a hash of what it held (never a value): [decision 0026](../decisions/0026-settings-follow-the-person.md) |
 | `system/logs/jaira-<utc date>.log` | JSONL | no | the app's diagnostics, one entry per line and one file per UTC day, written under the shared root only |
 | `system/machine.key` | text file | shared root, once approvals are used | the approval HMAC key as `dpapi:<base64>` or `plain:<hex>`, written with mode `0600` |
 

@@ -322,6 +322,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       return view;
     }) as Handler,
     "machines:copies": (() => service.replicator.onDisk()) as Handler,
+    "machines:syncSettings": ((request: { on: boolean }) => service.setSyncSettings(request?.on !== false)) as Handler,
     "machines:pairAsk": ((request: { device: string }) => service.fleet.pairAsk(String(request.device))) as Handler,
     "machines:pair": ((request: { device: string; code: string }) => service.fleet.pair(String(request.device), String(request.code))) as Handler,
     "machines:pairCancel": (() => service.fleet.pairCancel()) as Handler,

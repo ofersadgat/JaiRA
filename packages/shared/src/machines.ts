@@ -3,6 +3,7 @@
  * and the pairing code it is showing, for Settings → Machines.
  */
 import type { ChatSettings } from "./operationVocabulary";
+import type { SettingsSyncView } from "./settingsSync";
 
 export type MachineOsTag = "windows" | "mac" | "linux";
 
@@ -133,7 +134,7 @@ export interface MachinesView {
    * loopback port its engine listens on for other machines and devices, while it does — what Tailscale
    * publishes, and what `adb reverse` points an emulator at.
    */
-  self: MachineView & { tailnet: TailnetView; version: string; copy: CopyChoice; port?: number };
+  self: MachineView & { tailnet: TailnetView; version: string; copy: CopyChoice; port?: number; settings?: SettingsSyncView };
   machines: PeerView[];
   /** The phones that hold a token for this machine. */
   devices: DeviceView[];

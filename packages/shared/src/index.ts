@@ -13,6 +13,7 @@ export * from "./presetModels";
 export * from "./usage";
 export * from "./updates";
 export * from "./machines";
+export * from "./settingsSync";
 export * from "./engineFrames";
 export * from "./lanPairing";
 export * from "./plugins";

@@ -117,9 +117,9 @@ export function settingsLeadParts(section: SettingsSection, layer: ConfigLayer, 
     return [
       { text: `${purpose} Showing ` },
       { text: "Just you", bold: true },
-      { text: ": kept on this machine in " },
+      { text: ": kept in " },
       { text: "personal-settings.json", bold: true },
-      { text: ", never shared, and read after every other layer." },
+      { text: ", on this machine and the machines it is paired with, never in a checkout, and read after every other layer." },
     ];
   }
   if (layer === "project" && project !== null) {
@@ -134,7 +134,7 @@ export function settingsLeadParts(section: SettingsSection, layer: ConfigLayer, 
   return [
     { text: `${purpose} Editing ` },
     { text: "~/.jaira", bold: true },
-    { text: ", shared by every project on this machine; a project's own settings override it, and yours override both." },
+    { text: ", shared by every project on this machine and the machines it is paired with; a project's own settings override it, and yours override both." },
   ];
 }
 

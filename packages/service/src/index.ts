@@ -22,6 +22,8 @@ export * from "./fleet";
 export * from "./tailscale";
 export * from "./federation";
 export * from "./placement";
+export * from "./settingsSync";
+export * from "./agentLogins";
 export * from "./resources";
 export * from "./tailnetHelper";
 export * from "./lazy";

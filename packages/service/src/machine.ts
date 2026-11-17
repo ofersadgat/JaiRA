@@ -25,6 +25,11 @@ export interface MachineIdentity {
    * is not archived, a `jaira serve` nothing).
    */
   copy?: CopyChoice;
+  /**
+   * Whether this machine keeps its settings in step with the fleet's (decision 0026): absent is on, and
+   * only the person's `false` turns it off.
+   */
+  syncSettings?: false;
   createdAt: number;
 }
 
@@ -99,6 +104,7 @@ export function machineIdentity(baseDir: string): MachineIdentity {
         tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string") : [],
         createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
         ...(copyOf(raw.copy) !== undefined ? { copy: copyOf(raw.copy)! } : {}),
+        ...(raw.syncSettings === false ? { syncSettings: false as const } : {}),
       };
       // An identity made before the field existed: the guess is kept, so it is made once.
       if (!known) write(baseDir, identity);
@@ -113,14 +119,16 @@ export function machineIdentity(baseDir: string): MachineIdentity {
 }
 
 /** Rename this machine, say what it is, or change its tags. A tag is lower-case letters, digits and dashes. */
-export function updateMachineIdentity(baseDir: string, patch: { label?: string; tags?: string[]; copy?: CopyChoice; form?: MachineForm }): MachineIdentity {
+export function updateMachineIdentity(baseDir: string, patch: { label?: string; tags?: string[]; copy?: CopyChoice; form?: MachineForm; syncSettings?: boolean }): MachineIdentity {
   const current = machineIdentity(baseDir);
   const label = patch.label !== undefined ? patch.label.trim() : current.label;
   if (label === "") throw new Error("a machine needs a name");
   const tags = patch.tags !== undefined ? [...new Set(patch.tags.map((t) => t.trim().toLowerCase()).filter((t) => t !== ""))] : current.tags;
   for (const tag of tags) if (!/^[a-z0-9][a-z0-9-]*$/.test(tag)) throw new Error(`'${tag}' is not a tag: use lower-case letters, digits and dashes`);
   if (patch.form !== undefined && !MACHINE_FORMS.includes(patch.form)) throw new Error(`'${String(patch.form)}' is not something a machine is: ${MACHINE_FORMS.join(", ")}`);
-  const next = { ...current, label, tags: tags.filter((t) => t !== current.os), ...(patch.copy !== undefined ? { copy: patch.copy } : {}), ...(patch.form !== undefined ? { form: patch.form } : {}) };
+  const next: MachineIdentity = { ...current, label, tags: tags.filter((t) => t !== current.os), ...(patch.copy !== undefined ? { copy: patch.copy } : {}), ...(patch.form !== undefined ? { form: patch.form } : {}) };
+  if (patch.syncSettings === true) delete next.syncSettings;
+  else if (patch.syncSettings === false) next.syncSettings = false;
   write(baseDir, next);
   return next;
 }

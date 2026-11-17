@@ -11,7 +11,9 @@ decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, enginee
 Reach and pairing (§1–§3) and the 2026-09-30 amendment on phones and browsers are amended by
 [0022](0022-one-tailscale-sign-in.md): one Tailscale sign-in in place of Reachable, the tailnet's devices
 listed with Pair (the other device shows the code), and no browser pairing until the website exists.
-Phones keep pairing by a code found on the Wi-Fi (amended 2026-10-04, below).
+Phones keep pairing by a code found on the Wi-Fi (amended 2026-10-04, below). Ruling 11's "the fleet's
+settings sync" is widened by [0026](0026-settings-follow-the-person.md): every setting the person sets up
+follows them to every paired machine, piece by piece, and what belongs to one machine stays on it.
 
 This is the remote step that [0012](0012-local-server.md) left for later. It is wider than "connect to a
 remote engine": the person wants the machine a task runs on to be close to an implementation detail.

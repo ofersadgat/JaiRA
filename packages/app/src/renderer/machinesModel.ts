@@ -4,7 +4,7 @@
  * draws. A sentence that holds a link or a value is a list of {@link WordPart}s, which the page draws
  * run by run (`Words.tsx`).
  */
-import { LAN_PAIRING_PORT, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type MachineForm, type MachinesView, type NearbyEvent, type PeerView } from "@jaira/shared/browser";
+import { LAN_PAIRING_PORT, MACHINE_PIECE_WORDS, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type MachineForm, type MachinesView, type NearbyEvent, type PeerView, type SettingsSyncView } from "@jaira/shared/browser";
 import { dotOf, faceOf, machineKindOf, type MachineFace } from "./environmentModel";
 import type { MachineMark } from "./machineIcons";
 import { syncCache } from "./store";
@@ -34,6 +34,41 @@ export const COPY_CHOICES: ReadonlyArray<readonly [string, CopyChoice["mode"]]> 
   ["Chosen projects", "chosen"],
   ["Nothing", "nothing"],
 ];
+
+/** What an agent is called in Settings → Machines' sign-ins row. */
+const AGENT_NAMES: Record<string, string> = { "claude-cli": "Claude Code", "codex-cli": "Codex" };
+
+/**
+ * Settings → Machines' settings section (decision 0026): what the switch's row says, what stays on this
+ * machine, how the agents' sign-ins fare here, and what another machine sent that was not taken.
+ */
+export function settingsSyncWords(sync: SettingsSyncView | undefined, now = Date.now()): { keep: string; stays: string; logins: string; refused: string[] } {
+  if (sync === undefined) return { keep: "…", stays: "", logins: "", refused: [] };
+  const when =
+    sync.at === undefined
+      ? "Not in step with another machine yet."
+      : (() => {
+          const minutes = Math.round((now - sync.at) / 60_000);
+          return minutes < 1 ? "Last in step just now." : minutes < 60 ? `Last in step ${minutes} minute${minutes === 1 ? "" : "s"} ago.` : `Last in step ${new Date(sync.at).toLocaleString()}.`;
+        })();
+  const keep = sync.on
+    ? `Your Shared and Just you settings, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you to every paired machine; the latest change to each wins. ${when}`
+    : "This machine keeps its own settings: it neither sends its changes nor takes the other machines'.";
+  const following = sync.logins.filter((l) => l.synced);
+  const followed = following.map((l) => AGENT_NAMES[l.agent] ?? l.agent);
+  const where = following.find((l) => l.where !== undefined)?.where;
+  const not = sync.logins.filter((l) => !l.synced);
+  const logins = [
+    followed.length > 0
+      ? `${followed.join(" and ")} ${followed.length === 1 ? "follows" : "follow"}${where !== undefined ? `, kept ${where}` : ""}: signed in or out on one machine, signed in or out on all.`
+      : "",
+    ...not.map((l) => `${AGENT_NAMES[l.agent] ?? l.agent} does not here: ${l.why ?? "it cannot be reached"}.`),
+  ]
+    .filter((line) => line !== "")
+    .join(" ");
+  const stays = `${MACHINE_PIECE_WORDS.map((w, i) => (i === 0 ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join("; ")}.`;
+  return { keep, stays, logins, refused: (sync.refused ?? []).map((r) => `${r.what.charAt(0).toUpperCase()}${r.what.slice(1)}: ${r.why}`) };
+}
 
 /** The On disk row's sentence. */
 export function diskWords(disk: { bytes: number; machines: number } | undefined): string {
@@ -424,6 +459,14 @@ export const MACHINES_WORDS = {
   },
   copy: { name: "Copy" },
   disk: { name: "On disk" },
+  settings: {
+    title: "Settings on every machine",
+    info: "What you set up once is set up everywhere: connections, models, tools, how JaiRA looks, and the keys and sign-ins they use. What belongs to one machine stays on it.",
+  },
+  syncSettings: { name: "Keep in step" },
+  stays: { name: "Kept on each machine" },
+  logins: { name: "Agents' sign-ins" },
+  refused: { name: "Not taken" },
   outbox: {
     title: "Waiting to be delivered",
     info: "What you answered for a machine that was offline. Each is delivered when its machine reconnects; until then it can be taken back, and the question is open again.",

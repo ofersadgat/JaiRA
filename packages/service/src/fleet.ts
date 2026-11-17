@@ -24,7 +24,7 @@
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { PAIRING_CODE_MS, engineUrlOf, machineFormOf, normalizePairingCode, type DeviceView, type MachineForm, type MachineOsTag, type MachinesView, type PairingDevice, type PeerView, type CopyChoice, type TailnetDeviceView, type TailnetJaira, type TailnetView } from "@jaira/shared";
+import { PAIRING_CODE_MS, engineUrlOf, machineFormOf, normalizePairingCode, type SettingsSyncView, type DeviceView, type MachineForm, type MachineOsTag, type MachinesView, type PairingDevice, type PeerView, type CopyChoice, type TailnetDeviceView, type TailnetJaira, type TailnetView } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
 import { protocolMismatch } from "./enginePipe";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
@@ -86,6 +86,8 @@ export interface FleetOptions {
   announce?: AnnouncePort | false;
   /** Tests: where the pairing listener binds — loopback, so no firewall asks. */
   lanBindHost?: string;
+  /** What this machine says about keeping its settings in step (decision 0026), for the view. */
+  settingsSync?: () => SettingsSyncView | undefined;
 }
 
 const WORDS = [
@@ -262,8 +264,20 @@ export class Fleet {
     const asked = this.asked !== undefined && this.asked.expiresAt > now ? { by: this.asked.by, code: this.asked.code, expiresAt: this.asked.expiresAt } : undefined;
     const asking = this.asking !== undefined && this.asking.expiresAt > now ? { device: this.asking.device, expiresAt: this.asking.expiresAt } : undefined;
     const port = this.loopbackPort;
+    const settings = this.options.settingsSync?.();
     return {
-      self: { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, tailnet: this.tailnetState, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
+      self: {
+        id: me.id,
+        label: me.label,
+        os: me.os,
+        form: me.form,
+        tags: me.tags,
+        tailnet: this.tailnetState,
+        version: this.options.version,
+        copy: this.copying(),
+        ...(port !== undefined ? { port } : {}),
+        ...(settings !== undefined ? { settings } : {}),
+      },
       machines,
       devices: this.devices(),
       tailnetDevices: this.tailnetState.state === "on" || this.tailnetState.state === "removing" ? this.tailnetDevices() : [],
@@ -311,7 +325,15 @@ export class Fleet {
     return this.view();
   }
 
-  private changed(): void {
+  /** Keep this machine's settings in step with the others, or stop (decision 0026). */
+  setSyncSettings(on: boolean): MachinesView {
+    updateMachineIdentity(this.options.baseDir, { syncSettings: on });
+    this.changed();
+    return this.view();
+  }
+
+  /** Say the view again: something it shows changed outside the fleet (the settings sync's news). */
+  changed(): void {
     this.options.publish?.(this.view());
   }
 

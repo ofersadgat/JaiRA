@@ -28,9 +28,9 @@ siblings: [engineering/contracts/user-settings-json, engineering/contracts/secre
 | Layer | File | Whose |
 | --- | --- | --- |
 | Built in (`system`) | `$SYSTEM/settings.json` | what JaiRA ships; read-only |
-| Shared (`base`) | `<base>/settings.json` | every project on this machine reads it |
+| Shared (`base`) | `<base>/settings.json` | every project on this machine reads it; kept in step with the machines it is paired with, but for what is the machine's own ([decision 0026](../decisions/0026-settings-follow-the-person.md)) |
 | This project (`project`) | `<project>/.jaira/settings.json` | committed with the checkout |
-| Just you (`you`) | `<base>/personal-settings.json` | this person on this machine; never in a checkout, and read after every other layer |
+| Just you (`you`) | `<base>/personal-settings.json` | this person, on this machine and the machines it is paired with (decision 0026); never in a checkout, and read after every other layer |
 
 The built-in layer is `$SYSTEM/settings.json`: `packages/shared/builtin/settings.json`, copied to `dist/builtin/` by both bundlers and found by `jairaBuiltInPaths().settingsFile` ([decision 0006](../decisions/0006-built-in-layer.md)). It is read-only: nothing writes it, no `ConfigLayer` names it, and editing a value it holds writes that value into the layer being edited. The shared layer is `<base>/settings.json`. The project layer is `<project>/.jaira/settings.json`. Any may be absent; with all absent the configuration is `defaultConfig()`. `loadLayeredConfig` merges built in, then shared, then project, then the personal layer; the shared root opened as a project merges built in, its own file and the personal one, with no project layer between. `config:read` returns the built-in document as `ConfigView.system` and the personal one as `ConfigView.you` beside `base` and `project`, and `config:write` validates a layer merged with all the others. The personal layer is a file of its own rather than a key of `user-settings.json` because that file has its own whole-file writer, and two writers of one file overwrite each other.
 

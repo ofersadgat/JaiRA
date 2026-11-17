@@ -58,5 +58,6 @@ export function electronKeychain(): KeychainPort {
       delete all[name];
       save(all);
     },
+    names: () => Object.keys(load()),
   };
 }

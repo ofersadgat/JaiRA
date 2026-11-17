@@ -85,7 +85,7 @@ The response is `{name, target}`. A `.env.local` write removes every line that a
 
 ### The keychain is a five-member port the Electron main process fills
 
-`KeychainPort` in `@jaira/app` `service.ts`: `available(): boolean`, `reason?: string`, `get(name): string | undefined`, `set(name, value)`, `remove(name)`. The Electron adapter keeps `{<name>: <base64 safeStorage ciphertext>}` in `userData/secrets.json`, and its `get` answers undefined for a blob it cannot decrypt.
+`KeychainPort` in `@jaira/app` `service.ts`: `available(): boolean`, `reason?: string`, `get(name): string | undefined`, `set(name, value)`, `remove(name)`, and `names?(): string[]`, every name stored — what follows the person to their paired machines, but for the machine tokens under `jaira.` ([decision 0026](../decisions/0026-settings-follow-the-person.md)). The Electron adapter keeps `{<name>: <base64 safeStorage ciphertext>}` in `userData/secrets.json`, and its `get` answers undefined for a blob it cannot decrypt.
 
 ## A refusal comes from secret:set, and a missing key is reported by whoever needed it
 

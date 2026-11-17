@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { MachinesView, TailnetView } from "@jaira/shared";
-import { checkedWords, machineRowsOf, tailnetWords } from "../src/renderer/machinesModel";
+import { checkedWords, machineRowsOf, settingsSyncWords, tailnetWords } from "../src/renderer/machinesModel";
 
 function view(tailnet: TailnetView, more: Partial<MachinesView> = {}): MachinesView {
   return {
@@ -116,5 +116,33 @@ describe("the machine list", () => {
     expect(checkedWords(1000, 1000 + 20_000)).toBe("Checked just now");
     expect(checkedWords(0, 60_000)).toBe("Checked a minute ago");
     expect(checkedWords(0, 5 * 60_000)).toBe("Checked 5 minutes ago");
+  });
+});
+
+describe("Settings on every machine (decision 0026)", () => {
+  const now = Date.UTC(2026, 10, 16, 12, 0, 0);
+  const counts = { settings: 3, secrets: 1, signIns: 0, logins: 1 };
+
+  it("says what follows, when it was last in step, and how the agents' sign-ins fare here", () => {
+    const words = settingsSyncWords(
+      { on: true, at: now - 5 * 60_000, counts, logins: [{ agent: "claude-cli", synced: true }, { agent: "codex-cli", synced: false, why: "the keychain did not let JaiRA read it" }] },
+      now,
+    );
+    expect(words.keep).toMatch(/^Your Shared and Just you settings, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you/);
+    expect(words.keep).toMatch(/Last in step 5 minutes ago\.$/);
+    expect(words.logins).toBe("Claude Code follows: signed in or out on one machine, signed in or out on all. Codex does not here: the keychain did not let JaiRA read it.");
+    // Kept inside a WSL distro: said where.
+    expect(settingsSyncWords({ on: true, counts, logins: [{ agent: "claude-cli", synced: true, where: "inside Ubuntu (WSL)" }, { agent: "codex-cli", synced: true, where: "inside Ubuntu (WSL)" }] }, now).logins).toBe(
+      "Claude Code and Codex follow, kept inside Ubuntu (WSL): signed in or out on one machine, signed in or out on all.",
+    );
+    expect(words.stays).toMatch(/^Where commands and agents run \(WSL\), .*; MCP servers started as a command, or reached at a loopback address; .*\.$/);
+  });
+
+  it("says a machine that is off keeps its own, and lists what was not taken", () => {
+    expect(settingsSyncWords({ on: false, counts, logins: [] }, now).keep).toBe("This machine keeps its own settings: it neither sends its changes nor takes the other machines'.");
+    expect(settingsSyncWords({ on: true, counts, logins: [], refused: [{ what: "Shared appearance.mode", why: "must be light, dark or system", at: now }] }, now).refused).toEqual([
+      "Shared appearance.mode: must be light, dark or system",
+    ]);
+    expect(settingsSyncWords({ on: true, counts, logins: [] }, now).keep).toMatch(/Not in step with another machine yet\.$/);
   });
 });

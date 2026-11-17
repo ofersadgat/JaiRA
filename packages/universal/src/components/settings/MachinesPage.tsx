@@ -20,6 +20,7 @@ import {
   pairCodeWords,
   pairWords,
   phoneJoinWords,
+  settingsSyncWords,
   removeSpecWords,
   sentence,
   tailnetWords,
@@ -78,6 +79,7 @@ export function MachinesPage(): JSX.Element {
           <ThisMachine view={view} onView={setView} />
           <YourMachines view={view} onView={setView} />
           <Outbox />
+          <SettingsEverywhere view={view} onView={setView} />
           <Copies view={view} onView={setView} />
           <SettingsSection id="projects" title={W.projects.title} info={W.projects.info}>
             <SettingsRow name={W.grouped.name} description={groupedWords(grouped)} control={<Switch on={grouped} label={W.grouped.name} onChange={actions.setGroupWorkspaces} />} />
@@ -486,6 +488,37 @@ function Outbox(): JSX.Element | null {
           }
         />
       ))}
+    </SettingsSection>
+  );
+}
+
+/** Settings that follow the person to every paired machine (decision 0026), and what stays on this one. */
+function SettingsEverywhere({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
+  const sync = view.self.settings;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const words = settingsSyncWords(sync);
+  const turn = (on: boolean): void => {
+    setBusy(true);
+    setError(undefined);
+    invoke("machines:syncSettings", { on })
+      .then(onView, (e: unknown) => setError(errorOf(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <SettingsSection id="settings-sync" title={W.settings.title} info={W.settings.info}>
+      <SettingsRow
+        name={W.syncSettings.name}
+        description={error !== undefined ? <ErrorWords error={error} /> : words.keep}
+        control={<Switch on={sync?.on !== false} label={W.syncSettings.name} disabled={busy || sync === undefined} onChange={turn} />}
+      />
+      {sync?.on !== false ? (
+        <>
+          <SettingsRow name={W.stays.name} description={words.stays} />
+          {words.logins !== "" ? <SettingsRow name={W.logins.name} description={words.logins} /> : null}
+          {words.refused.length > 0 ? <SettingsRow name={W.refused.name} description={words.refused.join("\n")} /> : null}
+        </>
+      ) : null}
     </SettingsSection>
   );
 }

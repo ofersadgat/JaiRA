@@ -87,6 +87,7 @@
     "log:list",
     "machines:copies",
     "machines:copy",
+    "machines:syncSettings",
     "machines:forget",
     "machines:form",
     "machines:outbox",
