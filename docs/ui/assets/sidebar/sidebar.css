@@ -1,0 +1,535 @@
+/*
+ * The rail sidebar's four mockups (captured 2026-11-16). The universal shell draws the sidebar from
+ * `packages/universal/src/components/Sidebar.tsx`, not from a stylesheet, so these rules restate its
+ * measures over the frozen stylesheet's tokens and faces (`../styles.css`, which is not edited). Linked by
+ * the pages in this folder only. 12.5px is the app face's size; the code's scales are of it.
+ */
+
+.rsb {
+  position: relative;
+  display: flex;
+  height: 100%;
+  background: var(--panel-2);
+  border-right: 1px solid var(--line);
+  font-family: var(--font-app);
+  font-size: 12.5px;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.rsb button {
+  border: 0;
+  margin: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+
+/* macOS's three window buttons, which stand in the rail's head: drawn by the OS, not by the page. */
+.rsb-lights {
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  display: flex;
+  gap: 10px;
+}
+
+.rsb-lights i {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.3);
+}
+
+.rsb-lights i:nth-child(1) { background: #ff5f57; }
+.rsb-lights i:nth-child(2) { background: #febc2e; }
+.rsb-lights i:nth-child(3) { background: #28c840; }
+
+/* The rail: 68 wide, its head, the items, the foot. */
+.rsb-rail {
+  width: 68px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--panel-3);
+}
+
+.rsb.open .rsb-rail { border-right: 1px solid var(--line); }
+
+.rsb-head {
+  height: 34px;
+  align-self: stretch;
+  flex-shrink: 0;
+}
+
+.rsb-items {
+  flex: 1;
+  min-height: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+  overflow: hidden;
+}
+
+.rsb-foot {
+  align-self: stretch;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0 8px;
+  border-top: 1px solid var(--line);
+}
+
+.rsb-item {
+  position: relative;
+  width: 60px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 0 5px;
+  border-radius: 8px;
+}
+
+.rsb-icon {
+  width: 34px;
+  height: 30px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 15px;
+}
+
+.rsb-item.on .rsb-icon {
+  background: var(--tint-accent);
+  color: var(--accent);
+}
+
+.rsb-cap {
+  max-width: 56px;
+  font-size: 9.75px;
+  line-height: 1.15;
+  font-weight: 500;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rsb-item.on .rsb-cap {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.rsb-rule {
+  width: 28px;
+  height: 1px;
+  flex-shrink: 0;
+  margin: 3px 0;
+  background: var(--line);
+}
+
+/* A project's tile inside its 44px ring; the ring in the colour of what the project has going on. */
+.rsb-ring {
+  width: 44px;
+  height: 44px;
+  margin: -5px -5px -2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  border: 2px solid transparent;
+}
+
+.rsb-ring.running { border-color: var(--accent); }
+.rsb-ring.waiting { border-color: var(--warn); }
+
+.rsb-tile {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--text);
+}
+
+.rsb-tile small {
+  font-size: 8px;
+  font-weight: 500;
+  color: var(--dim);
+}
+
+.rsb-tile.on {
+  border: 1.5px solid var(--hue);
+  background: color-mix(in srgb, var(--hue) 22%, transparent);
+}
+
+.rsb-ring.running .rsb-tile { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+.rsb-ring.waiting .rsb-tile { background: color-mix(in srgb, var(--warn) 26%, transparent); }
+
+.rsb-add {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px dashed var(--line);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 16px;
+}
+
+.rsb-badge {
+  position: absolute;
+  top: 1px;
+  right: 6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--panel);
+  font-family: var(--font-data);
+  font-size: 8.75px;
+  font-weight: 700;
+  line-height: 12px;
+}
+
+.rsb-badge.warn { background: var(--warn); }
+.rsb-badge.bad { background: var(--bad); }
+.rsb-badge.ok { background: var(--ok); }
+
+/* Hidden, the open project's rooms under its tile. */
+.rsb-view {
+  position: relative;
+  width: 40px;
+  height: 26px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.rsb-view.on {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+}
+
+.rsb-view i {
+  position: absolute;
+  top: 3px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+/* The panel. */
+.rsb-panel {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.rsb-phead {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 0 12px;
+}
+
+.rsb-phead .rsb-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rsb-act {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.rsb-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin: 0 8px 6px;
+  border-radius: 8px;
+  background: var(--panel-3);
+  flex-shrink: 0;
+}
+
+.rsb-tab {
+  flex: 1;
+  height: 26px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--dim);
+}
+
+.rsb-tab.on {
+  background: var(--panel);
+  box-shadow: inset 0 0 0 1px var(--line);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.rsb-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+
+.rsb-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px 4px;
+  flex-shrink: 0;
+}
+
+.rsb-new {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 9px;
+  border-radius: 7px;
+  background: var(--fill-accent);
+  color: var(--on-accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* Over `.rsb button`'s reset, which is the more specific. */
+.rsb .rsb-new {
+  background: var(--fill-accent);
+  color: var(--on-accent);
+}
+
+.rsb-find {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12px;
+}
+
+.rsb-drawer {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 0 6px 6px;
+  overflow: hidden;
+}
+
+.rsb-colhead {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 28px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--dim);
+  flex-shrink: 0;
+}
+
+.rsb-colhead b {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.rsb-sec {
+  padding: 10px 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+.rsb-row {
+  height: 30px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.rsb-row.on { background: var(--fill-ghost-selected); }
+
+.rsb-row .rsb-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rsb-when {
+  flex-shrink: 0;
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  color: var(--dim);
+}
+
+.rsb-pills {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px 0;
+}
+
+.rsb-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 10px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.rsb-pill.running { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+.rsb-pill.waiting { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.rsb-pill.ok { color: var(--ok); }
+
+.rsb-words {
+  padding: 8px 6px 0;
+  color: var(--dim);
+  line-height: 1.45;
+}
+
+/* Settings: its head, its pages, and the rooms at its foot. */
+.rsb-lrow {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--dim);
+}
+
+.rsb-lrow .rsb-glyph {
+  width: 15px;
+  text-align: center;
+}
+
+.rsb-lrow.on {
+  background: var(--tint-accent);
+  color: var(--text);
+}
+
+.rsb-lrow .rsb-warn {
+  margin-left: auto;
+  font-family: var(--font-data);
+  font-size: 10.5px;
+  color: var(--warn);
+}
+
+.rsb-subs {
+  display: flex;
+  flex-direction: column;
+  margin: 2px 0 4px 18px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.rsb-sub {
+  height: 24px;
+  display: flex;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--dim);
+}
+
+.rsb-sub {
+  position: relative;
+}
+
+.rsb-sub.on {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The section being read: a 2px --accent mark over the rule its sections hang from. */
+.rsb-sub.on::before {
+  content: "";
+  position: absolute;
+  left: -11.5px;
+  top: 5px;
+  bottom: 5px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.rsb-pfoot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border-top: 1px solid var(--line);
+}

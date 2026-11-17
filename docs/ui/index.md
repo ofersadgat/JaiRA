@@ -136,6 +136,8 @@ They are frozen pictures of the look as of the tag `dom-renderer-final` (2026-10
 
 The ones captured 2026-10-02 (where a conversation runs: the environment bar, the machine icon, placing and waiting) were written for that design in the same classes and the same frozen stylesheet, and are as static.
 
+The sidebar's, captured 2026-11-16, were drawn again for the rail the universal shell ships: on the frozen stylesheet's tokens and faces, with the rail's own measures in [assets/sidebar/sidebar.css](assets/sidebar/sidebar.css), restated from `packages/universal/src/components/Sidebar.tsx`.
+
 | Doc | States captured | Reflects | Captured |
 | --- | --- | --- | --- |
 | app-window | [first-run](assets/app-window/first-run.html), [success](assets/app-window/success.html), [room](assets/app-window/room.html), [collapsed](assets/app-window/collapsed.html), [holding](assets/app-window/holding.html) | shipped | 2026-09-13 |
@@ -159,7 +161,7 @@ The ones captured 2026-10-02 (where a conversation runs: the environment bar, th
 | settings-appearance | [face-menu](assets/settings-appearance/face-menu.html) | shipped | 2026-09-23 |
 | settings-files | [default](assets/settings-files/default.html), [success](assets/settings-files/success.html), [loading](assets/settings-files/loading.html), [disabled](assets/settings-files/disabled.html) | shipped | 2026-09-23 |
 | settings-tools | [project](assets/settings-toolsets/project.html), [built-in](assets/settings-toolsets/built-in.html), [inherited](assets/settings-toolsets/inherited.html), [copied](assets/settings-toolsets/copied.html), [put-back](assets/settings-toolsets/put-back.html), [just-you](assets/settings-toolsets/just-you.html), [unsaved](assets/settings-toolsets/unsaved.html), [nested](assets/settings-toolsets/nested.html), [mcp](assets/settings-toolsets/mcp.html), [new-permissionSet](assets/settings-toolsets/new-permissionSet.html), [new-bucket](assets/settings-toolsets/new-bucket.html), [refused](assets/settings-toolsets/refused.html), [function](assets/settings-toolsets/function.html), [function-menu](assets/settings-toolsets/function-menu.html), [function-form](assets/settings-toolsets/function-form.html) | shipped | 2026-09-24 |
-| sidebar | [at-root](assets/sidebar/at-root.html), [in-a-project](assets/sidebar/in-a-project.html), [settings](assets/sidebar/settings.html), [collapsed](assets/sidebar/collapsed.html) | shipped | 2026-09-13 |
+| sidebar | [at-root](assets/sidebar/at-root.html), [in-a-project](assets/sidebar/in-a-project.html), [settings](assets/sidebar/settings.html), [collapsed](assets/sidebar/collapsed.html) | shipped | 2026-11-16 |
 | task-context | [empty](assets/task-context/empty.html), [conversation](assets/task-context/conversation.html), [details](assets/task-context/details.html), [subagent](assets/task-context/subagent.html), [gate-fallback](assets/task-context/gate-fallback.html), [rewind-asked](assets/task-context/rewind-asked.html) | shipped | 2026-09-13 |
 | tasks-view | [empty](assets/tasks-view/empty.html), [no-board](assets/tasks-view/no-board.html), [listing](assets/tasks-view/listing.html), [narrowed](assets/tasks-view/narrowed.html), [dragging](assets/tasks-view/dragging.html) | shipped | 2026-09-13 |
 | tools-field | [state-field](assets/tools-field/state-field.html), [state-field-adding](assets/tools-field/state-field-adding.html), [state-field-none](assets/tools-field/state-field-none.html) | shipped | 2026-09-21 |

@@ -4,67 +4,40 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/surfaces/sidebar">
 <meta name="state" content="at-root">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-11-16">
 <meta name="reflects" content="shipped">
 <title>sidebar · at-root</title>
 <link rel="stylesheet" href="../styles.css">
 <link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="sidebar.css">
 <script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
 </head>
 <body class="mockup">
 <p class="mockup-caption">ui/surfaces/sidebar · at-root</p>
-<div class="mockup-stage is-bare" style="width: 250px; height: 600px; display: flex; --sidebar: 250px">
-  <nav class="sidebar">
-    <div class="side-title">
-      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar" aria-expanded="true">|◂</button>
-      <span class="side-brand app-label">JAIRA</span>
+<div class="mockup-stage is-bare" style="width: 318px; height: 560px">
+  <!-- at the root, All tasks showing; jaira has work running, declarative-ai a task waiting on you -->
+  <nav class="rsb open" aria-label="Sidebar">
+    <div class="rsb-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="rsb-rail">
+      <div class="rsb-head"></div>
+      <div class="rsb-items">
+        <button class="rsb-item on" title="All tasks" aria-current="page"><span class="rsb-icon">▦</span><span class="rsb-cap">All tasks</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="All conversations"><span class="rsb-icon">✻</span><span class="rsb-cap">All chats</span><span class="rsb-badge ok">2</span></button>
+        <span class="rsb-rule"></span>
+        <button class="rsb-item" title="/Users/ofer/Code/jaira"><span class="rsb-ring running"><span class="rsb-tile" style="--hue: var(--p1)">ja<small>3m</small></span></span><span class="rsb-cap">jaira</span></button>
+        <button class="rsb-item" title="/Users/ofer/Code/declarative-ai"><span class="rsb-ring waiting"><span class="rsb-tile" style="--hue: var(--p2)">de<small>12m</small></span></span><span class="rsb-cap">declarative-ai</span></button>
+        <button class="rsb-item" title="/Users/ofer/.jaira"><span class="rsb-ring"><span class="rsb-tile" style="--hue: var(--p0)">ja</span></span><span class="rsb-cap">~/.jaira</span></button>
+        <button class="rsb-item" title="open another project" aria-haspopup="menu"><span class="rsb-add">+</span><span class="rsb-cap">Open</span></button>
+      </div>
+      <div class="rsb-foot">
+        <button class="rsb-item" title="Settings"><span class="rsb-icon">⚙</span><span class="rsb-cap">Settings</span></button>
+      </div>
     </div>
-    <div class="side-nav">
-      <div class="side-roots">
-        <div class="side-row">
-          <button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button>
-          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="3 running"><span class="pill-glyph">▶</span><span class="pill-n">3</span></span><span class="pill pill-waiting pill-active" title="2 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">2</span></span><span class="pill pill-more pill-error" title="4 more">+4</span></span>
-        </div>
-        <div class="side-row on is-active">
-          <button class="side-hit" title="All conversations" aria-current="page"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button>
-          <button class="side-act" title="new conversation" aria-label="new conversation">+</button><button class="side-act on" title="find" aria-pressed="true">⌕</button>
-        </div>
-        <div class="side-drawer">
-          <div class="chat-list">
-            <input class="chat-search" placeholder="Search conversations" value="">
-            <ul class="chat-rows">
-              <li class="sel"><span class="chat-row-mark" title="Read"></span><span class="chat-row-title ellip">Why does the rail skip a lane on a fork</span><span class="chip strip-project" style="--hue: var(--p1)">declarative-ai</span><span class="chat-row-when sub">4 min</span></li>
-              <li><span class="chat-row-mark unread" title="The latest reply has not been read"></span><span class="chat-row-title ellip">Draft the release notes for 0.9</span><span class="chip strip-project" style="--hue: var(--p2)">JaiRA</span><span class="chat-row-when sub">2 h</span></li>
-              <li><span class="chat-row-mark" title="Read"></span><span class="chat-row-title ellip">Explain the prune preview</span><span class="chip strip-project" style="--hue: var(--p0)">~/.jaira</span><span class="chat-row-when sub">3 d</span></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <div class="side-section" style="--hue: var(--p1)">
-        <div class="side-row side-project-row">
-          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">declarative-ai</span></span></button>
-          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="2 running"><span class="pill-glyph">▶</span><span class="pill-n">2</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-success pill-status" title="3 success"><span class="pill-glyph">✓</span><span class="pill-n">3</span></span></span>
-          <span class="side-twist is-mark">▸</span>
-        </div>
-      </div>
-      <div class="side-section" style="--hue: var(--p2)">
-        <div class="side-row side-project-row">
-          <button class="side-hit" title="C:\UbuntuCode\JaiRA" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">JaiRA</span></span></button>
-          <span class="pills" role="button" title="mark these seen"><span class="pill pill-running pill-active" title="1 running"><span class="pill-glyph">▶</span><span class="pill-n">1</span></span><span class="pill pill-waiting pill-active" title="1 waiting"><span class="pill-glyph">⏸</span><span class="pill-n">1</span></span><span class="pill pill-error pill-status" title="1 error"><span class="pill-glyph">⛔</span><span class="pill-n">1</span></span></span>
-          <span class="side-twist is-mark">▸</span>
-        </div>
-      </div>
-      <div class="side-section" style="--hue: var(--p0)">
-        <div class="side-row side-project-row">
-          <button class="side-hit" title="C:\Users\Ofer\.jaira" aria-expanded="false"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-secondary">~/.jaira</span></span></button>
-          <span class="side-twist is-mark">▸</span>
-        </div>
-      </div>
-      <button class="side-row side-open" title="open another project" aria-haspopup="menu"><span class="side-glyph">+</span><span class="side-label ellip app-secondary">Open a project…</span></button>
-    </div>
-    <div class="side-foot">
-      <div class="side-row">
-        <button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
+    <div class="rsb-panel">
+      <div class="rsb-phead"><span class="rsb-name app-title">All tasks</span></div>
+      <div class="rsb-drawer">
+        <div class="rsb-pills"><span class="rsb-pill running">▶ 1</span><span class="rsb-pill waiting">⏸ 1</span><span class="rsb-pill ok">✓ 2</span></div>
+        <div class="rsb-words app-secondary">Every project's board is open beside the sidebar.</div>
       </div>
     </div>
   </nav>

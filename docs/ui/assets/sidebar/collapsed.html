@@ -4,70 +4,62 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/surfaces/sidebar">
 <meta name="state" content="collapsed">
-<meta name="captured" content="2026-09-13">
+<meta name="captured" content="2026-11-16">
 <meta name="reflects" content="shipped">
 <title>sidebar · collapsed</title>
 <link rel="stylesheet" href="../styles.css">
 <link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="sidebar.css">
 <script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
 </head>
 <body class="mockup">
 <p class="mockup-caption">ui/surfaces/sidebar · collapsed</p>
-<div class="mockup-stage is-bare" style="width: 140px; height: 520px; display: flex; gap: 40px; --sidebar: 46px">
+<div class="mockup-stage is-bare" style="width: 176px; height: 780px; display: flex; gap: 40px">
   <!-- at the root, All tasks showing -->
-  <nav class="sidebar shut">
-    <div class="side-title">
-      <button class="side-toggle" title="show the sidebar" aria-label="Show the sidebar" aria-expanded="false">▸|</button>
-    </div>
-    <div class="side-rail">
-      <div class="rail-views">
-        <div class="side-row on is-active"><button class="side-hit" title="All tasks" aria-current="page"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
-        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+  <nav class="rsb" aria-label="Sidebar">
+    <div class="rsb-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="rsb-rail">
+      <div class="rsb-head"></div>
+      <div class="rsb-items">
+        <button class="rsb-item on" title="All tasks" aria-current="page"><span class="rsb-icon">▦</span><span class="rsb-cap">All tasks</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="All conversations"><span class="rsb-icon">✻</span><span class="rsb-cap">All chats</span><span class="rsb-badge ok">2</span></button>
+        <span class="rsb-rule"></span>
+        <button class="rsb-item" title="/Users/ofer/Code/jaira"><span class="rsb-ring running"><span class="rsb-tile" style="--hue: var(--p1)">ja<small>3m</small></span></span><span class="rsb-cap">jaira</span></button>
+        <button class="rsb-item" title="/Users/ofer/Code/declarative-ai"><span class="rsb-ring waiting"><span class="rsb-tile" style="--hue: var(--p2)">de<small>12m</small></span></span><span class="rsb-cap">declarative-ai</span></button>
+        <button class="rsb-item" title="/Users/ofer/.jaira"><span class="rsb-ring"><span class="rsb-tile" style="--hue: var(--p0)">ja</span></span><span class="rsb-cap">~/.jaira</span></button>
+        <button class="rsb-item" title="open another project" aria-haspopup="menu"><span class="rsb-add">+</span><span class="rsb-cap">Open</span></button>
       </div>
-      <div class="rail-split"></div>
-      <div class="rail-projects">
-        <button class="rail-tile" title="C:\UbuntuCode\declarative-ai" style="--hue: var(--p1)"><span class="side-glyph">de</span></button>
-        <button class="rail-tile" title="C:\UbuntuCode\JaiRA" style="--hue: var(--p2)"><span class="side-glyph">ja</span></button>
-        <button class="rail-tile" title="C:\Users\Ofer\.jaira" style="--hue: var(--p0)"><span class="side-glyph">ja</span></button>
+      <div class="rsb-foot">
+        <button class="rsb-item" title="Logs"><span class="rsb-icon">≡</span><span class="rsb-cap">Logs</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="Debug"><span class="rsb-icon">⌁</span><span class="rsb-cap">Debug</span></button>
+        <button class="rsb-item" title="Components"><span class="rsb-icon">▤</span><span class="rsb-cap">Components</span></button>
+        <button class="rsb-item" title="Settings"><span class="rsb-icon">⚙</span><span class="rsb-cap">Settings</span></button>
       </div>
-    </div>
-    <div class="side-foot">
-      <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
-      <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
-      <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
-      <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
-      <div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div>
     </div>
   </nav>
-  <!-- standing in declarative-ai, Tasks showing -->
-  <nav class="sidebar shut">
-    <div class="side-title">
-      <button class="side-toggle" title="show the sidebar" aria-label="Show the sidebar" aria-expanded="false">▸|</button>
-    </div>
-    <div class="side-rail">
-      <div class="rail-views">
-        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
-        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+  <!-- standing in jaira, Tasks showing: its rooms under its tile -->
+  <nav class="rsb" aria-label="Sidebar">
+    <div class="rsb-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="rsb-rail">
+      <div class="rsb-head"></div>
+      <div class="rsb-items">
+        <button class="rsb-item" title="All tasks"><span class="rsb-icon">▦</span><span class="rsb-cap">All tasks</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="All conversations"><span class="rsb-icon">✻</span><span class="rsb-cap">All chats</span><span class="rsb-badge ok">2</span></button>
+        <span class="rsb-rule"></span>
+        <button class="rsb-item on" title="/Users/ofer/Code/jaira"><span class="rsb-ring running"><span class="rsb-tile on" style="--hue: var(--p1)">ja<small>3m</small></span></span><span class="rsb-cap">jaira</span></button>
+        <button class="rsb-view" title="Files">❏</button>
+        <button class="rsb-view on" title="Tasks" aria-current="page">▶<i></i></button>
+        <button class="rsb-view" title="Chat">✎</button>
+        <button class="rsb-item" title="/Users/ofer/Code/declarative-ai"><span class="rsb-ring waiting"><span class="rsb-tile" style="--hue: var(--p2)">de<small>12m</small></span></span><span class="rsb-cap">declarative-ai</span></button>
+        <button class="rsb-item" title="/Users/ofer/.jaira"><span class="rsb-ring"><span class="rsb-tile" style="--hue: var(--p0)">ja</span></span><span class="rsb-cap">~/.jaira</span></button>
+        <button class="rsb-item" title="open another project" aria-haspopup="menu"><span class="rsb-add">+</span><span class="rsb-cap">Open</span></button>
       </div>
-      <div class="rail-split"></div>
-      <div class="rail-projects">
-        <button class="rail-tile on" title="C:\UbuntuCode\declarative-ai" aria-current="true" style="--hue: var(--p1)"><span class="side-glyph">de</span></button>
-        <button class="rail-tile" title="C:\UbuntuCode\JaiRA" style="--hue: var(--p2)"><span class="side-glyph">ja</span></button>
-        <button class="rail-tile" title="C:\Users\Ofer\.jaira" style="--hue: var(--p0)"><span class="side-glyph">ja</span></button>
+      <div class="rsb-foot">
+        <button class="rsb-item" title="Logs"><span class="rsb-icon">≡</span><span class="rsb-cap">Logs</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="Debug"><span class="rsb-icon">⌁</span><span class="rsb-cap">Debug</span></button>
+        <button class="rsb-item" title="Components"><span class="rsb-icon">▤</span><span class="rsb-cap">Components</span></button>
+        <button class="rsb-item" title="Settings"><span class="rsb-icon">⚙</span><span class="rsb-cap">Settings</span></button>
       </div>
-      <div class="rail-split"></div>
-      <div class="rail-views">
-        <div class="side-row"><button class="side-hit" title="Files"><span class="side-glyph">❏</span><span class="side-label ellip app-label">Files</span></button></div>
-        <div class="side-row on is-active"><button class="side-hit" title="Tasks" aria-current="page"><span class="side-glyph">▶</span><span class="side-label ellip app-label">Tasks</span></button></div>
-        <div class="side-row"><button class="side-hit" title="Chat"><span class="side-glyph">✎</span><span class="side-label ellip app-label">Chat</span></button></div>
-      </div>
-    </div>
-    <div class="side-foot">
-      <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
-      <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
-      <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
-      <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
-      <div class="side-row"><button class="side-hit" title="Settings"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button></div>
     </div>
   </nav>
 </div>

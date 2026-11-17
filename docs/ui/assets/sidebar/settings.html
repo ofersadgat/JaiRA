@@ -4,45 +4,53 @@
 <meta charset="utf-8">
 <meta name="doc" content="ui/surfaces/sidebar">
 <meta name="state" content="settings">
-<meta name="captured" content="2026-09-23">
+<meta name="captured" content="2026-11-16">
 <meta name="reflects" content="shipped">
 <title>sidebar · settings</title>
 <link rel="stylesheet" href="../styles.css">
 <link rel="stylesheet" href="../mockup.css">
+<link rel="stylesheet" href="sidebar.css">
 <script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
 </head>
 <body class="mockup">
 <p class="mockup-caption">ui/surfaces/sidebar · settings</p>
-<div class="mockup-stage is-bare" style="width: 250px; height: 600px; display: flex; --sidebar: 250px">
-  <nav class="sidebar">
-    <div class="side-title">
-      <button class="side-toggle" title="hide the sidebar" aria-label="Hide the sidebar" aria-expanded="true">|◂</button>
-      <span class="side-brand app-label">JAIRA</span>
+<div class="mockup-stage is-bare" style="width: 318px; height: 560px">
+  <!-- Settings open at Connections, read at its Agents section; one warning waiting -->
+  <nav class="rsb open" aria-label="Sidebar">
+    <div class="rsb-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+    <div class="rsb-rail">
+      <div class="rsb-head"></div>
+      <div class="rsb-items">
+        <button class="rsb-item" title="All tasks"><span class="rsb-icon">▦</span><span class="rsb-cap">All tasks</span><span class="rsb-badge warn">1</span></button>
+        <button class="rsb-item" title="All conversations"><span class="rsb-icon">✻</span><span class="rsb-cap">All chats</span><span class="rsb-badge ok">2</span></button>
+        <span class="rsb-rule"></span>
+        <button class="rsb-item" title="/Users/ofer/Code/jaira"><span class="rsb-ring running"><span class="rsb-tile" style="--hue: var(--p1)">ja<small>3m</small></span></span><span class="rsb-cap">jaira</span></button>
+        <button class="rsb-item" title="/Users/ofer/Code/declarative-ai"><span class="rsb-ring waiting"><span class="rsb-tile" style="--hue: var(--p2)">de<small>12m</small></span></span><span class="rsb-cap">declarative-ai</span></button>
+        <button class="rsb-item" title="/Users/ofer/.jaira"><span class="rsb-ring"><span class="rsb-tile" style="--hue: var(--p0)">ja</span></span><span class="rsb-cap">~/.jaira</span></button>
+        <button class="rsb-item" title="open another project" aria-haspopup="menu"><span class="rsb-add">+</span><span class="rsb-cap">Open</span></button>
+      </div>
+      <div class="rsb-foot">
+        <button class="rsb-item on" title="Settings" aria-current="page"><span class="rsb-icon">⚙</span><span class="rsb-cap">Settings</span><span class="rsb-badge warn">1</span></button>
+      </div>
     </div>
-    <div class="side-nav">
-      <div class="side-roots">
-        <div class="side-row"><button class="side-hit" title="All tasks"><span class="side-glyph">▦</span><span class="side-label ellip app-label">All tasks</span></button></div>
-        <div class="side-row"><button class="side-hit" title="All conversations"><span class="side-glyph">✻</span><span class="side-label ellip app-label">All conversations</span></button></div>
+    <div class="rsb-panel">
+      <div class="rsb-phead" style="gap: 6px; padding: 0 8px"><button class="rsb-act" title="back to where you were" aria-label="Back" style="font-size: 16px">‹</button><span class="rsb-name app-title">Settings</span><span class="rsb-pill waiting">⚠ 1</span></div>
+      <div class="rsb-drawer" style="padding-top: 2px">
+        <div class="rsb-lrow"><span class="rsb-glyph">◐</span>Appearance</div>
+        <div class="rsb-lrow on" aria-current="page"><span class="rsb-glyph">⏚</span>Connections</div>
+        <div class="rsb-subs"><span class="rsb-sub on">Agents</span><span class="rsb-sub">Model APIs</span><span class="rsb-sub">Local models</span><span class="rsb-sub">MCP servers</span><span class="rsb-sub">Forges</span></div>
+        <div class="rsb-lrow"><span class="rsb-glyph">▭</span>Machines</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">⬡</span>Models</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">⚒</span>Tools</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">▷</span>Runs</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">⛁</span>Data &amp; history</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">ⓘ</span>About</div>
       </div>
-      <div class="side-section open" style="--hue: var(--p1)">
-        <div class="side-row side-project-row">
-          <button class="side-hit" title="C:\UbuntuCode\declarative-ai" aria-expanded="true"><i class="side-dot"></i><span class="side-label side-name"><span class="ellip data-title">declarative-ai</span><span class="side-where ellip data-faint">UbuntuCode</span></span></button>
-        </div>
-      </div>
-    </div>
-    <div class="side-panel">
-      <div class="side-row on is-active">
-        <button class="side-back" title="back to where you were" aria-label="Back">‹</button>
-        <button class="side-hit" title="Settings" aria-label="Settings" aria-current="page"><span class="side-glyph">⚙</span><span class="side-label ellip app-label">Settings</span></button>
-      </div>
-      <div class="side-drawer">
-        <ul class="sections icons"><li><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"></path><path d="M12 3v18"></path></svg><span class="sections-label">Appearance</span></li><li><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v5"></path><path d="M15 3v5"></path><path d="M6 8h12v3a6 6 0 0 1-12 0Z"></path><path d="M12 17v4"></path></svg><span class="sections-label">Connections</span></li><li><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9Z"></path><path d="M12 12l8-4.5"></path><path d="M12 12v9"></path><path d="M12 12 4 7.5"></path></svg><span class="sections-label">Models</span></li><li class="sel"><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"></path></svg><span class="sections-label">Tools</span></li><li class="parts"><ul class="section-parts" aria-label="Tools sections"><li class="on" aria-current="location">Permission sets</li><li>Functions an agent calls</li><li>Functions a workflow calls</li></ul></li><li><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4.5v15l12-7.5Z"></path></svg><span class="sections-label">Runs</span></li><li><svg class="sections-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3Z"></path><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"></path><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"></path></svg><span class="sections-label">Data &amp; history</span></li></ul>
-      </div>
-      <div class="side-panel-rest">
-        <div class="side-row"><button class="side-hit" title="Logs"><span class="side-glyph">≡</span><span class="side-label ellip app-label">Logs</span></button></div>
-        <div class="side-row"><button class="side-hit" title="Debug"><span class="side-glyph">⌁</span><span class="side-label ellip app-label">Debug</span></button></div>
-        <div class="side-row"><button class="side-hit" title="Components"><span class="side-glyph">▤</span><span class="side-label ellip app-label">Components</span></button></div>
-        <button class="side-row side-theme" title="switch to dark" aria-label="Toggle theme"><span class="side-glyph">☾</span><span class="side-label ellip app-label">Dark</span></button>
+      <div class="rsb-pfoot">
+        <div class="rsb-lrow"><span class="rsb-glyph">≡</span>Logs<span class="rsb-warn">⚠ 1</span></div>
+        <div class="rsb-lrow"><span class="rsb-glyph">⌁</span>Debug</div>
+        <div class="rsb-lrow"><span class="rsb-glyph">▤</span>Components</div>
+        <div class="rsb-lrow" title="switch to dark"><span class="rsb-glyph">☾</span>Dark</div>
       </div>
     </div>
   </nav>
