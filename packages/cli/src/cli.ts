@@ -137,6 +137,7 @@ import {
   grantAlwaysGrantedTools,
   enabledAdapters,
   enabledGenericAgents,
+  withCodexKey,
   registerAgentRuntimes,
   sdkCredential,
   registerChangesetFunctions,
@@ -673,6 +674,7 @@ function buildRunEnvironment(
     ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
     ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
     ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
+    ...withCodexKey(config.agents, (name) => secrets.lookup(name)?.value),
   });
   registerGenericAgents(registry, {
     execEnv: config.execEnvironment,

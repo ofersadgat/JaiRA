@@ -241,6 +241,7 @@ import {
   enabledAdapters,
   failureMessage,
   enabledGenericAgents,
+  withCodexKey,
   listExecutors,
   probeExecutor,
   withSignInRefusal,
@@ -5688,6 +5689,8 @@ export class AppService {
         ...(config.agents.claudeCli?.command !== undefined ? { cliCommand: config.agents.claudeCli.command } : {}),
         ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
         ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
+        // Codex's key, looked up as each codex process starts — the chain the probe reads.
+        ...withCodexKey(config.agents, (name) => this.secretResolver(open).lookup(name)?.value),
         mcpServers: this.mcpServersFor(config, this.secretResolver(open)),
       });
       // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered

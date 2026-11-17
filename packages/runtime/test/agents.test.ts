@@ -9,9 +9,12 @@
 import { describe, expect, it } from "vitest";
 import type { AgentQueryOptions, AgentStreamMessage } from "@declarative-ai/agents-api";
 import type { ExecServices, RuntimeCapabilities } from "@declarative-ai/exec";
-import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn, gateCapabilities, registerAgentRuntimes } from "../src/agents";
+import { loadBundle } from "@declarative-ai/hw";
+import type { SpawnProcess } from "@declarative-ai/agents-cli";
+import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CODEX_KEY_VARIABLES, agentSpawn, envIntoWsl, gateCapabilities, registerAgentRuntimes, spawnWithKey } from "../src/agents";
+import { agentPromptRoutes, codexKeyOf } from "../src/modelRoutes";
 import { resolveInvocation } from "../src/exec";
-import { newRegistry } from "../src/wiring";
+import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
 /**
  * A query that records what it was asked and replies with fixed text. The adapter
@@ -312,4 +315,75 @@ describe("agentSpawn — the child's diagnostics", () => {
     for await (const _line of proc.lines) void _line;
     expect(await proc.exit).toBe(0);
   }, 30_000);
+});
+
+describe("codex's key — `agents.codex.credential`, handed to the process", () => {
+  /** A codex that answers "ok" and keeps what each spawn was asked. */
+  const fakeCodex = () => {
+    const asked: Array<{ argv: string[]; env: NodeJS.ProcessEnv | undefined }> = [];
+    const spawn: SpawnProcess = (argv, opts) => {
+      asked.push({ argv, env: opts.env });
+      return {
+        lines: (async function* () {
+          yield JSON.stringify({ type: "item.completed", item: { item_type: "assistant_message", text: "ok" } });
+        })(),
+        kill: () => {},
+        exit: Promise.resolve(0),
+      };
+    };
+    return { spawn, asked };
+  };
+  const run = (registry: ReturnType<typeof newRegistry>) =>
+    (registry.functions.get(AGENT_CODEX)! as { impl: (i: unknown, c: unknown) => Promise<{ value?: unknown }> }).impl({ prompt: "review", config: {} }, ctx());
+
+  it("reaches codex under the name it is filed under and as CODEX_API_KEY, which `codex exec` reads — looked up at each run", async () => {
+    const { spawn, asked } = fakeCodex();
+    const keys: Record<string, string> = {};
+    const registry = registerAgentRuntimes(newRegistry(), { adapters: ["codex"], spawn, codexKey: { name: "OPENAI_API_KEY", as: CODEX_KEY_VARIABLES, lookup: (name) => keys[name] } });
+    // Not stored yet: codex starts with the environment it would have had.
+    expect((await run(registry)).value).toBe("ok");
+    expect(asked[0]!.env).toBeUndefined();
+    keys["OPENAI_API_KEY"] = "sk-stored";
+    await run(registry);
+    expect(asked[1]!.env).toMatchObject({ OPENAI_API_KEY: "sk-stored", CODEX_API_KEY: "sk-stored", PATH: process.env["PATH"] });
+  });
+
+  it("reaches codex through its model prefix too — the route a workflow's `codex-cli/default` takes", async () => {
+    const { spawn, asked } = fakeCodex();
+    const routes = agentPromptRoutes({ codex: { credential: "OPENAI_API_KEY" } }, { spawn, secret: (name) => (name === "OPENAI_API_KEY" ? "sk-route" : undefined) });
+    await executeWorkflow({
+      bundle: loadBundle({ ask: { label: "Ask", operation: { kind: "prompt", prompt: "Say hi.", model: "codex-cli/default" } } }, "ask"),
+      inputs: {},
+      registry: newRegistry(),
+      prompt: buildPromptExecutor({ routes, tree: { kind: "agent", agent: "codex-cli" } }),
+    });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.env).toMatchObject({ OPENAI_API_KEY: "sk-route", CODEX_API_KEY: "sk-route" });
+  });
+
+  it("is nothing at all when config names no key — codex runs on its own sign-in", () => {
+    const spawn: SpawnProcess = () => {
+      throw new Error("not spawned here");
+    };
+    expect(spawnWithKey(spawn, undefined)).toBe(spawn);
+    expect(codexKeyOf({}, () => "sk")).toBeUndefined();
+    expect(codexKeyOf({ codex: { credential: "OPENAI_API_KEY" } }, undefined)).toBeUndefined();
+  });
+});
+
+describe("agentSpawn's environment", () => {
+  it("is the one the adapter asked for — it used to be dropped, so nothing an adapter set reached its agent", async () => {
+    const child = agentSpawn()([process.execPath, "-e", "console.log(process.env.JAIRA_SPAWN_KEY ?? 'none')"], { env: { ...process.env, JAIRA_SPAWN_KEY: "k-1" } });
+    const lines: string[] = [];
+    for await (const line of child.lines) lines.push(line);
+    expect(await child.exit).toBe(0);
+    expect(lines).toEqual(["k-1"]);
+  });
+
+  it("crosses into a WSL distro: what the call set is listed in WSLENV, what it inherited is not", () => {
+    const asked = { ...process.env, CODEX_API_KEY: "k", WSLENV: "USERPROFILE/p" };
+    const env = envIntoWsl({ ...asked }, asked, { wsl: "Ubuntu" });
+    expect(env["WSLENV"]).toBe("USERPROFILE/p:CODEX_API_KEY/u");
+    expect(envIntoWsl({ ...asked }, asked, "windows")["WSLENV"]).toBe("USERPROFILE/p");
+  });
 });

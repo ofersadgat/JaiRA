@@ -51,7 +51,7 @@ import {
   type SecretOrigin,
   type WeightsFileCheck,
 } from "@jaira/shared";
-import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, agentSpawn } from "./agents";
+import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CODEX_KEY_VARIABLES, agentSpawn, spawnWithKey, type AgentKey } from "./agents";
 import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
 import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
@@ -286,9 +286,11 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     // The MCP servers are not a reason for another executor: they are read off each call, and codex's
     // bridge proxies them, putting every call to the gate before it is forwarded — so a tool's line is
     // answered at the call, whatever it says, and nothing about them is fixed at construction.
+    // The key config names for codex, handed to each codex process as `codex exec` reads one.
+    const codexSpawn = spawnWithKey(spawn, codexKeyOf(agents, options.secret));
     const codex = (readOnly: boolean): AgentCodexExecutor =>
       new AgentCodexExecutor({
-        spawn,
+        spawn: codexSpawn,
         ...(agents.codex?.command !== undefined ? { command: agents.codex.command } : {}),
         ...(agents.codex?.sandbox !== undefined ? { sandbox: agents.codex.sandbox } : {}),
         ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
@@ -736,6 +738,22 @@ async function probeEmbeddedRoute(
         : `${usable.length} of ${named.length} ready — missing: ${absent.map((row) => row.id).join(", ")}`,
     ...(absent.length === 0 ? {} : { fix: `correct the modelPath for ${absent.map((row) => row.id).join(", ")}` }),
   };
+}
+
+/**
+ * The key codex runs on, as {@link spawnWithKey} hands it over: the secret `agents.codex.credential`
+ * names, looked up through `secret`, and given to codex as `CODEX_API_KEY` too. None when config names
+ * no key, or nothing can look one up.
+ */
+export function codexKeyOf(agents: JairaAgentConfig, secret: ((name: string) => string | undefined) | undefined): AgentKey | undefined {
+  const name = agents.codex?.credential;
+  return name === undefined || secret === undefined ? undefined : { name, as: CODEX_KEY_VARIABLES, lookup: secret };
+}
+
+/** {@link codexKeyOf} as `registerAgentRuntimes`' option: `{ codexKey }`, or nothing. */
+export function withCodexKey(agents: JairaAgentConfig, secret: ((name: string) => string | undefined) | undefined): { codexKey?: AgentKey } {
+  const key = codexKeyOf(agents, secret);
+  return key !== undefined ? { codexKey: key } : {};
 }
 
 /** The agent route NAMES, without building the executors — the cheap half of {@link agentPromptRoutes}. */

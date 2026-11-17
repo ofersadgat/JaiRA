@@ -33,7 +33,7 @@ export { createMcpBridgeHost, type McpBridgeHost, type McpBridgeHostOptions, typ
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
-import type { ExecEnv } from "./paths";
+import { isWslEnv, type ExecEnv } from "./paths";
 import { primaryNativeOf, TOOL_SPEC_BY_NAME, type AgentToolDeclaration } from "@jaira/shared";
 import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction, permissionSetViewOf } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
@@ -115,6 +115,51 @@ export function nativeNamesByRoute(standard: string): Record<string, string> {
  *  - **stdin errors are swallowed.** An agent that answers before reading its whole
  *    prompt leaves an EPIPE on the pipe, which arrives as an unhandled `'error'`.
  */
+/**
+ * The environment an agent starts with, made to reach it inside a WSL distro: `wsl.exe` carries the
+ * Windows side's variables in only for the names `WSLENV` lists, so each one this call set or changed
+ * is added (`/u`, from Windows into WSL) after what `WSLENV` lists already. Natively, as it is.
+ */
+export function envIntoWsl(env: NodeJS.ProcessEnv, asked: NodeJS.ProcessEnv | undefined, execEnv: ExecEnv | undefined): NodeJS.ProcessEnv {
+  if (asked === undefined || execEnv === undefined || !isWslEnv(execEnv)) return env;
+  const set = Object.keys(asked).filter((name) => name !== "WSLENV" && asked[name] !== undefined && asked[name] !== process.env[name]);
+  if (set.length === 0) return env;
+  const listed = (env["WSLENV"] ?? "").split(":").filter((entry) => entry.length > 0);
+  return { ...env, WSLENV: [...listed, ...set.map((name) => `${name}/u`).filter((entry) => !listed.includes(entry))].join(":") };
+}
+
+/**
+ * The variables `codex exec` reads an API key from for a single run (observed 2026-11, Codex's
+ * environment-variable docs: `CODEX_API_KEY`, supported in `codex exec` only). A key config names
+ * for codex is handed over as these as well as under its own name — the name is where it is FILED
+ * (OPENAI_API_KEY, the suggestion), and codex reads neither that nor any other name for a run.
+ */
+export const CODEX_KEY_VARIABLES: readonly string[] = ["CODEX_API_KEY"];
+
+/** A key config names for an agent: what it is filed under, the variables its binary reads, and how it is looked up. */
+export interface AgentKey {
+  name: string;
+  /** Also handed over as these — the variables the binary reads, when not the name it is filed under. */
+  as?: readonly string[];
+  lookup: (name: string) => string | undefined;
+}
+
+/**
+ * A spawn that hands an agent the key config names for it — under its own name and as the variables
+ * its binary reads — looked up at each spawn, so a key stored after the runtime was registered is
+ * found. A key that is not found is left out: the probe already calls the agent not working, and a
+ * run asked of an agent that is down is refused before it gets here.
+ */
+export function spawnWithKey(spawn: SpawnProcess, key: AgentKey | undefined): SpawnProcess {
+  if (key === undefined) return spawn;
+  return (argv, opts) => {
+    const value = key.lookup(key.name);
+    if (value === undefined || value.length === 0) return spawn(argv, opts);
+    const handed = Object.fromEntries([key.name, ...(key.as ?? [])].map((name) => [name, value]));
+    return spawn(argv, { ...opts, env: { ...(opts.env ?? process.env), ...handed } });
+  };
+}
+
 export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver } = {}): SpawnProcess {
   return (argv, opts) => {
     const [agentCommand, ...agentArgs] = argv;
@@ -122,9 +167,13 @@ export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver
       ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
       ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     });
+    // The environment the adapter asked for (`SpawnOptions.env`, a whole one), as upstream's own spawn
+    // reads it — this one dropped it, so nothing an adapter set for its agent ever reached it. Absent
+    // stays absent: `env: undefined` is what inherits.
+    const env = opts.env !== undefined || needs !== undefined ? envIntoWsl({ ...(opts.env ?? process.env), ...needs }, opts.env, options.execEnv) : undefined;
     const child = spawn(command, args, {
       ...(cwd !== undefined ? { cwd } : {}),
-      ...(needs !== undefined ? { env: { ...process.env, ...needs } } : {}),
+      ...(env !== undefined ? { env } : {}),
       // stdin is PIPED whenever the adapter may speak again, not only when it has a prompt to hand
       // over. That is what makes steering possible at all: a closed channel is why the only mid-run
       // signal this transport used to have was `kill()`.
@@ -266,6 +315,11 @@ export interface AgentRuntimeOptions {
   connectMcpServer?: ConnectMcpServer;
   /** Path to the codex binary (default: `codex` on PATH). */
   codexCommand?: string;
+  /**
+   * The key codex runs on (`agents.codex.credential`) and how to look it up — handed to each codex
+   * process ({@link spawnWithKey}). Absent ⇒ codex runs on its own sign-in, or whatever its environment holds.
+   */
+  codexKey?: AgentKey;
   /** Hears every agent call's outcome — how a refused sign-in reaches the settings screen. */
   onOutcome?: AgentOutcomeObserver;
   /**
@@ -385,7 +439,7 @@ export function registerAgentRuntimes(
             ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
             ...(options.connectMcpServer !== undefined ? { connectMcpServer: options.connectMcpServer } : {}),
             ...(codexServers !== undefined ? { mcpServers: codexServers } : {}),
-            spawn,
+            spawn: spawnWithKey(spawn, options.codexKey),
           });
     registry.functions.set(
       AGENT_CODEX,
