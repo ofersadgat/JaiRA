@@ -12,6 +12,7 @@ import {
   SCREEN_MAPPING,
   TOOL_SPECS,
   isMcpStdio,
+  mcpSecretsOf,
   mcpWhere,
   placeArgsOf,
   parseIntegrations,
@@ -25,6 +26,7 @@ import {
   type EmbeddedWeightsReport,
   type ExecutorInfo,
   type ForgeCheck,
+  type GitCliName,
   type JairaForgeConnection,
   type LocalServerProbe,
   type McpDetectedSource,
@@ -122,6 +124,9 @@ const INSTALLED_WITH: Record<AgentInstallMethod, string> = {
   bun: "Bun",
   pnpm: "pnpm",
   winget: "WinGet",
+  chocolatey: "Chocolatey",
+  scoop: "Scoop",
+  "command-line-tools": "Command Line Tools",
 };
 
 /** One line of an agent's install panel: a way and its command, or the place it was found. */
@@ -194,6 +199,41 @@ export function shelfTileOf(install: AgentInstall | undefined): { sub: string; w
   return { sub: first !== undefined ? `installs with ${first.via}` : "nothing here installs it", ways };
 }
 
+// --- Connections → Git: git, and the forges' own CLIs ------------------------------------------
+
+/** The git programs as their rows and tiles name them. */
+export const GIT_CLI_TITLES: Readonly<Record<GitCliName, string>> = { git: "Git", gh: "GitHub CLI", glab: "GitLab CLI" };
+
+/** What a git program's tile says it is for, under its name — the forge it calls. */
+export const GIT_CLI_FOR: Readonly<Record<GitCliName, string>> = { git: "", gh: "GitHub from a shell", glab: "GitLab from a shell" };
+
+/**
+ * Where a git program is drawn in Connections → Git: git is always a row — JaiRA cannot do without it,
+ * so its absence is said where it is looked for, not tucked on a shelf — and gh and glab are rows once
+ * the check found them, tiles under the card while it did not (the agents' rule, {@link agentPlaceOf}).
+ */
+export function gitCliPlaceOf(name: GitCliName, probe: ProbeResult | undefined): "row" | "shelf" {
+  return name === "git" ? "row" : agentPlaceOf(probe);
+}
+
+/**
+ * A git program's install panel: the agents', less the path to use — a git program found where this
+ * app's PATH does not reach has that folder added to it by the check itself, so one still reported so
+ * is in WSL, where its sentence says what to do.
+ */
+export function gitCliPanelOf(install: AgentInstall | undefined): ReturnType<typeof installPanelOf> {
+  if (install?.onPath === false && install.broken !== true) return undefined;
+  return installPanelOf(install);
+}
+
+/** A git program's one button on its closed row: the install or reinstall that would make it work, or nothing. */
+export function gitCliActionOf(probe: ProbeResult | undefined): AgentAction | undefined {
+  if (probe === undefined || probe.status !== "failed") return undefined;
+  const fix = gitCliPanelOf(probe.install)?.rows[0];
+  if (fix === undefined || fix.method === undefined) return undefined;
+  return { kind: "install", label: fix.button, title: fix.title, method: fix.method };
+}
+
 /**
  * A closed agent row's one line: the state's word, then — ready — its version and how it was installed,
  * or else what the check found. Drawn on one line; the opened row says the check whole, with its fix.
@@ -251,9 +291,58 @@ export function agentChipOf(probe: ProbeResult | undefined, state: ProviderState
 
 /** What an agent's folded settings hold, for the line that opens them: its first fields, by label. */
 export function settingsGistOf(spec: ProviderSpec): string | undefined {
-  const labels = allFields(spec).map((field) => field.label);
+  return gistOf(allFields(spec).map((field) => field.label));
+}
+
+/** What a schema form's fold holds, for the line that opens it: its fields' titles, the first three. */
+export function schemaGistOf(schema: Schema): string | undefined {
+  const titles = Object.entries(schema.properties ?? {}).map(([key, property]) => (typeof property === "object" && property !== null && typeof (property as { title?: unknown }).title === "string" ? (property as { title: string }).title : key));
+  return gistOf(titles);
+}
+
+function gistOf(labels: string[]): string | undefined {
   if (labels.length === 0) return undefined;
   return labels.length <= 3 ? labels.join(", ") : `${labels.slice(0, 3).join(", ")} and ${labels.length - 3} more`;
+}
+
+// --- Connections → Model APIs and Local models: the closed rows ---------------------------------
+
+/**
+ * A model route's closed line: the state's word, then — ready — what it serves (an API's prefix, where
+ * its key is in the chip beside it) or what the check found (a local server's address, the weights), or
+ * else what the check found. A route's check never asks the provider, so a ready API says only that.
+ */
+export function routeLineOf(spec: ProviderSpec, probe: ProbeResult | undefined, state: ProviderState): { word: string; rest: string | undefined } {
+  const word = providerSayState(probe, state);
+  if (probe === undefined || state === "off" || state === "unchecked") return { word, rest: undefined };
+  if (state === "available" && spec.credential === "required") return { word, rest: `serves ${spec.id}/…` };
+  return { word, rest: probe.detail !== "" ? probe.detail : undefined };
+}
+
+/** The one button a closed route row carries: the key it cannot run without, the local server that answers, the weights it has none of. */
+export type RouteAction = { kind: "key"; label: string; title: string } | { kind: "use"; label: string; title: string; baseURL: string } | { kind: "open"; label: string; title: string };
+
+export function routeActionOf(spec: ProviderSpec, probe: ProbeResult | undefined, state: ProviderState, merged: Record<string, unknown>, localServers: readonly LocalServerProbe[] | undefined): RouteAction | undefined {
+  if (probe === undefined || state === "off" || state === "unchecked" || state === "available") return undefined;
+  if (spec.id === "local") {
+    // A server answers on its usual port and the route does not point at it: pointing it there is the fix.
+    const up = localServers?.find((server) => server.up && !server.inUse);
+    return up !== undefined ? { kind: "use", label: `Use ${up.name}`, title: `send local models to ${up.baseURL}`, baseURL: up.baseURL } : undefined;
+  }
+  if (spec.id === "embedded") return state === "unconfigured" ? { kind: "open", label: "Add weights", title: "name a model id and the .gguf it loads" } : undefined;
+  if (spec.credential === "required" && probe.credential === undefined) {
+    const { plusTitle, plusSub } = keyBoxWords(spec, merged);
+    return { kind: "key", label: plusTitle, title: `store ${plusSub}` };
+  }
+  return undefined;
+}
+
+/** The key a ready route calls with, as its closed row's chip: its name, and where it was found. */
+export function routeChipOf(spec: ProviderSpec, probe: ProbeResult | undefined, state: ProviderState, merged: Record<string, unknown>): AgentChip | undefined {
+  if (probe === undefined || state !== "available" || spec.credential === "none") return undefined;
+  const named = typeof merged["credential"] === "string" ? merged["credential"] : spec.credential === "required" ? spec.suggestedCredential : undefined;
+  if (named === undefined) return undefined;
+  return { kind: "key", name: named, where: probe.credential !== undefined ? `in ${SECRET_SOURCE_LABELS[probe.credential.source]}` : undefined, missing: false };
 }
 
 /** The words of an agent's + box: "Sign in" when there is nobody, "Switch account" when there is somebody. */
@@ -633,6 +722,39 @@ export function forgeRowOf(name: string, connection: JairaForgeConnection, check
 }
 
 /**
+ * Where a forge connection is drawn (the person, 2026-11-17, "Forges B"): a row while it connects as
+ * someone — or tried to and was refused, or is turned off — and a tile on the "Not connected" shelf
+ * while there is no token for it at all.
+ */
+export function forgePlaceOf(enabled: boolean, check: ForgeCheck | undefined): "row" | "shelf" {
+  return enabled && check?.status === "unconfigured" ? "shelf" : "row";
+}
+
+/** A forge row's closed line: the state's word, then — connected — the token's scopes, or else what the check found. */
+export function forgeLineOf(state: ProviderState, check: ForgeCheck | undefined): { word: string; rest: string | undefined } {
+  const word = stateWord(state);
+  if (check === undefined || state === "off" || state === "unchecked") return { word, rest: undefined };
+  if (state === "available") {
+    const scopes = check.identity?.scopes;
+    return { word, rest: scopes !== undefined && scopes.length > 0 ? scopes.join(", ") : undefined };
+  }
+  return { word, rest: check.detail !== "" ? check.detail : undefined };
+}
+
+/** The one button a closed forge row carries: sign in through the browser, or store a token where there is no sign-in. */
+export function forgeActionOf(row: ReturnType<typeof forgeRowOf>, check: ForgeCheck | undefined, host: string, canSignIn: boolean): { kind: "sign-in" | "token"; label: string; title: string } | undefined {
+  if (check === undefined || row.state === "available" || row.state === "off" || row.state === "unchecked") return undefined;
+  if (canSignIn) return { kind: "sign-in", label: row.state === "unavailable" ? "Sign in again" : `Sign in with ${row.label}`, title: `opens ${host} with a code to enter` };
+  return { kind: "token", label: check.credential !== undefined ? "Replace the token" : "Add a token", title: `filed under ${row.tokenName}` };
+}
+
+/** Who a connected forge acts as, as its closed row's chip: the account, and how it signed in. */
+export function forgeChipOf(row: ReturnType<typeof forgeRowOf>): AgentChip | undefined {
+  if (row.identity === undefined) return undefined;
+  return { kind: "login", who: row.identity.login, fact: row.viaOAuth ? "OAuth" : "token", more: 0 };
+}
+
+/**
  * Add a host from the new-connection form: the connection's path and value, or a problem in words. The
  * parser main will run, run here first — so "two connections on one host" is said beside the form that
  * caused it rather than as a refused save.
@@ -844,6 +966,60 @@ export function newServerOf(draft: Record<string, unknown>, servers: Record<stri
 /** The detected servers a source lists that are not configured yet — what its Add writes. */
 export function newFromSource(source: McpDetectedSource, servers: Readonly<Record<string, McpServerConfig>>): Array<{ name: string; config: McpServerConfig }> {
   return source.servers.filter((entry) => servers[entry.name] === undefined);
+}
+
+/** The one button a closed server row carries: the claims waiting to be accepted, or the secret it is not sent. */
+export function mcpActionOf(enabled: boolean, server: McpServerConfig, status: McpServerStatus | undefined): { kind: "accept" | "secret"; label: string; title: string } | undefined {
+  if (!enabled || status === undefined) return undefined;
+  const claims = unacceptedClaims(server, status);
+  if (claims.length > 0) return { kind: "accept", label: `Accept ${claims.length}…`, title: `${claims.length} ${claims.length === 1 ? "tool says what it counts" : "tools say what they count"} as — open to accept` };
+  const missing = (status.credentials ?? mcpSecretsOf(server)).filter((secret) => secret.origin === undefined);
+  if (missing.length > 0) return { kind: "secret", label: "Store a secret", title: `store ${missing.map((secret) => secret.credential).join(", ")}` };
+  return undefined;
+}
+
+/** The secret a server is sent, as its closed row's chip: the first that was found, and where. */
+export function mcpChipOf(enabled: boolean, status: McpServerStatus | undefined): AgentChip | undefined {
+  if (!enabled || status === undefined) return undefined;
+  const found = status.credentials.find((secret) => secret.origin !== undefined);
+  return found?.origin !== undefined ? { kind: "key", name: found.credential, where: `in ${SECRET_SOURCE_LABELS[found.origin.source]}`, missing: false } : undefined;
+}
+
+/** One server another tool runs, as a tile on the "Found on this machine" shelf. */
+export interface FoundServer {
+  name: string;
+  config: McpServerConfig;
+  /** How it is reached and where it was found: "stdio · in Cursor". */
+  sub: string;
+  /** What Add writes: the command or the address. */
+  what: string;
+}
+
+/**
+ * The servers other tools run that are not configured here, a tile each (the person, 2026-11-17, "MCP
+ * A"): from every place that listed some, in the order the places were read; a name two places list is
+ * the first one's, since a second would be refused as the same name.
+ */
+export function foundServersOf(detected: readonly McpDetectedSource[] | undefined, servers: Readonly<Record<string, McpServerConfig>>): FoundServer[] {
+  const seen = new Set<string>();
+  const found: FoundServer[] = [];
+  for (const source of detected ?? []) {
+    if (source.state !== "found") continue;
+    for (const entry of newFromSource(source, servers)) {
+      if (seen.has(entry.name)) continue;
+      seen.add(entry.name);
+      found.push({ name: entry.name, config: entry.config, sub: `${isMcpStdio(entry.config) ? "stdio" : "HTTP"} · in ${source.label}`, what: mcpWhere(entry.config) });
+    }
+  }
+  return found;
+}
+
+/** Where the shelf looked, in a sentence under it. */
+export function lookedInOf(detected: readonly McpDetectedSource[] | undefined): string | undefined {
+  if (detected === undefined || detected.length === 0) return undefined;
+  // A place's own name may hold a comma ("Cursor, this project"), so the places are set apart with " · ".
+  const list = detected.map((source) => source.label.replace(/^This /, "this ")).join(" · ");
+  return `Looked in ${list} when this page opened. None is started until it is added.`;
 }
 
 /** What a detected source's row says after where it was found. */

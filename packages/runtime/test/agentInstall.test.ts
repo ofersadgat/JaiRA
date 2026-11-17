@@ -197,6 +197,46 @@ describe("installing an agent that is not here", () => {
   });
 });
 
+describe("on Windows, beside the vendors' own ways", () => {
+  const windows = (files: Record<string, "file">) =>
+    fakeFs({
+      platform: "win32",
+      home: "C:\\Users\\me",
+      path: ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0", "C:\\Program Files\\nodejs", "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps", "C:\\ProgramData\\chocolatey\\bin", "C:\\Users\\me\\scoop\\shims"],
+      files: { "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe": "file", ...files },
+    });
+  const ALL = {
+    "C:\\Program Files\\nodejs\\npm.cmd": "file",
+    "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe": "file",
+    "C:\\ProgramData\\chocolatey\\bin\\choco.exe": "file",
+    "C:\\Users\\me\\scoop\\shims\\scoop.cmd": "file",
+  } as const;
+
+  it("offers WinGet, Chocolatey and Scoop where each has the agent — after the vendor's own", () => {
+    const methods = (pkg: typeof CLAUDE) => planOf(pkg, installFactsOf(pkg.binary, pkg, windows({ ...ALL }))).install.map((one) => one.method);
+    expect(methods(CLAUDE)).toEqual(["native", "winget", "npm", "chocolatey", "scoop"]);
+    expect(methods(CODEX)).toEqual(["npm", "winget", "chocolatey", "scoop"]);
+    // OpenCode v2 only: Chocolatey's `opencode` is v1.
+    expect(methods(OPENCODE)).toEqual(["npm", "winget", "scoop"]);
+    // Nothing current for Gemini on any of them.
+    expect(methods(GEMINI)).toEqual(["npm"]);
+  });
+
+  it("installs Claude by WinGet's id, and Chocolatey's as administrator", () => {
+    const { install } = planOf(CLAUDE, installFactsOf("claude", CLAUDE, windows({ ...ALL })));
+    expect(install.find((one) => one.method === "winget")?.display).toBe("winget install --id Anthropic.ClaudeCode --exact");
+    expect(install.find((one) => one.method === "chocolatey")?.display).toBe("choco install claude-code -y (as administrator)");
+    expect(install.find((one) => one.method === "scoop")?.display).toBe("scoop install claude-code");
+  });
+
+  it("updates an agent Scoop or Chocolatey installed by the same program", () => {
+    const scoop = windows({ ...ALL, "C:\\Users\\me\\scoop\\shims\\codex.exe": "file" });
+    expect(planOf(CODEX, installFactsOf("codex", CODEX, scoop)).update?.display).toBe("scoop update codex");
+    const choco = windows({ ...ALL, "C:\\ProgramData\\chocolatey\\bin\\claude.exe": "file" });
+    expect(planOf(CLAUDE, installFactsOf("claude", CLAUDE, choco)).update?.display).toBe("choco upgrade claude-code -y (as administrator)");
+  });
+});
+
 describe("Gemini, Muse Code and OpenCode", () => {
   const machine = (files: Record<string, "file" | { link: string }>, platform: NodeJS.Platform = "darwin") =>
     fakeFs({ platform, path: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"], files: { ...SYSTEM, "/opt/homebrew/bin/brew": "file", "/usr/local/bin/npm": "file", ...files } });
@@ -279,13 +319,14 @@ describe("inside WSL", () => {
   });
 });
 
-/** An Exec that answers every command the same, and records what it ran. */
-function recordingExec(answer: Partial<ExecResult>, after?: () => void): Exec & { calls: Array<{ file: string; args: readonly string[]; stdin?: string }> } {
+/** An Exec that answers every command the same, and records what it ran — printing `prints` as it runs. */
+function recordingExec(answer: Partial<ExecResult>, after?: () => void, prints: Array<["stdout" | "stderr", string]> = []): Exec & { calls: Array<{ file: string; args: readonly string[]; stdin?: string }> } {
   const calls: Array<{ file: string; args: readonly string[]; stdin?: string }> = [];
   return {
     calls,
     run: (file, args, options) => {
       calls.push({ file, args, ...(options?.stdin !== undefined ? { stdin: options.stdin } : {}) });
+      for (const [stream, chunk] of prints) options?.onOutput?.(stream, chunk);
       after?.();
       return Promise.resolve({ code: 0, signal: null, stdout: "", stderr: "", command: file, timedOut: false, aborted: false, ...answer } as ExecResult);
     },
@@ -325,6 +366,26 @@ describe("installAgent", () => {
     const odd = fakeFs({ path: ["/opt/tools", "/usr/bin", "/bin"], files: { ...SYSTEM, "/opt/tools/claude": "file" } });
     expect(await installAgent(CLAUDE_CLI, undefined, { exec, deps: odd })).toMatchObject({ ok: false, reason: expect.stringMatching(/not installed in a way JaiRA can update/) });
     expect(exec.calls).toEqual([]);
+  });
+
+  it("says what it runs, then what the installer prints as it prints it, to whoever is watching", async () => {
+    const deps = fakeFs({ path: ["/usr/local/bin", "/usr/bin", "/bin"], files: { ...SYSTEM, "/usr/local/bin/npm": "file" } });
+    const said: string[] = [];
+    const exec = recordingExec({ code: 0 }, undefined, [
+      ["stdout", "added 3 packages\r"],
+      ["stderr", "npm warn deprecated\n"],
+    ]);
+    await installAgent(CLAUDE_CLI, "npm", { exec, deps, onOutput: (text) => said.push(text) });
+    expect(said).toEqual(["$ npm install -g @anthropic-ai/claude-code\n", "added 3 packages\r", "npm warn deprecated\n"]);
+    // A watcher that throws is nobody's problem but its own.
+    const broken = await installAgent(CLAUDE_CLI, "npm", {
+      exec,
+      deps,
+      onOutput: () => {
+        throw new Error("a broken watcher");
+      },
+    });
+    expect(broken.ok).toBe(true);
   });
 
   it("says why an installer failed in its own last words, and a cancel as a cancel", async () => {

@@ -1,18 +1,20 @@
 import { useContext, useState, type JSX } from "react";
-import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, isMcpStdio, mcpSecretsOf, mcpServerEnabled, type McpDetectedSource, type McpServerConfig, type McpServerStatus, type SecretTarget } from "@jaira/shared/browser";
+import { View } from "@tamagui/core";
+import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, mcpSecretsOf, mcpServerEnabled, type McpServerConfig, type McpServerStatus, type SecretTarget } from "@jaira/shared/browser";
 import { layerWriter } from "@jaira/ui/configWriter";
 import {
-  HTTP_SCHEMA,
   NEW_SERVER_SCHEMA,
-  STDIO_SCHEMA,
-  detectedSaid,
   effectiveServers,
+  foundServersOf,
   layerDocument,
+  lookedInOf,
+  mcpActionOf,
+  mcpChipOf,
   mcpDetail,
   mcpRowState,
   mcpWord,
-  newFromSource,
   newServerOf,
+  schemaGistOf,
   secretTargetsOf,
   serverSchemaOf,
   unacceptedClaims,
@@ -23,21 +25,34 @@ import type { McpServerRowsProps } from "@jaira/ui/mcpServersRowsTypes";
 import { SchemaForm } from "../../form/SchemaForm";
 import { Code, Hint, PaneActions, Stack } from "../bits";
 import { Button } from "../Button";
+import { Switch } from "../controls";
 import { SelectInput, TextField } from "../fields";
 import { SettingsLayerContext } from "../layers";
-import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
-import { AddBox, ConnRow, ConnRows, EntryBox, KeyBox, Problem, RowControls, RowHead, Say, Tag, Wide } from "./Row";
+import { SettingsGroup } from "../SettingsPage";
+import { ActionSlot, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
+import { AddBox, Chevron, ConnRow, ConnRows, EntryBox, KeyBox, Problem, RowHead, Say, Wide } from "./Row";
+import { AnotherTile, Shelf, ShelfCard, Tile } from "./Shelf";
 
 /**
- * The rows of Connections → MCP servers: one row per configured server — whether it answered, the
- * secrets it is sent as boxes, its switch and chevron — then "Add a server", with the servers other
- * tools on this machine already run under it. What each says and writes is `connectionsModel.ts`'s.
+ * Connections → MCP servers (the person, 2026-11-17, "MCP A"): the configured servers as rows closed
+ * to a line — how each is reached and what it listed, the one button that would make it work (accept
+ * what its tools say they count as, store the secret it is not sent) or the chip of the secret it is
+ * sent, its switch and its chevron — then the shelf "Found on this machine": a tile per server another
+ * tool runs that is not added here, and "Another server" last. What each says and writes is
+ * `connectionsModel.ts`'s (`mcpActionOf`, `mcpChipOf`, `foundServersOf`); the pieces are `Closed.tsx`'s
+ * and `Shelf.tsx`'s.
  */
 export function McpServerRows(props: McpServerRowsProps): JSX.Element {
   const { config, layer, busy, editable, mcp, onSave } = props;
   // The Just you view's "What you changed": only the servers the layer states, and no adding.
   const onlyStated = useContext(SettingsLayerContext)?.onlyStated === true;
-  if (config === null) return <Hint card>The configuration could not be read.</Hint>;
+  if (config === null) {
+    return (
+      <SettingsGroup>
+        <Hint card>The configuration could not be read.</Hint>
+      </SettingsGroup>
+    );
+  }
   const doc = layerDocument(config, layer);
   const servers = effectiveServers(config);
   const locked = busy || !editable;
@@ -46,12 +61,23 @@ export function McpServerRows(props: McpServerRowsProps): JSX.Element {
   const addAll = (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>): void => onSave(layer, withServersAdded(doc, servers, entries));
   const shown = Object.entries(servers).filter(([name]) => !onlyStated || stated(`mcp.servers.${name}`));
   return (
-    <ConnRows>
-      {shown.map(([name, server], i) => (
-        <McpServerRow key={`${layer}:${name}`} {...props} first={i === 0} name={name} server={server} status={mcp.report?.servers.find((s) => s.name === name)} locked={locked} set={set} stated={stated} />
-      ))}
-      {onlyStated ? null : <AddServerRow first={shown.length === 0} servers={servers} detected={mcp.detected} locked={locked} set={set} onAddAll={addAll} />}
-    </ConnRows>
+    <>
+      {shown.length > 0 || mcp.problem !== null ? (
+        <SettingsGroup>
+          <ConnRows>
+            {shown.map(([name, server], i) => (
+              <McpServerRow key={`${layer}:${name}`} {...props} first={i === 0} name={name} server={server} status={mcp.report?.servers.find((s) => s.name === name)} locked={locked} set={set} stated={stated} />
+            ))}
+          </ConnRows>
+          {mcp.problem !== null ? (
+            <View paddingVertical={13} paddingHorizontal={16}>
+              <Problem>{mcp.problem}</Problem>
+            </View>
+          ) : null}
+        </SettingsGroup>
+      ) : null}
+      {onlyStated ? null : <FoundShelf servers={servers} detected={mcp.detected} locked={locked} set={set} onAdd={addAll} />}
+    </>
   );
 }
 
@@ -84,6 +110,24 @@ function McpServerRow({
   // What the server's tools say themselves they count as, and nobody has accepted yet (decision 0019, ruling 5).
   const claims = unacceptedClaims(server, status);
   const accept = (picked: typeof claims): void => set(`${path}.tools`, { ...(server.tools ?? {}), ...Object.fromEntries(picked.map((one) => [one.tool, one.claim])) });
+  const action = mcpActionOf(enabled, server, status);
+  const chip = mcpChipOf(enabled, status);
+  const detail = mcpDetail(enabled, server, status);
+  const schema = serverSchemaOf(server, status);
+
+  const slot = open ? null : action !== undefined ? (
+    <ActionSlot
+      action={action}
+      waiting={undefined}
+      disabled={locked}
+      onPress={() => {
+        setOpen(true);
+        if (action.kind === "secret") setStoring(true);
+      }}
+    />
+  ) : chip !== undefined ? (
+    <RunsAs chip={chip} />
+  ) : null;
 
   const boxes = [
     ...credentials.map((secret) => {
@@ -99,51 +143,58 @@ function McpServerRow({
       );
     }),
     credentials.length === 0 || storing ? null : <AddBox key="add" title="Store a secret" sub={credentials.map((secret) => secret.credential).join(", ")} disabled={locked} onPress={() => setStoring(true)} />,
-    claims.length === 0 || open ? null : (
-      <AddBox key="claims" title={`${claims.length} ${claims.length === 1 ? "tool says" : "tools say"} what ${claims.length === 1 ? "it counts" : "they count"} as`} sub="open to accept" disabled={locked} onPress={() => setOpen(true)} />
-    ),
-  ];
+  ].filter((box) => box !== null);
 
-  const wide = [
-    storing ? (
-      <Wide key="secret">
-        <SecretEntry names={credentials.map((secret) => secret.credential)} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onStore={(request) => void mcp.storeSecret(request)} onClose={() => setStoring(false)} />
-      </Wide>
-    ) : null,
-    open ? (
-      <Wide key="form" body>
-        {claims.length > 0 ? (
-          <Stack gap={6}>
-            <Hint>
-              {claims.length === 1 ? "One of its tools says" : "Some of its tools say"} what {claims.length === 1 ? "it counts" : "they count"} as among JaiRA's permissions. Nothing counts until you accept it: a server could say that a tool which deletes files only reads them.
-            </Hint>
-            {claims.map((one) => (
-              <PaneActions key={one.tool}>
-                <Code>{one.tool}</Code>
-                <Hint>counts as {countsAsWords(one.claim)}</Hint>
-                <Button kind="ghost" disabled={locked} onPress={() => accept([one])}>
-                  Accept
-                </Button>
-              </PaneActions>
-            ))}
-            {claims.length > 1 ? (
-              <PaneActions>
-                <Button kind="ghost" disabled={locked} onPress={() => accept(claims)}>
-                  {`Accept all ${claims.length}`}
-                </Button>
-              </PaneActions>
-            ) : null}
+  const wide = open
+    ? [
+        boxes.length > 0 ? (
+          <Wide key="sends">
+            <LabelledBoxes label="Sends">{boxes}</LabelledBoxes>
+          </Wide>
+        ) : null,
+        storing ? (
+          <Wide key="secret">
+            <SecretEntry names={credentials.map((secret) => secret.credential)} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onStore={(request) => void mcp.storeSecret(request)} onClose={() => setStoring(false)} />
+          </Wide>
+        ) : null,
+        claims.length > 0 ? (
+          <Wide key="claims" body>
+            <Stack gap={6}>
+              <Hint>
+                {claims.length === 1 ? "One of its tools says" : "Some of its tools say"} what {claims.length === 1 ? "it counts" : "they count"} as among JaiRA's permissions. Nothing counts until you accept it: a server could say that a tool which deletes files only reads them.
+              </Hint>
+              {claims.map((one) => (
+                <PaneActions key={one.tool}>
+                  <Code>{one.tool}</Code>
+                  <Hint>counts as {countsAsWords(one.claim)}</Hint>
+                  <Button kind="ghost" disabled={locked} onPress={() => accept([one])}>
+                    Accept
+                  </Button>
+                </PaneActions>
+              ))}
+              {claims.length > 1 ? (
+                <PaneActions>
+                  <Button kind="ghost" disabled={locked} onPress={() => accept(claims)}>
+                    {`Accept all ${claims.length}`}
+                  </Button>
+                </PaneActions>
+              ) : null}
+            </Stack>
+          </Wide>
+        ) : null,
+        // How it is reached, and — once it has listed them — what its tools count as.
+        <SettingsFold key="form" gist={schemaGistOf(schema)}>
+          <Stack>
+            <SchemaForm schema={schema} value={server} onChange={(next) => set(path, next)} ctx={{ path, disabled: locked, isSet: stated, setAt: set }} />
+            <PaneActions>
+              <Button kind="danger" disabled={locked || !stated(path)} title="delete this server from the layer being edited" onPress={() => set(path, undefined)}>
+                Remove
+              </Button>
+            </PaneActions>
           </Stack>
-        ) : null}
-        <SchemaForm schema={serverSchemaOf(server, status)} value={server} onChange={(next) => set(path, next)} ctx={{ path, disabled: locked, isSet: stated, setAt: set }} />
-        <PaneActions>
-          <Button kind="danger" disabled={locked || !stated(path)} title="delete this server from the layer being edited" onPress={() => set(path, undefined)}>
-            Remove
-          </Button>
-        </PaneActions>
-      </Wide>
-    ) : null,
-  ];
+        </SettingsFold>,
+      ]
+    : [];
 
   return (
     <ConnRow
@@ -152,21 +203,30 @@ function McpServerRow({
       main={
         <>
           <RowHead brand={name} state={state} title={name} mono />
-          <Say state={state} word={mcpWord(enabled, status)} detail={mcpDetail(enabled, server, status)} fix={enabled && status?.fix ? status.fix : undefined} />
+          {open ? <Say state={state} word={mcpWord(enabled, status)} detail={detail} fix={enabled && status?.fix ? status.fix : undefined} /> : <RowLine state={state} word={mcpWord(enabled, status)} rest={detail} />}
         </>
       }
-      boxes={boxes}
+      // An empty slot where there is nothing, so the switch keeps one column down the card.
+      boxes={[slot ?? <View key="none" />]}
       controls={
-        <RowControls
-          on={enabled}
-          disabled={locked}
-          label={enabled ? `stop handing ${name} to agents` : `hand ${name} to agents again`}
-          // `undefined` REMOVES the key: on is the default, and a layer that says so says nothing.
-          onToggle={(next) => set(`${path}.enabled`, next ? undefined : false)}
-          open={open}
-          title={name}
-          onOpen={() => setOpen((v) => !v)}
-        />
+        <>
+          <Switch
+            on={enabled}
+            label={enabled ? `stop handing ${name} to agents` : `hand ${name} to agents again`}
+            disabled={locked}
+            // `undefined` REMOVES the key: on is the default, and a layer that says so says nothing.
+            onChange={(next) => set(`${path}.enabled`, next ? undefined : false)}
+          />
+          <Chevron
+            open={open}
+            label={open ? `close ${name}` : `open ${name}`}
+            tips={["Show more", "Show less"]}
+            onPress={() => {
+              if (open) setStoring(false);
+              setOpen(!open);
+            }}
+          />
+        </>
       }
       wide={wide}
     />
@@ -229,25 +289,33 @@ function SecretEntry({
   );
 }
 
-/** The last row: add a server by hand, and the servers other tools on this machine already run. */
-function AddServerRow({
-  first,
+/**
+ * "Found on this machine": a tile per server another tool runs and this configuration does not have —
+ * none is started until it is added — then "Another server", which opens the form across the shelf; and
+ * under them, where the page looked.
+ */
+function FoundShelf({
   servers,
   detected,
   locked,
   set,
-  onAddAll,
+  onAdd,
 }: {
-  first: boolean;
   servers: Record<string, McpServerConfig>;
-  detected: McpDetectedSource[] | undefined;
+  detected: McpServerRowsProps["mcp"]["detected"];
   locked: boolean;
   set: (path: string, value: unknown) => void;
-  onAddAll: (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>) => void;
+  onAdd: (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>) => void;
 }): JSX.Element {
-  const [open, setOpen] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   const [problem, setProblem] = useState<string | null>(null);
+  const found = foundServersOf(detected, servers);
+  const looked = lookedInOf(detected);
+  const close = (): void => {
+    setAdding(false);
+    setProblem(null);
+  };
   const add = (): void => {
     // The parser main will run, run here first, so what is wrong is said beside the form (`newServerOf`).
     const made = newServerOf(draft, servers);
@@ -257,94 +325,37 @@ function AddServerRow({
     }
     set(made.path, made.value);
     setDraft({});
-    setProblem(null);
-    setOpen(false);
+    close();
   };
   return (
-    <ConnRow
-      first={first}
-      state="unconfigured"
-      main={
+    <Shelf
+      title="Found on this machine"
+      sub={found.length > 0 ? "servers other tools already run — none is started until you add it" : undefined}
+      across={
         <>
-          <RowHead brand="+" state="unconfigured" title="Add a server" />
-          <Say state="unconfigured" word="not set up" detail="a command JaiRA starts (stdio), or a URL it calls (HTTP)" />
+          {adding ? (
+            <ShelfCard title="Another server" onClose={close}>
+              <Hint>A command JaiRA starts (stdio), or a URL it calls (HTTP).</Hint>
+              <SchemaForm schema={NEW_SERVER_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
+              {problem ? <Problem>{problem}</Problem> : null}
+              <PaneActions>
+                <Button kind="primary" disabled={locked} onPress={add}>
+                  Add it
+                </Button>
+                <Button kind="ghost" onPress={close}>
+                  Cancel
+                </Button>
+              </PaneActions>
+            </ShelfCard>
+          ) : null}
+          {looked !== undefined ? <Hint paddingHorizontal={4}>{looked}</Hint> : null}
         </>
       }
-      boxes={[open ? null : <AddBox key="add" title="Add a server" sub="a name, and a command or an address" disabled={locked} onPress={() => setOpen(true)} />]}
-      controls={null}
-      wide={[
-        open ? (
-          <Wide key="form" body>
-            <SchemaForm schema={NEW_SERVER_SCHEMA} value={draft} onChange={(next) => setDraft((next ?? {}) as Record<string, unknown>)} ctx={{ path: "", disabled: locked, hidePaths: true }} />
-            {problem ? <Problem>{problem}</Problem> : null}
-            <PaneActions>
-              <Button kind="primary" disabled={locked} onPress={add}>
-                Add it
-              </Button>
-              <Button
-                kind="ghost"
-                onPress={() => {
-                  setOpen(false);
-                  setProblem(null);
-                }}
-              >
-                Cancel
-              </Button>
-            </PaneActions>
-          </Wide>
-        ) : null,
-        detected !== undefined ? (
-          <Wide key="found">
-            <DetectedServers detected={detected} servers={servers} locked={locked} onAdd={onAddAll} />
-          </Wide>
-        ) : null,
-      ]}
-    />
-  );
-}
-
-/** What other tools on this machine already run: one row per place looked, and Add. */
-export function DetectedServers({
-  detected,
-  servers,
-  locked,
-  onAdd,
-}: {
-  detected: McpDetectedSource[];
-  servers: Readonly<Record<string, McpServerConfig>>;
-  locked: boolean;
-  onAdd: (entries: ReadonlyArray<{ name: string; config: McpServerConfig }>) => void;
-}): JSX.Element {
-  const last = useColumn();
-  return (
-    <ProbeList found>
-      <ProbeHead left="Servers other tools on this machine already run" right="read when this page opens — none is started" />
-      {detected.map((source) => {
-        const fresh = newFromSource(source, servers);
-        const id = `${source.source}:${source.where}`;
-        return (
-          <ProbeRow
-            key={id}
-            id={id}
-            up={source.state === "found"}
-            name={source.label}
-            dimName={source.state !== "found"}
-            at={`${source.where} · ${detectedSaid(source)}`}
-            title={source.where}
-            nameWidth={190}
-            last={last}
-            end={
-              source.state !== "found" ? null : fresh.length === 0 ? (
-                <Tag tone="accent">added</Tag>
-              ) : (
-                <RowButton disabled={locked} onPress={() => onAdd(fresh)}>
-                  {fresh.length === 1 ? "Add" : `Add ${fresh.length}`}
-                </RowButton>
-              )
-            }
-          />
-        );
-      })}
-    </ProbeList>
+    >
+      {found.map((one) => (
+        <Tile key={one.name} title={one.name} sub={one.sub} button={{ label: "Add", title: `adds ${one.what}`, disabled: locked, onPress: () => onAdd([{ name: one.name, config: one.config }]) }} />
+      ))}
+      <AnotherTile title="Another server" sub="a command or an address" open={adding} onPress={() => (adding ? close() : setAdding(true))} />
+    </Shelf>
   );
 }

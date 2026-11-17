@@ -81,6 +81,7 @@ import type {
   RunTarget,
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
+import { appendInstallLog, installLogKey, type InstallLog } from "./installLog";
 import {
   clearedAbove,
   withPaths,
@@ -92,6 +93,8 @@ import {
   WORKFLOW_JSON,
   parseRemoteProjectKey,
   type AgentInstallMethod,
+  type GitCliName,
+  type InstallTarget,
   type WritingTool,
 } from "@jaira/shared/browser";
 import {
@@ -354,6 +357,14 @@ export interface AppState {
   signingIn: string[];
   /** Agents whose install or update is running — their rows say so and offer Cancel. */
   installing: string[];
+  /** The git programs (git, gh, glab) whose install or update is running — kept apart: a CLI agent may be called `git`. */
+  installingGitClis: GitCliName[];
+  /**
+   * What each install or update pressed in this window printed, by `installLogKey` (`agent:claude-cli`,
+   * `gitCli:gh`): from the press until its row's Hide. A row with one stays a row, opened, even while
+   * what it installs is not there — a failed install's last words are the reason to keep looking.
+   */
+  installLogs: Record<string, InstallLog>;
   /** What the secret store can do here — decides which "save key to…" options are offered. */
   secrets: SecretCapabilities;
   /**
@@ -923,6 +934,8 @@ const EMPTY: AppState = {
   rechecking: false,
   signingIn: [],
   installing: [],
+  installingGitClis: [],
+  installLogs: {},
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
@@ -2520,6 +2533,15 @@ export function useApp() {
           // The fold itself is shared with a made task's nested conversation (`liveTurnFold.ts`),
           // which holds a tail of its own for its task and must fold identically.
           liveDraw.hold(foldLiveTurn(live, message));
+          break;
+        }
+        case "install:output": {
+          // Only an install this window started and is still showing: one another window started has
+          // no row here waiting for it, and would never be told it ended.
+          const key = installLogKey(message.target);
+          const log = ref.current.installLogs[key];
+          if (log === undefined || !log.running) break;
+          patch({ installLogs: { ...ref.current.installLogs, [key]: appendInstallLog(log, message.text) } });
           break;
         }
         case "log:entry": {
@@ -4131,22 +4153,70 @@ export function useApp() {
        */
       installAgent: async (name: string, method?: AgentInstallMethod) => {
         if (ref.current.installing.includes(name)) return;
-        patch({ installing: [...ref.current.installing, name], error: null });
+        const key = installLogKey({ kind: "agent", name });
+        // The log starts empty: the service's first push is the command it runs.
+        patch({ installing: [...ref.current.installing, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: method === undefined } }, error: null });
+        let outcome: InstallLog["outcome"];
         try {
-          const outcome = await invoke("executor:install", { name, ...(method !== undefined ? { method } : {}) });
-          // A cancel is the person's own doing, and says nothing they need told.
-          if (!outcome.ok && !/cancelled$/.test(outcome.reason)) patch({ error: outcome.reason });
-          if (outcome.ok && outcome.onPath === false && outcome.path !== undefined) await actionsRef.current.useAgentCommand(name, outcome.path);
+          const answered = await invoke("executor:install", { name, ...(method !== undefined ? { method } : {}) });
+          // Why it failed is said in the log, under the row — a cancel too, as the person's own doing.
+          outcome = answered.ok ? { ok: true } : { ok: false, reason: answered.reason };
+          if (answered.ok && answered.onPath === false && answered.path !== undefined) await actionsRef.current.useAgentCommand(name, answered.path);
           applyAvailability(patch, await invoke("availability:read", undefined));
         } catch (e) {
+          outcome = { ok: false, reason: e instanceof Error ? e.message : String(e) };
           fail(e);
         } finally {
-          patch({ installing: ref.current.installing.filter((running) => running !== name) });
+          const log = ref.current.installLogs[key];
+          patch({
+            installing: ref.current.installing.filter((running) => running !== name),
+            ...(log !== undefined ? { installLogs: { ...ref.current.installLogs, [key]: { ...log, running: false, outcome } } } : {}),
+          });
         }
       },
       cancelInstall: async (name: string) => {
         try {
           await invoke("executor:cancelInstall", { name });
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
+       * Install git, gh or glab the way named, or (none named) update it the way it was installed. As
+       * an agent's: the row waits until the installer exits — for Apple's Command Line Tools, until git
+       * is there — and main has re-checked by the time it answers.
+       */
+      installGitCli: async (name: GitCliName, method?: AgentInstallMethod) => {
+        if (ref.current.installingGitClis.includes(name)) return;
+        const key = installLogKey({ kind: "gitCli", name });
+        patch({ installingGitClis: [...ref.current.installingGitClis, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: method === undefined } }, error: null });
+        let outcome: InstallLog["outcome"];
+        try {
+          const answered = await invoke("gitCli:install", { name, ...(method !== undefined ? { method } : {}) });
+          outcome = answered.ok ? { ok: true } : { ok: false, reason: answered.reason };
+          applyAvailability(patch, await invoke("availability:read", undefined));
+        } catch (e) {
+          outcome = { ok: false, reason: e instanceof Error ? e.message : String(e) };
+          fail(e);
+        } finally {
+          const log = ref.current.installLogs[key];
+          patch({
+            installingGitClis: ref.current.installingGitClis.filter((running) => running !== name),
+            ...(log !== undefined ? { installLogs: { ...ref.current.installLogs, [key]: { ...log, running: false, outcome } } } : {}),
+          });
+        }
+      },
+      /** Put away what an install printed: its row goes back to where its check puts it. Not while it runs. */
+      hideInstallLog: (target: InstallTarget) => {
+        const key = installLogKey(target);
+        const log = ref.current.installLogs[key];
+        if (log === undefined || log.running) return;
+        const { [key]: _hidden, ...rest } = ref.current.installLogs;
+        patch({ installLogs: rest });
+      },
+      cancelGitCliInstall: async (name: GitCliName) => {
+        try {
+          await invoke("gitCli:cancelInstall", { name });
         } catch (e) {
           fail(e);
         }

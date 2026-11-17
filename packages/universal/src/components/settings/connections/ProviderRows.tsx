@@ -14,7 +14,6 @@ import {
 import {
   emptyLevelWords,
   fieldControlOf,
-  installPanelOf,
   keyBoxWords,
   keyEntryExecutor,
   keyEntryName,
@@ -27,11 +26,15 @@ import {
   placeholderFor,
   providerSayState,
   readAt,
+  routeActionOf,
+  routeChipOf,
+  routeLineOf,
   secretTargetsOf,
-  updateOf,
+  settingsGistOf,
   useProviderRow,
   weightsSize,
   type InstallPanelRow,
+  type RouteAction,
 } from "@jaira/ui/connectionsModel";
 import { checkCredentialName } from "@jaira/ui/executorConfig";
 import { accountFor, useLimits } from "@jaira/ui/limitsStore";
@@ -46,13 +49,14 @@ import { Code, Hint, PaneActions, Stack } from "../bits";
 import { Button } from "../Button";
 import { SelectInput, TextField } from "../fields";
 import { SettingsLayerContext } from "../layers";
-import { CardActions, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMark, LogoutButton, Problem, RowControls, RowHead, Say, SmallButton, SplitAddBox, Spin, Tag, Version, WaitingBox, Who, Wide, AddBox } from "./Row";
+import { Switch } from "../controls";
+import { ActionSlot, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
+import { CardActions, Chevron, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMark, LogoutButton, Problem, RowHead, Say, SmallButton, SplitAddBox, Spin, Tag, WaitingBox, Who, Wide, AddBox } from "./Row";
 import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
 
 /**
- * The provider rows of Connections: one row per model API and local model — what it is and whether
- * it works, who it connects as (its key, as boxes, with a + box to add one), its switch and its
- * chevron — and, opened, its own form. The agents' rows are `AgentRows.tsx`'s, built of the pieces
+ * The provider rows of Connections: one row per model API and local model, closed to a line as an
+ * agent's is (`ProviderRow`), and, opened, its key, its servers or weights, and its own form. The agents' rows are `AgentRows.tsx`'s, built of the pieces
  * exported here (the login and key boxes, the install panel, the form). What each says and writes is
  * `connectionsModel.ts`'s.
  */
@@ -229,6 +233,13 @@ function LoginCard({
   );
 }
 
+/**
+ * One model API or local model route, closed to a line (the person, 2026-11-17): what it serves or what
+ * the check found, the one button that would make it work — the key it needs, the local server that
+ * answers, the weights it has none of — or the chip of the key it calls with; the switch, the chevron.
+ * Opened: the sentence whole, its key boxes and the key's entry, the local servers or the weights, and
+ * its settings folded.
+ */
 function ProviderRow(
   props: ProvidersPaneProps & {
     first: boolean;
@@ -238,75 +249,58 @@ function ProviderRow(
     effective: unknown;
   },
 ): JSX.Element {
-  const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, installing, onInstall, onCancelInstall, onUseCommand, localServers, onScanLocal, scanningLocal, weights } = props;
+  const { first, spec, probe, layer, secrets, config, onRemove, onSaveCredential, localServers, onScanLocal, scanningLocal, weights } = props;
   const [open, setOpen] = useState(false);
   const row = useProviderRow(props);
   const { merged, locked, enabled, state, write } = row;
-  // The key's store form opens under the row, across its width, from the key box on the right.
+  // The key's store form, across the opened row — from its + box, or from the closed row's Add a key.
   const [keyOpen, setKeyOpen] = useState(false);
-  const agentLogins = probe?.accounts !== undefined && state !== "off";
-  // How the agent got here and what installs or updates it — for claude and codex, while they are on.
-  const install = state !== "off" ? probe?.install : undefined;
-  const running = installing.has(spec.id);
-  const installPanel = installPanelOf(install);
-  const update = updateOf(install);
+  const line = routeLineOf(spec, probe, state);
+  const action = routeActionOf(spec, probe, state, merged, localServers);
+  const chip = routeChipOf(spec, probe, state, merged);
 
-  const boxes = [
-    ...(agentLogins
-      ? LoginCards({
-          agent: spec.id,
-          command: typeof merged["command"] === "string" ? merged["command"] : undefined,
-          accounts: probe!.accounts!,
-          signingIn: signingIn.has(spec.id),
-          busy,
-          warn: state === "needs-sign-in",
-          onSignIn: () => onSignIn(spec.id),
-          onCancel: () => onCancelSignIn(spec.id),
-          onSignOut: () => onSignOut(spec.id),
-          ...(spec.credential !== "none" && !keyOpen ? { onAddKey: () => setKeyOpen(true) } : {}),
-        })
-      : []),
-    ...KeyBoxes({ spec, probe, merged, busy: locked, open: keyOpen || agentLogins, warn: state === "needs-sign-in", onOpen: () => setKeyOpen(true) }),
-  ];
+  const act = (one: RouteAction): void => {
+    if (one.kind === "use") {
+      write({ baseURL: one.baseURL });
+      return;
+    }
+    setOpen(true);
+    if (one.kind === "key") setKeyOpen(true);
+  };
+  // Closed, the one thing beside the switch; opened, the row's body has it whole.
+  const slot = open ? null : action !== undefined ? <ActionSlot action={action} waiting={undefined} disabled={locked} onPress={() => act(action)} /> : chip !== undefined ? <RunsAs chip={chip} /> : null;
+  const keyBoxes = KeyBoxes({ spec, probe, merged, busy: locked, open: keyOpen, warn: false, onOpen: () => setKeyOpen(true) });
 
-  const wide = [
-    installPanel !== undefined ? (
-      <Wide key="install">
-        <InstallPanel
-          panel={installPanel}
-          running={running}
-          busy={busy}
-          locked={locked}
-          onInstall={(method) => onInstall(spec.id, method)}
-          onCancel={() => onCancelInstall(spec.id)}
-          onUse={(path) => onUseCommand(spec.id, path)}
-        />
-      </Wide>
-    ) : null,
-    keyOpen ? (
-      <Wide key="key">
-        <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
-      </Wide>
-    ) : null,
-    spec.id === "local" && localServers !== undefined ? (
-      <Wide key="local">
-        <LocalServers found={localServers} locked={locked} scanning={scanningLocal === true} onScan={onScanLocal} onUse={(baseURL) => write({ baseURL })} />
-      </Wide>
-    ) : null,
-    spec.id === "embedded" ? (
-      <Wide key="weights">
-        <EmbeddedWeights weights={weights} merged={merged} locked={locked} write={write} />
-      </Wide>
-    ) : null,
-    open ? (
-      // The row's own form: what is in it is this provider's, drawn whole once the row is.
-      <SettingsLayerContext.Provider key="form" value={null}>
-        <Wide body>
-          <ProviderForm spec={spec} row={row} layer={layer} onRemove={onRemove} />
-        </Wide>
-      </SettingsLayerContext.Provider>
-    ) : null,
-  ];
+  const wide = open
+    ? [
+        keyBoxes.length > 0 ? (
+          <Wide key="boxes">
+            <LabelledBoxes label="Key">{keyBoxes}</LabelledBoxes>
+          </Wide>
+        ) : null,
+        keyOpen ? (
+          <Wide key="key">
+            <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
+          </Wide>
+        ) : null,
+        spec.id === "local" && localServers !== undefined ? (
+          <Wide key="local">
+            <LocalServers found={localServers} locked={locked} scanning={scanningLocal === true} onScan={onScanLocal} onUse={(baseURL) => write({ baseURL })} />
+          </Wide>
+        ) : null,
+        spec.id === "embedded" ? (
+          <Wide key="weights">
+            <EmbeddedWeights weights={weights} merged={merged} locked={locked} write={write} />
+          </Wide>
+        ) : null,
+        // The form is the provider's own, drawn whole once its fold is open.
+        <SettingsFold key="form" gist={settingsGistOf(spec)}>
+          <Stack>
+            <ProviderForm spec={spec} row={row} layer={layer} onRemove={onRemove} />
+          </Stack>
+        </SettingsFold>,
+      ]
+    : [];
 
   return (
     <ConnRow
@@ -315,24 +309,34 @@ function ProviderRow(
       main={
         <>
           <RowHead brand={spec.id} state={state} title={spec.title} />
-          <Say state={state} word={providerSayState(probe, state)} detail={probe && state !== "off" && probe.detail ? probe.detail : undefined} fix={probe && state !== "off" && probe.fix ? probe.fix : undefined} />
-          {probe?.version ? (
-            <Version after={update !== undefined ? <UpdateAfter via={update.via} title={update.title} running={running} disabled={busy} onUpdate={() => onInstall(spec.id)} onCancel={() => onCancelInstall(spec.id)} /> : undefined}>{probe.version}</Version>
-          ) : null}
+          {open ? (
+            <Say state={state} word={providerSayState(probe, state)} detail={probe && state !== "off" && probe.detail ? probe.detail : undefined} fix={probe && state !== "off" && probe.fix ? probe.fix : undefined} />
+          ) : (
+            <RowLine state={state} word={line.word} rest={line.rest} />
+          )}
         </>
       }
-      boxes={boxes}
+      // An empty slot where there is nothing, so the switch keeps one column down the card.
+      boxes={[slot ?? <View key="none" />]}
       controls={
-        <RowControls
-          on={enabled}
-          disabled={locked}
-          label={enabled ? `stop using ${spec.title} in this project` : `use ${spec.title} again`}
-          // `undefined` REMOVES the key rather than writing `true`: on is the default.
-          onToggle={(next) => write({ enabled: next ? undefined : false })}
-          open={open}
-          title={spec.title}
-          onOpen={() => setOpen((v) => !v)}
-        />
+        <>
+          <Switch
+            on={enabled}
+            label={enabled ? `stop using ${spec.title} in this project` : `use ${spec.title} again`}
+            disabled={locked}
+            // `undefined` REMOVES the key rather than writing `true`: on is the default.
+            onChange={(next) => write({ enabled: next ? undefined : false })}
+          />
+          <Chevron
+            open={open}
+            label={open ? `close ${spec.title}` : `open ${spec.title}`}
+            tips={["Show more", "Show less"]}
+            onPress={() => {
+              if (open) setKeyOpen(false);
+              setOpen(!open);
+            }}
+          />
+        </>
       }
       wide={wide}
     />

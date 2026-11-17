@@ -28,6 +28,7 @@ import type {
   SignInOutcome,
   AgentInstallMethod,
   AgentInstallOutcome,
+  GitCliName,
 } from "./executors";
 import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
 import type { JairaSettings } from "./settings";
@@ -2276,6 +2277,16 @@ export interface IpcContract {
   /** Give up on an install or update still running: the installer is killed. */
   "executor:cancelInstall": { request: { name: string }; response: void };
   /**
+   * Install one of the git programs (git, gh, glab) the way named — one of its check's
+   * `install.install` — or, with no way named, update it the way it was installed. As `executor:install`:
+   * main decides the command from what is on the machine, answers when the installer exits, and a fresh
+   * availability check follows. Apple's Command Line Tools install in a window of their own, so that way
+   * answers once git is there (or on Cancel).
+   */
+  "gitCli:install": { request: { name: GitCliName; method?: AgentInstallMethod }; response: AgentInstallOutcome };
+  /** Give up on a git program's install still running: the installer is killed, or the wait for Apple's ends. */
+  "gitCli:cancelInstall": { request: { name: GitCliName }; response: void };
+  /**
    * Sign in to a forge connection through the browser (RFC 8628's device flow), beside pasting a token.
    *
    * Answers as soon as the forge hands out a code — with the code, the page to type it on (already
@@ -2838,6 +2849,8 @@ export const IPC_CHANNELS = [
   "executor:signOut",
   "executor:install",
   "executor:cancelInstall",
+  "gitCli:install",
+  "gitCli:cancelInstall",
   "forge:signIn",
   "forge:cancelSignIn",
   "forge:signIns",
@@ -3251,6 +3264,20 @@ export type PushMessage =
   | { type: "notice:posted"; notice: EventsNotice }
   /** An agent began or ended using the mouse and keyboard (decision 0019, ruling 6); `null` when none is. */
   | { type: "desktop:driving"; driving: DesktopDriving | null }
+  /**
+   * What an install or update running here printed since the last of these: an agent's
+   * (`executor:install`) or a git program's (`gitCli:install`). The first says the command
+   * (`$ brew install gh`); then the installer's stdout and stderr, raw — escapes and carriage returns
+   * kept — a tenth of a second's worth at a time. Settings → Connections draws it under the row. This
+   * machine's.
+   */
+  | { type: "install:output"; target: InstallTarget; text: string }
+
+/** Whose install an `install:output` is: an agent, by its executor's name, or a git program. */
+export interface InstallTarget {
+  kind: "agent" | "gitCli";
+  name: string;
+}
 
 /** An agent using the mouse and keyboard: which task, and since when (epoch ms). What the app's band names. */
 export interface DesktopDriving {

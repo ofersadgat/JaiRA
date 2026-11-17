@@ -54,6 +54,8 @@ const BADGE_HEX: Record<string, string> = {
   NVIDIA: "#76B900",
   Perplexity: "#20808D",
   IBM: "#0F62FE",
+  // Git's own orange-red (git-scm.com), for Settings → Connections → Git until its mark is lifted from `simple-icons`.
+  Git: "#F05032",
 };
 
 /**
@@ -93,6 +95,10 @@ export function brandOf(name: string): string {
     "ibm-granite": "IBM",
     github: "GitHub",
     gitlab: "GitLab",
+    // The git programs (Settings → Connections → Git): the forges' CLIs wear their forge's mark.
+    git: "Git",
+    gh: "GitHub",
+    glab: "GitLab",
   };
   if (exact[key] !== undefined) return exact[key]!;
   // Everything else keeps its own name, capitalised — `moonshotai` is Moonshotai, which is close

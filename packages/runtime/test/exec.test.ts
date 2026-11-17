@@ -74,6 +74,12 @@ describe("NodeExec (native)", () => {
     expect(result.stdout.toLowerCase()).toBe(process.cwd().toLowerCase());
   });
 
+  it("answers a program that exits without reading its stdin by its exit, never an uncaught EPIPE", async () => {
+    // More than a pipe's buffer, so the write is still going when the program has gone.
+    const result = await exec.run(process.execPath, ["-e", "process.exit(0)"], { stdin: "x".repeat(4 * 1024 * 1024) });
+    expect(result.code).toBe(0);
+  });
+
   it("passes env and stdin", async () => {
     const withEnv = await exec.run(process.execPath, ["-e", "process.stdout.write(process.env.JAIRA_TEST??'')"], {
       env: { JAIRA_TEST: "set" },
@@ -195,6 +201,20 @@ describe("ExecObserver output", () => {
     expect(result.code).toBe(0);
     expect(seen.filter((e) => e.stream === "stdout").map((e) => e.chunk).join("")).toBe("out");
     expect(seen.filter((e) => e.stream === "stderr").map((e) => e.chunk).join("")).toBe("err");
+  });
+
+  it("hands each chunk to the call's own watcher too, and a watcher that throws changes nothing", async () => {
+    const seen: string[] = [];
+    const exec = new NodeExec();
+    const result = await exec.run(node, ["-e", "process.stdout.write('one');process.stderr.write('two')"], { onOutput: (stream, chunk) => seen.push(`${stream}:${chunk}`) });
+    expect(result).toMatchObject({ code: 0, stdout: "one", stderr: "two" });
+    expect(seen.sort()).toEqual(["stderr:two", "stdout:one"]);
+    const thrown = await exec.run(node, ["-e", "process.stdout.write('still')"], {
+      onOutput: () => {
+        throw new Error("a broken watcher");
+      },
+    });
+    expect(thrown).toMatchObject({ code: 0, stdout: "still" });
   });
 
   it("survives a child that writes far more to stderr than a pipe holds", async () => {

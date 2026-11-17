@@ -1,6 +1,6 @@
 /**
  * Installing and updating the coding agents JaiRA drives — `claude`, `codex`, `gemini`, `agy`, `muse`
- * and `opencode`.
+ * and `opencode` — and the git programs it checks beside them (`git`, `gh`, `glab`: {@link GIT_CLI_PACKAGES}).
  *
  * Each has several installers, and they do not mix: `claude update` on a Homebrew cask is refused,
  * `npm i -g` beside the native build leaves two binaries that disagree about which one is current, and
@@ -18,7 +18,7 @@
 import { lstatSync, readlinkSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { posix, win32 } from "node:path";
-import type { AgentInstall, AgentInstallCommand, AgentInstallMethod, AgentInstallOutcome, ExecutorInfo, ExecutorKind } from "@jaira/shared";
+import type { AgentInstall, AgentInstallCommand, AgentInstallMethod, AgentInstallOutcome, ExecutorInfo, ExecutorKind, GitCliName } from "@jaira/shared";
 import type { Exec } from "./exec";
 import { isWslEnv, type ExecEnv } from "./paths";
 
@@ -35,6 +35,12 @@ export interface AgentPackage {
   brew?: { name: string; cask: boolean };
   /** Its WinGet package id. */
   winget?: string;
+  /** Its Chocolatey package id. Chocolatey installs into a machine-wide folder, so it runs as administrator. */
+  choco?: string;
+  /** Its Scoop package, by the name `scoop install` takes — `extras/…` for one in the extras bucket, added first. */
+  scoop?: string;
+  /** Apple's Command Line Tools ship it: git, which a Mac has only as a placeholder until they are installed. */
+  xcode?: boolean;
   /**
    * The vendor's own installer: its script, where it puts the binary (what classifies an install as
    * its), and the binary's own updater — absent where there is none, and the script is run again.
@@ -58,6 +64,12 @@ export interface AgentPackage {
  *  - Antigravity CLI (Google, `agy`): its install script only — `~/.local/bin/agy`, or
  *    `%LOCALAPPDATA%\agy\bin` on Windows — which installs the latest when run again. (Homebrew's
  *    `antigravity` is the desktop app, not this.)
+ *
+ * On Windows, beside the vendors' own ways (checked 2026-11-17): WinGet has Claude Code (Anthropic's docs
+ * name it), Codex and OpenCode v2; Chocolatey has Claude Code and Codex, and Scoop's main bucket all
+ * three — community packages, kept current, offered after the vendor's. Chocolatey's `claude` and
+ * Scoop's extras `claude` are Claude's desktop app; Chocolatey's `gemini-cli` is months behind, and its
+ * `opencode` is v1. None of them is offered.
  */
 export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
   claude: {
@@ -65,19 +77,24 @@ export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
     npm: { name: "@anthropic-ai/claude-code" },
     brew: { name: "claude-code", cask: true },
     winget: "Anthropic.ClaudeCode",
+    choco: "claude-code",
+    scoop: "claude-code",
     native: {
       posix: "curl -fsSL https://claude.ai/install.sh | bash",
       windows: "irm https://claude.ai/install.ps1 | iex",
       paths: [/\/\.local\/share\/claude\//, /\/\.claude\/local\//, /\/\.local\/bin\/claude\.exe$/i],
       update: ["update"],
     },
-    order: ["native", "homebrew", "npm"],
+    order: ["native", "homebrew", "winget", "npm", "chocolatey", "scoop"],
   },
   codex: {
     binary: "codex",
     npm: { name: "@openai/codex" },
     brew: { name: "codex", cask: true },
-    order: ["npm", "homebrew"],
+    winget: "OpenAI.Codex",
+    choco: "codex",
+    scoop: "codex",
+    order: ["npm", "homebrew", "winget", "chocolatey", "scoop"],
   },
   gemini: {
     binary: "gemini",
@@ -96,8 +113,11 @@ export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
     binary: "opencode",
     npm: { name: "@opencode/cli", also: ["opencode-ai"] },
     brew: { name: "anomalyco/tap/opencode-v2", cask: false },
+    // v2 both: Chocolatey's `opencode` is still v1, and its `opencode2` too new to lean on.
+    winget: "Anomaly.OpenCode",
+    scoop: "opencode",
     native: { posix: "curl -fsSL https://opencode.ai/v2/install | bash", paths: [/\/\.opencode\/bin\//], update: ["upgrade"] },
-    order: ["native", "npm", "homebrew"],
+    order: ["native", "npm", "homebrew", "winget", "scoop"],
   },
   antigravity: {
     binary: "agy",
@@ -110,6 +130,48 @@ export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
   },
 };
 
+/**
+ * The git programs JaiRA checks (Settings → Connections → Git), as their makers and the package
+ * managers ship them (observed 2026-11):
+ *
+ *  - git: on a Mac, Apple's Command Line Tools — /usr/bin/git is a placeholder that opens their
+ *    installer until they are there — and Homebrew's formula. On Windows, Git for Windows by WinGet,
+ *    Chocolatey or Scoop: the first two run its own installer into Program Files, which says nothing of
+ *    which of them ran it, so that git has no Update here. On Linux, Homebrew's formula where there is
+ *    one; the distribution's own package needs root, which the person runs themselves.
+ *  - gh (GitHub CLI) and glab (GitLab CLI): Homebrew formulae, and a package in each Windows manager.
+ */
+export const GIT_CLI_PACKAGES: Readonly<Record<GitCliName, AgentPackage>> = {
+  git: {
+    binary: "git",
+    brew: { name: "git", cask: false },
+    winget: "Git.Git",
+    choco: "git",
+    scoop: "git",
+    xcode: true,
+    order: ["command-line-tools", "homebrew", "winget", "chocolatey", "scoop"],
+  },
+  gh: {
+    binary: "gh",
+    brew: { name: "gh", cask: false },
+    winget: "GitHub.cli",
+    choco: "gh",
+    scoop: "gh",
+    order: ["homebrew", "winget", "chocolatey", "scoop"],
+  },
+  glab: {
+    binary: "glab",
+    brew: { name: "glab", cask: false },
+    winget: "GLab.GLab",
+    choco: "glab",
+    scoop: "glab",
+    order: ["homebrew", "winget", "chocolatey", "scoop"],
+  },
+};
+
+/** Where Windows installers put the git programs that do not add a folder of their own to a usual place. */
+const WINDOWS_PROGRAM_DIRS = ["GitHub CLI", "glab"] as const;
+
 /** The way, as a person names it — for an update by the binary's own updater, see {@link planOf}. */
 const VIA: Record<AgentInstallMethod, string> = {
   native: "the native installer",
@@ -118,6 +180,9 @@ const VIA: Record<AgentInstallMethod, string> = {
   bun: "Bun",
   pnpm: "pnpm",
   winget: "WinGet",
+  chocolatey: "Chocolatey",
+  scoop: "Scoop",
+  "command-line-tools": "Apple's Command Line Tools",
 };
 
 // --- where the binary is ------------------------------------------------------------------------
@@ -135,7 +200,7 @@ export interface FoundBinary {
 }
 
 /** The installers a machine offers, by the program that runs each. */
-export type InstallTool = "brew" | "npm" | "bun" | "pnpm" | "winget" | "powershell" | "curl" | "bash";
+export type InstallTool = "brew" | "npm" | "bun" | "pnpm" | "winget" | "choco" | "scoop" | "powershell" | "curl" | "bash" | "xcode-select";
 
 /** What a machine — or a WSL distro — says about one agent: where it is and what can install it. */
 export interface InstallFacts {
@@ -212,10 +277,27 @@ function pathModule(platform: string): typeof posix {
 function usualDirs(deps: InstallDeps): string[] {
   const path = pathModule(deps.platform);
   if (deps.platform === "win32") {
+    // An installer that adds its folder to the PATH changes it for programs started AFTER it: this app,
+    // started before, finds what it installed only here.
+    const programFiles = deps.env["ProgramFiles"] ?? "C:\\Program Files";
+    const programData = deps.env["ProgramData"] ?? "C:\\ProgramData";
+    const localAppData = deps.env["LOCALAPPDATA"];
     return [
       path.join(deps.home, ".local", "bin"),
       ...(deps.env["APPDATA"] !== undefined ? [path.join(deps.env["APPDATA"], "npm")] : []),
-      ...(deps.env["LOCALAPPDATA"] !== undefined ? [path.join(deps.env["LOCALAPPDATA"], "Microsoft", "WinGet", "Links"), path.join(deps.env["LOCALAPPDATA"], "agy", "bin")] : []),
+      ...(localAppData !== undefined ? [path.join(localAppData, "Microsoft", "WinGet", "Links"), path.join(localAppData, "agy", "bin")] : []),
+      // WinGet's machine-wide links; Chocolatey's shims; Scoop's, the person's and the machine-wide.
+      path.join(programFiles, "WinGet", "Links"),
+      path.join(deps.env["ChocolateyInstall"] ?? path.join(programData, "chocolatey"), "bin"),
+      path.join(deps.env["SCOOP"] ?? path.join(deps.home, "scoop"), "shims"),
+      path.join(programData, "scoop", "shims"),
+      // Git for Windows, however it was installed (WinGet and Chocolatey both run its own installer) —
+      // in Program Files, or the person's own Programs when Program Files was not writable.
+      path.join(programFiles, "Git", "cmd"),
+      ...(localAppData !== undefined ? [path.join(localAppData, "Programs", "Git", "cmd")] : []),
+      // The GitHub CLI's MSI, and the GitLab CLI's installer machine-wide or for the person.
+      ...WINDOWS_PROGRAM_DIRS.map((dir) => path.join(programFiles, dir)),
+      ...(localAppData !== undefined ? [path.join(localAppData, "Programs", "glab")] : []),
     ];
   }
   // A Mac app started from the Finder gets launchd's PATH — /usr/bin:/bin:/usr/sbin:/sbin — which
@@ -275,7 +357,10 @@ export function locateBinary(command: string, deps: InstallDeps): FoundBinary | 
 /** Every installer this machine has, found as the agent is (PATH first, then the usual places). */
 function locateTools(deps: InstallDeps): Partial<Record<InstallTool, string>> {
   const tools: Partial<Record<InstallTool, string>> = {};
-  const names: InstallTool[] = deps.platform === "win32" ? ["npm", "bun", "pnpm", "winget", "powershell"] : ["brew", "npm", "bun", "pnpm", "curl", "bash"];
+  const names: InstallTool[] =
+    deps.platform === "win32"
+      ? ["npm", "bun", "pnpm", "winget", "choco", "scoop", "powershell"]
+      : ["brew", "npm", "bun", "pnpm", "curl", "bash", ...(deps.platform === "darwin" ? (["xcode-select"] as const) : [])];
   for (const name of names) {
     const found = locateBinary(name, deps);
     if (found !== undefined && !found.broken) tools[name] = found.path;
@@ -379,6 +464,11 @@ export function installOriginOf(real: string, pkg: AgentPackage): InstallOrigin 
   const brew = /^(.*)\/(Caskroom|Cellar)\/([^/]+)\//.exec(p);
   if (brew !== null) return { method: "homebrew", prefix: brew[1]!, name: brew[3]!, formula: brew[2] === "Cellar" };
   if (/\/WinGet\/(Packages|Links)\//i.test(p)) return { method: "winget" };
+  if (/\/chocolatey\/(lib|bin)\//i.test(p)) return { method: "chocolatey" };
+  if (/\/scoop\/(apps|shims)\//i.test(p)) return { method: "scoop" };
+  // Apple's own git, read where /usr/bin/git hands over to (`gitClis.ts`): the Command Line Tools'. Xcode's
+  // says nothing JaiRA could install or update it by.
+  if (pkg.xcode === true && /^\/Library\/Developer\/CommandLineTools\//.test(p)) return { method: "command-line-tools" };
   if (pkg.native?.paths.some((path) => path.test(p)) === true) return { method: "native" };
   const npmName = npmNames(pkg).find((name) => p.includes(`/node_modules/${name}/`) || p.endsWith(`/node_modules/${name}`));
   if (npmName === undefined) return undefined;
@@ -484,7 +574,38 @@ function updatePlan(pkg: AgentPackage, facts: InstallFacts, origin: InstallOrigi
       const args = ["upgrade", "--id", pkg.winget, "--exact", "--disable-interactivity"];
       return plan("winget", VIA.winget, winget!, args, `winget upgrade --id ${pkg.winget} --exact`, platform);
     }
+    case "chocolatey":
+      return pkg.choco !== undefined ? chocoPlan(facts, "upgrade", pkg.choco) : undefined;
+    case "scoop":
+      return pkg.scoop !== undefined ? scoopPlan(facts, "update", pkg.scoop) : undefined;
+    case "command-line-tools":
+      // Apple's Software Update brings them up to date, not anything JaiRA runs.
+      return undefined;
   }
+}
+
+/**
+ * Chocolatey's install or upgrade, run as administrator: it writes under %ProgramData%, and run without
+ * the rights it warns and then fails. PowerShell asks Windows for them — the person answers Windows'
+ * own prompt — and waits for choco, whose exit code is the answer (its output stays in its own window).
+ */
+function chocoPlan(facts: InstallFacts, verb: "install" | "upgrade", id: string): InstallPlan | undefined {
+  const choco = facts.tools.choco;
+  if (facts.platform !== "win32" || choco === undefined) return undefined;
+  const quote = (one: string): string => `'${one.replace(/'/g, "''")}'`;
+  const script = `$p = Start-Process -FilePath ${quote(choco)} -ArgumentList ${[verb, id, "-y", "--no-progress"].map(quote).join(",")} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
+  return plan("chocolatey", VIA.chocolatey, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", script], `choco ${verb} ${id} -y (as administrator)`, facts.platform);
+}
+
+/** Scoop's install or update — in the person's own folder, so no rights are asked for. A package in another bucket adds the bucket first. */
+function scoopPlan(facts: InstallFacts, verb: "install" | "update", name: string): InstallPlan | undefined {
+  if (facts.platform !== "win32" || facts.tools.scoop === undefined) return undefined;
+  const bucket = verb === "install" && name.includes("/") ? name.slice(0, name.indexOf("/")) : undefined;
+  const target = verb === "update" ? name.slice(name.indexOf("/") + 1) : name;
+  if (bucket === undefined) return plan("scoop", VIA.scoop, "scoop", [verb, target], `scoop ${verb} ${target}`, facts.platform);
+  // Scoop is PowerShell; adding a bucket already there is a warning, not a failure.
+  const display = `scoop bucket add ${bucket}; scoop install ${target}`;
+  return plan("scoop", VIA.scoop, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", `scoop bucket add ${bucket} *> $null; scoop install ${target}; exit $LASTEXITCODE`], display, facts.platform);
 }
 
 /** The ways to install an agent from here, in its vendor's order ({@link AgentPackage.order}). */
@@ -506,6 +627,22 @@ function installPlans(pkg: AgentPackage, facts: InstallFacts): InstallPlan[] {
         if (pkg.npm === undefined || npm === undefined) return undefined;
         const args = ["install", "-g", pkg.npm.name];
         return plan("npm", VIA.npm, npm, args, ["npm", ...args].join(" "), platform);
+      }
+      case "winget": {
+        if (pkg.winget === undefined || platform !== "win32" || facts.tools.winget === undefined) return undefined;
+        // Its agreements accepted here, since nobody can answer them: stdin is closed.
+        const args = ["install", "--id", pkg.winget, "--exact", "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"];
+        return plan("winget", VIA.winget, "winget", args, `winget install --id ${pkg.winget} --exact`, platform);
+      }
+      case "chocolatey":
+        return pkg.choco !== undefined ? chocoPlan(facts, "install", pkg.choco) : undefined;
+      case "scoop":
+        return pkg.scoop !== undefined ? scoopPlan(facts, "install", pkg.scoop) : undefined;
+      case "command-line-tools": {
+        // It asks macOS to install them, in Apple's own window, and exits at once (`installGitCli` waits).
+        if (pkg.xcode !== true || platform !== "darwin") return undefined;
+        const xcodeSelect = facts.tools["xcode-select"] ?? "/usr/bin/xcode-select";
+        return plan("command-line-tools", VIA["command-line-tools"], xcodeSelect, ["--install"], "xcode-select --install", platform);
       }
       default:
         return undefined;
@@ -561,6 +698,12 @@ export function agentPackageOf(info: ExecutorInfo): AgentPackage | undefined {
 
 export interface InstallRunOptions extends InstallLookup {
   abortSignal?: AbortSignal;
+  /**
+   * What the install prints, as it prints it: the command first (`$ brew install gh`), then the
+   * installer's stdout and stderr as they come, interleaved, untouched — escapes and carriage returns
+   * included, for whoever draws it to make sense of. Settings → Connections shows it under the row.
+   */
+  onOutput?: (text: string) => void;
 }
 
 /** Long enough for a download on a slow line; an installer that waits on a question fails sooner (stdin is closed). */
@@ -574,8 +717,21 @@ const INSTALL_TIMEOUT_MS = 15 * 60_000;
 export async function installAgent(info: ExecutorInfo, method: AgentInstallMethod | undefined, options: InstallRunOptions): Promise<AgentInstallOutcome> {
   const pkg = agentPackageOf(info);
   if (pkg === undefined) return { ok: false, reason: `JaiRA does not know how to install ${info.name}` };
-  const command = info.command ?? pkg.binary;
-  const facts = await gatherInstallFacts(command, pkg, options);
+  return runInstall(pkg, info.command ?? pkg.binary, method, options);
+}
+
+/** What a caller of {@link runInstall} adds to it. */
+export interface InstallRunHooks {
+  /** How the machine is looked at, before and after — {@link gatherInstallFacts} unless a package needs more. */
+  facts?: () => Promise<InstallFacts | undefined>;
+  /** Called once the installer exited 0, before the binary is looked for again; its answer is the outcome. */
+  afterRun?: (chosen: InstallPlan, result: { stdout: string; stderr: string }) => Promise<AgentInstallOutcome | undefined>;
+}
+
+/** The install or update of one package, by the way named (none: the update), as {@link installAgent} describes. */
+export async function runInstall(pkg: AgentPackage, command: string, method: AgentInstallMethod | undefined, options: InstallRunOptions, hooks: InstallRunHooks = {}): Promise<AgentInstallOutcome> {
+  const look = hooks.facts ?? (() => gatherInstallFacts(command, pkg, options));
+  const facts = await look();
   if (facts === undefined) return { ok: false, reason: `could not look for '${command}' where it runs` };
   const plans = planOf(pkg, facts);
   const chosen = method === undefined ? plans.update : plans.install.find((one) => one.method === method);
@@ -588,6 +744,14 @@ export async function installAgent(info: ExecutorInfo, method: AgentInstallMetho
           : `${VIA[method]} cannot install ${pkg.binary} here`,
     };
   }
+  const say = (text: string): void => {
+    try {
+      options.onOutput?.(text);
+    } catch {
+      // Somebody watching; the install goes on without them.
+    }
+  };
+  say(`$ ${chosen.display}\n`);
   let result;
   try {
     result = await options.exec.run(chosen.file, chosen.args, {
@@ -598,6 +762,7 @@ export async function installAgent(info: ExecutorInfo, method: AgentInstallMetho
       timeoutMs: options.timeoutMs ?? INSTALL_TIMEOUT_MS,
       // Closed, so an installer that stops to ask fails with its question rather than waiting forever.
       stdin: "",
+      ...(options.onOutput !== undefined ? { onOutput: (_stream: "stdout" | "stderr", chunk: string) => say(chunk) } : {}),
     });
   } catch (e) {
     return { ok: false, reason: `'${chosen.display}' could not be started: ${(e as Error).message}` };
@@ -611,7 +776,9 @@ export async function installAgent(info: ExecutorInfo, method: AgentInstallMetho
     const said = lastLine(`${result.stdout}\n${result.stderr}`, result.stderr);
     return { ok: false, reason: `'${chosen.display}' exited ${result.code}${said ? `: ${said}` : ""}` };
   }
-  const after = await gatherInstallFacts(command, pkg, options);
+  const waited = hooks.afterRun !== undefined ? await hooks.afterRun(chosen, result) : undefined;
+  if (waited !== undefined) return waited;
+  const after = await look();
   const now = after?.found;
   return now !== undefined && !now.broken ? { ok: true, path: now.path, onPath: now.onPath } : { ok: true };
 }

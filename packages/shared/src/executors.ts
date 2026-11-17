@@ -224,17 +224,26 @@ export interface ProbeResult {
   /**
    * How the agent's binary got onto this machine, and the command that installs or updates it — only
    * for an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode — a generic CLI by
-   * its program), and only when the check looked.
+   * its program) or one of the {@link GitCliName}s, and only when the check looked.
    */
   install?: AgentInstall;
 }
 
 /**
- * The ways an agent's binary is installed. Each updates differently — `claude update` is wrong for a
- * Homebrew cask, `npm i -g` is wrong for the native build — so the way is read off where the binary
- * lives rather than guessed.
+ * The ways a binary is installed — an agent's, or one of the {@link GitCliName}s. Each updates
+ * differently — `claude update` is wrong for a Homebrew cask, `npm i -g` is wrong for the native build —
+ * so the way is read off where the binary lives rather than guessed. `command-line-tools` is Apple's
+ * Command Line Tools, which is how a Mac gets git.
  */
-export type AgentInstallMethod = "native" | "homebrew" | "npm" | "bun" | "pnpm" | "winget";
+export type AgentInstallMethod = "native" | "homebrew" | "npm" | "bun" | "pnpm" | "winget" | "chocolatey" | "scoop" | "command-line-tools";
+
+/**
+ * The git programs Settings → Connections → Git checks: git itself, which JaiRA runs for worktrees,
+ * diffs and pushes, and the forges' own CLIs — GitHub's `gh` and GitLab's `glab` — which JaiRA does not
+ * run (it reaches a forge through its own connection) but an agent may, from a shell.
+ */
+export type GitCliName = "git" | "gh" | "glab";
+export const GIT_CLI_NAMES: readonly GitCliName[] = ["git", "gh", "glab"];
 
 /** One command that installs, updates or repairs an agent — what the person is shown before it runs. */
 export interface AgentInstallCommand {
@@ -334,6 +343,11 @@ export interface AvailabilitySnapshot {
   executors: ProbeResult[];
   /** Forge connections, in configuration order — each checked by asking its host who the token is. */
   forges?: ForgeCheck[];
+  /**
+   * The git programs where agents run, in {@link GIT_CLI_NAMES} order — each a `--version` and where its
+   * binary lives, as an agent's is. `name` is the program.
+   */
+  gitClis?: ProbeResult[];
   /**
    * The DEFAULT executor, resolved — the whole tree, derived from what the checks above found.
    *

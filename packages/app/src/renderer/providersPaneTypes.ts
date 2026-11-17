@@ -14,6 +14,7 @@ import type {
   SecretTarget,
 } from "@jaira/shared/browser";
 import type { ExecutorPatch, ExecutorTarget } from "./executorConfig";
+import type { InstallLog } from "./installLog";
 import type { ModelPatch } from "./modelsConfig";
 
 export interface ProvidersPaneProps {
@@ -51,9 +52,13 @@ export interface ProvidersPaneProps {
   onSignOut: (name: string) => void;
   /** Agents whose install or update is running. */
   installing: ReadonlySet<string>;
+  /** What each agent's install or update pressed here printed, by agent — until its row's Hide. */
+  installLogs: Readonly<Record<string, InstallLog>>;
   /** Install an agent the way named, or — none named — update it the way it was installed. */
   onInstall: (name: string, method?: AgentInstallMethod) => void;
   onCancelInstall: (name: string) => void;
+  /** Put an install's output away. */
+  onHideInstallLog: (name: string) => void;
   /** Run an agent from this path: installed where this app's PATH does not reach. */
   onUseCommand: (name: string, path: string) => void;
   /** What answered on the usual local ports, when the page last asked. Absent ⇒ not asked yet. */

@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { View } from "@tamagui/core";
 import { checkedAgo, providerGroups, useLocalModels } from "@jaira/ui/connectionsModel";
+import { installLogsOf } from "@jaira/ui/installLog";
 import { useMcpData } from "@jaira/ui/mcpData";
 import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { useShell } from "../../app/shell";
@@ -9,15 +10,16 @@ import { Button } from "./Button";
 import { AgentRows } from "./connections/AgentRows";
 import { ProviderRows } from "./connections/ProviderRows";
 import { ForgeRows } from "./connections/ForgeRows";
+import { GitRows } from "./connections/GitRows";
 import { McpServerRows } from "./connections/McpServerRows";
-import { Problem } from "./connections/Row";
 import { NeedsAttention, useSettingsShell } from "./NeedsAttention";
 import { SettingsSection } from "./SettingsPage";
 
 /**
  * Settings → Connections: what JaiRA can reach, and as whom — the agents, the model APIs, the local
- * models, the MCP servers and the forges, each a card of rows (the agents' with a shelf of the ones not
- * installed under it: `connections/AgentRows.tsx`). Its rows are built from the store; what
+ * models, the MCP servers, git and the forges, each a card of rows closed to a line (`connections/Closed.tsx`)
+ * — the agents', the MCP servers', git's and the forges' with a shelf under them of what is not set up
+ * yet (`connections/Shelf.tsx`). Its rows are built from the store; what
  * is asked of main (the local ports, the weights, the MCP servers) is `connectionsModel.ts`'s and
  * `mcpData.ts`'s. How the re-check line looks:
  *
@@ -52,8 +54,10 @@ export function ConnectionsPage(): JSX.Element {
     onCancelSignIn: (name) => void actions.cancelSignIn(name),
     onSignOut: (name) => void actions.signOut(name),
     installing: new Set(state.installing),
+    installLogs: installLogsOf(state.installLogs, "agent"),
     onInstall: (name, method) => void actions.installAgent(name, method),
     onCancelInstall: (name) => void actions.cancelInstall(name),
+    onHideInstallLog: (name) => actions.hideInstallLog({ kind: "agent", name }),
     onUseCommand: (name, path) => void actions.useAgentCommand(name, path),
     localServers: local.localServers,
     // The ports now, and the local route's own check — which is what turns its row from "not
@@ -93,15 +97,35 @@ export function ConnectionsPage(): JSX.Element {
         title="MCP servers"
         info="Servers whose tools an agent can call: a command JaiRA starts, or a URL it calls. Every agent run is handed the ones that are on, and a permission set says what each of their tools may do (Settings → Tools)."
         action={<RecheckLine checkedAt={mcp.report?.checkedAt ?? 0} rechecking={mcp.rechecking} busy={state.busy} onRecheck={mcp.recheck} />}
+        // The card is McpServerRows' own, with the shelf of servers other tools run under it.
+        plain
       >
         <McpServerRows config={state.config} layer={layer} busy={state.busy} editable={editable} secrets={state.secrets} mcp={mcp} onSave={actions.saveConfig} />
-        {mcp.problem !== null ? (
-          <View paddingVertical={13} paddingHorizontal={16}>
-            <Problem>{mcp.problem}</Problem>
-          </View>
-        ) : null}
       </SettingsSection>
-      <SettingsSection id="forges" title="Forges" info="Where a review can also be opened as a merge request. A project's git remote picks the connection by host.">
+      <SettingsSection
+        id="git"
+        title="Git"
+        info="The git JaiRA runs for worktrees, diffs and pushes, where agents run. GitHub's and GitLab's own CLIs are for agents that call a forge from a shell: JaiRA itself reaches a forge through the connections under Forges."
+        // The card is GitRows' own, with the shelf of forge CLIs not installed under it.
+        plain
+      >
+        <GitRows
+          checks={state.availability.gitClis}
+          installing={new Set(state.installingGitClis)}
+          logs={installLogsOf(state.installLogs, "gitCli")}
+          busy={state.busy}
+          onInstall={(name, method) => void actions.installGitCli(name, method)}
+          onCancel={(name) => void actions.cancelGitCliInstall(name)}
+          onHideLog={(name) => actions.hideInstallLog({ kind: "gitCli", name })}
+        />
+      </SettingsSection>
+      <SettingsSection
+        id="forges"
+        title="Forges"
+        info="Where a review can also be opened as a merge request. A project's git remote picks the connection by host."
+        // The card is ForgeRows' own, with the shelf of connections not signed in to under it.
+        plain
+      >
         <ForgeRows
           config={state.config}
           layer={layer}

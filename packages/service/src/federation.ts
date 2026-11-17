@@ -69,6 +69,8 @@ export const MACHINE_LOCAL = new Set([
   "placement:changed",
   "frame:contextMenu",
   "forge:signInFinished",
+  // An installer's output, on the machine it runs on.
+  "install:output",
   // This engine's change log, on its own clock (decision 0018): another machine's copy of its tasks is kept by replication.
   "sync:changed",
 ]);

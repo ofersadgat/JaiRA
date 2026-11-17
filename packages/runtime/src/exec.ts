@@ -30,6 +30,12 @@ export interface ExecOptions {
   timeoutMs?: number;
   /** Text piped to stdin, then closed. */
   stdin?: string;
+  /**
+   * Each chunk of the child's output as it arrives, beside the whole that the result carries — for a
+   * command somebody is watching run (an installer, in Settings → Connections). A throw from it is
+   * swallowed: watching is not the work.
+   */
+  onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
   /** Overrides for Windows program resolution — injected by tests, never set in production. */
   program?: ProgramDeps;
 }
@@ -208,6 +214,11 @@ export class NodeExec implements Exec {
         } catch (e) {
           report(e, "output");
         }
+        try {
+          merged.onOutput?.(stream, chunk);
+        } catch {
+          // The caller's own watcher; the command goes on without it.
+        }
       };
 
       let stdout = "";
@@ -274,7 +285,14 @@ export class NodeExec implements Exec {
         resolve({ code, signal, stdout, stderr, command: printable, timedOut, aborted });
       });
 
-      if (merged.stdin !== undefined) child.stdin?.end(merged.stdin);
+      if (merged.stdin !== undefined) {
+        // A program that exits without reading its stdin (`git --version`, an installer that fails at
+        // once) closes the pipe under the write, which raises EPIPE on the stream. That is not the
+        // command failing — its exit says how it went — and with no listener it would be an uncaught
+        // exception in whatever process runs this.
+        child.stdin?.on("error", () => undefined);
+        child.stdin?.end(merged.stdin);
+      }
     });
   }
 }

@@ -77,6 +77,7 @@ export * from "./eventsTask";
 export * from "./repoWatch";
 export * from "./executors";
 export * from "./agentInstall";
+export * from "./gitClis";
 export * from "./agentOutcome";
 export * from "./executorStack";
 export * from "./executorTree";

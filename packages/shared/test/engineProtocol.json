@@ -68,6 +68,8 @@
     "functions:approve",
     "functions:pending",
     "git:identity",
+    "gitCli:cancelInstall",
+    "gitCli:install",
     "health:dismiss",
     "health:dismissAll",
     "health:list",

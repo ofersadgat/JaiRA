@@ -246,6 +246,8 @@ import {
   probeExecutor,
   withSignInRefusal,
   installAgent,
+  installGitCli,
+  probeGitCli,
   nodeInstallDeps,
   agentPackageOf,
   type InstallDeps,
@@ -632,7 +634,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { downAgentsOf, EXECUTOR_TITLES, type AgentInstallMethod, type AgentInstallOutcome, type MachinesView } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES, GIT_CLI_NAMES, type AgentInstallMethod, type AgentInstallOutcome, type GitCliName, type InstallTarget, type MachinesView } from "@jaira/shared";
 import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
@@ -11304,7 +11306,7 @@ export class AppService {
     const config = this.effectiveConfig();
     const secrets = this.secretResolver();
     const marks = this.readSettings().forgeSignIns ?? {};
-    const [routes, executors, forges] = await Promise.all([
+    const [routes, executors, forges, gitClis] = await Promise.all([
       probeModelRoutes(config.models, { secrets }),
       this.probeExecutors(),
       // A connection with no token stored makes no request, so an install that uses no forge pays
@@ -11314,6 +11316,7 @@ export class AppService {
         signedIn: (credential) => marks[credential]?.source,
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
       }),
+      this.probeGitClis(),
     ]);
     this.scheduleForgeRenewal(marks);
     // A route or a forge connection that worked and now does not (a key revoked, a sign-in expired).
@@ -11340,7 +11343,7 @@ export class AppService {
       agents: Object.keys(agentPromptRouteNames(config.agents)),
       vendors: agentRouteVendors(config.agents),
     });
-    this.availability = { routes, executors, forges, tree, configured, checkedAt: Date.now() };
+    this.availability = { routes, executors, forges, gitClis, tree, configured, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
     // What each reachable route serves, now that it is known which answer — a source whose inputs
     // did not change and whose answer is under a day old is not asked again (`CatalogRefresher`).
@@ -11518,23 +11521,118 @@ export class AppService {
     const config = this.effectiveConfig();
     const controller = new AbortController();
     this.installs.set(name, controller);
+    const output = this.installOutput({ kind: "agent", name });
     try {
-      return await installAgent(info, method, {
+      const outcome = await installAgent(info, method, {
         exec: new NodeExec({ execEnv: config.execEnvironment }),
         execEnv: config.execEnvironment,
         deps: this.options.installDeps ?? nodeInstallDeps(),
         abortSignal: controller.signal,
+        onOutput: output.say,
       });
+      if (outcome.ok) output.say(INSTALLED_CHECKING);
+      return outcome;
     } finally {
+      output.end();
       this.installs.delete(name);
       // Awaited, so the caller's next read is the check that saw the new binary.
       await this.refreshAvailability().catch(() => undefined);
     }
   }
 
+  /**
+   * What an install prints, to the window watching it (`install:output`): gathered for a tenth of a
+   * second and sent together, so an installer drawing a progress bar a character at a time is a few
+   * pushes a second rather than hundreds. `end` sends what is left.
+   */
+  private installOutput(target: InstallTarget): { say: (text: string) => void; end: () => void } {
+    let held = "";
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const send = (): void => {
+      timer = undefined;
+      if (held.length === 0) return;
+      const text = held;
+      held = "";
+      this.publish({ type: "install:output", target, text });
+    };
+    return {
+      say: (text) => {
+        held += text;
+        timer ??= setTimeout(send, INSTALL_OUTPUT_EVERY_MS);
+      },
+      end: () => {
+        if (timer !== undefined) clearTimeout(timer);
+        send();
+      },
+    };
+  }
+
   /** Give up on an install or update still running: the installer is killed. */
   cancelInstall(name: string): void {
     this.installs.get(name)?.abort();
+  }
+
+  // --- the git programs: git, gh, glab --------------------------------------
+
+  /**
+   * Check git, gh and glab where agents run (Settings → Connections → Git). One found only in its
+   * installer's usual folder — Homebrew's, to a Mac app started from the Finder; Git for Windows', to an
+   * app started before it was installed — has that folder added to the END of this process's PATH, so
+   * the git JaiRA runs, and every program it starts, finds it; nothing already on the PATH is displaced.
+   */
+  async probeGitClis(): Promise<ProbeResult[]> {
+    const config = this.effectiveConfig();
+    const exec = new NodeExec({ execEnv: config.execEnvironment });
+    // A test's stand-in machine is looked at, and this process's PATH left alone.
+    const reach = this.options.installDeps === undefined ? { reach: appendToPath } : {};
+    const results = await Promise.all(
+      GIT_CLI_NAMES.map((name) =>
+        probeGitCli(name, { exec, execEnv: config.execEnvironment, deps: this.options.installDeps ?? nodeInstallDeps(), ...reach }).catch(
+          (e: unknown): ProbeResult => ({ name, status: "not-checked", detail: `could not be checked: ${(e as Error).message}` }),
+        ),
+      ),
+    );
+    // Reached once, it is on the PATH from then on — and still there only because JaiRA put it there.
+    return results.map((result) => {
+      const path = result.install?.path;
+      const dir = path !== undefined ? path.replace(/[\\/][^\\/]*$/, "") : undefined;
+      return result.status === "ok" && dir !== undefined && PATH_ADDED.has(dir) && result.detail === `found at ${path}`
+        ? { ...result, detail: `found at ${path} — JaiRA added ${dir} to the PATH it runs programs with` }
+        : result;
+    });
+  }
+
+  /** Installs and updates of the git programs still running — what Cancel aborts. */
+  private readonly gitCliInstalls = new Map<GitCliName, AbortController>();
+
+  /** Install a git program the way named, or update it the way it was installed; re-checked once it exits. */
+  async installGitCli(name: GitCliName, method?: AgentInstallMethod): Promise<AgentInstallOutcome> {
+    if (!GIT_CLI_NAMES.includes(name)) throw this.refusal("config", `JaiRA does not know how to install '${name}'`);
+    if (this.gitCliInstalls.has(name)) return { ok: false, reason: `${name} is already being installed` };
+    const config = this.effectiveConfig();
+    const controller = new AbortController();
+    this.gitCliInstalls.set(name, controller);
+    const output = this.installOutput({ kind: "gitCli", name });
+    try {
+      const outcome = await installGitCli(name, method, {
+        exec: new NodeExec({ execEnv: config.execEnvironment }),
+        execEnv: config.execEnvironment,
+        deps: this.options.installDeps ?? nodeInstallDeps(),
+        abortSignal: controller.signal,
+        onOutput: output.say,
+      });
+      if (outcome.ok) output.say(INSTALLED_CHECKING);
+      return outcome;
+    } finally {
+      output.end();
+      this.gitCliInstalls.delete(name);
+      await this.refreshAvailability().catch(() => undefined);
+    }
+  }
+
+  /** Give up on a git program's install still running. */
+  cancelGitCliInstall(name: GitCliName): void {
+    this.gitCliInstalls.get(name)?.abort();
   }
 
   /** The executor, refused unless it is one that signs itself in. */
@@ -15443,6 +15541,30 @@ const INPUT_SOURCE_LIMIT = 20;
  * An artifact travels as a reference carrying its content; an input wants the content. Handing the
  * reference across tasks would hand over a name only the producing run can resolve.
  */
+/**
+ * Add a folder to the END of this process's PATH, once: what a git program found only in its
+ * installer's usual folder needs to be run by its bare name — by JaiRA, and by every program JaiRA
+ * starts, which inherits this environment. Nothing already on the PATH is displaced.
+ */
+function appendToPath(dir: string): void {
+  const sep = process.platform === "win32" ? ";" : ":";
+  const key = Object.keys(process.env).find((name) => name.toUpperCase() === "PATH") ?? "PATH";
+  const dirs = (process.env[key] ?? "").split(sep).filter((one) => one.length > 0);
+  const same = (a: string, b: string): boolean => (process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  if (dirs.some((one) => same(one, dir))) return;
+  process.env[key] = [...dirs, dir].join(sep);
+  PATH_ADDED.add(dir);
+}
+
+/** The folders {@link appendToPath} added — the PATH is the process's, so this is too. */
+const PATH_ADDED = new Set<string>();
+
+/** How long an installer's output is gathered before it is sent to the window (`installOutput`). */
+const INSTALL_OUTPUT_EVERY_MS = 100;
+
+/** The installer's output's last line once it exits 0: the check that follows takes a few seconds of its own. */
+const INSTALLED_CHECKING = "\nDone — checking what it installed…\n";
+
 function taskOutputOf(row: TaskRuntimeRow, output: string | undefined): JsonValue | undefined {
   if (output === undefined || row.status !== "completed" || row.outputsJson === undefined) return undefined;
   let outputs: unknown;
