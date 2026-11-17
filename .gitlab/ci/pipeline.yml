@@ -80,11 +80,20 @@ variables:
   # codeview's Settings > CI/CD > Job token allowlist. Set in the environment, not with
   # `git config --global`: the group's machines keep their files between jobs, and a job's token ends
   # with the job. GitHub's workflows do the same with a deploy token (.github/workflows/ci.yml).
-  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_COUNT: "3"
   GIT_CONFIG_KEY_0: "url.https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/codeview.git.insteadOf"
   GIT_CONFIG_VALUE_0: "ssh://git@gitlab.com/mistlabs/codeview.git"
   GIT_CONFIG_KEY_1: "url.https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/codeview.git.insteadOf"
   GIT_CONFIG_VALUE_1: "https://gitlab.com/mistlabs/codeview.git"
+  # A job on the group's Windows or Mac machine starts by `git clean`ing the checkout the last job left,
+  # node_modules and all; the runner sets the job's variables for it, these included. On Windows a
+  # package's files sit deeper than 260 characters, which git removes only with core.longPaths (else
+  # "Filename too long", and the job fails: 18122719162). On the Mac, git emptied node_modules of every
+  # entry it saw and still found it "not empty" (18122719163): macOS can skip entries of a large
+  # directory being emptied as it is read, and another try removes the rest.
+  GIT_CONFIG_KEY_2: core.longPaths
+  GIT_CONFIG_VALUE_2: "true"
+  GET_SOURCES_ATTEMPTS: "3"
 
 build:
   stage: test
@@ -141,11 +150,16 @@ release:plan:
 # its installers, its update manifests and its record (`builds.mjs mark`) in builds/<name>/
 # for release:publish. The release scripts are this pipeline's, copied aside before checking
 # out the commit to build, which may be older than them.
+#
+# A build that fails, for any reason, is run once more (`retry: 1`): a nightly runs with no one
+# watching, on machines that download half the internet, and the check above means a second run
+# never builds what the first one finished. release:publish waits for the second run.
 .release-build-linux:
   stage: build
   needs: [release:plan]
   rules:
     - if: $RELEASE_EVENT
+  retry: 1
   variables:
     GIT_DEPTH: 0
   script:
@@ -194,6 +208,7 @@ release:build:win-x64:
   needs: [release:plan]
   rules:
     - if: $RELEASE_EVENT
+  retry: 1
   tags: [$RUNNER_WINDOWS]
   variables:
     GIT_DEPTH: 0
@@ -275,6 +290,7 @@ release:build:ios:
     - if: $RELEASE_EVENT
   # New: an iOS failure must not hold back the desktop release.
   allow_failure: true
+  retry: 1
   script:
     - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
     - if [ -z "$ASC_KEY_P8_BASE64" ]; then echo "no App Store Connect key here (a protected variable reaches only protected branches and tags)"; exit 0; fi
