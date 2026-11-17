@@ -205,6 +205,8 @@ export interface AgentRouteOptions {
   onOutcome?: AgentOutcomeObserver;
   /** The key the SDK route runs on — the same option {@link AgentRuntimeOptions.sdkCredential} is. */
   sdkCredential?: () => SdkCredential;
+  /** Look a named secret up, for a generic CLI's key (`GenericCliQueryOptions.secret`). */
+  secret?: (name: string) => string | undefined;
   /**
    * The configured MCP servers that are on, their secrets looked up (`resolveMcpServers`) — handed to
    * claude and codex on every call, less a server the call's permission set refuses outright
@@ -328,6 +330,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
             createGenericCliQuery(spec, {
               ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
               ...(options.exec !== undefined ? { exec: options.exec } : {}),
+              ...(options.secret !== undefined ? { secret: options.secret } : {}),
             }),
         }),
         { label: spec.name ?? AGENT_GENERIC_CLI },

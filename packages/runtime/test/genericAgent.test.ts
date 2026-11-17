@@ -17,7 +17,9 @@ import {
   createGenericCliQuery,
   registerGenericAgents,
 } from "../src/genericAgent";
-import { newRegistry } from "../src/wiring";
+import { loadBundle } from "@declarative-ai/hw";
+import { agentPromptRoutes } from "../src/modelRoutes";
+import { buildPromptExecutor, executeWorkflow, newRegistry } from "../src/wiring";
 
 interface Call {
   command: string;
@@ -233,5 +235,80 @@ describe("a model a generic CLI has nowhere to put", () => {
     const query = createGenericCliQuery({ name: "mycli", command: "mycli" }, { exec: fakeExec(seen) as never });
     for await (const _ of query({ prompt: "go" })) void _;
     expect(seen.args).toEqual(["--", "go"]);
+  });
+});
+
+describe("a generic CLI's key", () => {
+  // A stored key, by the name the binary reads it from — what Settings' key box files it under.
+  const store = (keys: Record<string, string>) => (name: string) => keys[name];
+
+  it("is handed to the binary under its own name, from the chain the probe reads", async () => {
+    const { exec, calls } = fakeExec();
+    const query = createGenericCliQuery(spec({ command: "gemini", credential: "GEMINI_API_KEY" }), { exec, secret: store({ GEMINI_API_KEY: "k-123" }) });
+    const messages = await collect(query({ prompt: "go" }));
+    expect(calls[0]!.options.env).toEqual({ GEMINI_API_KEY: "k-123" });
+    expect(messages).toEqual([{ type: "result", result: { text: "the agent's answer" } }]);
+  });
+
+  it("is looked up as each run starts, so a key stored after the agent was registered is found", async () => {
+    const { exec, calls } = fakeExec();
+    const keys: Record<string, string> = {};
+    const query = createGenericCliQuery(spec({ command: "muse", credential: "META_API_KEY" }), { exec, secret: store(keys) });
+    expect(await collect(query({ prompt: "go" }))).toMatchObject([{ type: "other" }]);
+    keys["META_API_KEY"] = "m-456";
+    await collect(query({ prompt: "go" }));
+    expect(calls.map((call) => call.options.env)).toEqual([{ META_API_KEY: "m-456" }]);
+  });
+
+  it("refuses the run when the key it names is nowhere — rather than letting the binary bill some other sign-in", async () => {
+    const { exec, calls } = fakeExec();
+    const query = createGenericCliQuery(spec({ command: "gemini", credential: "GEMINI_API_KEY" }), { exec, secret: store({}) });
+    expect(await collect(query({ prompt: "go" }))).toEqual([
+      {
+        type: "other",
+        error: "'gemini' is set to use the key 'GEMINI_API_KEY', but no value was found for it — store one (Settings → Connections → Agents), or clear the key so the binary signs itself in",
+      },
+    ]);
+    expect(calls).toEqual([]);
+  });
+
+  it("gives way to a variable config states itself, and sits beside the rest of `env`", async () => {
+    const { exec, calls } = fakeExec();
+    const query = createGenericCliQuery(spec({ credential: "OPENAI_API_KEY", env: { OPENAI_API_KEY: "from-config", OPENCODE_DEBUG: "1" } }), { exec, secret: store({ OPENAI_API_KEY: "stored" }) });
+    await collect(query({ prompt: "go" }));
+    expect(calls[0]!.options.env).toEqual({ OPENAI_API_KEY: "from-config", OPENCODE_DEBUG: "1" });
+  });
+
+  it("is left to the inherited environment when nothing looks keys up — as it always was", async () => {
+    const { exec, calls } = fakeExec();
+    const query = createGenericCliQuery(spec({ credential: "GEMINI_API_KEY" }), { exec });
+    await collect(query({ prompt: "go" }));
+    expect(calls[0]!.options.env).toBeUndefined();
+  });
+
+  it("crosses into a WSL distro: each variable is listed in WSLENV, after what it lists already", async () => {
+    const { exec, calls } = fakeExec();
+    const query = createGenericCliQuery(spec({ command: "gemini", credential: "GEMINI_API_KEY", env: { WSLENV: "USERPROFILE/p", NO_COLOR: "1" } }), {
+      exec,
+      execEnv: { wsl: "Ubuntu" },
+      secret: store({ GEMINI_API_KEY: "k-123" }),
+    });
+    await collect(query({ prompt: "go" }));
+    expect(calls[0]!.options.env).toEqual({ GEMINI_API_KEY: "k-123", NO_COLOR: "1", WSLENV: "USERPROFILE/p:GEMINI_API_KEY/u:NO_COLOR/u" });
+  });
+
+  it("reaches the binary through a model prefix too — the route a workflow's `gemini-cli/default` takes", async () => {
+    const { exec, calls } = fakeExec();
+    const routes = agentPromptRoutes({ genericCli: [{ name: "gemini-cli", command: "gemini", args: ["-p", "{prompt}"], credential: "GEMINI_API_KEY" }] }, { exec, secret: store({ GEMINI_API_KEY: "k-route" }) });
+    const result = await executeWorkflow({
+      bundle: loadBundle({ ask: { label: "Ask", operation: { kind: "prompt", prompt: "Say hi.", model: "gemini-cli/default" } } }, "ask"),
+      inputs: {},
+      registry: newRegistry(),
+      prompt: buildPromptExecutor({ routes, tree: { kind: "agent", agent: "gemini-cli" } }),
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("gemini");
+    expect(calls[0]!.options.env).toEqual({ GEMINI_API_KEY: "k-route" });
+    expect(JSON.stringify(result)).not.toMatch(/no value was found/);
   });
 });

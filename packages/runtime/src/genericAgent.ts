@@ -29,7 +29,7 @@ import {
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import type { JairaGenericCliAgent } from "@jaira/shared";
 import { NodeExec, type Exec } from "./exec";
-import { pathFor, type ExecEnv } from "./paths";
+import { isWslEnv, pathFor, type ExecEnv } from "./paths";
 import { GENERIC_CLI_TOOLS, holdAgentFunction } from "./agentTools";
 
 /** The default registry name a single configured generic CLI is registered under. */
@@ -78,6 +78,12 @@ export interface GenericCliQueryOptions {
   exec?: Exec;
   /** Cap a runaway agent. Absent ⇒ no limit. */
   timeoutMs?: number;
+  /**
+   * Look a named secret up — the chain the probe reads (keychain, the `.env` files, the environment).
+   * Asked as each run starts, so a key stored after the agent was registered is found. Absent, a key
+   * config names is left to the environment the binary inherits, as it always was.
+   */
+  secret?: (name: string) => string | undefined;
 }
 
 /**
@@ -151,6 +157,27 @@ export function createGenericCliQuery(spec: JairaGenericCliAgent, options: Gener
         : // `--` first: an instruction beginning with `-` must not be read as a flag.
           [...filled, "--", opts.prompt];
 
+    // The key config names, handed to the binary under its own name — which is the variable it reads
+    // (`GEMINI_API_KEY`, `META_API_KEY`). A key named and not found REFUSES the run, as the probe calls
+    // the agent not working: run without it, the binary would fall back to whatever sign-in it has,
+    // and the person who stored a key would be billed somewhere they did not choose.
+    let key: Record<string, string> = {};
+    if (spec.credential !== undefined && options.secret !== undefined) {
+      const value = options.secret(spec.credential);
+      if (value === undefined || value.length === 0) {
+        yield {
+          type: "other",
+          error:
+            `'${spec.command}' is set to use the key '${spec.credential}', but no value was found for it — ` +
+            "store one (Settings → Connections → Agents), or clear the key so the binary signs itself in",
+        };
+        return;
+      }
+      key = { [spec.credential]: value };
+    }
+    // Config's own `env` outranks the key: a variable stated there is stated on purpose.
+    const env = intoDistro({ ...key, ...spec.env }, options.execEnv);
+
     let result;
     try {
       result = await exec.run(spec.command, args, {
@@ -159,7 +186,7 @@ export function createGenericCliQuery(spec: JairaGenericCliAgent, options: Gener
           ? { cwd: options.execEnv !== undefined ? pathFor(options.execEnv, opts.cwd) : opts.cwd }
           : {}),
         ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-        ...(spec.env !== undefined ? { env: spec.env } : {}),
+        ...(env !== undefined ? { env } : {}),
         ...(viaStdin ? { stdin: opts.prompt } : {}),
         ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
         ...(opts.abortSignal !== undefined ? { abortSignal: opts.abortSignal } : {}),
@@ -187,6 +214,22 @@ export function createGenericCliQuery(spec: JairaGenericCliAgent, options: Gener
     // inventing a number would corrupt the run's roll-up.
     yield { type: "result", result: { text: result.stdout.trim() } };
   };
+}
+
+/**
+ * The variables a generic CLI is started with, made to reach it inside a WSL distro.
+ *
+ * `wsl.exe` carries the Windows side's environment into the distro only for the names `WSLENV`
+ * lists, so a key set here would stop at the boundary — each name is added (`/u`: from Windows into
+ * WSL), after whatever `WSLENV` already lists. Natively nothing is needed. `undefined` for none.
+ */
+export function intoDistro(env: Record<string, string>, execEnv: ExecEnv | undefined): Record<string, string> | undefined {
+  const names = Object.keys(env).filter((name) => name !== "WSLENV");
+  if (names.length === 0) return Object.keys(env).length > 0 ? env : undefined;
+  if (execEnv === undefined || !isWslEnv(execEnv)) return env;
+  const listed = (env["WSLENV"] ?? process.env["WSLENV"] ?? "").split(":").filter((entry) => entry.length > 0);
+  const add = names.map((name) => `${name}/u`).filter((entry) => !listed.includes(entry));
+  return { ...env, WSLENV: [...listed, ...add].join(":") };
 }
 
 export interface GenericAgentOptions extends GenericCliQueryOptions {

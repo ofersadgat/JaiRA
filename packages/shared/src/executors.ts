@@ -112,17 +112,22 @@ export const EXECUTOR_TITLES: Readonly<Record<string, string>> = {
  * The agent CLIs JaiRA ships set up as generic CLIs — `builtin/settings.json`'s `agents.genericCli`,
  * the bottom configuration layer — and what each is, for its row. Generic because none has an adapter
  * of its own: each is driven by an argv template, so none enforces JaiRA's permissions (DESIGN §16).
- * A built-in one can be turned off and its arguments changed, but not removed.
+ * A built-in one can be turned off and its arguments changed, but not removed. `credential` is the
+ * variable its binary reads a key from — what its key box suggests, and what a stored key is handed
+ * to it as; none for one whose keys are per provider (OpenCode).
  */
-export const BUILTIN_GENERIC_AGENTS: Readonly<Record<string, { hint: string }>> = {
+export const BUILTIN_GENERIC_AGENTS: Readonly<Record<string, { hint: string; credential?: string }>> = {
   "gemini-cli": {
     hint: "Google's `gemini` binary, now for Gemini Code Assist and paid API keys — individual plans moved to Antigravity CLI. Run headless (`gemini -p`) with edits approved and shell commands not. Signs itself in, or reads GEMINI_API_KEY. A generic CLI: it enforces none of JaiRA's permissions.",
+    credential: "GEMINI_API_KEY",
   },
   "antigravity-cli": {
     hint: "Google's `agy` binary, run headless (`agy -p`) with edits accepted and anything else declined. Sign in once by running `agy` in a terminal — or a GEMINI_API_KEY, with `modelProvider: \"gemini\"` in its own settings. A generic CLI: it enforces none of JaiRA's permissions.",
+    credential: "GEMINI_API_KEY",
   },
   "muse-code": {
     hint: "Meta's `muse` binary, run headless (`muse exec`) in its own sandbox without asking. Signs itself in with `muse login`, or reads META_API_KEY. A generic CLI: it enforces none of JaiRA's permissions.",
+    credential: "META_API_KEY",
   },
   opencode: {
     hint: "The `opencode` binary, run headless (`opencode run`) with whatever provider it is signed in to (`opencode auth login`). A generic CLI: it enforces none of JaiRA's permissions.",

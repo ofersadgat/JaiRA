@@ -155,3 +155,19 @@ describe("what a provider's row says", () => {
     expect(providerState(true, probe("failed"))).not.toBe("available");
   });
 });
+
+describe("a built-in agent CLI's key box", () => {
+  const generic = (name: string, command: string): ExecutorInfo => ({ name, kind: "generic", enabled: true, command, credentialUse: "optional", policyEnforcement: "none" });
+
+  it("suggests the variable its binary reads, which is the name a stored key is handed to it under", () => {
+    const specs = agentProviders([generic("gemini-cli", "gemini"), generic("antigravity-cli", "agy"), generic("muse-code", "muse"), generic("opencode", "opencode"), generic("aider", "aider")]);
+    expect(Object.fromEntries(specs.map((spec) => [spec.id, spec.suggestedCredential]))).toEqual({
+      "gemini-cli": "GEMINI_API_KEY",
+      "antigravity-cli": "GEMINI_API_KEY",
+      "muse-code": "META_API_KEY",
+      // Per provider: no one variable to suggest.
+      opencode: undefined,
+      aider: undefined,
+    });
+  });
+});

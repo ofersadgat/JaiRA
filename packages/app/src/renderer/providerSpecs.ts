@@ -342,8 +342,9 @@ export function agentProviders(executors: ExecutorInfo[]): ProviderSpec[] {
     family: "agent" as const,
     location: { kind: "agent" as const, name: info.name, executorKind: info.kind },
     credential: info.credentialUse,
-    ...(EXECUTOR_KINDS[info.kind].suggestedCredential !== undefined
-      ? { suggestedCredential: EXECUTOR_KINDS[info.kind].suggestedCredential! }
+    // A built-in CLI's own variable (GEMINI_API_KEY) before its kind's convention.
+    ...((BUILTIN_GENERIC_AGENTS[info.name]?.credential ?? EXECUTOR_KINDS[info.kind].suggestedCredential) !== undefined
+      ? { suggestedCredential: (BUILTIN_GENERIC_AGENTS[info.name]?.credential ?? EXECUTOR_KINDS[info.kind].suggestedCredential)! }
       : {}),
     levels: [AGENT_LEVEL, ...agentLevels(info.kind)],
   }));

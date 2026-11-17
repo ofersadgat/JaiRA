@@ -112,6 +112,8 @@ async function main(): Promise<void> {
       check(page.includes(command), `${name}'s install is drawn`);
     }
     check(["Gemini (cli)", "Antigravity (cli)", "Muse Code", "OpenCode"].every((title) => page.includes(title)), "the four are titled");
+    // Their key boxes name the variable each binary reads — what a stored key is handed to it as.
+    check(page.includes("GEMINI_API_KEY") && page.includes("META_API_KEY"), "Gemini's and Muse Code's key boxes suggest GEMINI_API_KEY and META_API_KEY");
     const codex = before.find((p) => p.name === "codex-cli");
     console.log(`agent-install: codex here is ${JSON.stringify(codex?.install)}`);
 

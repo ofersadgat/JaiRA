@@ -678,6 +678,7 @@ function buildRunEnvironment(
     execEnv: config.execEnvironment,
     exec,
     agents: enabledGenericAgents(config.agents),
+    secret: (name) => secrets.lookup(name)?.value,
   });
   if (wiring.interactions) {
     wiring.interactions.register(registry);
@@ -740,6 +741,7 @@ function buildRunEnvironment(
             exec,
             startBridge,
             sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, secrets),
+            secret: (name) => secrets.lookup(name)?.value,
             ...(files?.observer !== undefined ? { observer: files.observer } : {}),
             // The same servers the app hands its agents, looked up through the same chain.
             mcpServers: resolveMcpServers(config.mcp, (name) => secrets.lookup(name)?.value).servers,

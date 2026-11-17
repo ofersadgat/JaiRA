@@ -5697,6 +5697,8 @@ export class AppService {
         execEnv: config.execEnvironment,
         exec,
         agents: enabledGenericAgents(config.agents),
+        // A CLI's key, looked up as each run starts — the chain the probe reads.
+        secret: (name) => this.secretResolver(open).lookup(name)?.value,
       });
       // Our own tools, so an agent's commands go through the policy at all: an agent
       // calling its native shell would be invisible to it (DESIGN §10.1).
@@ -14594,6 +14596,7 @@ export class AppService {
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
         sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, opts.secrets ?? this.secretResolver()),
+        secret: (name) => (opts.secrets ?? this.secretResolver()).lookup(name)?.value,
         mcpServers: this.mcpServersFor(config, opts.secrets ?? this.secretResolver()),
       }),
       // The presets, and what choosing a preset's model asks: which models this machine can run — every
