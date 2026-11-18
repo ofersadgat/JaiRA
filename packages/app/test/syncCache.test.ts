@@ -187,6 +187,55 @@ describe("views", () => {
     expect(cache.peek("task:detail", { taskId: "t-x" })).toEqual({ value: undefined, error: "unknown task 't-x'", loading: false });
   });
 
+  it("of a task a page says was deleted are not asked for, and say so", async () => {
+    // A conversation rewound to before its opening message is deleted, and the page saying so arrived
+    // while the window still held it: its detail and conversation were asked for, and each refusal was
+    // printed in main's log (2026-11-18).
+    const e = engine((channel) => (channel === "task:detail" ? { taskId: "t-a" } : []));
+    e.answerSince(() => page(10, [task("t-a")], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [
+      ["task:detail", { taskId: "t-a" }],
+      ["session:history", { taskId: "t-a" }],
+    ]);
+    await settle();
+    const before = e.asked.length;
+    cache.push(changed(10, page(11, [], { gone: ["t-a"], changes: [{ collection: "task", id: "t-a", taskId: "t-a", at: 11, deleted: true }] })));
+    await settle();
+    expect(e.asked.slice(before)).toEqual([]);
+    expect(cache.peek("task:detail", { taskId: "t-a" })).toEqual({ value: { taskId: "t-a" }, error: "task 't-a' was deleted", loading: false });
+    expect(cache.peek("session:history", { taskId: "t-a" }).error).toBe("task 't-a' was deleted");
+    // Nor on the pages after it, nor when held anew.
+    cache.push(changed(11, page(12, [task("t-b")])));
+    cache.hold("other", [["task:conversation", { taskId: "t-a" }]]);
+    await settle();
+    expect(e.asked.slice(before)).toEqual([]);
+    expect(cache.peek("task:conversation", { taskId: "t-a" }).error).toBe("task 't-a' was deleted");
+    // A page that brings it back has it read again (past the gap since the deletion's read).
+    cache.push(changed(12, page(13, [task("t-a", "back", 13)])));
+    await new Promise((r) => setTimeout(r, 600));
+    expect(e.asked.slice(before).map((a) => a.channel).sort()).toEqual(["session:history", "task:conversation", "task:detail"]);
+    expect(cache.peek("task:detail", { taskId: "t-a" })).toEqual({ value: { taskId: "t-a" }, error: undefined, loading: false });
+  });
+
+  it("of a task a whole page no longer has are still asked for: it says nothing was deleted", async () => {
+    // A project closed: its tasks leave the index with no `gone`, and are not called deleted.
+    const e = engine(() => ({ ok: true }));
+    let whole = page(10, [task("t-a")], { whole: true });
+    e.answerSince(() => whole);
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [["task:detail", { taskId: "t-a" }]]);
+    await settle();
+    whole = page(20, [], { whole: true });
+    await cache.reconcile();
+    await settle();
+    expect(cache.task("t-a")).toBeUndefined();
+    expect(e.asked.filter((a) => a.channel === "task:detail").length).toBe(2);
+    expect(cache.peek("task:detail", { taskId: "t-a" }).error).toBeUndefined();
+  });
+
   it("are not read again once nothing holds them", async () => {
     const e = engine(() => ({}));
     e.answerSince(() => page(10, [], { whole: true }));

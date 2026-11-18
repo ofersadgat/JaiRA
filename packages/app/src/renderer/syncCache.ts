@@ -159,6 +159,17 @@ const NOTHING: Held<never> = Object.freeze({ value: undefined, error: undefined,
 /** A change in the log, as a row of it: what changed, without when. */
 const changeKey = (change: SyncChange): string => `${change.collection}\u0000${change.id}`;
 
+/**
+ * The refusal a view of a deleted task is answered with, without asking the engine — see
+ * `SyncCache.ask`. Its own kind so a view from the mirror is answered by it too: it is an engine's
+ * word, carried by a page, not the silence of no engine answering.
+ */
+class TaskDeleted extends Error {
+  constructor(taskId: string) {
+    super(`task '${taskId}' was deleted`);
+  }
+}
+
 function show(entry: Entry): void {
   // Shown with its group, when the group is.
   if (entry.group !== undefined) return;
@@ -263,8 +274,11 @@ export class SyncCache {
    * The engine and page each task's summary (or its deletion) was taken from: an older page of the
    * same engine never overwrites it. Another engine's clock says nothing of this one's, so a page from
    * another engine is newer by arriving.
+   *
+   * `deleted` marks a deletion a page said (`gone`), until a page brings the task back. Only those: a
+   * whole page drops what it lacks without saying why — a closed project's tasks are not deleted.
    */
-  private readonly indexAt = new Map<string, { source: string; at: number }>();
+  private readonly indexAt = new Map<string, { source: string; at: number; deleted?: true }>();
   private indexList: ProjectTask[] = [];
   private readonly entries = new Map<string, Entry>();
   private readonly listeners = new Set<() => void>();
@@ -446,7 +460,7 @@ export class SyncCache {
     for (const id of page.gone) {
       if (older(id)) continue;
       this.index.delete(id);
-      this.indexAt.set(id, { source, at: page.at });
+      this.indexAt.set(id, { source, at: page.at, deleted: true });
     }
     // A whole page is the engine's state as of its stamp, whatever came before — one from a database set
     // up again sets the cursor back.
@@ -472,6 +486,8 @@ export class SyncCache {
       // this page or later. The window's first whole page once read every view it held again, each
       // asked a moment before it (2026-11-06).
       if (entry.issued > askedAt) continue;
+      // Its task was deleted, and the view says so: nothing is left to read until a page brings it back.
+      if (entry.error !== undefined && this.isDeleted(entry.taskId)) continue;
       // Shown from the mirror, or unreadable: an engine answering is the time to ask it again.
       if (entry.mirrored || entry.error !== undefined) {
         if (this.isLive(entry)) this.readForChange(key, entry);
@@ -739,7 +755,7 @@ export class SyncCache {
           const asked = ++this.reads;
           entry.issued = asked;
           try {
-            const answered = await this.io.invoke(entry.channel, entry.request as never);
+            const answered = await this.ask(entry);
             if (asked >= entry.at) {
               // What did not move keeps its object, the whole answer included when nothing did: a reader
               // compares by identity, and redraws only what moved.
@@ -752,10 +768,12 @@ export class SyncCache {
               if (moved) this.mirror?.keepView(key, value);
             }
           } catch (e) {
-            // A view shown from the mirror stays shown while no engine can answer for it.
-            if (asked >= entry.at && !entry.mirrored) {
+            // A view shown from the mirror stays shown while no engine can answer for it — but a deletion
+            // is an engine's answer.
+            if (asked >= entry.at && (!entry.mirrored || e instanceof TaskDeleted)) {
               entry.error = e instanceof Error ? e.message : String(e);
               entry.at = asked;
+              entry.mirrored = false;
             }
           }
           if (entry.again) {
@@ -773,6 +791,23 @@ export class SyncCache {
       }
     })();
     return entry.idle;
+  }
+
+  /**
+   * The engine's answer for a view — or, for a task a page said was deleted, the refusal it would give,
+   * without asking. Every refused request is printed in main's log as a failed handler, and a deletion
+   * comes with one: the page saying a task is gone reads again what the window holds of it, before the
+   * window lets go (2026-11-18: a conversation rewound to before its opening message, which deletes it,
+   * printed "unknown task" for its detail and its conversation).
+   */
+  private ask(entry: Entry): Promise<unknown> {
+    if (this.isDeleted(entry.taskId)) return Promise.reject(new TaskDeleted(entry.taskId));
+    return this.io.invoke(entry.channel, entry.request as never);
+  }
+
+  /** Whether a page said this task was deleted, and none has brought it back since. */
+  private isDeleted(taskId: string | null): taskId is string {
+    return taskId !== null && this.indexAt.get(taskId)?.deleted === true;
   }
 
   /** Drop views nothing holds, past the newest {@link KEEP_UNHELD}. */
