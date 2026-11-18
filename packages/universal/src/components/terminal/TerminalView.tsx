@@ -1,0 +1,541 @@
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { Platform, ScrollView, TextInput, type GestureResponderEvent } from "react-native";
+import { Text, View, isWeb } from "@tamagui/core";
+import type { CommandDialect } from "@jaira/shared/browser";
+import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
+import { terminalEntryOf } from "@jaira/ui/panelStack";
+import { PLACES, type Place } from "@jaira/ui/splitModel";
+import { invoke } from "@jaira/ui/store";
+import { signalTerminal, typeInto } from "@jaira/ui/terminalStore";
+import {
+  TERM_INK,
+  TermScreen,
+  durationText,
+  endsInText,
+  isWaiting,
+  promptChoicesOf,
+  requestRowsOf,
+  terminalStatusOf,
+  terminalTitleOf,
+  type TermLine,
+  type TerminalTone,
+} from "@jaira/ui/terminalModel";
+import { takenApartOf } from "@jaira/ui/transcript";
+import { base64Of } from "@jaira/ui/valueViewMeta";
+import { copyText } from "../../clipboard";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
+import { useTokens, type Tokens } from "../../tokens";
+import { moveEntry, useEntryPlaces, usePlacesHere } from "../../app/places";
+import { usePhone } from "../../app/phone";
+import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
+import { colorOf } from "../Sidebar";
+import { Icon } from "../panel/Icon";
+import { PlaceButtons } from "../panel/PlaceButtons";
+import { useTerminal } from "./useTerminal";
+
+/**
+ * A shell command as a terminal (decision 0028), drawn like an artifact: in the conversation a card
+ * under its row; in a pane or the side panel (`fill`) the same without its title bar, the head of what
+ * holds it naming it. How it looks:
+ *
+ *   the card         1px --line (waiting: --warn at 45%), radius 10, on --panel; clipped
+ *   the title bar    row, centred, gap 8, height 38, padding 0 8 0 10: the glyph box (18, radius 5,
+ *                    --panel-3, --accent), the title (app 13/12.5 600), the status (app 12/12.5, in its
+ *                    tone), a spacer, Stop while running, the place buttons, …
+ *   the reading row  row, centred, gap 6, padding 0 8 8 10 (fill: 7 10, a --line under): the readings
+ *                    as one joined switch (Terminal | Text | Command), a spacer, then (fill) the status,
+ *                    Stop, the places and …, then Following while it runs, and Copy
+ *   the screen       on the terminal's ground (#0f1120), padding 8 14 10, data 11.5/12 on 19px: the
+ *                    command line taken apart as the approval takes it (each request on its hue at 22%,
+ *                    what joins them dim), then what it printed, in its colours; the person's typing
+ *                    marked. A card shows the last 12 lines, more a press away; a filled one scrolls,
+ *                    following the end while Following is on
+ *   the choices      while it waits and its prompt names answers: a key per answer, its meaning beside
+ *   the input line   while it runs: `›`, a field that sends a line to its stdin, Ctrl-C; while it
+ *                    waits, when its time limit ends
+ */
+export interface TerminalViewProps {
+  taskId: string;
+  project?: string | undefined;
+  callId: string;
+  command: string;
+  dialect: CommandDialect;
+  /** Filling a pane or the side panel. */
+  fill?: boolean;
+  /** For a call the engine no longer keeps: what its result carried. */
+  fallback?: { output: string; exitCode?: number | null } | undefined;
+}
+
+type Reading = "terminal" | "text" | "command";
+
+const CARD_LINES = 12;
+const MORE_LINES = 400;
+const FILL_LINES = 3_000;
+
+const TONE: Record<TerminalTone, string> = { accent: "accent", warn: "warn", ok: "dim", bad: "bad", dim: "dim" };
+
+export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback }: TerminalViewProps): JSX.Element {
+  const t = useTokens();
+  const copy = useTerminal(taskId, callId, project);
+  const summary = copy?.summary;
+  const running = summary !== undefined && summary.endedAt === undefined;
+  const waiting = summary !== undefined && isWaiting(summary);
+  const now = useTicking(running);
+  const [reading, setReading] = useState<Reading>("terminal");
+  const [following, setFollowing] = useState(true);
+  const [more, setMore] = useState(false);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+
+  // What it printed: the engine's terminal, else the result it left.
+  const kept = useMemo(() => {
+    if (copy !== undefined) return copy.screen;
+    if (fallback === undefined) return undefined;
+    const screen = new TermScreen();
+    screen.write(fallback.output);
+    return screen;
+  }, [copy, copy?.version, fallback]);
+
+  const status = summary !== undefined ? terminalStatusOf(summary, waiting, now) : fallback !== undefined ? { text: fallback.exitCode === 0 || fallback.exitCode === undefined ? "ended" : `exit ${String(fallback.exitCode)}`, tone: (fallback.exitCode ?? 0) === 0 ? ("dim" as const) : ("bad" as const) } : { text: "not kept", tone: "dim" as const };
+  const title = terminalTitleOf(command, dialect);
+
+  // The three places, as an artifact's (decision 0028, ruling 2).
+  const entry = useMemo(() => terminalEntryOf({ taskId, project, callId, command, dialect }), [taskId, project, callId, command, dialect]);
+  const lit = useEntryPlaces(entry.key);
+  const phone = usePhone();
+  const here = usePlacesHere(phone);
+  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
+  const place = (target: Place): void => moveEntry(target, entry, lit, phone);
+
+  const plain = (): string => kept?.plain() ?? "";
+  const stop = (): void => void signalTerminal(taskId, callId, "stop", project);
+  const interrupt = (): void => void signalTerminal(taskId, callId, "interrupt", project);
+  const openMenu = (e: GestureResponderEvent): void => {
+    const at = pressedAt(e);
+    setMenu({
+      x: at.x - MENU_WIDTH,
+      y: at.y,
+      items: [
+        ...offered.map((one) => ({ label: PLACE_WORDS[one], ...(lit.includes(one) ? { note: "here", disabled: one !== "panel" } : {}), onSelect: () => place(one) })),
+        ...(running ? [{ label: "Follow the output", separator: true, checked: following, onSelect: () => setFollowing((v) => !v) }] : []),
+        { label: "Copy the output", ...(running ? {} : { separator: true }), note: `${kept?.count ?? 0} lines`, onSelect: () => void copyText(plain()) },
+        { label: "Copy the command", onSelect: () => void copyText(command) },
+        { label: "Download the log…", note: `${title.split(" ")[0]}.log`, onSelect: () => void invoke("shell:saveFile", { name: `${title.split(" ")[0]}.log`, data: base64Of(plain()) }).catch(() => undefined) },
+        ...(running
+          ? [
+              { label: "Send Ctrl-C", separator: true, note: "interrupt", onSelect: interrupt },
+              { label: `Stop ${title.split(" ")[0]}`, separator: true, danger: true, note: "ends the process", onSelect: stop },
+            ]
+          : []),
+      ],
+    });
+  };
+
+  const verbs = (
+    <>
+      {running ? <StopButton onPress={stop} /> : null}
+      <PlaceButtons offered={offered} lit={lit} onPlace={place} />
+      <MoreButton open={menu !== null} onPress={openMenu} />
+    </>
+  );
+
+  const lines = kept === undefined ? [] : fill ? kept.tail(FILL_LINES) : kept.tail(more ? MORE_LINES : CARD_LINES);
+  const earlier = kept === undefined ? 0 : Math.max(0, kept.count - lines.length - (kept.partial().length === 0 ? 1 : 0));
+  const choices = waiting && kept !== undefined ? promptChoicesOf(kept.partial()) : [];
+  const ends = summary !== undefined && waiting ? endsInText(summary, now) : undefined;
+
+  return (
+    <View
+      flexDirection="column"
+      minWidth={0}
+      {...(fill ? { flex: 1, minHeight: 0 } : { borderRadius: 10, overflow: "hidden", backgroundColor: t.v("panel") as never, ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, waiting ? undefined : "line") as object) })}
+      {...(!fill && waiting ? { borderWidth: 1, borderStyle: "solid", borderColor: t.mix(t.v("warn"), 45, "transparent") as never } : {})}
+    >
+      {!fill ? (
+        <View flexDirection="row" alignItems="center" gap={8} height={38} paddingLeft={10} paddingRight={8} minWidth={0}>
+          <View width={18} height={18} borderRadius={5} alignItems="center" justifyContent="center" backgroundColor={(waiting ? t.mix(t.v("warn"), 14, "transparent") : t.v("panel-3")) as never}>
+            <Icon name="terminal" size={12} color={String(t.v(waiting ? "warn" : "accent"))} />
+          </View>
+          <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0}>
+            {title}
+          </Txt>
+          <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
+            {status.text}
+            {summary?.by === "you" ? " · yours" : ""}
+          </Txt>
+          {verbs}
+        </View>
+      ) : null}
+
+      {fill ? (
+        // Filling a pane or the panel, the title bar's other half: the status, Stop, the places and `…`.
+        <View flexDirection="row" alignItems="center" gap={8} paddingVertical={7} paddingLeft={12} paddingRight={8} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
+          <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
+            {status.text}
+            {summary?.by === "you" ? " · yours" : ""}
+          </Txt>
+          {verbs}
+        </View>
+      ) : null}
+
+      <View flexDirection="row" alignItems="center" gap={6} minWidth={0} {...(fill ? { paddingVertical: 7, paddingHorizontal: 10, ...(edge(t, { bottom: 1 }) as object) } : { paddingLeft: 10, paddingRight: 8, paddingBottom: 8 })}>
+        <Readings reading={reading} onReading={setReading} />
+        <View flex={1} />
+        {running ? <Following on={following} onPress={() => setFollowing((v) => !v)} /> : null}
+        <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(plain())} />
+      </View>
+
+      <View backgroundColor={TERM_INK.ground} paddingTop={8} paddingBottom={10} paddingHorizontal={14} minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
+        {reading === "command" ? (
+          <CommandRows command={command} dialect={dialect} />
+        ) : reading === "text" ? (
+          <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0}>
+            <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} {...(isWeb ? { style: { whiteSpace: "pre-wrap", userSelect: "text" } } : { selectable: true })}>
+              {kept?.plain() ?? ""}
+            </Text>
+          </Scroller>
+        ) : (
+          <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0} capped={!fill && more}>
+            <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>
+              <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.accent}>
+                ❯
+              </Text>
+              <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} flex={1} minWidth={0} numberOfLines={fill ? undefined : 1}>
+                <CommandLine command={command} dialect={dialect} t={t} />
+              </Text>
+              {summary?.by === "you" ? <YouChip /> : null}
+            </View>
+            {earlier > 0 && !fill ? (
+              <Press onPress={() => setMore((v) => !v)} alignSelf="flex-start" paddingVertical={1}>
+                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: TERM_INK.dim }}>{more ? "↓ fewer lines" : `↑ ${earlier} earlier line${earlier === 1 ? "" : "s"}`}</Txt>
+              </Press>
+            ) : null}
+            {lines.map((line, i) => (
+              <ScreenLine key={i} line={line} t={t} />
+            ))}
+            {kept === undefined ? (
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, italic: true, color: TERM_INK.dim }}>{running ? "starting…" : "The engine no longer keeps this command's output."}</Txt>
+            ) : null}
+          </Scroller>
+        )}
+      </View>
+
+      {choices.length > 0 ? (
+        <View flexDirection="row" flexWrap="wrap" gap={6} paddingHorizontal={12} paddingTop={8} paddingBottom={2} backgroundColor={TERM_INK.head}>
+          {choices.map((choice) => (
+            <Press
+              key={choice.key}
+              onPress={() => void typeInto(taskId, callId, choice.send, project)}
+              label={`Answer ${choice.key}: ${choice.label}`}
+              flexDirection="row"
+              alignItems="center"
+              gap={7}
+              height={28}
+              paddingLeft={4}
+              paddingRight={10}
+              borderRadius={7}
+              borderWidth={1}
+              borderStyle="solid"
+              borderColor="#2f3358"
+              box={({ hovered }) => ({ backgroundColor: hovered ? "#262a4d" : "#1b1e38" })}
+            >
+              <View minWidth={20} height={20} paddingHorizontal={4} borderRadius={4} alignItems="center" justifyContent="center" backgroundColor="#2a2e52">
+                <Txt spec={{ voice: "data", scale: 11 / 12, weight: 600, color: "#eceefa" }}>{choice.key}</Txt>
+              </View>
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TERM_INK.text }}>{choice.label}</Txt>
+            </Press>
+          ))}
+        </View>
+      ) : null}
+
+      {running ? (
+        <InputLine
+          title={title}
+          waiting={waiting}
+          ends={ends}
+          onSend={(text) => void typeInto(taskId, callId, `${text}\n`, project)}
+          onInterrupt={interrupt}
+        />
+      ) : null}
+
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+    </View>
+  );
+}
+
+const PLACE_WORDS: Record<Place, string> = { main: "Open in the main view", split: "Open in a split", panel: "Open in the side panel" };
+
+/** A second's tick while a command runs, for its elapsed time. */
+function useTicking(running: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [running]);
+  return running ? now : Date.now();
+}
+
+function pressedAt(e: GestureResponderEvent): { x: number; y: number } {
+  const el = (e as unknown as { currentTarget?: { getBoundingClientRect?: () => DOMRect } }).currentTarget;
+  const rect = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect() : undefined;
+  return rect !== undefined ? { x: rect.right, y: rect.bottom + 4 } : { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 12 };
+}
+
+/** The command line taken apart by the approval's parser, on the terminal's ground. */
+function CommandLine({ command, dialect, t }: { command: string; dialect: CommandDialect; t: Tokens }): JSX.Element {
+  const segments = useMemo(() => lineSegments(command, takenApartOf(command, dialect).requests.map((request) => ({ span: request.span, matched: [] }))), [command, dialect]);
+  return (
+    <>
+      {segments.map((segment, at) =>
+        segment.kind === "glue" ? (
+          <Text key={at} color={TERM_INK.hint}>
+            {segment.text}
+          </Text>
+        ) : (
+          <Text
+            key={at}
+            color={TERM_INK.text}
+            backgroundColor={t.mix(colorOf(t, hueOf(segment.part)), 22, "transparent") as never}
+            {...((Platform.OS === "web" ? { paddingHorizontal: 3, borderRadius: 4, style: { boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" } } : {}) as object)}
+          >
+            {segment.pieces.map((piece) => piece.text).join("")}
+          </Text>
+        ),
+      )}
+    </>
+  );
+}
+
+/** One line of the screen, its spans in their colours. */
+function ScreenLine({ line, t }: { line: TermLine; t: Tokens }): JSX.Element {
+  const base = font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object;
+  return (
+    <Text {...base} color={TERM_INK.text} {...(isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 })}>
+      {line.length === 0
+        ? " "
+        : line.map((span, i) => (
+            <Text
+              key={i}
+              color={span.you === true ? TERM_INK.accent : (span.fg ?? TERM_INK.text)}
+              {...(span.you === true ? { backgroundColor: "rgba(179,182,255,0.16)" } : span.bg !== undefined ? { backgroundColor: span.bg } : {})}
+              {...(span.bold === true || span.you === true ? { fontWeight: "600" } : {})}
+              {...(span.dim === true ? { opacity: 0.6 } : {})}
+              {...(span.italic === true ? { fontStyle: "italic" } : {})}
+              {...(span.underline === true ? { textDecorationLine: "underline" } : {})}
+            >
+              {span.text}
+            </Text>
+          ))}
+    </Text>
+  );
+}
+
+/** The screen's scroller: a card's is as tall as its lines (at most 320 once opened out); a filled one scrolls and follows the end. */
+function Scroller({ fill, follow, signal, capped = false, children }: { fill: boolean; follow: boolean; signal: number; capped?: boolean; children: ReactNode }): JSX.Element {
+  const ref = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (follow) ref.current?.scrollToEnd({ animated: false });
+  }, [follow, signal]);
+  if (!fill && !capped) return <View minWidth={0}>{children}</View>;
+  return (
+    <ScrollView ref={ref} style={fill ? { flex: 1 } : { maxHeight: 320 }} contentContainerStyle={{ minWidth: 0 }} onContentSizeChange={() => (follow ? ref.current?.scrollToEnd({ animated: false }) : undefined)}>
+      {children}
+    </ScrollView>
+  );
+}
+
+/** The `Command` reading: the line's requests, as the approval lists them (decision 0028, ruling 4). */
+function CommandRows({ command, dialect }: { command: string; dialect: CommandDialect }): JSX.Element {
+  const t = useTokens();
+  const rows = useMemo(() => requestRowsOf(command, dialect), [command, dialect]);
+  if (rows.length === 0) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TERM_INK.dim }}>The line could not be taken apart.</Txt>;
+  return (
+    <View flexDirection="column" gap={4}>
+      {rows.map((row, i) => (
+        <View key={i} flexDirection="row" alignItems="center" gap={8} paddingLeft={row.nested ? 17 : 0} minWidth={0}>
+          <View width={9} height={9} flexShrink={0} backgroundColor={colorOf(t, hueOf(i)) as never} opacity={row.nested ? 0.6 : 1} />
+          <Txt spec={{ voice: "data", scale: 11.5 / 12, color: TERM_INK.text }} ellip flexShrink={1} minWidth={0}>
+            {row.words}
+          </Txt>
+          <Txt spec={{ voice: "data", scale: 11.5 / 12, color: TERM_INK.hint }}>→</Txt>
+          <Txt spec={{ voice: "data", scale: 11.5 / 12, weight: 600, color: "#eceefa" }} ellip flexShrink={1} minWidth={0}>
+            {row.what}
+          </Txt>
+        </View>
+      ))}
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: TERM_INK.dim }} paddingTop={4}>
+        Taken apart as the policy read it. What decided each part is on the approval, when one was asked.
+      </Txt>
+    </View>
+  );
+}
+
+function YouChip(): JSX.Element {
+  return (
+    <View paddingHorizontal={6} borderRadius={4} backgroundColor="rgba(179,182,255,0.18)">
+      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 600, color: TERM_INK.accent }}>you</Txt>
+    </View>
+  );
+}
+
+/** The line you type on: a line sent to its stdin, Ctrl-C, and while it waits, when it ends. */
+function InputLine({ title, waiting, ends, onSend, onInterrupt }: { title: string; waiting: boolean; ends: string | undefined; onSend: (text: string) => void; onInterrupt: () => void }): JSX.Element {
+  const t = useTokens();
+  const [text, setText] = useState("");
+  const [focused, setFocused] = useState(false);
+  const program = title.split(" ")[0] ?? title;
+  return (
+    <View
+      flexDirection="row"
+      alignItems="center"
+      gap={8}
+      height={36}
+      paddingLeft={12}
+      paddingRight={8}
+      backgroundColor={TERM_INK.head}
+      borderTopWidth={1}
+      borderStyle="solid"
+      borderColor={(focused ? "rgba(179,182,255,0.55)" : TERM_INK.line) as never}
+    >
+      <Txt spec={{ voice: "data", scale: 11.5 / 12, color: TERM_INK.accent }}>›</Txt>
+      <TextInput
+        {...(ENTER_KEEPS_FOCUS as object)}
+        value={text}
+        onChangeText={setText}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onSubmitEditing={() => {
+          onSend(text);
+          setText("");
+        }}
+        placeholder={waiting ? `${program} is waiting — type an answer, ⏎ sends it` : `Type to ${program} — ⏎ sends the line`}
+        placeholderTextColor={TERM_INK.dim}
+        accessibilityLabel={`Type to ${program}`}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={{ ...(font(t, { voice: "data", scale: 11.5 / 12, color: TERM_INK.text }) as object), flex: 1, minWidth: 0, ...(isWeb ? { outlineStyle: "none" } : {}) } as never}
+      />
+      {ends !== undefined ? (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: TERM_INK.warn }} numberOfLines={1}>
+          {ends}
+        </Txt>
+      ) : null}
+      <Press onPress={onInterrupt} label="Send Ctrl-C: interrupt it" title="interrupt it" height={24} paddingHorizontal={8} borderRadius={6} borderWidth={1} borderStyle="solid" borderColor="#2f3358" justifyContent="center" box={({ hovered }) => ({ backgroundColor: hovered ? "#262a4d" : "transparent" })}>
+        <Txt spec={{ voice: "data", scale: 11 / 12, color: TERM_INK.text }}>Ctrl-C</Txt>
+      </Press>
+    </View>
+  );
+}
+
+/** The readings, as one joined switch — the value view's, at the terminal's three. */
+function Readings({ reading, onReading }: { reading: Reading; onReading: (reading: Reading) => void }): JSX.Element {
+  const t = useTokens();
+  const all: Array<[Reading, string]> = [
+    ["terminal", "Terminal"],
+    ["text", "Text"],
+    ["command", "Command"],
+  ];
+  return (
+    <View role="group" aria-label="Reading" flexDirection="row" flexShrink={0} borderRadius={6} overflow="hidden" {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+      {all.map(([id, label], i) => {
+        const on = id === reading;
+        return (
+          <Press
+            key={id}
+            onPress={() => onReading(id)}
+            {...({ "aria-pressed": on } as object)}
+            height={22}
+            paddingHorizontal={9}
+            justifyContent="center"
+            {...(i > 0 ? (edge(t, { left: 1 }) as object) : {})}
+            box={({ hovered }) => ({ backgroundColor: on ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
+          >
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: on ? 600 : 400, color: on ? "text" : "dim" }}>{label}</Txt>
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
+
+function Following({ on, onPress }: { on: boolean; onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={onPress}
+      {...({ "aria-pressed": on } as object)}
+      title={on ? "following the end — press to stop" : "follow the end"}
+      flexDirection="row"
+      alignItems="center"
+      gap={5}
+      height={24}
+      paddingHorizontal={9}
+      borderRadius={6}
+      box={({ hovered }) => ({ backgroundColor: on ? t.v("tint-accent") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      <View transform={[{ rotate: "90deg" }]}>
+        <Icon name="arrow" size={12} color={String(t.v(on ? "accent" : "dim"))} />
+      </View>
+      <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: on ? "accent" : "dim" }}>Following</Txt>
+    </Press>
+  );
+}
+
+function IconButton({ icon, label, onPress }: { icon: "copy"; label: string; onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press onPress={onPress} label={label} title={label} width={26} height={24} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered }) => (hovered ? { backgroundColor: t.v("fill-ghost-hover") } : {})}>
+      {({ hovered }: { hovered: boolean }) => <Icon name={icon} size={13} color={String(t.v(hovered ? "text" : "dim"))} />}
+    </Press>
+  );
+}
+
+function StopButton({ onPress }: { onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={onPress}
+      label="Stop it"
+      title="end the command"
+      flexDirection="row"
+      alignItems="center"
+      gap={5}
+      height={24}
+      paddingHorizontal={9}
+      borderRadius={6}
+      borderWidth={1}
+      borderStyle="solid"
+      borderColor={t.mix(t.v("bad"), 35, "transparent") as never}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("tint-bad") : "transparent" })}
+    >
+      <Icon name="stop" size={10} color={String(t.v("bad"))} />
+      <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "bad" }}>Stop</Txt>
+    </Press>
+  );
+}
+
+function MoreButton({ open, onPress }: { open: boolean; onPress: (e: GestureResponderEvent) => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={onPress}
+      label="What else can be done with this"
+      title="What else can be done with this"
+      {...({ "aria-expanded": open } as object)}
+      width={26}
+      height={24}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={5}
+      box={({ hovered }) => ({ backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 600, color: open ? "text" : "dim", lineHeight: { px: 16 } }}>…</Txt>
+    </Press>
+  );
+}
+
+/** How long a finished terminal ran, for a row's note. */
+export function tookOf(startedAt: number, endedAt: number | undefined): string {
+  return durationText((endedAt ?? Date.now()) - startedAt);
+}

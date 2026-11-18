@@ -16,18 +16,20 @@
  * Pure: a value in, a new value out. The shell holds the state and the frame draws it; the rules are
  * tested here without a window.
  */
+import type { CommandDialect } from "@jaira/shared/browser";
 import type { PinnedValue } from "./valuePanel";
 import type { TrailStep } from "./trail";
+import { terminalTitleOf } from "./terminalModel";
 
 /** The tabs a task root offers. The rail's icons are these, in this order. */
 export const TASK_TABS = ["conversation", "steps", "changes", "outputs", "configuration"] as const;
 export type TaskTab = (typeof TASK_TABS)[number];
 /** Beside a conversation that is in the MAIN view — no conversation tab, so it is never on screen twice. */
-export const CONVO_TABS = ["steps", "produced", "changes", "held"] as const;
+export const CONVO_TABS = ["steps", "produced", "changes", "held", "terminals"] as const;
 /** …and, beside the events task's conversation, its automations (`configuration`, see `isEventsTask`). */
 export type ConvoTab = (typeof CONVO_TABS)[number] | "configuration";
-/** Beside a plain chat: a chat has no workflow, so no steps. */
-export const CHAT_TABS = ["produced", "changes", "held"] as const;
+/** Beside a plain chat: a chat has no workflow, so no steps. Terminals: decision 0028, ruling 7. */
+export const CHAT_TABS = ["produced", "changes", "held", "terminals"] as const;
 export type ChatTab = (typeof CHAT_TABS)[number];
 /** A state's three readings. Configuration is hidden while the Files editor holds the same file. */
 export const STATE_TABS = ["run", "checks", "configuration"] as const;
@@ -50,7 +52,9 @@ export type PanelEntry =
   | { kind: "config"; key: string; stateId: string; taskId?: string; instanceId?: string; project?: string | null }
   | { kind: "preview"; key: string; preview: PinnedValue }
   | { kind: "subagent"; key: string; taskId: string; project?: string; step: TrailStep }
-  | { kind: "rerun"; key: string; taskId: string; project?: string };
+  | { kind: "rerun"; key: string; taskId: string; project?: string }
+  /** A shell command's terminal (decision 0028): `terminalEntryOf` makes it, keyed by task and call. */
+  | { kind: "terminal"; key: string; taskId: string; project?: string; callId: string; command: string; dialect: CommandDialect };
 
 export type PanelKind = PanelEntry["kind"];
 
@@ -247,7 +251,22 @@ export function crumbOf(entry: PanelEntry): string {
       return entry.preview.title;
     case "subagent":
       return `⑂ ${entry.step.name ?? entry.step.sidechain ?? entry.step.stateId}`;
+    case "terminal":
+      return terminalTitleOf(entry.command, entry.dialect);
   }
+}
+
+/** A terminal as an entry a pane or the side panel can hold (decision 0028, ruling 3). */
+export function terminalEntryOf(terminal: { taskId: string; project?: string | undefined; callId: string; command: string; dialect: CommandDialect }): PanelEntry {
+  return {
+    kind: "terminal",
+    key: `terminal:${terminal.taskId}:${terminal.callId}`,
+    taskId: terminal.taskId,
+    ...(terminal.project !== undefined ? { project: terminal.project } : {}),
+    callId: terminal.callId,
+    command: terminal.command,
+    dialect: terminal.dialect,
+  };
 }
 
 export function kindWordOf(entry: PanelEntry): string {
@@ -270,6 +289,8 @@ export function kindWordOf(entry: PanelEntry): string {
       return "subagent";
     case "rerun":
       return "a copy with changes";
+    case "terminal":
+      return "a terminal";
   }
 }
 

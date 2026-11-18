@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, type JSX } from "react";
+import { terminals } from "@jaira/ui/terminalStore";
 import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION, type TaskDetail } from "@jaira/shared/browser";
 import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
@@ -340,6 +341,9 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       );
     },
   };
+  // A conversation's Terminals tab counts what runs and what waits (decision 0028): redrawn as a terminal
+  // starts, waits or ends — not on its output, which only the terminal's own view hears.
+  useSyncExternalStore(terminals.subscribe, terminals.stateVersion, terminals.stateVersion);
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   // The panes' faces, for what they draw that is not a conversation or an artifact (`PaneBody`): this
   // host over each pane's own path, so a link inside one goes on that pane's path.

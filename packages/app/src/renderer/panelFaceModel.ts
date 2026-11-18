@@ -44,7 +44,16 @@ export const TAB_ICONS: Record<string, IconKey> = {
   held: "pin",
   run: "play",
   checks: "check",
+  terminals: "terminal",
 };
+
+/**
+ * The Terminals tab (decision 0028, ruling 7): counted while any of the conversation's commands runs,
+ * amber while one waits for the person.
+ */
+export function terminalsTab(running: { count: number; waiting: number } = { count: 0, waiting: 0 }): PanelTabSpec {
+  return tab("terminals", "Terminals", running.count > 0 ? { count: running.count, ...(running.waiting > 0 ? { tone: "amber" as const } : {}) } : {});
+}
 
 /**
  * A status's glyph — the badge before a task's name. Nine entries wide: a panel describing ONE task is
@@ -125,8 +134,8 @@ export function taskVerbsOf(host: VerbHost, detail: TaskDetail, project: string 
  * The panel beside a conversation (a `chat` entry): its tabs — what the conversation produced, what it
  * changed, and what has been held out of it — and its head's words.
  */
-export function chatTabs(held: number): PanelTabSpec[] {
-  return [tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", held > 0 ? { count: held } : {})];
+export function chatTabs(held: number, running?: { count: number; waiting: number }): PanelTabSpec[] {
+  return [tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", held > 0 ? { count: held } : {}), terminalsTab(running)];
 }
 export const chatPanelTitleOf = (detail: TaskDetail | null): string => detail?.title ?? "This conversation";
 export const CHAT_PANEL_SUB = "beside the conversation";

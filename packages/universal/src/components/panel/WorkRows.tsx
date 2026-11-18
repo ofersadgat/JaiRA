@@ -30,6 +30,13 @@ import { PublishedView } from "./PublishedView";
 import { ShownFilesView } from "./ShownFiles";
 import { PublishedList } from "./PublishedList";
 import { Media } from "./ValueReadings";
+import { PlaceButtons } from "./PlaceButtons";
+import { TerminalView } from "../terminal/TerminalView";
+import { useTerminal } from "../terminal/useTerminal";
+import { terminalEntryOf } from "@jaira/ui/panelStack";
+import { PLACES } from "@jaira/ui/splitModel";
+import { moveEntry, useEntryPlaces, usePlacesHere } from "../../app/places";
+import { usePhone } from "../../app/phone";
 
 /**
  * The transcript's work rows: one line of work — a call, a thought, a call being written, a journal
@@ -254,6 +261,14 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const subagentHost = useContext(SubagentHostContext);
   const askedHere = ask?.pending.recovered === true && held.callId === ask.pending.requestId;
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
+  // A shell call JaiRA ran is a terminal (decision 0028): live under its row while it runs, a press away
+  // once it has ended, and placeable as an artifact is.
+  const shell = line.command !== undefined && held.sidechain === undefined && !isHostCall(held) ? line.command : undefined;
+  const term = useTerminal(shell !== undefined ? artifacts?.taskId : undefined, shell !== undefined ? held.callId : undefined, artifacts?.project ?? undefined);
+  const termEntry = term !== undefined ? terminalEntryOf({ taskId: term.summary.taskId, project: artifacts?.project ?? undefined, callId: term.summary.callId, command: term.summary.command, dialect: term.summary.dialect }) : undefined;
+  const termLit = useEntryPlaces(termEntry?.key ?? "");
+  const phone = usePhone();
+  const placesHere = usePlacesHere(phone);
   // What is drawn unasked under the line — a page it produced, its output, a question, an outcome —
   // has its large values fetched; the rest wait for the row to be opened (`Payload`).
   const unasked = line.shown === "produced" || line.shown === "published" || line.shown === "output" || line.shown === "asked" || line.shown === "outcome" || line.shown === "picture";
@@ -276,6 +291,39 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   };
   // The approval prompt, and a permission check: its line is the whole of it.
   if (isHostCall(entry)) return <Row {...head} />;
+  if (term !== undefined && termEntry !== undefined) {
+    const { summary } = term;
+    const card = <TerminalView taskId={summary.taskId} project={artifacts?.project ?? undefined} callId={summary.callId} command={summary.command} dialect={summary.dialect} />;
+    const live = summary.endedAt === undefined;
+    // Shown somewhere else: the row carries the same three buttons, that place lit (the person's
+    // amendment to round 2, 2026-11-18), and draws no second copy.
+    const elsewhere = termLit.length > 0;
+    const offered = PLACES.filter((place) => place === "main" || placesHere[place] || termLit.includes(place));
+    const placed = elsewhere ? <PlaceButtons offered={offered} lit={termLit} onPlace={(place) => moveEntry(place, termEntry, termLit, phone)} /> : undefined;
+    const failed = !live && summary.exitCode !== 0 && summary.stopped !== true;
+    const last = failed ? term.screen.lastText().trim() : "";
+    return (
+      <Row
+        {...head}
+        {...(placed !== undefined ? { note: placed } : {})}
+        {...(live && !elsewhere ? { shown: card } : {})}
+        {...(failed && last.length > 0 && !elsewhere
+          ? {
+              shown: (
+                <View flexDirection="row" alignItems="center" gap={8} minWidth={0} marginTop={-2}>
+                  <Txt spec={{ voice: "data", scale: 11 / 12, weight: 600, color: "bad" }}>{summary.timedOut === true ? "timed out" : `exit ${String(summary.exitCode ?? summary.signal ?? "?")}`}</Txt>
+                  <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>·</Txt>
+                  <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} ellip flex={1} minWidth={0}>
+                    {last}
+                  </Txt>
+                </View>
+              ),
+            }
+          : {})}
+        {...(!live && !elsewhere ? { body: <View paddingTop={4} paddingBottom={6} minWidth={0}>{card}</View> } : {})}
+      />
+    );
+  }
   const shown = ((): ReactNode => {
     if (line.shown === "sidechain") {
       const hosted = subagentHost?.(entry.sidechain!);

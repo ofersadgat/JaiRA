@@ -166,6 +166,10 @@ export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean
   // A subagent's call: its conversation is a child of this one, not a step of it.
   if (entry.sidechain !== undefined) return true;
   if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;
+  // A shell command still running is a terminal somebody may be watching or need to answer (decision
+  // 0028): drawn under the summary until its result lands, and folded back into it then. A call cut off
+  // with no result (the app closed under it) is drawn too, its row saying no result was recorded.
+  if (entry.result === undefined && entry.ok === undefined && shellLineOf(entry) !== undefined) return true;
   if (maybePublished(entry)) return calls?.replaced?.has(entry) !== true;
   return workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false && calls?.outcomes !== "rail";
 }

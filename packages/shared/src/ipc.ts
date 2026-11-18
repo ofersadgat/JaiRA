@@ -46,6 +46,7 @@ import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { SyncPage } from "./sync";
 import type { CommandApproval, PartAnswer } from "./commandParts";
+import type { TerminalRead, TerminalSignal, TerminalSummary } from "./terminals";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
 import type { McpDetectedSource, McpToolsReport } from "./mcp";
@@ -2063,6 +2064,27 @@ export interface IpcContract {
    */
   "chat:cancel": { request: { taskId: string; project?: string }; response: { canceled: boolean } };
   /**
+   * A task's terminals (decision 0028): every command its agents ran through JaiRA's `shell`, and
+   * every one the person ran in its workspace, that the engine still keeps — oldest first. This
+   * engine's memory: empty after it restarts. `terminal:state` and `terminal:output` keep it current.
+   */
+  "terminal:list": { request: { taskId: string; project?: string }; response: TerminalSummary[] };
+  /** One terminal whole, its kept output included; null when the engine no longer has it. */
+  "terminal:read": { request: { taskId: string; callId: string; project?: string }; response: TerminalRead | null };
+  /**
+   * Type into a running command: `text` is written to its stdin as given (a line carries its own
+   * newline). Restarts the command's time limit. `sent: false` when it has ended or is not kept.
+   */
+  "terminal:input": { request: { taskId: string; callId: string; text: string; project?: string }; response: { sent: boolean } };
+  /** Interrupt (Ctrl-C) or stop a running command's whole process tree. */
+  "terminal:signal": { request: { taskId: string; callId: string; signal: TerminalSignal; project?: string }; response: { sent: boolean } };
+  /**
+   * Run a command line in the conversation's workspace as the person (decision 0028, ruling 8): no
+   * permission set is asked. It is a terminal like any other, `by: "you"`, and the person's next
+   * message carries it to the agent.
+   */
+  "terminal:run": { request: { taskId: string; command: string; project?: string }; response: TerminalSummary };
+  /**
    * The composer's settings changed: they are the conversation's now (`TaskMeta.chatSettings`), what
    * its composer opens with next time, and what its next message is sent with.
    *
@@ -2746,6 +2768,11 @@ export const IPC_CHANNELS = [
   "chat:startPlan",
   "chat:send",
   "chat:cancel",
+  "terminal:list",
+  "terminal:read",
+  "terminal:input",
+  "terminal:signal",
+  "terminal:run",
   "chat:settings",
   "chat:thread",
   "log:list",
@@ -3272,6 +3299,18 @@ export type PushMessage =
    * machine's.
    */
   | { type: "install:output"; target: InstallTarget; text: string }
+  /**
+   * What a terminal printed since the last of these (decision 0028): raw, from character `from` of its
+   * whole output — gathered for 80 ms and sent together. A window holding fewer characters than
+   * `from` missed some and reads the terminal again (`terminal:read`).
+   */
+  | { type: "terminal:output"; taskId: string; project?: string; callId: string; from: number; text: string }
+  /**
+   * A terminal started, was typed into, or ended: its facts as they now stand. `project` is the
+   * engine's key for it, rewritten when another machine's push is relayed (`Federation.relay`);
+   * `terminal.project` is not, so a window addresses the terminal by the conversation it is in.
+   */
+  | { type: "terminal:state"; project?: string; terminal: TerminalSummary }
 
 /** Whose install an `install:output` is: an agent, by its executor's name, or a git program. */
 export interface InstallTarget {

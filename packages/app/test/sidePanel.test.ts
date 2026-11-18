@@ -70,7 +70,13 @@ describe("the conversation's context", () => {
   });
 
   it("beside a plain chat has no Steps either", () => {
-    expect(chatTabs(0).map((one) => one.id)).toEqual(["produced", "changes", "held"]);
+    expect(chatTabs(0).map((one) => one.id)).toEqual(["produced", "changes", "held", "terminals"]);
+  });
+
+  it("counts the conversation's running commands on its Terminals tab, amber while one waits (decision 0028)", () => {
+    expect(chatTabs(0).at(-1)).not.toHaveProperty("count");
+    expect(chatTabs(0, { count: 2, waiting: 0 }).at(-1)).toMatchObject({ id: "terminals", count: 2 });
+    expect(chatTabs(0, { count: 2, waiting: 1 }).at(-1)).toMatchObject({ count: 2, tone: "amber" });
   });
 });
 

@@ -627,6 +627,9 @@ let installed: LogSink | undefined;
  */
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
+import { TerminalHub } from "./terminals";
+import { createShellTool } from "@jaira/runtime";
+import type { TerminalRead, TerminalSignal, TerminalSummary } from "@jaira/shared";
 import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
@@ -5746,8 +5749,9 @@ export class AppService {
         secret: (name) => this.secretResolver(open).lookup(name)?.value,
       });
       // Our own tools, so an agent's commands go through the policy at all: an agent
-      // calling its native shell would be invisible to it (DESIGN §10.1).
-      registerTools(registry, { execEnv: config.execEnvironment, exec });
+      // calling its native shell would be invisible to it (DESIGN §10.1). Each call is a terminal a
+      // window can watch and type into (decision 0028).
+      registerTools(registry, { execEnv: config.execEnvironment, exec, terminals: this.terminals.forTask(taskId, open.key) });
       // A state can also run a command directly, without delegating to an agent; it
       // gates itself with the same policy (DESIGN §10.1).
       registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
@@ -7098,7 +7102,12 @@ export class AppService {
     // ticked `read_file` got `tool 'read_file' is not registered` — the loud failure that call is
     // designed to give for a name nobody registered, raised here for a wiring gap instead.
     const registry = newRegistry();
-    registerTools(registry, { execEnv: config.execEnvironment, exec: new NodeExec({ execEnv: config.execEnvironment }) });
+    registerTools(registry, {
+      execEnv: config.execEnvironment,
+      exec: new NodeExec({ execEnv: config.execEnvironment }),
+      // Each command a terminal the conversation can watch and type into (decision 0028).
+      terminals: this.terminals.forTask(request.taskId, open.key),
+    });
     // The same artifact wiring the run used, so a file this turn writes lands where that run's files
     // landed rather than somewhere only this conversation knows about.
     //
@@ -7520,6 +7529,55 @@ export class AppService {
     for (const abort of turns) abort.abort();
     open.chatTurns.delete(request.taskId);
     return { canceled: true };
+  }
+
+  // --- terminals (decision 0028) ---------------------------------------------
+
+  /** The commands a task's agents and the person ran, as this engine still keeps them — see `TerminalHub`. */
+  readonly terminals = new TerminalHub((message) => this.publish(message));
+
+  terminalList(request: { taskId: string }): TerminalSummary[] {
+    return this.terminals.list(request.taskId);
+  }
+
+  terminalRead(request: { taskId: string; callId: string }): TerminalRead | null {
+    return this.terminals.read(request.taskId, request.callId);
+  }
+
+  terminalInput(request: { taskId: string; callId: string; text: string }): { sent: boolean } {
+    return { sent: this.terminals.input(request.taskId, request.callId, request.text) };
+  }
+
+  terminalSignal(request: { taskId: string; callId: string; signal: TerminalSignal }): { sent: boolean } {
+    return { sent: this.terminals.signal(request.taskId, request.callId, request.signal) };
+  }
+
+  /**
+   * Run a line in a conversation's workspace as the person (decision 0028, ruling 8): the workspace a
+   * turn of it would run in (its worktree, else the project directory), through the same shell tool
+   * and so the same interpreter, with no permission set asked and no time limit. Returns as soon as it
+   * has started; it is a terminal like any other from then on.
+   */
+  terminalRun(request: { taskId: string; command: string; project?: string }): TerminalSummary {
+    const command = request.command.trim();
+    if (command.length === 0) throw new Error("no command given");
+    const open = this.session(request.project);
+    const project = open.project;
+    const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
+    const root = recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
+    const execEnv = project.config.execEnvironment;
+    const callId = this.terminals.nextYours();
+    const tool = createShellTool({
+      execEnv,
+      exec: new NodeExec({ execEnv }),
+      timeoutMs: 0,
+      terminals: { open: (call) => this.terminals.open(request.taskId, open.key, { ...call, callId, by: "you" }) },
+    });
+    // What it prints and how it ends reach the window through the terminal; a failure to start ends it.
+    void Promise.resolve(tool.run({ command }, { workspace: { root } } as never)).catch(() => undefined);
+    const read = this.terminals.read(request.taskId, callId);
+    if (read === null) throw new Error("the command could not be started");
+    return read.summary;
   }
 
   /** How a permission set reference is followed in this project — the reader a state's `tools` is followed with. */

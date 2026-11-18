@@ -102,10 +102,44 @@ export interface ToolOptions {
   execEnv?: ExecEnv;
   /** Fallback working directory when the operation has no workspace. */
   cwd?: string;
-  /** Per-command timeout; a hung command would otherwise stall the run. */
+  /** Per-command timeout; a hung command would otherwise stall the run. 0 is no limit, with `terminals` only. */
   timeoutMs?: number;
   /** Cap on captured output, so a runaway command cannot balloon the transcript. */
   maxOutputChars?: number;
+  /**
+   * Where each call's process is shown as it runs (decision 0028): given, every call opens a terminal
+   * there, streams its output to it, and lets a person type into it and stop it. The model's result is
+   * what it was, with what the person typed added as `input`.
+   */
+  terminals?: ShellTerminals;
+}
+
+/** The terminals a shell tool streams its calls to — the service's per-task hub. */
+export interface ShellTerminals {
+  /** A call is starting; undefined when nobody is keeping its terminal. */
+  open(call: { callId: string | undefined; command: string; cwd: string | undefined; dialect: CommandDialect }): ShellCallTerminal | undefined;
+}
+
+/** One call's terminal, as the shell tool feeds it. */
+export interface ShellCallTerminal {
+  /** What the process printed, stdout and stderr alike, as it arrives. */
+  output(text: string): void;
+  /** The process exists: how a person reaches it. */
+  attach(io: ShellCallIo): void;
+  /** The process has closed. */
+  ended(end: { exitCode: number | null; signal: string | null; timedOut: boolean; stopped: boolean }): void;
+}
+
+/** How a person reaches a running call. */
+export interface ShellCallIo {
+  /** Write to the command's stdin, as given; restarts its time limit. False once it has closed its stdin. */
+  type(text: string): boolean;
+  /** Ctrl-C: SIGINT to the command's process tree. */
+  interrupt(): void;
+  /** End it: SIGTERM to the command's process tree. */
+  stop(): void;
+  /** When the time limit ends, epoch ms. */
+  endsAt(): number | undefined;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -162,6 +196,17 @@ export function createShellTool(options: ToolOptions = {}): Tool {
       const env: ExecEnv = options.execEnv ?? "windows";
       const [interpreter, ...prefix] = interpreterFor(env);
 
+      const terminal = options.terminals?.open({ callId: ctx?.toolCallId, command, cwd, dialect: dialectFor(env) });
+      if (terminal !== undefined) {
+        return runInTerminal(exec, terminal, [interpreter!, ...prefix, command], {
+          ...(cwd !== undefined ? { cwd } : {}),
+          execEnv: env,
+          limitMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          max: options.maxOutputChars ?? DEFAULT_MAX_OUTPUT,
+          ...(ctx?.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
+        });
+      }
+
       const result = await exec.run(interpreter, [...prefix, command], {
         ...(cwd !== undefined ? { cwd } : {}),
         execEnv: env,
@@ -178,6 +223,92 @@ export function createShellTool(options: ToolOptions = {}): Tool {
       };
     },
   } as Tool;
+}
+
+/**
+ * A shell call run where a person can watch it (decision 0028): its output streams to `terminal`, its
+ * stdin stays open for what the person types, and the time limit is this function's, not exec's, so
+ * that typing restarts it — a command waiting on a question is not killed while someone answers it.
+ * The model's result is the same shape as an unwatched call's, with `input` (each line the person
+ * typed) and `stopped` (a person stopped it) added when they happened.
+ */
+async function runInTerminal(
+  exec: Exec,
+  terminal: ShellCallTerminal,
+  argv: readonly string[],
+  options: { cwd?: string; execEnv: ExecEnv; limitMs: number; max: number; abortSignal?: AbortSignal },
+): Promise<Record<string, unknown>> {
+  const [file, ...args] = argv;
+  const limit = new AbortController();
+  let timedOut = false;
+  let stopped = false;
+  let endsAt: number | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = (): void => {
+    // No limit at all (0): what the person runs runs until it ends or is stopped.
+    if (options.limitMs <= 0) return;
+    if (timer !== undefined) clearTimeout(timer);
+    endsAt = Date.now() + options.limitMs;
+    timer = setTimeout(() => {
+      timedOut = true;
+      limit.abort();
+    }, options.limitMs);
+  };
+  arm();
+  // The turn's stop and the time limit, as one signal for exec to kill the tree on.
+  const onTurnAbort = (): void => limit.abort();
+  if (options.abortSignal?.aborted) limit.abort();
+  else options.abortSignal?.addEventListener("abort", onTurnAbort, { once: true });
+
+  const typed: string[] = [];
+  let pending = "";
+  try {
+    const result = await exec.run(file!, args, {
+      ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      execEnv: options.execEnv,
+      abortSignal: limit.signal,
+      onOutput: (_stream, chunk) => terminal.output(chunk),
+      interactive: (io) =>
+        terminal.attach({
+          type: (text) => {
+            const sent = io.write(text);
+            if (!sent) return false;
+            arm();
+            // Kept by line, for the model: what was answered for it.
+            pending += text;
+            const lines = pending.split(/\r?\n/);
+            pending = lines.pop() ?? "";
+            typed.push(...lines);
+            return true;
+          },
+          interrupt: () => {
+            stopped = true;
+            io.signal("SIGINT");
+          },
+          stop: () => {
+            stopped = true;
+            io.signal("SIGTERM");
+          },
+          endsAt: () => endsAt,
+        }),
+    });
+    if (pending.length > 0) typed.push(pending);
+    terminal.ended({ exitCode: result.code, signal: result.signal, timedOut, stopped: stopped || (result.aborted && !timedOut) });
+    return {
+      exitCode: result.code,
+      stdout: clamp(result.stdout, options.max),
+      stderr: clamp(result.stderr, options.max),
+      ...(timedOut ? { timedOut: true } : {}),
+      ...(stopped ? { stopped: true } : {}),
+      ...(typed.length > 0 ? { input: typed } : {}),
+    };
+  } catch (error) {
+    terminal.ended({ exitCode: null, signal: null, timedOut, stopped });
+    throw error;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    options.abortSignal?.removeEventListener("abort", onTurnAbort);
+  }
 }
 
 /** Register JaiRA's tool set on a registry's `tools` facet. */

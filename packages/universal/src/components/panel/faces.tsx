@@ -1,8 +1,12 @@
 import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
 import { isWritableLayer, type ArtifactSummary, type InstanceNode, type PendingInteraction, type StateView, type TaskDetail, type WritableLayer } from "@jaira/shared/browser";
-import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
-import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, terminalsTab, type PanelVerb } from "@jaira/ui/panelFaceModel";
+import { crumbOf, pop, push, selectStep, setTab, terminalEntryOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { terminals } from "@jaira/ui/terminalStore";
+import { TerminalView } from "../terminal/TerminalView";
+import { TerminalsTab } from "../terminal/TerminalsTab";
+import { runningOf } from "../terminal/useTerminal";
 import { View } from "@tamagui/core";
 import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
 import type { ConfigPanelServices } from "@jaira/ui/configPanelModel";
@@ -397,6 +401,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
             return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
             return <HeldView held={host.held} onOpen={(item) => pushPreview(host, item as PinnedValue)} onDrop={(item) => host.unhold(item as PinnedValue)} dropIcon={(item) => dropIcon(host)(item as PinnedValue)} />;
+          case "terminals":
+            return <TerminalsTab taskId={detail.taskId} project={project} onOpen={(terminal) => host.onStack((was) => push(was, terminalEntryOf({ ...terminal, project })))} />;
           case "configuration":
             // The conversation is the main view's already, so "open it" has nowhere else to go.
             return isEventsTask(detail) ? host.automationsOf(project, () => undefined) : null;
@@ -414,6 +420,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
           tab("produced", "Produced"),
           tab("changes", "Changes"),
           tab("held", "Held", host.held.length > 0 ? { count: host.held.length } : {}),
+          terminalsTab(runningOf(terminals.listOf(entry.taskId))),
           ...(isEventsTask(detail) ? [tab("configuration", "Automations")] : []),
         ],
         tab: entry.tab,
@@ -430,13 +437,15 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         title,
         titleText: title,
         sub: CHAT_PANEL_SUB,
-        tabs: chatTabs(host.held.length),
+        tabs: chatTabs(host.held.length, runningOf(terminals.listOf(entry.taskId))),
         tab: entry.tab,
         body:
           entry.tab === "produced" ? (
             <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} onShow={produced(host, serveOf(entry.taskId, project))} />
           ) : entry.tab === "changes" ? (
             <ChangesPanel taskId={entry.taskId} project={project} signal={`${detail?.status}:${detail?.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />
+          ) : entry.tab === "terminals" ? (
+            <TerminalsTab taskId={entry.taskId} project={project} onOpen={(terminal) => host.onStack((was) => push(was, terminalEntryOf({ ...terminal, project })))} />
           ) : (
             <HeldView held={host.held} onOpen={(item) => pushPreview(host, item as PinnedValue)} onDrop={(item) => host.unhold(item as PinnedValue)} dropIcon={(item) => dropIcon(host)(item as PinnedValue)} />
           ),
@@ -562,6 +571,20 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
             />
           ),
       };
+
+    case "terminal": {
+      // Decision 0028, ruling 3: the terminal fills what holds it; the head names it.
+      const project = entry.project ?? host.project;
+      return {
+        glyph: <Glyph name="terminal" />,
+        // The program, as a pane's crumb and tab name it; the whole line is the screen's first.
+        title: crumbOf(entry),
+        titleText: crumbOf(entry),
+        body: <TerminalView taskId={entry.taskId} project={project} callId={entry.callId} command={entry.command} dialect={entry.dialect} fill />,
+        full: true,
+        scroll: false,
+      };
+    }
   }
 }
 

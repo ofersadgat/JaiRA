@@ -17,7 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { hostNode, resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
-import { killTree, type KillTreeOptions } from "./killTree";
+import { detachedForTree, killTree, type KillTreeOptions } from "./killTree";
 
 export interface ExecOptions {
   cwd?: string;
@@ -36,8 +36,24 @@ export interface ExecOptions {
    * swallowed: watching is not the work.
    */
   onOutput?: (stream: "stdout" | "stderr", chunk: string) => void;
+  /**
+   * A command somebody can type into and stop (decision 0028): called once the process exists, with
+   * its stdin kept open and a way to signal its whole tree. The child is spawned in its own process
+   * group (`detachedForTree`), so an interrupt or a stop reaches what the shell started, not only the
+   * shell. Ignored when `stdin` is given, which closes the pipe.
+   */
+  interactive?: (io: ExecIo) => void;
   /** Overrides for Windows program resolution — injected by tests, never set in production. */
   program?: ProgramDeps;
+}
+
+/** What `ExecOptions.interactive` hands over: the running child's stdin and its tree's signals. */
+export interface ExecIo {
+  /** Write to the child's stdin; false once the pipe has closed. */
+  write(text: string): boolean;
+  /** Signal the child and everything it started (`killTree`). */
+  signal(signal: NodeJS.Signals): void;
+  pid?: number;
 }
 
 export interface ExecResult {
@@ -183,6 +199,8 @@ export class NodeExec implements Exec {
         windowsHide: true,
         // No shell: arguments stay literal (see the module note).
         shell: false,
+        // A command somebody may interrupt is its own group, so the interrupt reaches its children.
+        ...(merged.interactive !== undefined && merged.stdin === undefined ? detachedForTree : {}),
       });
 
       // Observed after spawn, so `pid` is real. A throwing observer must not take
@@ -284,6 +302,22 @@ export class NodeExec implements Exec {
         observeExit(code, signal);
         resolve({ code, signal, stdout, stderr, command: printable, timedOut, aborted });
       });
+
+      if (merged.interactive !== undefined && merged.stdin === undefined) {
+        // As below: a program that exits without reading its stdin closes the pipe under a write.
+        child.stdin?.on("error", () => undefined);
+        try {
+          merged.interactive({
+            write: (text) => (child.stdin !== null && child.stdin.writable ? child.stdin.write(text) : false),
+            signal: (signal) => {
+              if (child.exitCode === null && child.signalCode === null) killTree(child, signal, this.defaults.killTree);
+            },
+            ...(child.pid !== undefined ? { pid: child.pid } : {}),
+          });
+        } catch {
+          // The watcher's own failure; the command goes on without it.
+        }
+      }
 
       if (merged.stdin !== undefined) {
         // A program that exits without reading its stdin (`git --version`, an installer that fails at

@@ -19,6 +19,8 @@ import { conversationAnswering, openingRunAnswering, stillRunningIn } from "./ch
 import { askDrawnAtItsCall } from "./approvalCall";
 import { seenClockOf } from "./pillModel";
 import type { CutSide } from "./transcriptViewTypes";
+import { terminals } from "./terminalStore";
+import { yourCommandsNote } from "./terminalModel";
 
 /**
  * What the box is ARMED for beyond a reply — see `EditMessage`.
@@ -292,6 +294,10 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       return;
     }
     setSending((n) => n + 1);
+    // The person's own commands since the last message go with this one (decision 0028, ruling 8) —
+    // in its text, so what the agent is told is what the person sees sent.
+    const yours = armed?.kind === "edit" ? [] : terminals.takeYours(taskId);
+    if (yours.length > 0) message = `${message}\n\n${yourCommandsNote(yours)}`;
     setSent((was) => [...was, message]);
     const at = armed?.kind === "edit" ? armed.at : undefined;
     // Sending re-pins. Typing into the box is the clearest possible statement that the live edge is

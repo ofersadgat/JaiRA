@@ -6,6 +6,7 @@ import {
   followedEntry,
   followedSplit,
   leaveArtifactPane,
+  leavePane,
   litPlacesOf,
   openInPane,
   openPathInPane,
@@ -130,6 +131,41 @@ export function pressPlace(target: Place, lit: readonly Place[], ref: PublishedR
     return;
   }
   placeArtifact(target, ref, artifacts, phone, follows);
+}
+
+/**
+ * The places an entry stands in now, by its key — what a terminal's place buttons light (decision
+ * 0028, ruling 2): the main view when the first pane shows it, Split when the second does, the side
+ * panel when it is on top there.
+ */
+export function useEntryPlaces(key: string): Place[] {
+  const split = splitView.use();
+  const panel = panelTop.use();
+  const first = topOfPath(split.panes[0])?.key;
+  const second = topOfPath(split.panes[1])?.key;
+  const top = panel?.key;
+  return useMemo(() => [...(first === key ? (["main"] as const) : []), ...(second === key ? (["split"] as const) : []), ...(top === key ? (["panel"] as const) : [])], [first, second, top, key]);
+}
+
+/**
+ * A place button of something that is not an artifact pressed (a terminal): MOVED there, closed where it
+ * was — as an artifact's are (decision 0025, ruling 1). Pressed where it is lit, the side panel closes and
+ * a pane stays as it is.
+ */
+export function moveEntry(target: Place, entry: PanelEntry, lit: readonly Place[], phone: boolean): void {
+  if (lit.includes(target)) {
+    if (target === "panel") closePanel();
+    return;
+  }
+  for (const place of lit) {
+    if (place === "panel") panelOnStack.get()?.((was) => (was.entries.length > 1 ? pop(was) : close(was)));
+    else {
+      const pane = paneOfPlace(place);
+      const split = splitView.get();
+      if (topOfPath(split.panes[pane])?.key === entry.key) splitView.set(leavePane(split, pane));
+    }
+  }
+  placeEntry(target, entry, phone);
 }
 
 /** Anything a pane holds, to a place: an artifact moves as its buttons move it; anything else is opened there. */

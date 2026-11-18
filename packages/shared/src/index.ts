@@ -52,6 +52,7 @@ export * from "./mcp";
 export * from "./permissionSetBuckets";
 export * from "./commandParts";
 export * from "./shellCommand";
+export * from "./terminals";
 export * from "./shellTables";
 export * from "./systemCommands";
 export * from "./changeLog";
