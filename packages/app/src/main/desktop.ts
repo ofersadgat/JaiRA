@@ -726,6 +726,13 @@ async function dispatch(channel: IpcChannel, request: unknown): Promise<unknown>
     if (link === undefined) throw new Error("the engine is not reachable yet — JaiRA is finding or starting it");
     return await link.invoke(channel, request);
   } catch (e) {
+    // Quitting (`before-quit`): the engine drains and closes its databases while the window still
+    // stands and still asks, since closing them moves what it watches — and what it asks is refused
+    // ("project '~/.jaira' is not open", "no project is open"), each printed by Electron and logged
+    // as a failure, about an app that is going. Every request is still TRIED, so a layout or a draft
+    // kept in the drain's first moments lands; one that fails is held rather than rejected. Once
+    // `closing` is set the quit always ends the process, so nothing is left waiting on it.
+    if (closing) return await new Promise<never>(() => undefined);
     // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
     // and still shows the message — but the failure is no longer invisible to everyone else. Every
     // handler failure in the app becomes one line naming the channel, for six lines here.
