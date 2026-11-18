@@ -77,6 +77,19 @@ describe("config", () => {
     expect(() => parseConfig({ agents: { genericCli: [{ command: "x", env: { A: 1 } }] } })).toThrow(/env/);
     expect(() => parseConfig({ agents: [] })).toThrow(/must be an object/);
   });
+
+  it("takes a generic CLI's `mcp` block, and refuses one that could never point the binary at the bridge", () => {
+    const mcp = { env: { OPENCODE_CONFIG: "{mcpConfig}" }, config: { mcp: { dai: { type: "remote", url: "{mcpUrl}" } } }, configName: "opencode.json", builtinsOff: true };
+    expect(parseConfig({ agents: { genericCli: [{ command: "opencode", mcp }] } }).agents.genericCli?.[0]?.mcp).toEqual(mcp);
+    expect(parseConfig({ agents: { genericCli: [{ command: "x", mcp: { args: ["--mcp", "{mcpUrl}"] } }] } }).agents.genericCli?.[0]?.mcp).toEqual({ args: ["--mcp", "{mcpUrl}"] });
+    const refused = (block: unknown) => () => parseConfig({ agents: { genericCli: [{ command: "x", mcp: block }] } });
+    expect(refused([])).toThrow(/\.mcp must be an object/);
+    expect(refused({ builtinsOff: true })).toThrow(/never names \{mcpUrl\} or \{mcpConfig\}/);
+    expect(refused({ args: ["--config", "{mcpConfig}"] })).toThrow(/names \{mcpConfig\} but has no config/);
+    expect(refused({ args: ["{mcpUrl}"], configName: "../x.json" })).toThrow(/configName must be a file name/);
+    expect(refused({ args: ["{mcpUrl}"], builtinsOff: "yes" })).toThrow(/builtinsOff must be true or false/);
+    expect(refused({ args: ["{mcpUrl}"], url: "x" })).toThrow(/url/);
+  });
 });
 
 describe("json", () => {

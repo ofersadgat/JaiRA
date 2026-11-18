@@ -57,7 +57,7 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { resolveInvocation } from "./exec";
-import type { ExecEnv } from "./paths";
+import { isWslEnv, type ExecEnv } from "./paths";
 
 // --- what a process is handed ------------------------------------------------------
 
@@ -181,7 +181,9 @@ export function mcpServersOfCall(servers: Record<string, ResolvedMcpServer>, vie
  * and every URL, are unchanged.
  */
 export function mcpServersIn(servers: Record<string, ResolvedMcpServer>, execEnv: ExecEnv | undefined): Record<string, ResolvedMcpServer> {
-  if (execEnv === undefined || execEnv === "windows") return servers;
+  // Only WSL moves them: a workspace's container (decision 0027) holds the commands JaiRA runs, and a
+  // server, like the agent it serves, is the machine's.
+  if (execEnv === undefined || !isWslEnv(execEnv)) return servers;
   const out: Record<string, ResolvedMcpServer> = {};
   for (const [name, server] of Object.entries(servers)) {
     if (!("command" in server)) {
@@ -367,7 +369,7 @@ export const listMcpTools: McpLister = async (server, options) => {
  */
 function stdioTransport(mcp: McpSdk, server: Extract<ResolvedMcpServer, { command: string }>, execEnv: ExecEnv | undefined): StdioClientTransport {
   const env = { ...mcp.getDefaultEnvironment(), ...server.env };
-  if (execEnv !== undefined && execEnv !== "windows") {
+  if (execEnv !== undefined && isWslEnv(execEnv)) {
     const { file, argv } = resolveInvocation(server.command, server.args, { execEnv, ...(server.cwd !== undefined ? { cwd: server.cwd } : {}) });
     return new mcp.StdioClientTransport({ command: file, args: argv, env: { ...env, ...wslenvOf(server.env) }, stderr: "pipe" });
   }

@@ -258,10 +258,14 @@ describe("a direct call is brought down from the gate's loosest mode to its own 
     expect(policy.scopeOf!({ name: "read_file" }, { path: "src/a.ts" } as FunctionInputs, block(decl) as never)).toBe("deny");
     // Nothing reaches past the floor: a place the floor never named is refused, whatever the line allows.
     expect(policy.scopeOf!({ name: "read_file" }, { path: "/etc/x" } as FunctionInputs, block({ read_file: "allow" }) as never)).toBe("deny");
-    // …nor past `.jaira/`, which a shell line is refused outright.
-    const jaira = { command: "cat .jaira/settings.json" };
-    expect(policy.scopeOf!({ name: "shell" }, jaira as FunctionInputs, block({ shell: { "**": "allow" }, read_file: "allow" }) as never)).toBe("deny");
-    expect(commandDecisionOf(jaira)!.parts.parts[0]!.decidedBy.source).toBe("path");
+    // A shell line's parts answer to their lines' places here too. `.jaira/` is no rule of the policy's:
+    // it is refused where a line's place says so — as every set JaiRA ships does — and read where the
+    // read line allows it.
+    const lines = { shell: { "**": "allow" }, read_file: "allow", write_file: { "**": "allow", "$PROJECT/.jaira": "deny" } };
+    const write = { command: "echo x > .jaira/settings.json" };
+    expect(policy.scopeOf!({ name: "shell" }, write as FunctionInputs, block(lines) as never)).toBe("deny");
+    expect(commandDecisionOf(write)!.parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "write_file", place: "$PROJECT/.jaira" });
+    expect(policy.scopeOf!({ name: "shell" }, { command: "cat .jaira/settings.json" } as FunctionInputs, block(lines) as never)).not.toBe("deny");
   });
 });
 

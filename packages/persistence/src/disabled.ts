@@ -16,10 +16,11 @@
  */
 import { createLogger } from "@declarative-ai/log";
 import { expandReferences, stateIdFromPath, type LoadBundleOptions } from "@declarative-ai/hw";
-import { disabledBy, disabledWords, refusal, type JairaPaths } from "@jaira/shared";
+import { disabledBy, disabledWords, refusal, type JairaPaths, type WorkflowLayer } from "@jaira/shared";
 import type { Project } from "./project";
 import { readWorkflowsTolerantly } from "./workflows";
 import { workflowLoadOptions } from "./workflowRefs";
+import { workflowLayerDirs } from "./fileLayers";
 
 const log = createLogger("jaira.persistence.disabled");
 
@@ -54,11 +55,14 @@ export function disabledAmong(winning: ReadonlyMap<string, unknown>, options: Lo
 }
 
 /**
- * The layer directories a project searches, in order — its own, the Shared root's, the built-in one —
- * each once.
+ * The layer directories a project searches, in order — the settings' six, most specific first, then the
+ * built-in one (decision 0023, amended 2026-11-18) — each once. `upTo`: only that layer and those under
+ * it, what a page on it sees.
  */
-function layerDirsOf(paths: JairaPaths): string[] {
-  return [...new Set([paths.workflowsDir, paths.base.workflowsDir, paths.builtIn.workflowsDir])];
+function layerDirsOf(paths: JairaPaths, upTo?: WorkflowLayer): string[] {
+  const all = workflowLayerDirs(paths);
+  const at = upTo === undefined ? 0 : Math.max(0, all.findIndex((one) => one.layer === upTo));
+  return [...new Set(all.slice(at).map((one) => one.dir))];
 }
 
 /**
@@ -73,9 +77,9 @@ export function disabledStatesOf(project: Project): string[] {
  * {@link disabledStatesOf} over any layer layout — a project's, or the shared root's on its own
  * (`baseAsProjectPaths`), where what Shared says is all there is above what ships.
  */
-export function disabledStatesIn(paths: JairaPaths, searchPath?: readonly string[]): string[] {
+export function disabledStatesIn(paths: JairaPaths, searchPath?: readonly string[], upTo?: WorkflowLayer): string[] {
   const winning = new Map<string, unknown>();
-  for (const dir of layerDirsOf(paths)) {
+  for (const dir of layerDirsOf(paths, upTo)) {
     for (const [file, raw] of Object.entries(readWorkflowsTolerantly(dir, { scripts: false }).files)) {
       const stateId = stateIdFromPath(file);
       if (!winning.has(stateId)) winning.set(stateId, raw);

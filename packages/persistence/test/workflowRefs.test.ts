@@ -247,17 +247,26 @@ describe("the project search path", () => {
     expect(op.config).toEqual({ model: "from-default-path" });
   });
 
-  it("keeps the workflows dir first, whatever the config asks for", () => {
-    // Even asked to put another root first, the workflows dir leads — otherwise every bare state id
-    // in the project would re-identify.
+  /** The settings' four newer layers' `workflows/`, most specific first (decision 0023, amended 2026-11-18). */
+  const nearer = (): string[] => {
+    const base = project.paths.base.baseDir;
+    const projectYou = (workflowLoadOptions(project.paths).defaultRoot as string[])[0]!;
+    expect(projectYou.startsWith(join(base, "projects"))).toBe(true);
+    return [projectYou, join(base, "personal", "workflows"), join(project.paths.jairaDir, "local", "workflows"), join(base, "machine", "workflows")];
+  };
+
+  it("keeps the workflows dir first after the settings' newer layers, whatever the config asks for", () => {
+    // Even asked to put another root first, the newer layers and then the workflows dir lead —
+    // otherwise a project root could stand in front of a person's override.
     const options = workflowLoadOptions(project.paths, { path: ["$JAIRA/functions"] });
-    expect((options.defaultRoot as string[])[0]).toBe(project.paths.workflowsDir);
+    expect((options.defaultRoot as string[]).slice(0, 5)).toEqual([...nearer(), project.paths.workflowsDir]);
   });
 
   it("generates the layer path when nothing is configured", () => {
     // One source of truth: `paths.roots` in, `<root>/workflows` + `<root>/functions` out. Nothing
     // is written down twice, so adding a layer later cannot leave a stale constant behind.
     expect(workflowLoadOptions(project.paths).defaultRoot).toEqual([
+      ...nearer(),
       project.paths.workflowsDir,
       join(project.paths.jairaDir, "functions"),
       project.paths.base.workflowsDir,
@@ -268,12 +277,13 @@ describe("the project search path", () => {
     ]);
   });
 
-  it("exposes the layer roots a bare `$` searches", () => {
-    expect(workflowLoadOptions(project.paths).rootPath).toEqual([
-      project.paths.jairaDir,
-      project.paths.base.baseDir,
-      project.paths.builtIn.dir,
-    ]);
+  it("exposes the layer roots a bare `$` searches: the settings' four newer layers, then the project's own", () => {
+    const [projectYou, you, projectMachine, machine, ...rest] = workflowLoadOptions(project.paths).rootPath ?? [];
+    expect(rest).toEqual([project.paths.jairaDir, project.paths.base.baseDir, project.paths.builtIn.dir]);
+    expect(projectYou!.startsWith(join(project.paths.base.baseDir, "projects"))).toBe(true);
+    expect([you, projectMachine, machine]).toEqual([join(project.paths.base.baseDir, "personal"), join(project.paths.jairaDir, "local"), join(project.paths.base.baseDir, "machine")]);
+    // Each is named too, for a reference that means exactly that copy.
+    expect(workflowLoadOptions(project.paths).roots).toMatchObject({ MACHINE: machine, PROJECTMACHINE: projectMachine, YOU: you, PROJECTYOU: projectYou });
   });
 });
 

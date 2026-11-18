@@ -307,6 +307,29 @@ describe("a transport that enforces nothing", () => {
   });
 });
 
+describe("a generic CLI with its own tools off, pointed at the bridge (`mcp.builtinsOff`)", () => {
+  const agents = {
+    genericCli: [{ name: "opencode", command: "opencode", mcp: { env: { OPENCODE_CONFIG: "{mcpConfig}" }, config: { mcp: { dai: { url: "{mcpUrl}" } } }, builtinsOff: true } }],
+  };
+
+  it("runs a permission set that refuses things: only the held tools are served, each gated at the bridge", async () => {
+    const { opts, result } = await run(READ_ONLY_MAP, { agent: "opencode", agents });
+    expect(JSON.stringify(result)).not.toMatch(/enforces nothing/);
+    expect(Object.keys(opts!.mcpTools ?? {})).toContain("read_file");
+    for (const refused of ["edit", "write_file", "shell"]) expect(Object.keys(opts!.mcpTools ?? {})).not.toContain(refused);
+    // No built-in of claude's is named to it: it has none of its own to deny.
+    expect(opts!.permissionMode).toBeUndefined();
+    expect((opts!.disallowedTools ?? []).filter((name) => name !== "AskUserQuestion")).toEqual([]);
+  });
+
+  it("puts an asked tool to the approver at the bridge, as codex's are", async () => {
+    const { opts, asked } = await run({ tools: { read_file: "allow", edit: "ask", other: "deny" } }, { agent: "opencode", agents });
+    expect(await opts!.mcpTools!["read_file"]!.run({ path: "a" })).toBe("ok");
+    expect(await opts!.mcpTools!["edit"]!.run({ path: "a" })).toMatchObject({ denied: true });
+    expect(asked).toEqual(["edit"]);
+  });
+});
+
 describe("the implementation choice — a RUN, which reads it off the state's block", () => {
   it("keeps a `native` built-in and does not inject ours beside it — as a conversation turn does", async () => {
     const { opts, asked } = await run({ tools: { read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" } });

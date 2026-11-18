@@ -117,6 +117,8 @@ function earlierRow(asked: number, shown: number): PlaceRow[] {
 const STEP_WORDS: Record<StartStep["kind"], { icon: PlaceIcon; hue: PlaceHue; chip: string; said: (what: string) => Said[] }> = {
   workspace: { icon: "git", hue: "git", chip: "worktree", said: (what) => [{ text: "Made the worktree for " }, { code: what }] },
   pin: { icon: "pin", hue: "pin", chip: "snapshot", said: (what) => [{ text: "Pinned " }, { code: what }, { text: " as it is now" }] },
+  // The project's setup target its workflow asks for, run on the machine first (decision 0027).
+  setup: { icon: "play", hue: "launch", chip: "setup", said: (what) => [{ text: "Ran the setup target " }, { code: what }] },
 };
 
 /**
@@ -138,7 +140,13 @@ export function placementSummaryOf(input: { queued?: QueuedPlacement | undefined
       until: placed.at,
     };
     const steps = placed.steps ?? [];
-    const stepRows: PlaceRow[] = steps.map((step, i) => ({ key: `step:${i}`, at: step.at, icon: STEP_WORDS[step.kind].icon, said: STEP_WORDS[step.kind].said(step.what), tookMs: step.tookMs }));
+    const stepRows: PlaceRow[] = steps.map((step, i) => ({
+      key: `step:${i}`,
+      at: step.at,
+      icon: STEP_WORDS[step.kind].icon,
+      said: [...STEP_WORDS[step.kind].said(step.what), ...(step.detail !== undefined ? [{ text: ` — ${step.detail}` }] : [])],
+      tookMs: step.tookMs,
+    }));
     const last = steps.at(-1);
     const prepared = last !== undefined ? last.at + last.tookMs : placed.at;
     const starting = input.starting === true;

@@ -14,13 +14,73 @@
  * - **What is the machine's stays.** Where the engine runs (`execEnvironment`, `engine`), the update
  *   track, a server on this machine (the `local` and `embedded` routes, an MCP server that is a command
  *   or a loopback address), a workflow search path naming a folder, and an agent's binary given as a path
- *   are never sent, and never replaced by another machine's.
+ *   are never sent, and never replaced by another machine's — in every layer that syncs, the person's
+ *   settings for one project included.
+ * - **Files follow too** (amended 2026-11-18): the permission sets, workflows and prompts of the same
+ *   layers, whole folders by an allow-list ({@link SYNCED_FILE_FOLDERS}), each file a piece of its own.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { BUILTIN_GENERIC_AGENTS } from "./executors";
 
-/** The settings layers that sync: Shared (`<base>/settings.json`) and Just you (`personal-settings.json`). */
+/**
+ * The settings layers that sync whole: Shared (`<base>/settings.json`) and Just you
+ * (`personal-settings.json`). The person's settings for one project (`projects/<key>/personal-settings.json`)
+ * sync too, a project at a time, keyed by the project as well as the path ({@link isProjectSettingsKey}).
+ */
 export type SyncedLayer = "base" | "you";
+
+/**
+ * Whether a string can be a project's settings key as another machine sends one — the folder name under
+ * `<base>/projects/` (`projectSettingsKey` in `paths.ts`): only `A–Z a–z 0–9 . _ -`, never starting with a
+ * dot, so it names one folder there and nothing above it.
+ */
+export function isProjectSettingsKey(key: string): boolean {
+  return key.length > 0 && key.length <= 200 && /^[A-Za-z0-9._-]+$/.test(key) && !key.startsWith(".");
+}
+
+/**
+ * The layers whose FILES follow the person too (amended 2026-11-18), by their roots: Shared (`<base>/`),
+ * Just you (`<base>/personal/`) and the person's for one project (`<base>/projects/<key>/`). This
+ * machine's own (`<base>/machine/`) and a project's on one machine (`.jaira/local/`) stay on it; a
+ * project's own (`.jaira/`) travels by git.
+ */
+export type SyncedFileLayer = "base" | "you" | "projectYou";
+
+/**
+ * The folders of a layer root whose files follow, every file in them at any depth: permission sets,
+ * workflows (automations and the states they are made of), and the prompt fragments a workflow names by
+ * `$/prompts/…`. An allow-list, because `<base>/` is also where a machine keeps its database, logs,
+ * sessions, keys and its own layer: nothing else under a root is ever read to be sent.
+ */
+export const SYNCED_FILE_FOLDERS: readonly string[] = ["permission-sets", "workflows", "prompts"];
+
+/** A file larger than this stays on its machine, and the log says so. */
+export const SYNCED_FILE_MAX_BYTES = 1024 * 1024;
+
+/** How many folders deep under its synced folder a file may be. */
+const SYNCED_FILE_MAX_DEPTH = 12;
+
+/**
+ * Whether one name on a synced file's path may travel: one file or folder name that every machine can
+ * hold — not empty, no separator, no `.` or `..`, nothing a Windows disk refuses or quietly changes (`<>:"|?*`,
+ * control characters, a trailing dot or space, `CON`, `NUL`, …) — and not a hidden file (`.env`,
+ * `.DS_Store`, an editor's swap file, a half-written file of the sync's own), an editor's backup (`~`) or
+ * `node_modules`.
+ */
+export function isSyncedFileName(name: string): boolean {
+  if (name.length === 0 || name.length > 255 || name.startsWith(".") || name.endsWith("~") || name.endsWith(".") || name.endsWith(" ")) return false;
+  if (/[<>:"/\\|?*]/.test(name) || [...name].some((c) => c.charCodeAt(0) < 32)) return false;
+  return name !== "node_modules" && !/^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(name);
+}
+
+/**
+ * Whether a path under a layer root names a file that follows: inside one of {@link SYNCED_FILE_FOLDERS},
+ * every name on the way one {@link isSyncedFileName} takes, no deeper than twelve folders. A path another
+ * machine sends is taken only when this holds, so nothing it names can be outside its folder.
+ */
+export function isSyncedFilePath(path: readonly string[]): boolean {
+  return path.length >= 2 && path.length <= SYNCED_FILE_MAX_DEPTH + 1 && SYNCED_FILE_FOLDERS.includes(path[0]!) && path.every(isSyncedFileName);
+}
 
 /** One piece of a layer: where it is, and what it holds there (never absent: an absent piece is no piece). */
 export interface SettingsPiece {
@@ -230,6 +290,9 @@ export const MACHINE_PIECE_WORDS: readonly string[] = [
   "MCP servers started as a command, or reached at a loopback address",
   "an agent's binary given as a path",
   "a workflow search path that names a folder",
+  "your settings, permission sets and workflows for a project with no remote, which is keyed by where it is on that machine",
+  "this machine's own settings, and a project's on this machine, with their permission sets and workflows",
+  "functions and skills, and a permission set, workflow or prompt file over 1 MB",
 ];
 
 /** What this machine says about keeping its settings in step with the others (Settings → Machines). */
@@ -238,8 +301,8 @@ export interface SettingsSyncView {
   on: boolean;
   /** When this machine last took or gave a change, if it has. */
   at?: number;
-  /** How many pieces it keeps in step, by kind. */
-  counts: { settings: number; secrets: number; signIns: number; logins: number };
+  /** How many pieces it keeps in step, by kind; `files` (permission sets, workflows, prompts) from 2026-11-18. */
+  counts: { settings: number; secrets: number; signIns: number; logins: number; files?: number };
   /** The agents whose sign-in follows, where it is kept when that is worth saying ("inside Ubuntu (WSL)"), and why one does not when it does not. */
   logins: Array<{ agent: string; synced: boolean; why?: string; where?: string }>;
   /** A change from another machine that could not be laid in here, and why — the latest few. */

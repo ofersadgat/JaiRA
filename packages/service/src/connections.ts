@@ -15,7 +15,10 @@ import type { AppService } from "./service";
 /** The channels a connection answers for itself (see {@link EngineConnections.handlersFor}). */
 export const CONNECTION_CHANNELS = ["project:open", "project:init", "project:current", "limits:watch"] as const;
 
-type ConnectionService = Pick<AppService, "open" | "init" | "current" | "inspect" | "watchLimits">;
+type ConnectionService = Pick<AppService, "open" | "init" | "current" | "inspect" | "watchLimits"> & {
+  /** Where a request naming another machine goes: that machine opens the folder, not this one. */
+  federation?: Pick<AppService["federation"], "route">;
+};
 
 export class EngineConnections {
   private readonly opened = new Map<string, string>();
@@ -30,10 +33,16 @@ export class EngineConnections {
       this.opened.set(id, result.dir);
       return result;
     };
+    // These two replace the service's routed ones for a window, so they route too: "Open project on
+    // mac-mini" names mac-mini, and opening that path HERE would open the wrong machine's folder.
+    const routed = (channel: "project:open" | "project:init", request: { machine?: string }): Promise<unknown> | undefined =>
+      service.federation?.route(channel, request) as Promise<unknown> | undefined;
     return {
-      "project:open": (async (request: { dir: string; remember?: boolean }) =>
+      "project:open": (async (request: { dir: string; remember?: boolean; machine?: string }) =>
+        routed("project:open", request) ??
         remember(await service.open(resolve(request.dir), request.remember === false ? { remember: false } : {}))) as Handler,
-      "project:init": (async (request: { dir: string }) => remember(await service.init(resolve(request.dir)))) as Handler,
+      "project:init": (async (request: { dir: string; machine?: string }) =>
+        routed("project:init", request) ?? remember(await service.init(resolve(request.dir)))) as Handler,
       "project:current": (() => this.current(id)) as Handler,
       "limits:watch": ((request: { watching: boolean }) => this.watch(id, request.watching)) as Handler,
     };

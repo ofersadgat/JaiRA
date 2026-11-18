@@ -81,7 +81,6 @@ import {
   commandDecisionOf,
   commandNarrowingOf,
   commandWords,
-  isDeniedPath,
   noteFunctionCall,
   notePlaceAnswer,
   packageFolderOf,
@@ -145,9 +144,9 @@ export function createShellTool(options: ToolOptions = {}): Tool {
 
       const root = ctx?.workspace?.root ?? options.cwd;
       const relative = typeof args.cwd === "string" ? args.cwd : undefined;
-      // A cwd is an escape hatch out of the workspace if it is not checked; the
-      // policy denies `.jaira/**` by path, and the same rule applies here.
-      if (relative !== undefined && (isDeniedPath(relative) || relative.includes(".."))) {
+      // A cwd is an escape hatch out of the workspace if it is not checked. Where under it a line
+      // may run is the permission set's, at its places: the line was judged with this cwd.
+      if (relative !== undefined && relative.includes("..")) {
         return { error: `cwd '${relative}' is not allowed` };
       }
       const cwd = root !== undefined && relative !== undefined ? `${root}/${relative}` : root;

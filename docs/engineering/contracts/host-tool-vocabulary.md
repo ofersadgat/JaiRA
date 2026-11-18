@@ -242,7 +242,7 @@ outside it.
 Served to an agent, an `{error: <string>}` value is an MCP error result (`isError`, `agents-api` `valueResult`), as a refusal and a throw are: the agent's record calls the call failed, and so does whatever reads it (the change list counts no refused edit).
 | `shell` gets an empty command, or a `cwd` containing `..` or `.jaira` | `{error: "no command given"}`, `{error: "cwd '<cwd>' is not allowed"}` | send a command, or a relative directory |
 | `shell` cannot start its interpreter | the call rejects with `failed to run '<command>': <message>` | fix the environment |
-| A file tool gets an empty path or one under `.jaira/` | `{error: "no path given"}`, `{error: "'<path>' is inside .jaira/, which agents may not write"}`, for reads too | name another path |
+| A file tool gets an empty path | `{error: "no path given"}` (a path under `.jaira/` is no error of the tool's: the shipped permission sets refuse writing there at the gate, as a refused call) | name a path |
 | A read cannot open (a path outside the workspace is read where it is: whether it may be is the permission set's, decision 0023 ruling 18) | `{error: "could not read '<path>': <message>"}` | name a path that exists |
 | A write's destination refuses the path or the disk refuses the write | `{error}` with the `DestinationError` message, `{error: "could not write '<path>': <message>"}`, or `could not show` for `show_artifact` | name a path the destination admits |
 | A write names an absolute path outside the workspace that is not in the calling agent's own folder (`$AGENT_WORKSPACE`, decision 0023 ruling 18, amended 2026-11-11) | `{error: "'<path>' is outside the workspace"}` | write in the workspace or the agent's folder |

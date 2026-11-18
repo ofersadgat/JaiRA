@@ -38,6 +38,9 @@ const VIEW: ConfigView = {
   system: null,
   base: null,
   project: { files: { hidden: OWN } },
+  machine: null,
+  projectMachine: null,
+  projectYou: null,
   effective: {},
   baseFile: "C:/home/.jaira/settings.json",
   projectFile: "C:/repo/.jaira/settings.json",
@@ -62,7 +65,7 @@ describe("the Files tree section", () => {
 
   it("groups the rules the way they apply, with a count on each head", () => {
     expect(tree.groups.map((group) => group.name)).toEqual(["JaiRA's own files", "Secrets", "Version control", "Dependencies", "Build output", "Added in this project"]);
-    expect(groupSummary(groupOf("jaira"), tree.rules, tree.capped)).toBe("7 rules · hides 1 folder");
+    expect(groupSummary(groupOf("jaira"), tree.rules, tree.capped)).toBe("9 rules · hides 1 folder");
     expect(groupSummary(groupOf("dependencies"), tree.rules, tree.capped)).toBe("3 rules · hides 2 folders");
     expect(groupSummary(groupOf("build"), tree.rules, tree.capped)).toBe("4 rules · hides nothing here · 1 off");
   });

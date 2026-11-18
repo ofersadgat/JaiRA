@@ -2,13 +2,13 @@
 id: engineering/units/process-exec
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-11-18
 implements: [product/work-inside-wsl, product/hand-work-to-agents]
 layer: core
 owns_contracts: [engineering/contracts/exec-observer]
 requires: []
-implemented_by: [packages/runtime/src/exec.ts, packages/runtime/src/paths.ts, packages/runtime/src/killTree.ts]
-verified_by: [packages/runtime/test/exec.test.ts, packages/runtime/test/paths.test.ts, packages/runtime/test/killTree.test.ts]
+implemented_by: [packages/runtime/src/exec.ts, packages/runtime/src/paths.ts, packages/runtime/src/killTree.ts, packages/runtime/src/container.ts]
+verified_by: [packages/runtime/test/exec.test.ts, packages/runtime/test/paths.test.ts, packages/runtime/test/killTree.test.ts, packages/runtime/test/container.test.ts]
 siblings: [engineering/units/git-cli, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/process-claims]
 ---
 
@@ -24,9 +24,9 @@ siblings: [engineering/units/git-cli, engineering/units/host-tools, engineering/
 - resolves an `ExecResult` on `close` whatever the exit code, and rejects `failed to run '<file> <argv>': <message>` only when the child cannot start;
 - calls the constructor's observer after the spawn, per output chunk and at the end, each call guarded. The hook is [exec-observer](../contracts/exec-observer.md).
 
-`resolveInvocation` passes a native command to upstream `resolveProgram`, which on Windows keeps a real executable as written and turns a `.cmd` shim or a JS entry into `node <entry>`. Under `{ wsl: distro }` it returns `wsl.exe -d <distro> [--cd <toWslPath(cwd)>] -- <command> ...args` with no cwd of its own. `execOk` returns trimmed stdout, or throws `ExecError` carrying the result with the message `'<command>' exited <code>`, `timed out` or `was canceled`, followed by the trimmed stderr or stdout.
+`resolveInvocation` passes a native command to upstream `resolveProgram`, which on Windows keeps a real executable as written and turns a `.cmd` shim or a JS entry into `node <entry>`. Under `{ wsl: distro }` it returns `wsl.exe -d <distro> [--cd <toWslPath(cwd)>] -- <command> ...args` with no cwd of its own. Under a workspace's container, `{ container, user?, from? }` ([0027](../decisions/0027-open-anywhere-and-project-setup.md)), `containerInvocation` returns `docker exec -i [-u <user>] [-w <cwd>] [-e NAME …] <container> sh -c <CONTAINER_RUN> jaira <pid file> <command> ...args` and a `stop`: the command runs under `setsid` in a group of its own, its id in `/tmp/.jaira-exec-<token>.pid` (stdin carried to it on fd 3, its exit code handed back), and since Docker keeps a process running when its `docker exec` ends, `NodeExec` runs the `stop` — `docker exec [-u <user>] <container> sh -c <CONTAINER_STOP> jaira <pid file>`, TERM to the group, KILL two seconds later — once, on a timeout or an abort, before killing the client; the cwd as it is (the workspace is mounted at the same path inside), each variable by name only (docker takes its value from its own environment, which is the command's, so no value is on a command line or in a job row's argv), no cwd of its own; on a Windows host it throws a `Refusal`. `execOk` returns trimmed stdout, or throws `ExecError` carrying the result with the message `'<command>' exited <code>`, `timed out` or `was canceled`, followed by the trimmed stderr or stdout.
 
-`paths.ts` is the mapper: `ExecEnv`, `isWslEnv`, `distroOf`, `toWslPath`, `toWindowsPath`, `pathFor`, `hostPathFor`, `samePathKey`, `samePath`, and the host pair `interpreterFor` and `dialectFor`. `killTree(child, signal, options)` in `killTree.ts` runs `taskkill /PID <pid> /T /F` on Windows and `process.kill(-pid, signal)` on POSIX, falling back to `child.kill` whenever either cannot act. On Windows `taskkill` gets `TASKKILL_DEADLINE_MS` (2 s); one that overruns it, exits non-zero or cannot start is killed and replaced by `TREE_WALK`, a toolhelp-snapshot walk run through `powershell.exe` that does not go through WMI, and `child.kill` follows the walk whatever it did. `KillTreeOptions` replaces either helper and either deadline, and `NodeExec` takes it as `killTree`. `detachedForTree` is `{ detached: true }` on POSIX and empty on Windows. `killTree.ts` is not exported from the runtime's index.
+`paths.ts` is the mapper: `ExecEnv` (`MachineExecEnv` — `"windows"` or `{ wsl }` — or a `ContainerExecEnv`), `isWslEnv`, `isContainerEnv`, `machineEnvOf` and `onMachine` (a container's machine is native: what git, the agents, their installers and MCP servers run in), `containerRefusal` (Mac and Linux hosts only, never from inside WSL), `distroOf`, `toWslPath`, `toWindowsPath`, `pathFor`, `hostPathFor` (both identity for a container), `samePathKey`, `samePath`, and the host pair `interpreterFor` and `dialectFor` (`sh -lc` and `posix` in a container). `container.ts` makes, uses again and keeps up a workspace's container — `dockerUp`, `devcontainerUp`, `ensureContainer`, `inspectContainer`, `containerNameFor` (`jaira-` and 8 hex of the folder's sha-256) and `containerPort`, the setup's port over them — always running docker on the machine. `killTree(child, signal, options)` in `killTree.ts` runs `taskkill /PID <pid> /T /F` on Windows and `process.kill(-pid, signal)` on POSIX, falling back to `child.kill` whenever either cannot act. On Windows `taskkill` gets `TASKKILL_DEADLINE_MS` (2 s); one that overruns it, exits non-zero or cannot start is killed and replaced by `TREE_WALK`, a toolhelp-snapshot walk run through `powershell.exe` that does not go through WMI, and `child.kill` follows the walk whatever it did. `KillTreeOptions` replaces either helper and either deadline, and `NodeExec` takes it as `killTree`. `detachedForTree` is `{ detached: true }` on POSIX and empty on Windows. `killTree.ts` is not exported from the runtime's index.
 
 It deliberately does not own:
 
@@ -39,7 +39,7 @@ It deliberately does not own:
 
 - Layer `core`, package `@jaira/runtime`. It calls `node:child_process`, `node:fs` for program lookup, and `refusal` from `@jaira/shared`.
 - Upstream seam: `resolveProgram` and `ProgramDeps` from `@declarative-ai/agents-cli`. The engine never calls this unit; registered tools and functions do.
-- Boundary: Windows and WSL. `toWslPath` and `toWindowsPath` are the one translation, used by `resolveInvocation`, `Git.path`, `agentSpawn` and the CLI's `worktree list` join.
+- Boundary: Windows and WSL, and a workspace's container. `toWslPath` and `toWindowsPath` are the one translation, used by `resolveInvocation`, `Git.path`, `agentSpawn` and the CLI's `worktree list` join. A container needs none: its workspace and the folder its task worktrees go in are mounted at their own paths. Only the commands JaiRA runs go in — `shell`, `run_command`, setup steps; `Git`, `agentSpawn`, `createGenericCliQuery`, `mcpServersIn`, `probeExecutor`, the sign-ins, `probeGitCli`, `installGitCli` and `installAgent` take `machineEnvOf` of the environment they are handed, and the tool installer looks inside a container as it looks inside WSL (`inGuest`).
 - The app's `startRun` and the CLI's `buildRunEnvironment` build one `NodeExec` per run with the run's observer, shared by `shell`, `run_command` and generic agents. Chat turns, probes, `gitFor` and the git identity lookup build their own without one.
 
 ## Process exec owns no stored data, and the environment it runs in comes from settings
@@ -47,7 +47,7 @@ It deliberately does not own:
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
 | `execEnvironment` from `settings.json` | read by callers and passed as `execEnv` | [project-config](project-config.md) | host-tools, tool-policy, agent-executors, git-cli |
-| A child's environment | `options.env` over the constructor's `env` over `process.env` | the host process | none; under WSL none of it reaches the Linux process |
+| A child's environment | `options.env` over the constructor's `env` over `process.env` | the host process | none; under WSL none of it reaches the Linux process, and in a container only the names `options.env` and the constructor's `env` give |
 | `ExecResult.stdout` and `stderr` | accumulated in memory for the child's whole life | the child | the caller; the observer sees each chunk as it arrives |
 
 ## The invariants keep arguments literal, streams drained and the tree killable

@@ -681,6 +681,7 @@ function buildRunEnvironment(
     exec,
     agents: enabledGenericAgents(config.agents),
     secret: (name) => secrets.lookup(name)?.value,
+    startBridge,
   });
   if (wiring.interactions) {
     wiring.interactions.register(registry);

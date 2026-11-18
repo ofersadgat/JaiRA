@@ -484,7 +484,7 @@ Look here before writing a control. The catalogue of what each looks like is
   web, `react-native-svg` on a phone), `Turn` (the turning ring), `usage/Ring.tsx`.
 - **Settings** (`components/settings/`): `SettingsPage`, `SettingsSection`, `SettingsRow` (with the ↺ and
   ⓘ), `Switch`, `Segmented`, `SelectInput`, `SizeStep`, `TextField`, `Button` (and its `ghost`, `quiet`,
-  `primary`, `danger`), `LayerPicker`. A section says it is one to `parts.ts`, which is what the sidebar's
+  `primary`, `danger`), `SettingsCrumb` (Settings' path, in the sheet's head). A section says it is one to `parts.ts`, which is what the sidebar's
   accordion lists. Connections' rows are `connections/Row.tsx` and `Probe.tsx`.
 - **Forms** (`components/form/`): `SchemaForm` (and `registerWidget`), `Field`, `FieldGrid`, `FormInput`,
   `NumInput`, `TextArea`, `Checkbox`, `Chip` and `PickWell`, `Range`, `LlmConfigForm`.

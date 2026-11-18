@@ -1,7 +1,9 @@
 import type { JSX } from "react";
 import { Platform } from "react-native";
 import type { MenuItem } from "@jaira/ui/crumbModel";
-import { Press, Txt, edge } from "../primitives";
+import { View } from "@tamagui/core";
+import { useCanHover } from "../canHover";
+import { Press, Txt, edge, useHover } from "../primitives";
 import { useTokens } from "../tokens";
 import { Float, pointRect } from "./floats/Float";
 import { MenuLayer } from "./MenuLayer";
@@ -18,6 +20,9 @@ import { MenuLayer } from "./MenuLayer";
  *   an item's note     --dim, app voice at 11/12.5, at most 45%
  *   disabled / danger  --dim / --bad (hovered: --bad ground), and still --bad when disabled
  *   the title          padding 5 12 4, data voice at 9.5/12, 0.09em, uppercase, --dim (`MenuAt.title`)
+ *   an item's action   a small --accent button at the row's right, in place of the note, while the row
+ *                      is under the pointer (always where nothing hovers): app 11.5/12.5 600, --panel
+ *                      ink, padding 2 9, radius 6 — pressing it does the action, not the row
  *
  * Placement is `Float`'s below-start with no gap (`floats/Float.tsx`): kept inside the window, opening
  * upward from the point when there is more room above.
@@ -56,8 +61,8 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
           </Txt>
         ) : null}
         {anchor.items.map((item, i) => (
+          <MenuRow key={`${item.label}-${i}`} item={item} onClose={onClose}>
           <Press
-            key={`${item.label}-${i}`}
             onPress={() => {
               onClose();
               item.onSelect();
@@ -97,8 +102,41 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
               );
             }}
           </Press>
+          </MenuRow>
         ))}
       </Float>
     </MenuLayer>
+  );
+}
+
+/** An item, with its action's button over its right end while it is under the pointer. */
+function MenuRow({ item, onClose, children }: { item: MenuItem; onClose: () => void; children: JSX.Element }): JSX.Element {
+  const t = useTokens();
+  const [hovered, hover] = useHover();
+  const canHover = useCanHover();
+  if (item.action === undefined) return children;
+  const action = item.action;
+  return (
+    <View position="relative" {...(hover as object)}>
+      {children}
+      {hovered || !canHover ? (
+        <View position="absolute" right={8} top={0} bottom={0} justifyContent="center">
+          <Press
+            onPress={() => {
+              onClose();
+              action.onSelect();
+            }}
+            label={`${action.label} — ${item.label}`}
+            paddingVertical={2}
+            paddingHorizontal={9}
+            borderRadius={6}
+            fill={false}
+            box={({ hovered: over }) => ({ backgroundColor: t.v(over ? "fill-accent-hover" : "fill-accent") })}
+          >
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 600, color: "on-accent" }}>{action.label}</Txt>
+          </Press>
+        </View>
+      ) : null}
+    </View>
   );
 }

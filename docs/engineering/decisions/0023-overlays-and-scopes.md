@@ -2,7 +2,7 @@
 id: engineering/decisions/0023-overlays-and-scopes
 type: decision
 status: built
-updated: 2026-11-04
+updated: 2026-11-18
 decides_for: [engineering/units/tool-policy, ui/components/permissionSet-card, ui/components/composer-setting-chip, ui/components/command-approval, ui/surfaces/settings-tools]
 ---
 
@@ -116,7 +116,7 @@ The shell part WAS judged as `read_file`. What differed was everything around th
     (§7.1) was asked and then refused, and only the shell could reach there. Where a read may go is the
     set's to say, at its places, and the executor floor is the sandbox: these tools now read and search
     an outside path where it is, by the path the call named. `.jaira/` is refused anywhere, `~/.jaira`
-    included. Writes keep the workspace: `write_file` and `edit` place files through the artifact
+    included (until 2026-11-17, §2.4: now the shipped sets' lines refuse writing it). Writes keep the workspace: `write_file` and `edit` place files through the artifact
     destination, which is the workspace's. **Amended 2026-11-11** (the person, of a conversation whose
     `edit` of Claude's memory was refused as "outside the workspace" under `full`): but for the calling
     agent's OWN folder (`$AGENT_WORKSPACE`, ruling 19), which is the agent's and not the project's. A
@@ -202,7 +202,11 @@ the `other` under it, as with any line. A set meant only to add lines should the
 and `declOfPermissionSet` stops writing `other` when the set it describes had none.
 
 **2.4 What no layer can change.** The destructive floor, `.jaira/`, a piece the parser cannot read
-(which asks at least), and an executor's floor all stand above every layer.
+(which asks at least), and an executor's floor all stand above every layer. **Amended 2026-11-17**
+(the person: "if we want an agent to modify the jaira files, that should be a permission layer… simply
+a default in the permission sets to exclude write permission to that directory"): `.jaira/` is no longer
+among them. Every set JaiRA ships refuses writing `$PROJECT/.jaira` and `$WORKTREE/.jaira`, and reading
+the machine key, with lines a layer can change ([tool-policy](../units/tool-policy.md) invariant 3).
 
 **2.5 A layer's copy is a layer.** `{ "$ref": lower, …lines }` is the stack [lower, these lines]. It is
 merged by §2.1, so a copy that names one place no longer replaces the whole map below it, as
@@ -402,8 +406,8 @@ answered by hand) stays as the 2026-11-02 rounds set it.
 - The most specific place decides, a file-pinning place beats any folder, and a place that matches
   nothing falls to a less specific line, never to a guess.
 - `unavailable` is never written on a command, a runner, `script` or a place.
-- Nothing in any layer reaches past the destructive floor, `.jaira/`, an unreadable piece, or an
-  executor's floor.
+- Nothing in any layer reaches past the destructive floor, an unreadable piece, or an executor's floor
+  (`.jaira/` left this list 2026-11-17, §2.4).
 - Lowered gate modes are never stricter than a per-call answer can be, and the narrowing never widens.
 
 ## 7. Settled last (ruling 12)
@@ -424,3 +428,195 @@ answered by hand) stays as the 2026-11-02 rounds set it.
    that decided it, and holds "save this stack as a set". A long stack keeps its first segment and its
    last three (`runtime`, `tools`, `+`) and folds the middle into `⋯ {n}`, which lists the folded
    layers (round 6, design 8).
+
+## Amended 2026-11-18: a permission set in each of the settings' layers
+
+Settings names whose settings a page edits by a path, `Settings › [project] › [machine] › [Just you]`, over
+six layers (decision 0026, amended 2026-11-17). Permission sets were files in two of them — Shared
+(`~/.jaira/permission-sets/`) and the project (`.jaira/permission-sets/`) — so with only a machine or Just
+you in the path the Tools page read the nearest of those and asked where to write. They now have all six.
+
+- **Where each is.** Each layer has a root holding a `permission-sets/` of its own (`fileLayers.ts`), named
+  by its own reference root for a reference that means exactly that copy:
+
+  | Layer | Root | Named |
+  | --- | --- | --- |
+  | you in the project | `~/.jaira/projects/<key>/` — beside `personal-settings.json` for it | `$PROJECTYOU` |
+  | Just you | `~/.jaira/personal/` | `$YOU` |
+  | the project on this machine | `.jaira/local/` — beside `settings.local.json`; the `.gitignore` template, and the back-fill before a file lands there, ignore `local/` | `$PROJECTMACHINE` |
+  | this machine | `~/.jaira/machine/` | `$MACHINE` |
+  | the project | `.jaira/` | `$JAIRA` |
+  | Shared | `~/.jaira/` | `$BASE` |
+  | what ships | the built-in layer | `$SYSTEM` |
+
+- **Found in the settings' order.** A bare `$/permission-sets/<id>` is searched along that column top to
+  bottom — the person over the machine over the project, a project's own over the layer it is the
+  project's in — by a run's lowering, the composer and Settings alike: the four newer roots lead the
+  project's `roots` on every `$` reference (`referenceRootPath`). A run therefore holds the copy the most
+  specific layer keeps.
+- **One file wins, whole.** A layer's copy is the set there (§2.5: a copy that names a lower one by `$ref`
+  is the stack [lower, these lines]). A copy in a layer that is no project's — this machine's, Just you's,
+  Shared — follows Shared's copy or what ships, never a project's (`layerSees`): it is read by every
+  project, and `$JAIRA/…` names a different file, or none, in each. So in a project that keeps its own copy,
+  a machine's or the person's stands in for it whole. A project's layers (the project, the project on this
+  machine, you in the project) follow whatever is under them.
+- **Settings → Tools.** The page's layer is the path's: each of the six lists its own sets and those it
+  sees under it, writes its own copy on the first change and resets it (`permissionSetLayersOf`). Another
+  machine's are read and written there (`machine` on `permissionSets:read`, `:write`, `:reset`, forwarded
+  by `Federation.route`). An engine from before lists only `project`, `base` and `system`; on its machines
+  the page reads the nearest of those and asks where to write, as Just you did. The composer's set browser
+  shows a newer layer's scope once it holds a set.
+- **Not stored with the person.** These are files, and files do not follow the person (decision 0026, Not
+  built): Just you's and you-in-the-project's sets are kept on the machine they are written on, though
+  their settings travel. A clone with no remote keys its `projects/<key>/` by where it is, as its settings.
+
+**What does not fit, and why.**
+
+- **Automations.** An automation is a workflow state — the events root `system/events` and a state per
+  line — found by bare id. A bare id is searched along the project's own `workflows/` FIRST: it is the
+  directory a state's id is folded against (`workflowRefs.ts`, `searchPathFor`), so nothing can stand in
+  front of it without changing every id in the project, and a machine's or the person's layer must stand
+  in front of it to win as the settings do. Put behind it, a machine's automations would lose to the
+  project's, which is not the settings' order. And the events task runs one copy per project, spliced from
+  Shared's (`$BASE/workflows/system/events.transitions`): a chain through six copies is a different shape
+  of the editor (`automationsModel.ts`). So automations keep their two writable layers; on a machine's or
+  Just you's path the page reads the nearest and asks whether the change goes to the project or to Shared,
+  and says why. A paired machine with no project reads and writes that machine's Shared copies there.
+  (The person asked for all six the same day; built below.)
+- **"Add to" from an approval, and "save this stack as a set".** Both still write the project or Shared.
+  The newer layers are read when an approval lists its targets — a copy in one marks the others as not
+  read here — but are not offered: the approval's menu names two layers and its answer carries one of the
+  two (`ApprovalPermissionSetTarget.layer`). (Built below.)
+- **Workflows, prompts and functions** keep their three roots for bare ids; a `$/…` reference to a prompt
+  or a type would find a copy in a newer root, which nothing makes.
+
+Verified: `app/test/permissionSetsService.test.ts` — each layer's copy where its settings are, the
+`.gitignore` line, the shared root's three; a run's reading going nearest first through all six; a
+machine's copy following what ships under a project's own; reset. `persistence/test/configLayers.test.ts`
+(the roots and their tokens, the `.gitignore` back-fill), `persistence/test/workflowRefs.test.ts` (the
+search order), `shared/test/permissionSetSettings.test.ts` (`layerSees`, a layer's pane),
+`app/test/permissionSets.test.ts` (`permissionSetLayersOf`, old and new engines).
+
+## Amended 2026-11-18, later: automations, "Add to" and "save as a set" in all six
+
+The person, on the four things left undone above: automations should have the same six layers as
+everything else, with the same rule — most specific wins — and "Add to" and "save this stack as a set"
+should write any of them. Built that way, with nothing to migrate: a project and Shared that keep
+automations today load exactly as they did.
+
+- **An automation's state, found along the six.** An automation is still a workflow state found by bare
+  id, and every other bare id is still searched along the project's own `workflows/` first. For the events
+  workflow's own ids — `system/events` and every state under it (`isAutomationStateId`) — the search is the
+  settings' column instead: each newer layer's root keeps a `workflows/` beside its `permission-sets/`, and
+  a copy of an id there stands in front of the project's (`nearerAutomationStates`, laid over the project's
+  files by `loadWorkflowBundle`, so a run, the browser's version of it and the events supervisor agree; and
+  first on `loadState`'s path for those ids). An id is the file's path under the `workflows/` it was found
+  in, as in every layer, so nothing a project already names moves. So Just you's
+  `~/.jaira/personal/workflows/system/events/push_main.json` beats the project's, the project on this
+  machine's beats this machine's, and you in the project's beats them all.
+- **The events workflow splices along the chain.** Each layer's copy says its own lines, then the lines
+  of the layer directly under it less the ones it turns off by name — the `$ref` a project's copy has
+  always had for Shared's. The layer under each is fixed (`EVENTS_FOLLOWS`): you in the project follows
+  `$YOU`, Just you `$PROJECTMACHINE`, the project on this machine `$MACHINE`, this machine `$JAIRA`, the
+  project `$BASE`, Shared `$SYSTEM`. A named root never searches, and the layers between may hold no copy —
+  Just you's copy is read by every project, some with a copy on this machine and some without — so where
+  one of the five above Shared has none, the loader reads one that only passes the layer under it through
+  (`automationsVfs`). Shared's is not made up: a `$BASE` with nothing there still names nothing, and what
+  writes any copy writes Shared's first, as before. With no project (the shared root opened as one),
+  `$JAIRA` is Shared and `$PROJECTMACHINE` / `$PROJECTYOU` name the machine's and the person's roots, so a
+  copy naming them still reads. A layer overrides a line under it by turning it off and saying its own of
+  that name, and changes only its steps by keeping its own `system/events/<name>.json`, as a project
+  always could over Shared.
+- **Unlike a permission set,** a cross-project layer's copy does follow a project's here: an automation
+  list is added to, not replaced, and every project reads the chain as it stands in it — this machine's
+  lines, then that project's (or nothing), then Shared's.
+- **Settings → Tools → Automations** reads, writes and resets the page's own layer, whichever of the six
+  the path makes, and shows the lines under it grouped by the layer each comes from. Its files go through
+  `automations:read`, `:write` and `:remove` (only `system/events` and below; `.gitignore`'s `local/`
+  line before a file lands in `.jaira/local/`), with the project always named, and with a paired machine in
+  the path, that machine's — forwarded by `Federation.route`. The question "write this to the project or to
+  Shared?" is gone. (Since: the ordinary workflow channels, below.)
+- **Events status** with a paired machine in the path is that machine's (`events:status` carries
+  `machine`).
+- **"Add to"** offers each of the six layers' files of the set, nearest first, and the menu and the
+  answer carry any of them (`ApprovalPermissionSetTarget.layer`, `PartAnswer.addTo`: `WritableSetLayer`).
+  A layer that is no project's never follows a project's copy (`layerSees`), so over a set only a project
+  holds, Just you and this machine are not offered. It still starts on the project's file, else Shared's.
+- **"Save this stack as a set"** takes any of the six; the form still starts on this project (or Shared).
+- **The Files view** reaches the newer layers' files: `.jaira/local/` is walked in the checkout's tree
+  though git ignores it (its rows marked ignored), and Just you, this machine and you in the project are
+  roots of their own beside the project once their folder exists — the shared root's folders, addressed
+  as its paths, offering file verbs and no state verbs. (Since: every layer a root of its own with its
+  states, below.)
+
+Verified: `persistence/test/automationLayers.test.ts` — Just you's state over the project's, the project
+on this machine's over this machine's, you in the project's over all, the pinned version moving with a
+newer layer's state; the chain spliced through a layer with no copy, a line overridden by turning it off,
+a newer layer's copy over Shared alone in a project and in the shared root, and an older project and
+Shared unchanged (and `eventsWorkflow.test.ts` as it was). `app/test/automationsModel.test.ts` (the
+splice's root, a page per layer, the writes a newer layer's first line makes),
+`app/test/settingsLayerFiles.test.ts` (the channels, save-as-set, the Files view's roots),
+`app/test/approvalPermissionSet.test.ts` and `persistence/test/permissionSetWrite.test.ts` (Add to in each
+layer), `app/test/approvalModel.test.ts` (its menu and default), `app/test/federation.test.ts` (events
+status and automations of a paired machine, read there). Seen in the window: `shots/settings-layers.mts`.
+
+## Amended 2026-11-18, last: every workflow in all six
+
+The person: "make all workflows use the six layers too." Automations were one case; now every workflow
+is, and automations are that case again rather than an exception.
+
+- **Lookup.** A bare state id — any, not only `system/events…` — is read from the most specific layer
+  that has a file for it: you in the project, Just you, the project on this machine, this machine, the
+  project, Shared, what ships. The four newer layers' `workflows/` lead the search path, ahead of the
+  project's own (`searchPathFor`), and their states are laid over the project's files when a bundle
+  loads (`nearerStates`, `loadWorkflowBundle`) — the one door a run, the browser, a task start, the
+  composer's workflow list and the events supervisor all go through, so they agree. An id is still the
+  file's path under the `workflows/` it was found in, and a root's id is the longest root that holds
+  it, not the first, so putting layers in front changes which copy is read and never what an id is.
+  Nothing moves: a project and Shared with nothing in the newer layers load exactly as before.
+- **Children and references.** A child's state, a `./` reference and a `children[].state` are ids once
+  resolved against the referring state's id, so each is found nearest first wherever its parent came
+  from. A parent in Just you finds a child the project holds, and one Shared holds; a project's parent
+  whose child Just you overrides runs Just you's child; a newer layer's file under a parent's id is
+  one of its children by directory, as a project's is. A named root folds back to the bare id —
+  `$YOU/workflows/feature/plan/draft` IS `feature/plan/draft`, found nearest first like any other — and
+  a bare `$/…` fragment (a prompt, a type) searches the layer roots most specific first, as it already did.
+- **Shadowing.** The browser lists every layer's files and marks each copy a nearer one overrides
+  `shadowed`, with `shadowedBy`: the layer whose copy is read. The Files view draws every layer as a
+  root of its own — a project's checkout, `{project} on this machine` (`.jaira/local/`, now out of the
+  checkout's walk), `You in {project}`, `Just you`, `This machine`, Shared when standing in it, `Built in`
+  — and a shadowed row says by whom (`shadowed · just you`). Just you and this machine are listed once
+  beside several projects, their marks reduced across them as what ships' are.
+- **Writing.** `WorkflowLayer` is the settings' six and `system`, so every workflow verb takes any of
+  them: `workflow:read`, `:write`, `:delete`, `:move` (copy, rename, "edit a copy"), `:setDisabled`, and
+  the path-addressed `file:*`. A project's three need the project named; the others are this machine's,
+  whichever project asks. A write into the project on this machine adds `local/` to `.jaira/.gitignore`
+  first. A state switched off in a layer that does not hold it follows the nearest layer under it it can
+  see — never a project's copy from a layer that is no project's (`layerSees`), as for permission sets.
+  The tree's copy verbs offer every other layer after the one they always offered first (Shared's into
+  the project, anything else to Shared); a shipped state's row offers `Edit a copy in Shared` and
+  `Override here` first, then the four newer layers. Saving a dynamic document as a workflow takes any
+  of the six. Defaults are as they were.
+- **Scripts, the watcher, the editor, the digest — as in a project.** A newer layer's `workflows/` is read
+  exactly as a project's is (`readWorkflowFiles`): its state files and its workflow scripts (`.ts`),
+  compiled through the same compiler and cache, a script and a state file of one id refused. Each newer
+  layer's whole root — its workflows, permission sets and prompts — is watched; one not on disk yet is
+  waited for at the nearest folder above it and taken up the moment it appears, made by a person or
+  brought by the settings sync from a paired machine (whose own `store:invalidate` reaches the same
+  re-read). The workflow editor's top bar offers, for what ships, `Edit a copy in Shared` and
+  `Override here` as links and the four newer layers behind `Elsewhere…`, by the tree's rules. The
+  conformance digest shows each state's source from the file it is read from, in whichever layer.
+- **Not in every layer:** a description is synced with its workflows in a project or Shared only
+  (`workflow:sync` refuses the newer layers, and says so).
+- **Automations** use the ordinary workflow channels now; `automations:*` is gone, and the events
+  workflow's splicing along the chain (`EVENTS_FOLLOWS`, `automationsVfs`) is unchanged.
+
+Verified: `persistence/test/workflowLayers.test.ts` (an ordinary workflow read from each layer in turn;
+the browser's shadow marks; an old project + Shared + built-in unchanged; children across layers — a
+parent in Just you with children in the project and Shared, a child Just you overrides under a project's
+parent, children by directory, a named root folding to the bare id, a `$/…` fragment),
+`app/test/settingsLayerFiles.test.ts` (writing, reading and deleting in each layer, the `.gitignore`
+line, copying into a layer, switching off by following, the Files view's roots and shadow marks from a
+project and from Shared), `app/test/federation.test.ts` (a paired machine's workflow read, written and
+deleted there), the events tests unchanged. Seen in the window: `shots/settings-layers.mts`.
+

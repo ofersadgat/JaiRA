@@ -6,7 +6,8 @@
 import { posix, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Exec, ExecResult } from "../src/exec";
-import { GIT_CLI_PACKAGES, agentInstallOf, installFactsOf, installOriginOf, planOf, type InstallDeps } from "../src/agentInstall";
+import { agentInstallOf } from "../src/agentInstall";
+import { GIT_CLI_PACKAGES, installFactsOf, installOriginOf, planOf, type InstallDeps } from "../src/install";
 import { gitCliVersionOf, installGitCli, probeGitCli } from "../src/gitClis";
 
 const GIT = GIT_CLI_PACKAGES.git;

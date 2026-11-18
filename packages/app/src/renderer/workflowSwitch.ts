@@ -36,7 +36,10 @@ export function switchItems(target: SwitchTarget, set: SetSwitch): MenuItem[] {
   }
   const off = disabledBy === stateId;
   const verb = off ? "Enable" : "Disable";
-  if (layer === "project") return [{ label: verb, note: stateId, onSelect: () => set("project", !off) }];
+  // A layer's own file is switched where it lies — the project's, or one of the settings' newer layers'.
+  if (layer === "project" || layer === "projectMachine" || layer === "projectYou" || layer === "you" || layer === "machine") {
+    return [{ label: verb, note: stateId, onSelect: () => set(layer, !off) }];
+  }
   // What ships is never switched off where it lies: its switch is a file in a layer above it.
   if (layer === "system" && off) return [];
   if (!hasProject) return [{ label: verb, note: "in Shared, for every project", onSelect: () => set("base", !off) }];
@@ -48,5 +51,18 @@ export function switchItems(target: SwitchTarget, set: SetSwitch): MenuItem[] {
 
 /** What a tree row's `disabled` chip says on hover: where the field that switched it off is written. */
 export function disabledChipTitle(layer: WorkflowLayer): string {
-  return layer === "base" ? "Disabled in Shared, for every project" : "Disabled in this project";
+  switch (layer) {
+    case "base":
+      return "Disabled in Shared, for every project";
+    case "machine":
+      return "Disabled on this machine, for every project on it";
+    case "you":
+      return "Disabled for just you, in every project of yours";
+    case "projectMachine":
+      return "Disabled in this project on this machine";
+    case "projectYou":
+      return "Disabled for you in this project";
+    default:
+      return "Disabled in this project";
+  }
 }

@@ -2,7 +2,7 @@
 id: engineering/decisions/0026-settings-follow-the-person
 type: decision
 status: built
-updated: 2026-11-16
+updated: 2026-11-18
 decides_for: [engineering/decisions/0013-machines, engineering/units/user-settings, engineering/units/project-config, engineering/units/secret-chain, engineering/units/forge-integrations]
 ---
 
@@ -55,9 +55,11 @@ it is the shape replication already has: equal machines, each asking the others 
 | --- | --- | --- |
 | A Shared setting | `base:<path>` | `<base>/settings.json` |
 | A Just you setting | `you:<path>` | `<base>/personal-settings.json` |
+| A setting of the person's for one project | `projectYou:[<key>, …path]` | `<base>/projects/<key>/personal-settings.json` (amended 2026-11-18, below) |
 | A key | `secret:<NAME>` | the keychain where there is one, and `<base>/.env.local` |
 | A forge sign-in's mark | `mark:<NAME>` | `forgeSignIns` in `user-settings.json`, without `source` |
 | An agent's sign-in | `login:<agent>` | `claude-cli` and `codex-cli`, where each agent keeps it (`agentLogins.ts`) |
+| A permission set, workflow or prompt file | `file:[<layer>, (<key>,) …path]` | `permission-sets/`, `workflows/` and `prompts/` in `<base>/`, `<base>/personal/` and `<base>/projects/<key>/` (amended 2026-11-18, below) |
 
 A layer is cut into pieces (`settingsPieces`, `@jaira/shared` `settingsSync.ts`): each top-level block,
 each key of a block that is an object (`appearance.mode`, `agents.claudeCli`, `autopilot.askBelow`), and
@@ -169,7 +171,8 @@ another's. An agent that arrives without a path gets this machine's path put bac
   what stands in the way.
 - The shared root's authored files (workflows, functions, skills, permission sets) are not settings and
   do not follow; the window's own state (`user-settings.json` layout, read marks, open projects, log
-  policy) does not either.
+  policy) does not either. (Amended 2026-11-18: permission sets, workflows and prompts do now, below;
+  functions and skills still do not.)
 - A window that changes a setting does not show which machine last changed it.
 
 ## Verified
@@ -198,6 +201,178 @@ another's. An agent that arrives without a path gets this machine's path put bac
   that finds (seen once under the full suite's load).
 - **Not seen:** two real machines on a tailnet, Claude Code's real keychain item read by JaiRA, and the
   real `wsl.exe` on Windows (how it passes the quoted `sh -c` script is taken on trust).
+
+## Amended 2026-11-17: a machine has a layer of its own
+
+Settings names whose settings a page edits by a path, `Settings › [project] › [machine] › [Just you]`
+(`ui/components/settings-header`), and a machine in the path is a layer of its own: `machine-settings.json`
+in that machine's shared root, read over the projects' and under the person's, and a project on one
+machine, `.jaira/settings.local.json` in that workspace. Neither syncs — they are the machine's by
+definition, so no piece of them is cut or sent — and Settings reads and writes them on the machine they
+belong to (`config:read` / `config:write` with `machine`, forwarded by `Federation.route`).
+
+- **The machine's own blocks.** `execEnvironment`, `engine` and `updates` stay machine pieces wherever they
+  are written (`isMachinePiece` is unchanged), and are still read from Shared and Just you, where earlier
+  builds kept them. About now writes the update track and the engine's hosting to this machine's layer,
+  taking them out of Just you as it does (a value there would otherwise win, Just you being more specific);
+  `execEnvironment` is a row like any other and lands in whatever layer the path names — the machine's or
+  the project's on the machine when a machine is in it. `machineSettings` (the frame, the updater, how the
+  engine is hosted) reads built in, Shared, the machine's and Just you.
+- **The person's settings for one project** (`projects/<key>/personal-settings.json`, keyed by the
+  repository identity) stayed on the machine they were written on: syncing them meant a piece keyed by
+  project as well as path, which this exchange did not have yet. It does since 2026-11-18 (below).
+- **An older peer** reads the new layers as nothing, and would write them into Just you's file; Settings
+  does not write them through an engine whose view has no `machineFile`.
+
+## Amended 2026-11-18: the person's settings for one project follow too
+
+`Settings › atlas › Just you` is the person's, like Just you, so it follows them like Just you.
+
+- **A piece keyed by project as well as path.** `projectYou:["github.com_me_atlas","appearance","mode"]`:
+  the first element is the project's settings key (`projectSettingsKey`) — its repository identity with
+  unsafe characters made `_`, the same in every clone on every machine — and the rest the path, cut as any
+  layer is (`settingsPieces`), the machine's own pieces left out (`execEnvironment` in it stays, as in
+  Just you). Laid in, checked and written a project at a time, through the same steps as Shared and Just
+  you: checked with every workspace of that project open there laid in (`checkConfigWrite`), or over the
+  layers every project has when none is open; written through `writeConfig` where a workspace of it is
+  open, so it is re-read at once.
+- **Which projects.** A machine offers the projects it has a workspace of whose key comes from a
+  repository identity (the engine's `projectKeys`), and keeps in step every project another machine has
+  sent it. **A clone with no remote keeps its file on its machine:** its key is its folder's name and a hash
+  of where it is on that machine, which names nothing on another — and the same path on two machines
+  would name two different projects by one key.
+- **Not cloned here.** A project another machine sends that has no workspace here is written to its key's
+  file anyway, and kept in step from then on: a clone made later reads it at once, and a hand edit to that
+  file still travels.
+- **What arrives is checked.** A key that is not one folder name (`isProjectSettingsKey`: only
+  `A–Z a–z 0–9 . _ -`, no leading dot) is passed over and said, so nothing is written outside `projects/`.
+- **Older machines.** A kind of piece a machine does not know is passed over (`kindOf` answers nothing for
+  it), so an older JaiRA ignores these, offered or answered, and keeps working; a newer one passes over a
+  kind added after it the same way.
+- **Settings says** the person's settings for a project are kept "on this machine and the machines it is
+  paired with (a clone with no remote keeps them on its machine)"; Settings → Machines lists the
+  no-remote case among what stays.
+
+Verified: `app/test/settingsSync.test.ts` — two clones of one repository on two engines paired on
+loopback (one by an ssh remote, one by https), a setting each way, the machine's own kept, a run there
+reading it, a clone with no remote not sent; a project not cloned on the other machine, kept and read once
+cloned, a hand edit there travelling back; a piece of an unknown kind and a key reaching out of
+`projects/` passed over. `shared/test/settingsSync.test.ts`: which keys are taken.
+
+## Amended 2026-11-18: permission sets and workflows follow too
+
+A permission set made or changed on one machine under Shared, Just you or you in a project is the
+person's, like the settings beside it, so it follows them like those settings. So do workflows — the
+automations Settings gives the person's layers, and the states they are made of — and the prompts a
+workflow names.
+
+- **What follows: whole folders, by an allow-list** (`SYNCED_FILE_FOLDERS`, `@jaira/shared`
+  `settingsSync.ts`): `permission-sets/`, `workflows/` and `prompts/` in the roots of the three layers
+  that follow — Shared (`<base>/`), Just you (`<base>/personal/`) and you in a project
+  (`<base>/projects/<key>/`, `fileLayers.ts`) — every file in them at any depth, whatever its name, so a
+  workflow added to a layer later travels without a change here. `prompts/` is in because a workflow's
+  `$/prompts/…` is searched along the same roots: a workflow that came without its prompt would not load.
+- **What never does.** Nothing else under a root is read to be sent. `<base>/` is also where the machine
+  keeps its database, logs, sessions, keys and run state (`system/`), its own layer (`machine/`), its
+  secrets (`.env`, `.env.local`), the window's state (`user-settings.json`) and its own settings
+  (`machine-settings.json`): none of it is in a synced folder. The machine's two layers keep their
+  files — `<base>/machine/` and `<project>/.jaira/local/` — and a project's own `.jaira/` travels by
+  git. `functions/` and `skills/` stay too: they hold code and what it depends on, and a module must be
+  approved on each machine it runs on anyway (`machine.key`). Inside a synced folder these stay: a
+  hidden file (`.env`, `.DS_Store`, an editor's swap file), an editor's backup (`~`), a name a machine
+  might not hold (`<>:"|?*`, a control character, a trailing dot or space, `CON`, `NUL`, …), a file more
+  than twelve folders deep, `node_modules`, a link (never followed, to a file or a folder, inside the
+  folder or on the way to it), and a file over 1 MB. A file left out for its size or as a link is said
+  once in the log (`machines`), and is not a removal: the other machines keep what they had.
+- **A piece per file.** `file:["you","permission-sets","work","careful.json"]`, and for a project
+  `file:["projectYou","github.com_me_atlas","workflows","release","start.json"]` — the layer, the
+  project's settings key for the person's own in one, and the path under the layer's root. Its value is
+  the file's bytes (`{base64}`); the sync file keeps only a hash, as for a setting. The same stamps, the
+  same offer and pull, the same peers and pairing, the same rule: the latest change to a file wins, a file
+  gone from a folder that was read whole is a removal and travels, and a file this machine wrote is hashed
+  as it wrote it, so it is never news here and never sent back.
+- **The first look** at a machine's files is stamped by each file's age, also on a machine that had
+  looked at its settings long before files followed (`lookedFiles` in the sync file), so the newer of two
+  machines' copies wins rather than the one looked at last. A project's files first kept in step since
+  then are stamped by their age too, as its settings are.
+- **Noticing a change.** Every local write that says workflows changed (`store:invalidate` of
+  `workflows`: a set saved, a file written, deleted or moved in Files, a workflow written) asks for a look
+  400 ms later; a hand edit is noticed by the minute's look. Another machine's news relayed here does not
+  ask: nothing on this disk changed.
+- **Written whole, as they are.** A file is not a setting and is not checked: what is broken on one
+  machine is broken on the other, as a copy would be. It is written beside itself under a hidden name and
+  renamed into place. A project's files are written under its key whether or not it is cloned there,
+  and kept in step from then on.
+- **What arrives is checked** as a path. A key is taken only when its layer is one of the three, its
+  project key is one folder name (`isProjectSettingsKey`), and every name on its path is one a synced
+  folder holds (`isSyncedFilePath`) — so no `..`, no separator, no absolute path. Then every folder on
+  the way down from the shared root is looked at: a link there, a file where a folder should be, a folder
+  where the file should be, a name already there in another case (the same file on a disk that ignores
+  case) or a file here over 1 MB, and it is not written. Each is passed over, logged and listed under
+  "Not taken".
+- **Older machines** pass over a `file` piece (`kindOf`), offered or answered, and keep exchanging
+  settings; they never hold one, so they never send a file's removal. A newer machine answers an older
+  one's pull with its files every time, and the older one drops them.
+- **Settings → Machines** says the settings "with their permission sets and workflows" follow, and lists
+  among what stays the machine's own layers' files, functions and skills, and a file over 1 MB.
+
+Found on the way: a `store:invalidate` with no `project`, published on one machine, is relayed by every
+paired machine back to the one it came from (`Federation.relay` drops only news about another machine's
+projects), so it goes back and forth for as long as both are up — one Shared settings save on two
+engines paired on loopback was 2,200 workflow invalidations on each in two seconds. Not fixed here; it is
+why the look above is asked for only by local news (`publish(message, relayed)`): asked for by every
+relayed one, its 400 ms wait never ended.
+
+Verified: `app/test/settingsSync.test.ts`, two engines paired on loopback — a set made through JaiRA in
+Shared, a set, a workflow and a prompt made by hand in Just you, a set and a workflow in you in atlas,
+each reaching the other machine and listed there under its layer; each edited by hand on the machine that
+had only received it and travelling back; deleted by hand and through Files, and gone on the other; then
+neither machine finding news in its own writes. A project's files written on a machine without a clone,
+listed once it is cloned, and a hand edit there travelling back. Two copies of one set from before files
+followed, the newer kept on both. Nothing sent from `system/`, `machine/`, `functions/`, `skills/`, a
+folder no layer syncs, a hidden file, a file over 1 MB or a link (a file, and a whole `prompts/`), each
+said once; a set grown past the cap neither sent nor removed. Refused: `..`, a folder that is not synced,
+an absolute name, a project key reaching out of `projects/`, a layer that does not follow, a value that is
+not a file's bytes, and a write through a link out of the folder. A stand-in older machine that passes
+over files: settings still travel both ways and the newer machine's set stays.
+`shared/test/settingsSync.test.ts`: which paths are taken. **Not seen:** two real machines, a disk that
+ignores case, Windows.
+
+## Amended 2026-11-18, later: automations in all six layers, and what follows of them
+
+Automations now have the settings' six layers, most specific wins (decision 0023, amended 2026-11-18,
+later): each layer's root keeps them under its `workflows/system/events…`. What that means here:
+
+- **Shared's, Just you's and you-in-a-project's automations follow the person**, because they are files
+  in a `workflows/` folder those three layers already send (above). An automation kept for Just you runs
+  on every machine of the person's, spliced into each project's events task there.
+- **This machine's and the project on this machine's stay on the machine** (`<base>/machine/workflows/`,
+  `<project>/.jaira/local/workflows/`), as their settings and permission sets do. A copy in a layer that
+  follows may name one of them as the layer under it (Just you's names `$PROJECTMACHINE`); on a machine
+  where that layer holds nothing, it reads as passing the layer under it through, so the copy still loads.
+- **A paired machine in the path** is that machine's, for automations as for settings: Settings → Tools
+  reads and writes its layers there, and its events status is its own watcher's (`automations:*` and
+  `events:status` carry `machine`, forwarded by `Federation.route`). An engine from before has no
+  `automations:*`; its page reads as having none.
+- **"Add to" and "save this stack as a set"** may now write Just you's or you-in-a-project's file, and so
+  a line or a set that follows the person; written into this machine's or the project on this machine's,
+  it stays.
+
+Verified: `app/test/federation.test.ts` — a paired machine's events status (its root's remote, which this
+machine's root has not) and its automations, read and written there and not here.
+
+## Amended 2026-11-18, last: every workflow in the person's layers follows
+
+Every workflow is found along the settings' six layers now, not only automations (decision 0023,
+amended 2026-11-18, last). So any workflow a person keeps in Just you (`~/.jaira/personal/workflows/`)
+or for one project (`~/.jaira/projects/<key>/workflows/`) — not only an automation — runs on every
+machine of theirs: those folders already follow (above). A workflow kept on this machine
+(`~/.jaira/machine/workflows/`) or in the project on this machine (`.jaira/local/workflows/`) stays on
+it. With a paired machine in Settings' path, a workflow read or written from Settings is that machine's
+(`workflow:read`, `:write`, `:delete` carry `machine`, forwarded by `Federation.route`).
+
+Verified: `app/test/federation.test.ts` — a paired machine's workflow, read, written and deleted there
+and not here.
 
 ## Revisit when
 

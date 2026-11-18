@@ -87,9 +87,14 @@ describe("a shell approval, answered through the service", () => {
     void park("rm foo.txt && git commit -m wip");
     const [pending] = service.pendingApprovals();
     expect(pending!.parts!.permissionSet).toBe(REF);
+    // Any of the settings' six layers, nearest first (decision 0023, amended 2026-11-18).
     expect(pending!.permissionSet).toEqual({
       id: "ask-first",
       targets: [
+        { layer: "projectYou", file: expect.stringMatching(/^~\/\.jaira\/projects\/[^/]+\/permission-sets\/ask-first\.json$/), follows: "$SYSTEM/permission-sets/ask-first" },
+        { layer: "you", file: "~/.jaira/personal/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+        { layer: "projectMachine", file: ".jaira/local/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+        { layer: "machine", file: "~/.jaira/machine/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
         { layer: "project", file: ".jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
         { layer: "base", file: "~/.jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
       ],
@@ -129,7 +134,24 @@ describe("a shell approval, answered through the service", () => {
     expect(narrowingFor({ command: "git commit -m again && terraform apply" })).toBeUndefined();
     // And the menu now describes a file that is THERE: the next line is added in place.
     void park("git log && npm publish");
-    expect(service.pendingApprovals()[0]!.permissionSet!.targets[0]).toEqual({ layer: "project", file: ".jaira/permission-sets/ask-first.json" });
+    expect(service.pendingApprovals()[0]!.permissionSet!.targets.find((t) => t.layer === "project")).toEqual({ layer: "project", file: ".jaira/permission-sets/ask-first.json" });
+  });
+
+  it("'add to the permission set, for just you' writes the person's own layer, following the built-in — and the next answer is read through it", async () => {
+    const parked = park("git commit -m wip");
+    const [pending] = service.pendingApprovals();
+    service.submitApproval(pending!.requestId, "allow", "workflow-run", ["git commit"], "you");
+    const personal = join(home, "personal", "permission-sets", "ask-first.json");
+    expect(JSON.parse(readFileSync(personal, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", "git commit": "allow" });
+    expect(existsSync(projectFile())).toBe(false);
+    expect(existsSync(sharedFile())).toBe(false);
+    await expect(parked).resolves.toEqual({ decision: "allow", scope: "once" });
+    // The project on this machine — under Just you, so it follows what ships too — is this machine's: kept
+    // out of the repository before a file lands there.
+    void park("terraform plan");
+    service.submitApproval(service.pendingApprovals()[0]!.requestId, "allow", "workflow-run", ["terraform"], "projectMachine");
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "local", "permission-sets", "ask-first.json"), "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", terraform: "allow" });
+    expect(readFileSync(join(dir, ".jaira", ".gitignore"), "utf8")).toMatch(/^local\/$/m);
   });
 
   it("'for all projects' writes the shared root, and a deny is written as deny", async () => {
@@ -194,8 +216,9 @@ describe("an approval over a stack of sets", () => {
     expect(pending!.parts!.parts[0]!.decidedBy).toMatchObject({ entry: "terraform", layer: "project/build-safe" });
     expect(pending!.layers!.map((layer) => [layer.id, layer.scope, layer.targets.map((target) => target.layer), layer.everyone ?? false])).toEqual([
       ["runtime", "runtime", [], false],
-      ["project/build-safe", "project", ["project"], false],
-      ["ask-first", "built in", ["project", "base"], true],
+      // A project's set: the project's own layers above it can follow it; Just you and this machine cannot.
+      ["project/build-safe", "project", ["projectYou", "projectMachine", "project"], false],
+      ["ask-first", "built in", ["projectYou", "you", "projectMachine", "machine", "project", "base"], true],
     ]);
     // The set that asked is where "Add to" starts, there being no standing layer for the top level here.
     expect(pending!.defaultLayer).toBe("ask-first");

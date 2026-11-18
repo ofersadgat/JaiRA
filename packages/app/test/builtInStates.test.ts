@@ -26,11 +26,12 @@ import { initProject } from "@jaira/persistence";
 import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
-import { layerBarOf } from "../src/renderer/builtInModel";
+import { layerBarOf, overrideTarget } from "../src/renderer/builtInModel";
 import { CHAT_CONTROL, CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 import { debugFileStatus } from "../src/renderer/debugModel";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
 import { builtInItems } from "../src/renderer/filesModel";
+import type { MenuItem } from "../src/renderer/menuTypes";
 import { runTargetOf } from "../src/renderer/runForm";
 import { savesOf } from "../src/renderer/stateEditorModel";
 
@@ -192,7 +193,15 @@ describe("the state editor on the three kinds of file", () => {
   it("says a built-in is read-only, with the two overrides and no Save", () => {
     const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true);
     expect(bar?.chip.text).toBe("built in · read-only");
-    expect(bar?.actions.map((a) => a.label)).toEqual(["Edit a copy in Shared", "Override here"]);
+    // The two it has always offered as links, then the settings' four newer layers behind `Elsewhere…`
+    // (decision 0023, amended 2026-11-18) — the tree's menu's six.
+    expect(bar?.actions.filter((a) => a.more !== true).map((a) => a.label)).toEqual(["Edit a copy in Shared", "Override here"]);
+    expect(bar?.actions.filter((a) => a.more === true).map((a) => a.label)).toEqual([
+      "Edit a copy for you in this project",
+      "Edit a copy for just you",
+      "Edit a copy in this project on this machine",
+      "Edit a copy on this machine",
+    ]);
     // The bar that holds Save and Revert is not drawn for what ships, whether the form over it is a
     // reading or, with copy-on-edit, live.
     expect(savesOf(true, true)).toBe(false);
@@ -212,12 +221,22 @@ describe("the state editor on the three kinds of file", () => {
     expect(actions(layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true))).toEqual([
       "override-base",
       "override-project",
+      "override-projectYou",
+      "override-you",
+      "override-projectMachine",
+      "override-machine",
     ]);
-    // A layer that already has its copy is offered disabled, and so is the project with none open.
-    expect(actions(layerBarOf({ layer: "system", builtIn: { layers: ["base", "system"] } }, false))).toEqual([
+    // A layer that already has its copy is offered disabled, and so is a project's with none open.
+    expect(actions(layerBarOf({ layer: "system", builtIn: { layers: ["you", "base", "system"] } }, false))).toEqual([
       "override-base (off)",
       "override-project (off)",
+      "override-projectYou (off)",
+      "override-you (off)",
+      "override-projectMachine (off)",
+      "override-machine",
     ]);
+    expect(overrideTarget("override-you")).toBe("you");
+    expect(overrideTarget("compare")).toBeNull();
     // An override, shared or in a project, offers the comparison and nothing else.
     expect(actions(layerBarOf({ layer: "base", builtIn: { layers: ["base", "system"] } }, true))).toEqual(["compare"]);
     expect(actions(layerBarOf({ layer: "project", builtIn: { layers: ["project", "system"] } }, true))).toEqual(["compare"]);
@@ -254,8 +273,9 @@ describe("the tree's third root", () => {
 
   it("closes a project's tree with a read-only Built in root", async () => {
     const tree = (await service.filesTree({ project: dir }));
-    expect(tree.roots.map((root) => root.layer)).toEqual(["project", "system"]);
-    const shipped = tree.roots[1]!;
+    // The project's checkout and the settings' newer layers over it (decision 0023, amended 2026-11-18), then what ships.
+    expect(tree.roots.map((root) => root.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "system"]);
+    const shipped = tree.roots.at(-1)!;
     expect(shipped.label).toBe("Built in");
     expect(shipped.dir).toBe(jairaBuiltInPaths().dir);
     expect(shipped.project).toBeUndefined();
@@ -273,7 +293,7 @@ describe("the tree's third root", () => {
   });
 
   it("closes the shared root's tree, and an empty window's, with it too", async () => {
-    expect((await service.filesTree({ project: SHARED_SESSION })).roots.map((root) => root.layer)).toEqual(["base", "system"]);
+    expect((await service.filesTree({ project: SHARED_SESSION })).roots.map((root) => root.layer)).toEqual(["base", "you", "machine", "system"]);
   });
 
   it("lists it ONCE beside several projects", async () => {
@@ -282,7 +302,8 @@ describe("the tree's third root", () => {
     extraDirs.push(other);
     initProject(other, testHome());
     await service.open(other);
-    expect((await service.filesTree()).roots.map((root) => root.layer)).toEqual(["project", "project", "system"]);
+    // Each project with its own two layers; Just you and this machine once, as what ships is.
+    expect((await service.filesTree()).roots.map((root) => root.layer)).toEqual(["project", "projectMachine", "projectYou", "project", "projectMachine", "projectYou", "you", "machine", "system"]);
   });
 
   it("marks which layer supplied a state: the shipped row overridden, the person's row overriding", async () => {
@@ -291,10 +312,11 @@ describe("the tree's third root", () => {
     writeFileSync(file, JSON.stringify({ label: "Here" }), "utf8");
 
     const tree = (await service.filesTree({ project: dir }));
+    const shippedRoot = tree.roots.find((root) => root.layer === "system")!;
     expect(find(tree.roots[0]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "project", overridesBuiltIn: true });
-    expect(find(tree.roots[1]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "system", shadowed: true });
+    expect(find(shippedRoot.nodes, CHAT_SESSION)).toMatchObject({ layer: "system", shadowed: true, shadowedBy: "project" });
     // A shipped state nobody overrode is marked as neither.
-    const untouched = find(tree.roots[1]!.nodes, CHAT_CONTROL)!;
+    const untouched = find(shippedRoot.nodes, CHAT_CONTROL)!;
     expect(untouched.shadowed).toBeUndefined();
     expect(untouched.overridesBuiltIn).toBeUndefined();
 
@@ -302,7 +324,7 @@ describe("the tree's third root", () => {
     installInShared(CHAT_CONTROL, JSON.stringify({ label: "Shared" }));
     const shared = (await service.filesTree({ project: SHARED_SESSION }));
     expect(find(shared.roots[0]!.nodes, CHAT_CONTROL)).toMatchObject({ layer: "base", overridesBuiltIn: true });
-    expect(find(shared.roots[1]!.nodes, CHAT_CONTROL)).toMatchObject({ shadowed: true });
+    expect(find(shared.roots.find((root) => root.layer === "system")!.nodes, CHAT_CONTROL)).toMatchObject({ shadowed: true });
   });
 
   it("offers reading and overriding on that root, and nothing that writes to it", () => {
@@ -316,18 +338,23 @@ describe("the tree's third root", () => {
       stateId: CHAT_SESSION,
     };
     const calls: string[] = [];
+    let second: { title: string; items: MenuItem[] } | null = null;
     const act = {
       hasProject: true,
       onOpen: (id: string, layer: string) => calls.push(`open ${id} ${layer}`),
       onOverride: (id: string, to: string) => calls.push(`override ${id} -> ${to}`),
       onCopy: (text: string) => calls.push(`copy ${text}`),
       onReveal: (file: string) => calls.push(`reveal ${file}`),
+      more: (menu: { title: string; items: MenuItem[] }) => (second = menu),
     };
     const items = builtInItems(state, root, act);
     expect(items.map((i) => i.label)).toEqual([
       "Open",
       "Edit a copy in Shared",
       "Override here",
+      // The settings' other layers (decision 0023, amended 2026-11-18), after the two it has always
+      // offered — behind one item, as the editor's bar has them behind `Elsewhere…`.
+      "Edit a copy elsewhere…",
       "Copy state id",
       "Copy path",
       "Reveal in file explorer",
@@ -338,8 +365,20 @@ describe("the tree's third root", () => {
       `override ${CHAT_SESSION} -> base`,
       `override ${CHAT_SESSION} -> project`,
     ]);
-    // With nothing open there is no "here" to override in.
-    expect(builtInItems(state, root, { ...act, hasProject: false }).find((i) => i.label === "Override here")?.disabled).toBe(true);
+    // A menu of their own, titled with the verb, each saying only where — in the editor's words, short
+    // enough to read whole at a menu's width, and no folder beside them.
+    items.find((i) => i.label === "Edit a copy elsewhere…")!.onSelect();
+    const opened = second as { title: string; items: MenuItem[] } | null;
+    expect(opened?.title).toBe("Edit a copy");
+    expect(opened?.items.map((i) => i.label)).toEqual(["for you in this project", "for just you", "in this project on this machine", "on this machine"]);
+    expect(opened?.items.every((i) => i.note === undefined && i.disabled !== true)).toBe(true);
+    opened!.items[1]!.onSelect();
+    expect(calls.at(-1)).toBe(`override ${CHAT_SESSION} -> you`);
+    // With nothing open there is no "here" to override in, nor a project's layer to copy into.
+    const closed = builtInItems(state, root, { ...act, hasProject: false });
+    expect(closed.find((i) => i.label === "Override here")?.disabled).toBe(true);
+    closed.find((i) => i.label === "Edit a copy elsewhere…")!.onSelect();
+    expect((second as { items: MenuItem[] } | null)?.items.map((i) => i.disabled === true)).toEqual([true, false, true, false]);
     // A folder or a README has nothing to override: it can be looked at, and that is all.
     const folder: FileNode = { path: "workflows", name: "workflows", kind: "directory", mime: "inode/directory", layer: "system" };
     expect(builtInItems(folder, root, act).map((i) => i.label)).toEqual(["Copy path", "Reveal in file explorer"]);

@@ -61,7 +61,9 @@
     "files:list",
     "files:tree",
     "files:whyHidden",
+    "forge:branches",
     "forge:cancelSignIn",
+    "forge:repositories",
     "forge:signIn",
     "forge:signIns",
     "forge:signOut",
@@ -89,7 +91,6 @@
     "log:list",
     "machines:copies",
     "machines:copy",
-    "machines:syncSettings",
     "machines:forget",
     "machines:form",
     "machines:outbox",
@@ -98,6 +99,7 @@
     "machines:pairCancel",
     "machines:pairCode",
     "machines:pairCodeCancel",
+    "machines:projectsFolder",
     "machines:refresh",
     "machines:refuse",
     "machines:remove",
@@ -105,6 +107,7 @@
     "machines:rename",
     "machines:signIn",
     "machines:signOut",
+    "machines:syncSettings",
     "machines:tags",
     "machines:view",
     "machines:withdraw",
@@ -215,6 +218,10 @@
     "workflow:sync",
     "workflow:syncCancel",
     "workflow:syncStatus",
-    "workflow:write"
+    "workflow:write",
+    "workspace:cancel",
+    "workspace:create",
+    "workspace:inspect",
+    "workspace:plan"
   ]
 }

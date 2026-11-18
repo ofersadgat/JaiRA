@@ -58,6 +58,7 @@ import type {
   WorkflowLayer,
   PartAnswer,
   WritableLayer,
+  WritableSetLayer,
   WorkflowSource,
   WorkflowSyncEdit,
   WorkflowSyncResult,
@@ -394,7 +395,7 @@ export interface FileSurfaceContext {
   onRunQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
   /** The command approval a running agent in this task is waiting on, hosted the same way. */
   runApproval?: PendingApproval | undefined;
-  onRunApproval?: ((decision: "allow" | "deny", scope: ApprovalScope, extras?: { remember?: string[]; addTo?: WritableLayer; answers?: PartAnswer[] }) => void) | undefined;
+  onRunApproval?: ((decision: "allow" | "deny", scope: ApprovalScope, extras?: { remember?: string[]; addTo?: WritableSetLayer; answers?: PartAnswer[] }) => void) | undefined;
   onAnswer?: (() => void) | undefined;
   /**
    * Set this run going again — `task:rerun`, and the shell's own action rather than a raw call.

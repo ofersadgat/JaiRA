@@ -1,10 +1,11 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { Linking, TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { formatLicenseBundles, thirdPartyLicenseEntryKey, withPaths, type JairaEngineConfig, type PluginId, type ThirdPartyLicenseEntry, type UpdateChannel } from "@jaira/shared/browser";
+import { formatLicenseBundles, thirdPartyLicenseEntryKey, type JairaEngineConfig, type PluginId, type ThirdPartyLicenseEntry, type UpdateChannel } from "@jaira/shared/browser";
 import {
   ANTHROPIC_TERMS,
   TRACK_CHOICES,
+  aboutMachineOf,
   buildTailOf,
   commandWords,
   downloadingThen,
@@ -13,12 +14,17 @@ import {
   licenseCountWords,
   pluginControlOf,
   pluginDescriptionOf,
+  remoteAboutWords,
   sentence,
   updateTrackOf,
   useCliCommand,
   useEngineStatus,
   useLicenseManifest,
+  useMachineConfig,
+  type AboutMachine,
 } from "@jaira/ui/aboutModel";
+import { useMachines } from "@jaira/ui/machinesModel";
+import type { ConfigView } from "@jaira/shared/browser";
 import { buildDownloadBytes, checkedAgo, pluginFamilies, publishedWords, sizeWords, updateMenu, waitedFor, type PluginFamily, type PluginRow } from "@jaira/ui/updatesModel";
 import { applyUpdate, checkForUpdate, checkPlugin, installPlugin, refreshBusy, removePlugin, usePlugins, useUpdate, type UpdateView } from "@jaira/ui/updatesStore";
 import type { FloatRect } from "@jaira/ui/floatPlace";
@@ -69,27 +75,39 @@ import { SettingsRow, SettingsSection } from "./SettingsPage";
  */
 export function AboutPage(): JSX.Element {
   const { state, actions } = useShell();
-  const config = state.config;
+  const [machines] = useMachines();
+  // The machine Settings' path names, when it is a paired one: About is about that machine — its
+  // version, and its own update track and engine settings, read and written there (`machine` on
+  // `config:read` / `config:write`, forwarded by the engine). What only the machine itself can do is
+  // said, not offered.
+  const machine = aboutMachineOf(state.settingsPath, machines);
+  const remote = useMachineConfig(machine.remote ? machine.id : undefined);
+  const config = machine.remote ? remote.config : state.config;
+  const save = (writes: ReadonlyArray<readonly [string, unknown]>): void => {
+    if (config === null) return;
+    if (!machine.remote) {
+      void actions.saveMachineConfig(writes);
+      return;
+    }
+    void actions.saveMachineConfig(writes, machine.id).then(remote.reload);
+  };
   return (
     <SettingsLayerContext.Provider value={null}>
       <NeedsAttention page="about" />
-      <UpdatesSection
-        onTrack={(channel) => {
-          if (config === null) return;
-          void actions.saveConfig("you", withPaths(config.you, [["updates.channel", channel]]));
-        }}
-      />
-      <PluginsSection />
-      <EngineSection
-        onEngine={(patch) => {
-          if (config === null) return;
-          void actions.saveConfig("you", withPaths(config.you, Object.entries(patch).map(([key, value]) => [`engine.${key}`, value] as [string, unknown])));
-        }}
-      />
-      <CommandLineSection />
+      {/* The update track and how the engine is hosted are the machine's own, whatever else Settings'
+          path names: written to that machine's layer (`saveMachineConfig`). */}
+      <UpdatesSection machine={machine} config={config} problem={machine.remote ? remote.problem : null} onTrack={(channel) => save([["updates.channel", channel]])} />
+      <PluginsSection machine={machine} />
+      <EngineSection machine={machine} config={config} onEngine={(patch) => save(Object.entries(patch).map(([key, value]) => [`engine.${key}`, value] as const))} />
+      <CommandLineSection machine={machine} />
       <ThirdPartyNotices />
     </SettingsLayerContext.Provider>
   );
+}
+
+/** What a section about another machine says in place of what only that machine can do. */
+function Elsewhere({ machine, what }: { machine: Extract<AboutMachine, { remote: true }>; what: "plugins" | "command" }): JSX.Element {
+  return <SettingsRow name={`On ${machine.label}`} description={remoteAboutWords(machine)[what]} />;
 }
 
 const DESC = { voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" } as const;
@@ -287,37 +305,49 @@ export function UpdateSplit({ label }: { label: string }): JSX.Element {
   );
 }
 
-function UpdatesSection({ onTrack }: { onTrack: (channel: UpdateChannel | undefined) => void }): JSX.Element {
+function UpdatesSection({ machine, config, problem, onTrack }: { machine: AboutMachine; config: ConfigView | null; problem: string | null; onTrack: (channel: UpdateChannel | undefined) => void }): JSX.Element {
   const t = useTokens();
-  const { state: shell } = useShell();
-  const config = shell.config;
   const view = useUpdate();
   const notesOpen = aboutNotes.use();
   const state = view.update;
-  const { version, own, channel, stated, back, words } = updateTrackOf(config, state);
+  const { version, own, channel, stated, back, words } = updateTrackOf(config, state, machine.remote ? { version: machine.version } : undefined);
+  const where = machine.remote ? machine.label : "this machine";
+  const said = machine.remote ? remoteAboutWords(machine) : undefined;
+  // Another machine's track can be set while it is online and its view was read.
+  const locked = config === null || (machine.remote ? !machine.online : state?.status === "disabled");
   return (
-    <SettingsSection id="updates" title="Updates" info="JaiRA checks 15 seconds after it starts and then every hour. Nothing downloads or installs until you click.">
+    <SettingsSection
+      id="updates"
+      title="Updates"
+      info={machine.remote ? `${machine.label} checks 15 seconds after it starts and then every hour, on the track set here.` : "JaiRA checks 15 seconds after it starts and then every hour. Nothing downloads or installs until you click."}
+      {...(said !== undefined ? { lead: problem !== null ? `${said.lead} Its settings could not be read: ${sentence(problem)}` : said.lead } : {})}
+    >
       <SettingsRow
         name="Version"
-        description="The build running now."
+        description={machine.remote ? `The build running on ${machine.label}, as it last said.` : "The build running now."}
         control={
-          <View flexDirection="row" alignItems="center" gap={8}>
-            <Txt spec={{ voice: "data", scale: 11.5 / 12 }}>{version}</Txt>
-            <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: { px: 18 }, color: "dim" }} paddingHorizontal={8} borderRadius={999} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
-              {own}
-            </Txt>
-          </View>
+          version === "" ? (
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>not known yet</Txt>
+          ) : (
+            <View flexDirection="row" alignItems="center" gap={8}>
+              <Txt spec={{ voice: "data", scale: 11.5 / 12 }}>{version}</Txt>
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: { px: 18 }, color: "dim" }} paddingHorizontal={8} borderRadius={999} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+                {own}
+              </Txt>
+            </View>
+          )
         }
       />
       <SettingsRow
         name="Update track"
         description={words}
-        info="Kept on this machine, in personal-settings.json. Going from Nightly to Stable installs the latest stable release once, even though its version is older."
-        reset={stated ? { label: back, onReset: () => onTrack(undefined), disabled: config === null } : undefined}
-        control={<Segmented label="Update track" value={channel} options={TRACK_CHOICES} disabled={config === null || state?.status === "disabled"} onChange={onTrack} />}
+        info={`Kept on ${where}, in machine-settings.json. Going from Nightly to Stable installs the latest stable release once, even though its version is older.`}
+        reset={stated ? { label: back, onReset: () => onTrack(undefined), disabled: locked } : undefined}
+        control={<Segmented label="Update track" value={channel} options={TRACK_CHOICES} disabled={locked} onChange={onTrack} />}
       />
-      {/* Open by themselves when About was opened for them (the Update row's Release notes). */}
-      <StatusRow view={view} notesOpen={notesOpen} />
+      {/* Open by themselves when About was opened for them (the Update row's Release notes). Another
+          machine's updater is its own: checking, downloading and restarting happen there. */}
+      {said !== undefined ? <SettingsRow name="Status" description={said.updates} /> : <StatusRow view={view} notesOpen={notesOpen} />}
     </SettingsSection>
   );
 }
@@ -566,9 +596,16 @@ function BuildLine({ family, build }: { family: PluginFamily; build: PluginRow }
   );
 }
 
-function PluginsSection(): JSX.Element {
+function PluginsSection({ machine }: { machine: AboutMachine }): JSX.Element {
   const { plugins, checked } = usePlugins();
   const families = pluginFamilies(plugins);
+  if (machine.remote) {
+    return (
+      <SettingsSection id="plugins" title="Plugins" info="Parts left out of the installer because they are big. Each machine downloads its own.">
+        <Elsewhere machine={machine} what="plugins" />
+      </SettingsSection>
+    );
+  }
   return (
     <SettingsSection
       id="plugins"
@@ -585,8 +622,15 @@ function PluginsSection(): JSX.Element {
   );
 }
 
-function CommandLineSection(): JSX.Element {
+function CommandLineSection({ machine }: { machine: AboutMachine }): JSX.Element {
   const { status, busy, error, install } = useCliCommand();
+  if (machine.remote) {
+    return (
+      <SettingsSection id="command-line" title="Command line" info="The jaira command runs workflows, tasks and plugins from a terminal, on the JaiRA of the machine it is installed on.">
+        <Elsewhere machine={machine} what="command" />
+      </SettingsSection>
+    );
+  }
   return (
     <SettingsSection id="command-line" title="Command line" info="The jaira command runs workflows, tasks and plugins from a terminal, on this app, its plugins and its version.">
       <SettingsRow
@@ -604,46 +648,74 @@ function CommandLineSection(): JSX.Element {
   );
 }
 
-function EngineSection({ onEngine }: { onEngine: (patch: Partial<Record<keyof JairaEngineConfig, boolean | undefined>>) => void }): JSX.Element {
-  const { state } = useShell();
-  const config = state.config;
+function EngineSection({ machine, config, onEngine }: { machine: AboutMachine; config: ConfigView | null; onEngine: (patch: Partial<Record<keyof JairaEngineConfig, boolean | undefined>>) => void }): JSX.Element {
   const status = useEngineStatus();
   const { separate, keep, resetLabel } = engineSwitchesOf(config);
-  const reset = (path: "engine.separateServer" | "engine.keepServerRunning", key: keyof JairaEngineConfig): { label: string; onReset: () => void } | undefined => {
+  const locked = config === null || (machine.remote && !machine.online);
+  const reset = (path: "engine.separateServer" | "engine.keepServerRunning", key: keyof JairaEngineConfig): { label: string; onReset: () => void; disabled?: boolean } | undefined => {
     const label = resetLabel(path);
-    return label === undefined ? undefined : { label, onReset: () => onEngine({ [key]: undefined }) };
+    return label === undefined ? undefined : { label, onReset: () => onEngine({ [key]: undefined }), ...(locked ? { disabled: true } : {}) };
   };
   const where = status !== undefined ? engineWhere(status) : undefined;
+  // Another machine's: its two switches, which its next start reads; where its engine runs now is its own to say.
+  const there = machine.remote ? machine.label : undefined;
+  const said = machine.remote ? remoteAboutWords(machine) : undefined;
   return (
-    <SettingsSection id="engine" title="Engine" info="The engine runs workflows and keeps the projects' records. There is one per person on this machine: every JaiRA window and jaira command uses the one that is running.">
-      <SettingsRow
-        name="Runs in"
-        description={
-          where === undefined ? (
-            "Checking…"
-          ) : status?.note !== undefined ? (
-            <Say>
-              {where.description}
-              <Txt spec={{ ...DESC, color: "bad" }}>{` ${sentence(status.note)}`}</Txt>
-            </Say>
-          ) : (
-            where.description
-          )
-        }
-        control={where !== undefined ? <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>{where.name}</Txt> : undefined}
-      />
+    <SettingsSection
+      id="engine"
+      title="Engine"
+      info={
+        there !== undefined
+          ? `The engine runs workflows and keeps the projects' records. There is one per person on ${there}: every JaiRA window and jaira command there uses the one that is running.`
+          : "The engine runs workflows and keeps the projects' records. There is one per person on this machine: every JaiRA window and jaira command uses the one that is running."
+      }
+    >
+      {said !== undefined ? (
+        said.runsIn !== undefined ? (
+          <SettingsRow name="Runs in" description={said.runsIn.description} control={<Txt spec={{ voice: "app", scale: 13 / 12.5 }}>{said.runsIn.name}</Txt>} />
+        ) : null
+      ) : (
+        <SettingsRow
+          name="Runs in"
+          description={
+            where === undefined ? (
+              "Checking…"
+            ) : status?.note !== undefined ? (
+              <Say>
+                {where.description}
+                <Txt spec={{ ...DESC, color: "bad" }}>{` ${sentence(status.note)}`}</Txt>
+              </Say>
+            ) : (
+              where.description
+            )
+          }
+          control={where !== undefined ? <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>{where.name}</Txt> : undefined}
+        />
+      )}
       <SettingsRow
         name="Separate server"
-        description={separate ? "At the next start, this window starts jaira serve and connects to it." : "At the next start, the engine runs in this window's process."}
-        info="Kept on this machine, in personal-settings.json. Either way, a window that finds an engine already running uses that one."
+        description={
+          said !== undefined
+            ? said.separate(separate)
+            : separate
+              ? "At the next start, this window starts jaira serve and connects to it."
+              : "At the next start, the engine runs in this window's process."
+        }
+        info={`Kept on ${there ?? "this machine"}, in machine-settings.json. Either way, a window that finds an engine already running uses that one.`}
         reset={reset("engine.separateServer", "separateServer")}
-        control={<Switch on={separate} label="Separate server" disabled={config === null} onChange={(on) => onEngine({ separateServer: on })} />}
+        control={<Switch on={separate} label="Separate server" disabled={locked} onChange={(on) => onEngine({ separateServer: on })} />}
       />
       <SettingsRow
         name="Keep the server running"
-        description={keep ? "The server this window starts keeps running after the window quits; jaira server stop ends it." : "The server this window starts stops when the window quits."}
+        description={
+          said !== undefined
+            ? said.keep(keep)
+            : keep
+              ? "The server this window starts keeps running after the window quits; jaira server stop ends it."
+              : "The server this window starts stops when the window quits."
+        }
         reset={reset("engine.keepServerRunning", "keepServerRunning")}
-        control={<Switch on={keep} label="Keep the server running" disabled={config === null || !separate} onChange={(on) => onEngine({ keepServerRunning: on })} />}
+        control={<Switch on={keep} label="Keep the server running" disabled={locked || !separate} onChange={(on) => onEngine({ keepServerRunning: on })} />}
       />
     </SettingsSection>
   );

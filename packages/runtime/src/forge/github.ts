@@ -33,6 +33,7 @@ import {
   type PipelineStatus,
   type ForgeAnchor,
   type ForgeBranch,
+  type ForgeRepository,
   type ForgeCommit,
   type ForgeComment,
   type ForgeIdentity,
@@ -486,6 +487,38 @@ export class GitHubProvider implements ForgeProvider {
   }
 
   /**
+   * `GET /user/repos`, most recently pushed first. A GitHub App's user token (JaiRA's own sign-in)
+   * sees only the repositories the app is installed on; where that list comes back empty, each of the
+   * account's installations is asked for its repositories instead.
+   */
+  async repositories(query: { search?: string; limit?: number } = {}): Promise<ForgeRepository[]> {
+    const limit = query.limit ?? 200;
+    const search = query.search?.trim().toLowerCase();
+    const keep = (repo: ForgeRepository): boolean => search === undefined || search === "" || repo.project.toLowerCase().includes(search);
+    let rows = await this.listed(`/user/repos?per_page=100&sort=pushed&affiliation=owner,collaborator,organization_member`, "listing your repositories", (all) =>
+      all.map((row) => githubRepositoryOf(asRecord(row))).filter(keep).length >= limit,
+    );
+    if (rows.length === 0) {
+      const installations = await this.listed(`/user/installations?per_page=100`, "listing the app's installations", () => false, "installations").catch(() => [] as unknown[]);
+      for (const installation of installations) {
+        const id = asRecord(installation)["id"];
+        rows.push(...(await this.listed(`/user/installations/${String(id)}/repositories?per_page=100`, "listing an installation's repositories", () => false, "repositories")));
+      }
+      rows = rows.sort((a, b) => asText(asRecord(b)["pushed_at"]).localeCompare(asText(asRecord(a)["pushed_at"])));
+    }
+    return rows.map((row) => githubRepositoryOf(asRecord(row))).filter(keep).slice(0, limit);
+  }
+
+  /** `GET /repos/{project}/contents/{path}` as raw text; undefined for a file that is not there. */
+  async fileText(project: string, path: string, ref?: string): Promise<string | undefined> {
+    const at = `/repos/${project}/contents/${path.split("/").map(encodeURIComponent).join("/")}${ref !== undefined ? `?ref=${encodeURIComponent(ref)}` : ""}`;
+    const response = await this.http({ method: "GET", url: `${this.rest}${at}`, headers: this.headers({ Accept: "application/vnd.github.raw+json" }), expect: "bytes" });
+    if (response.status === 404) return undefined;
+    const body = expectStatus(response, [200], `reading ${path} in ${project}`).body;
+    return body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body ?? "");
+  }
+
+  /**
    * The read, flattened. A reply needs the thread's GraphQL id, which only the read has — REST knows
    * a review thread only as the comment that started it — so this is one query, not a REST walk.
    */
@@ -871,4 +904,19 @@ function postedComment(body: unknown): ForgePosted {
   const row = asRecord(body);
   const url = asText(row["html_url"]);
   return { ...(row["id"] !== undefined ? { id: String(row["id"]) } : {}), ...(url.length > 0 ? { url } : {}) };
+}
+
+/** A row of `/user/repos` (or an installation's list) as Open shows it. */
+function githubRepositoryOf(row: Record<string, unknown>): ForgeRepository {
+  const description = asText(row["description"]);
+  return {
+    project: asText(row["full_name"]),
+    name: asText(row["name"]),
+    ...(description.length > 0 ? { description } : {}),
+    defaultBranch: asText(row["default_branch"]) || "main",
+    cloneUrl: asText(row["clone_url"]),
+    private: row["private"] === true,
+    updatedAt: asText(row["pushed_at"]) || asText(row["updated_at"]),
+    webUrl: asText(row["html_url"]),
+  };
 }

@@ -16,7 +16,7 @@ siblings: [engineering/units/task-worktrees, engineering/units/changesets, engin
 
 ## Git CLI runs git subcommands over the exec seam and parses what they print, and decides nothing about where or when
 
-`Git` in `git.ts` is the only git backend and implements both `GitRead` and `GitLifecycle`. Every call runs `git` in `repoDir` with the options from `opts()`: the project's `execEnv`, `timeoutMs`, and `GIT_TERMINAL_PROMPT=0` with `GCM_INTERACTIVE=never`, with any `extra` options spread last.
+`Git` in `git.ts` is the only git backend and implements both `GitRead` and `GitLifecycle`. Every call runs `git` in `repoDir` with the options from `opts()`: the project's `execEnv` (its `machineEnvOf`: under a workspace's container, the machine's git, since the files are the machine's at the same path), `timeoutMs`, and `GIT_TERMINAL_PROMPT=0` with `GCM_INTERACTIVE=never`, with any `extra` options spread last.
 
 - `run(args)` returns trimmed stdout or throws `ExecError`. `tryRun(args)` answers `undefined` for an `ExecError` and rethrows anything else.
 - Repository facts: `isRepo`, `root`, `head`, `currentBranch`, which is undefined when detached, `branchExists`, `identity` from `config --get user.name` and `user.email`, `isClean` from `status --porcelain`, and `treeHash`, which is the tree of `stash create` when the tree is dirty and `HEAD^{tree}` when it is clean.

@@ -61,6 +61,13 @@ export interface ProvidersPaneProps {
   onHideInstallLog: (name: string) => void;
   /** Run an agent from this path: installed where this app's PATH does not reach. */
   onUseCommand: (name: string, path: string) => void;
+  /**
+   * Run every check again — an agent row's Check again, while it is signed out or not working. Absent ⇒
+   * no row offers it (the section's Re-check still does).
+   */
+  onRecheck?: (() => void) | undefined;
+  /** The checks are running again: Check again reads `checking…`. */
+  rechecking?: boolean | undefined;
   /** What answered on the usual local ports, when the page last asked. Absent ⇒ not asked yet. */
   localServers?: LocalServerProbe[] | undefined;
   /**

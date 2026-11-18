@@ -1,36 +1,82 @@
 /**
  * Settings → Tools → Automations' host (`AutomationsSection.tsx`): the layers' copies it reads, what is
- * edited and not written yet, and the writes — as a hook and pure functions.
+ * edited and not written yet, and the writes — as a hook and pure functions. Every one of the settings'
+ * six layers holds automations (decision 0023, amended 2026-11-18), so a page writes its own layer.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { EVENT_SPECS, isEventName, type ConfigLayer, type EventsStatusView, type JairaEventsConfig, type WorkflowLayer, type WorkflowSource, type WritableLayer } from "@jaira/shared/browser";
+import {
+  AUTOMATION_LAYERS,
+  EVENT_SPECS,
+  isEventName,
+  type ConfigLayer,
+  type EventsStatusView,
+  type JairaEventsConfig,
+  type SetLayer,
+  type WorkflowLayer,
+  type WorkflowSource,
+  type WritableSetLayer,
+} from "@jaira/shared/browser";
 import {
   automationStateIdOf,
   automationsReadOf,
   automationsWritesOf,
   EVENTS_STATE_ID,
   linesProblem,
-  rebaseLines,
   sharedStepsWritesOf,
   shownLinesOf,
   type AutomationLine,
   type AutomationWrite,
   type Copies,
   type LayerFiles,
+  type LineLayer,
   type ShownLine,
 } from "./automationsModel";
 import { connectionBadgeOf, JAIRA_BADGE, type ConnectionBadge } from "./eventsModel";
 import type { RunField } from "./runForm";
 
-export const INTO_NAME: Readonly<Record<WritableLayer, string>> = { base: "Shared", project: "this project" };
+/** A layer as "Wrote ___'s copy of …" names it. */
+export const INTO_NAME: Readonly<Record<WritableSetLayer, string>> = {
+  base: "Shared",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "Just you",
+  projectYou: "you in this project",
+};
+
+/** A layer as a heading over its lines names it, and where its files are. */
+export const LAYER_HEADING: Readonly<Record<LineLayer, { name: string; dir: string }>> = {
+  system: { name: "Built in", dir: "as JaiRA ships it" },
+  base: { name: "Shared", dir: "~/.jaira" },
+  project: { name: "This project", dir: ".jaira" },
+  machine: { name: "This machine", dir: "~/.jaira/machine" },
+  projectMachine: { name: "This project on this machine", dir: ".jaira/local" },
+  you: { name: "Just you", dir: "~/.jaira/personal" },
+  projectYou: { name: "You in this project", dir: "~/.jaira/projects" },
+};
+
+/** "here", on a layer's page: `in this project`, `for just you`. */
+export const LAYER_HERE: Readonly<Record<WritableSetLayer, string>> = {
+  base: "in Shared",
+  project: "in this project",
+  machine: "on this machine",
+  projectMachine: "in this project on this machine",
+  you: "for just you",
+  projectYou: "for you in this project",
+};
+
+/** The layers a page reads: the six with a project open, else the three that are no project's. */
+export const automationLayersOf = (hasProject: boolean): WritableSetLayer[] =>
+  AUTOMATION_LAYERS.filter((layer) => hasProject || (layer !== "project" && layer !== "projectMachine" && layer !== "projectYou"));
 
 /** Everything the view is drawn from, and every write it asks for — `AutomationsView`'s props. */
 export interface AutomationsViewProps {
   /** Which layer's file the section's own lines are. */
-  reads: WritableLayer;
+  reads: WritableSetLayer;
   /**
    * Where those lines come from: the layer's own copy, the built-in (Shared with no copy yet), or
-   * nothing (a project with no copy — its own lines are none, and Shared's are all spliced in).
+   * nothing (a layer above Shared with no copy — its own lines are none, and the ones under it are all
+   * spliced in).
    */
   source: "copy" | "built in" | "none";
   shown: readonly ShownLine[];
@@ -45,19 +91,16 @@ export interface AutomationsViewProps {
   /** Why what is on screen is not written yet, or why a write was refused. */
   problem: string | null;
   told: string | null;
-  /** The personal layer's first change is held: where does it go? */
-  asking: readonly WritableLayer[] | null;
-  /** The layer's name in the footer: the project's, or Shared. */
+  /** Where the events task runs: the project's name, or Shared. */
   layerName: string;
   /** The events task exists, so its conversation can be opened. */
   hasTask: boolean;
   onLines: (lines: AutomationLine[]) => void;
-  /** A Shared line edited on a project page — `before` as Shared has it, `next` as it is now. */
+  /** A line from under this layer edited on its page — `before` as that layer has it, `next` as it is now. */
   onSharedLine: (before: AutomationLine, next: AutomationLine) => void;
-  /** Take a project's own copy of a Shared line's steps away: Shared's run here again. */
+  /** Take this layer's own copy of a line's steps away: the steps from under it run here again. */
   onUseSharedSteps: (name: string) => void;
   onIgnore: (name: string, ignored: boolean) => void;
-  onAnswer: (into: WritableLayer | null) => void;
   onOpenConversation: () => void;
   onEditFile: () => void;
   onOpenEvents: () => void;
@@ -79,11 +122,11 @@ export function newLineOf(name: string): AutomationLine {
   return { name, event: "git.pushed", filter: {}, steps: [{ kind: "start", workflow: "", inputs: {} }] };
 }
 
-/** What the host asks main for: a state file of a layer — the events root, or an automation's state. */
+/** What the host asks main for: a file of a layer — the events root, or an automation's state (`automations:*`). */
 export interface AutomationsChannel {
-  read: (layer: WorkflowLayer, stateId: string) => Promise<WorkflowSource>;
-  write: (layer: WritableLayer, stateId: string, text: string) => Promise<unknown>;
-  remove: (layer: WritableLayer, stateId: string) => Promise<unknown>;
+  read: (layer: SetLayer, stateId: string) => Promise<WorkflowSource>;
+  write: (layer: WritableSetLayer, stateId: string, text: string) => Promise<unknown>;
+  remove: (layer: WritableSetLayer, stateId: string) => Promise<unknown>;
 }
 
 const docOf = (source: WorkflowSource | undefined): unknown => {
@@ -104,7 +147,7 @@ export interface AutomationsPaneProps {
   channel: AutomationsChannel;
   /** The page's layer. */
   layer: ConfigLayer;
-  /** A project is open — so there is a project layer to read and write. */
+  /** A project is open — so there are the project's three layers to read and write. */
   hasProject: boolean;
   busy: boolean;
   events: JairaEventsConfig;
@@ -116,6 +159,7 @@ export interface AutomationsPaneProps {
   /** The events task of the layer read, when there is one. */
   hasTask: boolean;
   onOpenConversation: () => void;
+  /** Open a layer's events workflow as a workflow file. */
   onEditFile: (layer: WorkflowLayer) => void;
   onOpenEvents: () => void;
   onOpenConnections: () => void;
@@ -144,49 +188,50 @@ export function useAutomationsHost(props: AutomationsPaneProps): { props: Automa
   const [writing, setWriting] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [told, setTold] = useState<string | null>(null);
-  const [held, setHeld] = useState<{ before: AutomationLine[]; after: AutomationLine[] } | null>(null);
-  const [sentTo, setSentTo] = useState<WritableLayer | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const { channel } = props;
   const load = useCallback(async (): Promise<void> => {
-    const read = async (layer: WorkflowLayer, stateId: string): Promise<WorkflowSource | undefined> => {
+    const read = async (layer: SetLayer, stateId: string): Promise<WorkflowSource | undefined> => {
       try {
         return await channel.read(layer, stateId);
       } catch {
         return undefined;
       }
     };
-    const [project, base, system] = await Promise.all([props.hasProject ? read("project", EVENTS_STATE_ID) : Promise.resolve(undefined), read("base", EVENTS_STATE_ID), read("system", EVENTS_STATE_ID)]);
-    const roots = { project: docOf(project), base: docOf(base), system: docOf(system) };
-    // Every automation any of the roots names, read in both writable layers: a project's own copy of a
-    // Shared line's state is how that line's steps change for the project alone.
-    const names = [...new Set([...namesOf(roots.project), ...namesOf(roots.base), ...namesOf(roots.system)])];
-    const statesOf = async (layer: WritableLayer): Promise<Record<string, unknown>> => {
+    const layers = automationLayersOf(props.hasProject);
+    const [system, ...held] = await Promise.all([read("system", EVENTS_STATE_ID), ...layers.map((layer) => read(layer, EVENTS_STATE_ID))]);
+    const roots = layers.map((layer, i) => [layer, docOf(held[i])] as const);
+    // Every automation any of the roots names, read in every layer: a layer's own copy of a line's state
+    // from under it is how that line's steps change for that layer alone.
+    const names = [...new Set([...roots.flatMap(([, root]) => namesOf(root)), ...namesOf(docOf(system))])];
+    const statesOf = async (layer: WritableSetLayer): Promise<Record<string, unknown>> => {
       const found = await Promise.all(names.map(async (name) => [name, docOf(await read(layer, automationStateIdOf(name)))] as const));
       return Object.fromEntries(found.filter(([, doc]) => doc !== undefined));
     };
-    const [projectStates, baseStates] = await Promise.all([props.hasProject ? statesOf("project") : Promise.resolve({}), statesOf("base")]);
-    const layerOf = (root: unknown, states: Record<string, unknown>): LayerFiles => ({ ...(root !== undefined ? { root } : {}), states });
-    setCopies({
-      ...(props.hasProject ? { project: layerOf(roots.project, projectStates) } : {}),
-      base: layerOf(roots.base, baseStates),
-      ...(roots.system !== undefined ? { system: { root: roots.system } } : {}),
+    const states = await Promise.all(layers.map((layer) => statesOf(layer)));
+    const next: Copies = {};
+    roots.forEach(([layer, root], i) => {
+      const files: LayerFiles = { ...(root !== undefined ? { root } : {}), states: states[i]! };
+      next[layer] = files;
     });
+    const systemRoot = docOf(system);
+    if (systemRoot !== undefined) next.system = { root: systemRoot };
+    setCopies(next);
   }, [channel, props.hasProject]);
   useEffect(() => {
     load().catch((e: unknown) => setFailed(e instanceof Error ? e.message : String(e)));
   }, [load]);
   useEffect(() => {
     setPending(NOTHING_PENDING);
-    setHeld(null);
     setTold(null);
     setProblem(null);
   }, [props.layer]);
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const writesTo: WritableLayer | undefined = props.layer === "you" ? (sentTo ?? undefined) : props.layer;
-  const reads: WritableLayer = props.layer === "you" ? (props.hasProject ? "project" : "base") : props.layer;
+  // Every layer holds files: a page reads and writes its own. A project's layer with no project open is
+  // not there to write, so the page reads Shared's.
+  const reads: WritableSetLayer = props.hasProject || !(["project", "projectMachine", "projectYou"] as const).includes(props.layer as "project") ? props.layer : "base";
   let read: ReturnType<typeof automationsReadOf> | undefined;
   let unreadable: string | undefined;
   try {
@@ -210,8 +255,8 @@ export function useAutomationsHost(props: AutomationsPaneProps): { props: Automa
     };
   }
   const readNow = read;
-  const shown = shownLinesOf({ ...readNow.own, lines }, readNow.shared === undefined ? undefined : sharedNow, readNow.stepsOf).map((one) =>
-    // A Shared line edited here draws its steps as edited, wherever they are read from.
+  const shown = shownLinesOf({ ...readNow.own, lines }, readNow.shared === undefined ? undefined : sharedNow, readNow.stepsOf, readNow.sharedFrom).map((one) =>
+    // A line from under this layer edited here draws its steps as edited, wherever they are read from.
     one.from === "shared" && pending.shared[one.line.name] !== undefined ? { ...one, line: pending.shared[one.line.name]!.next } : one,
   );
 
@@ -235,34 +280,31 @@ export function useAutomationsHost(props: AutomationsPaneProps): { props: Automa
       .finally(() => setWriting(false));
   };
 
-  /** What was made that was not there: "Wrote this project's copy of system/events/push_main." */
+  /** What was made that was not there: "Wrote Just you's copy of system/events/push_main." */
   const madeOf = (writes: readonly AutomationWrite[]): string | null => {
     const made = writes.filter((one) => !("remove" in one) && (one.stateId === EVENTS_STATE_ID ? copies[one.layer]?.root === undefined : copies[one.layer]?.states[one.stateId.slice(EVENTS_STATE_ID.length + 1)] === undefined));
     return made.length > 0 ? `Wrote ${made.map((one) => `${INTO_NAME[one.layer]}'s copy of ${one.stateId}`).join(" and ")}.` : null;
   };
 
-  /** Everything pending, as the files it writes — Shared lines edited here folded in as the project's. */
-  const writesOf = (into: WritableLayer, now: Pending, ignored?: string[]): AutomationWrite[] => {
-    let own = now.own ?? (into === reads ? readNow.own.lines : automationsReadOf(copies, into).own.lines);
+  /** Everything pending, as the files it writes — lines from under this layer edited here folded in as its own. */
+  const writesOf = (now: Pending, ignored?: string[]): AutomationWrite[] => {
+    let own = now.own ?? readNow.own.lines;
     const ignoring = [...(ignored ?? readNow.own.splice?.ignored ?? [])];
     const out: AutomationWrite[] = [];
     let rules = now.own !== undefined || ignored !== undefined;
     for (const { before, next } of Object.values(now.shared)) {
       const stepsOnly = before.name === next.name && before.event === next.event && JSON.stringify(before.filter) === JSON.stringify(next.filter);
       if (stepsOnly) {
-        out.push(...sharedStepsWritesOf(copies, before.name, next.steps));
+        out.push(...sharedStepsWritesOf(copies, before.name, next.steps, reads));
         continue;
       }
-      // Its event, filter or name changed here: Shared's line is ignored in this project, and the
-      // project gets a line of its own in its place.
+      // Its event, filter or name changed here: the line from under is ignored on this layer, and this
+      // layer gets a line of its own in its place.
       own = [...own.filter((line) => line.name !== next.name), next];
       if (!ignoring.includes(before.name)) ignoring.push(before.name);
       rules = true;
     }
-    if (rules) {
-      const before = automationsReadOf(copies, into).own.lines;
-      out.push(...automationsWritesOf(copies, into, before, own, into === "project" ? ignoring : undefined));
-    }
+    if (rules) out.push(...automationsWritesOf(copies, reads, readNow.own.lines, own, reads !== "base" ? ignoring : undefined));
     return out;
   };
 
@@ -273,29 +315,19 @@ export function useAutomationsHost(props: AutomationsPaneProps): { props: Automa
     const wrong = linesProblem([...(now.own ?? lines), ...Object.values(now.shared).map((edit) => edit.next)]);
     setProblem(wrong !== undefined ? `Not saved yet — ${wrong}` : null);
     if (wrong !== undefined) return;
-    timer.current = setTimeout(() => {
-      // Shared lines edited on a project page are that project's — whichever page layer it is.
-      const sharedOnly = now.own === undefined;
-      if (sharedOnly) {
-        run(writesOf("project", now), madeOf);
-        return;
-      }
-      if (writesTo !== undefined) {
-        const onto = writesTo === reads ? now.own! : rebaseLines(readNow.own.lines, now.own!, automationsReadOf(copies, writesTo).own.lines);
-        run(writesOf(writesTo, { ...now, own: onto }), madeOf);
-      } else setHeld({ before: readNow.own.lines, after: now.own! });
-    }, SETTLE_MS);
+    timer.current = setTimeout(() => run(writesOf(now), madeOf), SETTLE_MS);
   };
 
   const ignore = (name: string, on: boolean): void => {
     const now = readNow.own.splice?.ignored ?? [];
     const ignored = on ? [...new Set([...now, name])] : now.filter((one) => one !== name);
-    // Put back: Shared's line again — and the project's own line of that name, which stood in for it, goes.
+    // Put back: the line from under again — and this layer's own line of that name, which stood in for it, goes.
     const own = on ? lines : lines.filter((line) => line.name !== name);
-    run(writesOf("project", { own, shared: {} }, ignored), madeOf);
+    run(writesOf({ own, shared: {} }, ignored), madeOf);
   };
 
-  const fileLayer: WorkflowLayer = reads === "project" && copies.project?.root !== undefined ? "project" : copies.base?.root !== undefined ? "base" : "system";
+  // The copy the page reads: its own, else the nearest one under it, else what ships.
+  const fileLayer: WritableSetLayer | "system" = [...AUTOMATION_LAYERS.slice(0, AUTOMATION_LAYERS.indexOf(reads) + 1)].reverse().find((layer) => copies[layer]?.root !== undefined) ?? "system";
 
   return {
     props: {
@@ -309,29 +341,15 @@ export function useAutomationsHost(props: AutomationsPaneProps): { props: Automa
       locked: props.busy || writing,
       problem,
       told,
-      asking: held !== null ? (props.hasProject ? ["project", "base"] : ["base"]) : null,
-      layerName: reads === "project" ? props.projectName : "Shared",
+      layerName: props.hasProject ? props.projectName : "Shared",
       hasTask: props.hasTask,
       onLines: (next) => settle({ ...pending, own: next }),
       onSharedLine: (before, next) => {
         const original = pending.shared[before.name]?.before ?? before;
         settle({ ...pending, shared: { ...pending.shared, [original.name]: { before: original, next } } });
       },
-      onUseSharedSteps: (name) => run([{ layer: "project", stateId: automationStateIdOf(name), remove: true }], () => `This project runs Shared's steps for ${name} again.`),
+      onUseSharedSteps: (name) => run([{ layer: reads, stateId: automationStateIdOf(name), remove: true }], () => `${INTO_NAME[reads].replace(/^./, (c) => c.toUpperCase())} runs the steps from under it for ${name} again.`),
       onIgnore: ignore,
-      onAnswer: (into) => {
-        if (held === null) return;
-        const change = held;
-        setHeld(null);
-        if (into === null) {
-          setPending(NOTHING_PENDING);
-          setProblem(null);
-          return;
-        }
-        setSentTo(into);
-        const onto = into === reads ? change.after : rebaseLines(change.before, change.after, automationsReadOf(copies, into).own.lines);
-        run(writesOf(into, { own: onto, shared: {} }), madeOf);
-      },
       onOpenConversation: props.onOpenConversation,
       onEditFile: () => props.onEditFile(fileLayer),
       onOpenEvents: props.onOpenEvents,

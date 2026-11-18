@@ -135,8 +135,24 @@ export interface JairaEmbeddedWeights {
  * Where this project's commands run (DESIGN §9.1). `"windows"` spawns natively;
  * `{ "wsl": "Ubuntu" }` runs git and agents inside that distro — deliberately not
  * Windows git against `\\wsl$`, which is slow and permission-fragile.
+ *
+ * `{ "container": "jaira-1a2b3c4d" }` (decision 0027) runs the commands JaiRA runs — its shell tool,
+ * setup steps, a state's `run_command` — inside a container that has the workspace mounted at the same
+ * path, through `docker exec`. Git, the file tools and the agents stay on the machine. A project's
+ * setup writes it into that workspace's own settings on the machine (`.jaira/settings.local.json`),
+ * with the user commands run as (`user`) and what made the container (`from`). Mac and Linux only.
  */
-export type JairaExecEnvironment = "windows" | { wsl: string };
+export type JairaExecEnvironment = "windows" | { wsl: string } | JairaContainerEnvironment;
+
+/** A workspace's container, as `execEnvironment` names it. */
+export interface JairaContainerEnvironment {
+  /** The container's name (or id), as `docker exec` takes it. */
+  container: string;
+  /** Who its commands run as (`docker exec -u`): a Dev Container's `remoteUser`. Absent: the image's user. */
+  user?: string;
+  /** What made it: a `use: devcontainer` step with `in: container`, or a `use: docker` step. */
+  from?: "devcontainer" | "docker";
+}
 
 /**
  * What every executor has in common, whatever adapter drives it.
@@ -217,7 +233,39 @@ export interface JairaGenericCliAgent extends JairaExecutorConfig {
   prompt?: "argument" | "stdin";
   /** Extra environment for the child process. */
   env?: Record<string, string>;
+  /**
+   * How this binary is handed JaiRA's tools over MCP, as codex is (decision 0007 §3). Absent, the binary
+   * can be served nothing and keeps its own tools, so a permission set that refuses anything refuses it.
+   */
+  mcp?: JairaGenericCliMcp;
 }
+
+/**
+ * How a generic CLI is pointed at JaiRA's tool bridge for a run. The bridge's address exists only once
+ * the run starts, so the binary is told it through placeholders: `{mcpUrl}` is the bridge's URL (it
+ * carries the run's secret), `{mcpConfig}` the path of the file JaiRA writes from {@link config} for the
+ * run. Either may stand anywhere inside a string of `args`, `env` or `config`.
+ */
+export interface JairaGenericCliMcp {
+  /** Arguments added for the run, after the configured `args` and before an appended prompt. */
+  args?: string[];
+  /** Variables set for the run, over the agent's own `env`. */
+  env?: Record<string, string>;
+  /** A config file written for the run, removed after it: this value as JSON, placeholders filled. */
+  config?: JsonValue;
+  /** The file's name, for a binary that reads it by extension. Default `jaira-mcp.json`. */
+  configName?: string;
+  /**
+   * The person's statement that, started so, the binary has none of its own tools: it reads, writes and
+   * runs commands only through the ones served. JaiRA cannot check it. Stated, the agent is held to a
+   * permission set as codex is, every call put to the gate at the bridge.
+   */
+  builtinsOff?: boolean;
+}
+
+/** The two placeholders a generic CLI's {@link JairaGenericCliMcp} is filled with. */
+export const MCP_URL_PLACEHOLDER = "{mcpUrl}";
+export const MCP_CONFIG_PLACEHOLDER = "{mcpConfig}";
 
 /**
  * The codex adapter's project settings (DESIGN §8.1).
@@ -1135,11 +1183,38 @@ function parseAgents(raw: unknown): JairaAgentConfig {
     ) {
       throw new Error(`${where}.env must be an object of strings`);
     }
-    allowedFields(spec, ["enabled", "credential", "name", "command", "args", "prompt", "env"], where);
+    if (spec["mcp"] !== undefined) parseGenericCliMcp(spec["mcp"], `${where}.mcp`);
+    allowedFields(spec, ["enabled", "credential", "name", "command", "args", "prompt", "env", "mcp"], where);
     checkExecutorFields(spec, where);
     return spec as unknown as JairaGenericCliAgent;
   });
   return { genericCli, ...builtins };
+}
+
+/** Check a generic CLI's `mcp` block — see {@link JairaGenericCliMcp}. */
+function parseGenericCliMcp(raw: unknown, where: string): void {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where} must be an object`);
+  const mcp = raw as Record<string, unknown>;
+  if (mcp["args"] !== undefined && !(Array.isArray(mcp["args"]) && mcp["args"].every((a) => typeof a === "string"))) {
+    throw new Error(`${where}.args must be an array of strings`);
+  }
+  const env = mcp["env"];
+  if (env !== undefined && (env === null || typeof env !== "object" || Array.isArray(env) || !Object.values(env).every((v) => typeof v === "string"))) {
+    throw new Error(`${where}.env must be an object of strings`);
+  }
+  const name = mcp["configName"];
+  if (name !== undefined && (typeof name !== "string" || name.length === 0 || /[\\/]/.test(name) || name === "." || name === "..")) {
+    throw new Error(`${where}.configName must be a file name, with no folder in it`);
+  }
+  if (mcp["builtinsOff"] !== undefined && typeof mcp["builtinsOff"] !== "boolean") throw new Error(`${where}.builtinsOff must be true or false`);
+  const said = JSON.stringify([mcp["args"] ?? [], mcp["env"] ?? {}, mcp["config"] ?? null]);
+  if (!said.includes(MCP_URL_PLACEHOLDER) && !said.includes(MCP_CONFIG_PLACEHOLDER)) {
+    throw new Error(`${where} never names ${MCP_URL_PLACEHOLDER} or ${MCP_CONFIG_PLACEHOLDER}, so the binary would never learn where the tools are`);
+  }
+  if (mcp["config"] === undefined && said.includes(MCP_CONFIG_PLACEHOLDER)) {
+    throw new Error(`${where} names ${MCP_CONFIG_PLACEHOLDER} but has no config to write there`);
+  }
+  allowedFields(mcp, ["args", "env", "config", "configName", "builtinsOff"], where);
 }
 
 /** The sandbox names codex accepts. Spelled out here so a typo is a config error rather than a
@@ -1167,10 +1242,22 @@ function parseExecEnvironment(raw: unknown): JairaExecEnvironment {
   if (raw === undefined) return "windows";
   if (raw === "windows") return "windows";
   if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
-    const distro = (raw as Record<string, unknown>)["wsl"];
+    const fields = raw as Record<string, unknown>;
+    // A container is only ever named by a workspace's own layer (the most specific one a project's
+    // setup writes), so where layers merged it beside a machine's `wsl` it is the one meant.
+    const container = fields["container"];
+    if (container !== undefined) {
+      if (typeof container !== "string" || container.length === 0) throw new Error("config.execEnvironment.container must name a container");
+      const user = fields["user"];
+      if (user !== undefined && (typeof user !== "string" || user.length === 0)) throw new Error("config.execEnvironment.user must name a user");
+      const from = fields["from"];
+      if (from !== undefined && from !== "devcontainer" && from !== "docker") throw new Error('config.execEnvironment.from must be "devcontainer" or "docker"');
+      return { container, ...(typeof user === "string" ? { user } : {}), ...(from !== undefined ? { from: from as "devcontainer" | "docker" } : {}) };
+    }
+    const distro = fields["wsl"];
     if (typeof distro === "string" && distro.length > 0) return { wsl: distro };
   }
-  throw new Error('config.execEnvironment must be "windows" or { "wsl": "<distro>" }');
+  throw new Error('config.execEnvironment must be "windows", { "wsl": "<distro>" } or { "container": "<name>" }');
 }
 
 /** True for a plain JSON object — the only thing worth merging key by key. */

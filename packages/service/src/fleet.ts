@@ -23,8 +23,9 @@
  */
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { PAIRING_CODE_MS, engineUrlOf, machineFormOf, normalizePairingCode, type SettingsSyncView, type DeviceView, type MachineForm, type MachineOsTag, type MachinesView, type PairingDevice, type PeerView, type CopyChoice, type TailnetDeviceView, type TailnetJaira, type TailnetView } from "@jaira/shared";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, sep } from "node:path";
+import { PAIRING_CODE_MS, engineUrlOf, guessProjectsFolder, machineFormOf, normalizePairingCode, type SettingsSyncView, type DeviceView, type MachineForm, type MachineOsTag, type MachinesView, type PairingDevice, type PeerView, type CopyChoice, type TailnetDeviceView, type TailnetJaira, type TailnetView } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
 import { protocolMismatch } from "./enginePipe";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
@@ -40,6 +41,8 @@ interface KnownMachine extends PeerMachine {
   addedAt: number;
   lastSeenAt?: number;
   version?: string;
+  /** What hosts its engine, as it last said: the desktop app, `jaira serve`, or a CLI command. */
+  host?: "desktop" | "server" | "cli";
 }
 
 interface FleetFile {
@@ -88,6 +91,8 @@ export interface FleetOptions {
   lanBindHost?: string;
   /** What this machine says about keeping its settings in step (decision 0026), for the view. */
   settingsSync?: () => SettingsSyncView | undefined;
+  /** The folders of this engine's open workspaces, for where new ones go when the person has not said. */
+  workspaceDirs?: () => readonly string[];
 }
 
 const WORDS = [
@@ -221,7 +226,34 @@ export class Fleet {
   selfPeer(): PeerMachine {
     const me = this.identity();
     const url = this.tailnetState.state === "on" && this.tailnetState.url !== undefined ? engineUrlOf(this.tailnetState.url) : this.read().url;
-    return { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, ...(url !== undefined ? { url } : {}) };
+    return { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, ...(url !== undefined ? { url } : {}), projectsFolder: this.projectsFolder() };
+  }
+
+  /**
+   * Where this machine's new workspaces go: the person's choice, else the folder most of its open
+   * workspaces sit in, else `Code` in its home folder (`guessProjectsFolder`).
+   */
+  projectsFolder(): string {
+    let dirs: readonly string[] = [];
+    try {
+      dirs = this.options.workspaceDirs?.() ?? [];
+    } catch {
+      dirs = [];
+    }
+    return this.identity().projectsFolder ?? guessProjectsFolder(homedir(), dirs, sep === "\\" ? "\\" : "/");
+  }
+
+  /**
+   * Choose where this machine's new workspaces go, or (`undefined`) go back to the guess. A folder on
+   * this machine, given whole: a relative one would mean wherever the engine happened to start.
+   */
+  setProjectsFolder(folder: string | undefined): MachinesView {
+    const chosen = folder?.trim();
+    if (chosen !== undefined && chosen !== "" && !isAbsolute(chosen)) throw new Error(`'${chosen}' is not a whole path: name the folder from the top, as ${homedir()} is`);
+    updateMachineIdentity(this.options.baseDir, { projectsFolder: chosen === undefined || chosen === "" ? null : chosen });
+    this.announce();
+    this.changed();
+    return this.view();
   }
 
   private known(): KnownMachine[] {
@@ -249,8 +281,10 @@ export class Fleet {
         form: machineFormOf(m.form),
         tags: m.tags,
         ...(m.url !== undefined ? { url: m.url } : {}),
+        ...(m.projectsFolder !== undefined ? { projectsFolder: m.projectsFolder } : {}),
         state: link?.state ?? "offline",
         ...(m.version !== undefined ? { version: m.version } : {}),
+        ...(m.host !== undefined ? { host: m.host } : {}),
         ...(m.lastSeenAt !== undefined ? { lastSeenAt: m.lastSeenAt } : {}),
         ...(link?.reason !== undefined ? { reason: link.reason } : {}),
         canReachHere: issued.has(m.id),
@@ -272,6 +306,7 @@ export class Fleet {
         os: me.os,
         form: me.form,
         tags: me.tags,
+        projectsFolder: this.projectsFolder(),
         tailnet: this.tailnetState,
         version: this.options.version,
         copy: this.copying(),
@@ -1156,7 +1191,7 @@ export class Fleet {
       link.state = client.limited ? "mismatch" : "online";
       link.reason = client.limited ? protocolMismatch(machine.label, client.host.protocol, "this machine") : undefined;
       link.wait = this.options.retryMs ?? 3000;
-      this.remember(machine, { lastSeenAt: Date.now(), version: client.host.version });
+      this.remember(machine, { lastSeenAt: Date.now(), version: client.host.version, host: client.host.kind });
       client.onPush((message) => {
         for (const listener of this.peerPushListeners) listener(machineId, message);
       });
@@ -1209,7 +1244,15 @@ export class Fleet {
 }
 
 function peerOf(machine: KnownMachine): PeerMachine {
-  return { id: machine.id, label: machine.label, os: machine.os, ...(machine.form !== undefined ? { form: machine.form } : {}), tags: machine.tags, ...(machine.url !== undefined ? { url: machine.url } : {}) };
+  return {
+    id: machine.id,
+    label: machine.label,
+    os: machine.os,
+    ...(machine.form !== undefined ? { form: machine.form } : {}),
+    tags: machine.tags,
+    ...(machine.url !== undefined ? { url: machine.url } : {}),
+    ...(machine.projectsFolder !== undefined ? { projectsFolder: machine.projectsFolder } : {}),
+  };
 }
 
 /** A peer as another machine described it: only the fields a peer has, shaped. */
@@ -1222,6 +1265,7 @@ function sanitizePeer(machine: PeerMachine): PeerMachine {
     form: machineFormOf(machine.form),
     tags: Array.isArray(machine.tags) ? machine.tags.filter((t): t is string => typeof t === "string").slice(0, 32) : [],
     ...(typeof machine.url === "string" && /^wss?:\/\//.test(machine.url) ? { url: machine.url } : {}),
+    ...(typeof machine.projectsFolder === "string" && machine.projectsFolder.trim() !== "" ? { projectsFolder: machine.projectsFolder.slice(0, 1024) } : {}),
   };
 }
 

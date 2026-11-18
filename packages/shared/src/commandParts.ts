@@ -14,7 +14,7 @@
 import type { PermissionMode } from "./operationVocabulary";
 import type { PlaceWidth } from "./places";
 import type { PlaceKind } from "./toolVocabulary";
-import type { WritableLayer } from "./view";
+import type { WritableSetLayer } from "./view";
 
 /** Offsets into the ORIGINAL line, `end` exclusive — `line.slice(start, end)` is the text. */
 export interface TextSpan {
@@ -65,8 +65,6 @@ export type CommandPartDecider =
   | "permissionSet"
   /** The built-in destructive floor (deny) or a built-in ask (push, install, network, credentials). */
   | "builtin"
-  /** `.jaira/` is engine-owned. */
-  | "path"
   /** A scope table said so about the part's path or url. */
   | "scope"
   /** An answer a person gave earlier in this run, remembered at a width — `entry` is the width. */
@@ -125,7 +123,7 @@ export interface CommandPart {
      * The LAYER of the stack that set the deciding line — at {@link place} where a place answered
      * (decision 0023 §2.7): a set's id (`ask-first`, `app/build`), `inline` for lines written on
      * a state, `tools` for the conversation's own, `runtime` for an answer given in this task. Absent
-     * where no layer decided — the built-ins, `.jaira/`, the parser, the floor — or where the judging
+     * where no layer decided — the built-ins, the parser, the floor — or where the judging
      * set came with no stack.
      */
     layer?: string;
@@ -247,8 +245,8 @@ export interface PartAnswer {
   place?: string;
   /** For `add`: the layer of the stack, by id (`project/build-safe`); absent, the set that asked. */
   layer?: string;
-  /** For `add`: which file of that layer — this project's (`project`) or the shared root's (`base`). */
-  addTo?: WritableLayer;
+  /** For `add`: which file of that layer — one of the settings' six (`project`, `base`, `you`, …). */
+  addTo?: WritableSetLayer;
 }
 
 /** The approval narrowed to one of its parts — what remembering or writing ONE row's answer works on. */

@@ -39,6 +39,8 @@ export interface PeerMachine {
   tags: string[];
   /** Where its engine is reached: `wss://…/engine`. Absent while it is not reachable. */
   url?: string;
+  /** Where its new workspaces go (`MachineView.projectsFolder`). Absent from a machine that predates it. */
+  projectsFolder?: string;
 }
 
 /** What kind of device a window is on, for the row that lists it. A browser is not one until the website exists (decision 0022 §6). */

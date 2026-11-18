@@ -1,10 +1,10 @@
 /**
- * The Settings sidebar and its layer switch after round 5 (2026-09-23): ONE flat list of pages in
- * the order a person sets things up, every page layered with the same switch, and Shared the layer
- * a window opens on.
+ * The Settings sidebar after round 5 (2026-09-23): ONE flat list of pages in the order a person sets
+ * things up, every page layered at the same path (`settingsScope.ts`, 2026-11-17), and Shared the
+ * layer a window opens on.
  */
 import { describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG_LAYER, SECTIONS, settingsLayersFor } from "../src/renderer/settingsSections";
+import { DEFAULT_CONFIG_LAYER, SECTIONS, settingsFrameOf, settingsLeadParts } from "../src/renderer/settingsSections";
 
 describe("the Settings pages", () => {
   it("are one list, in the order a person sets things up", () => {
@@ -29,13 +29,24 @@ describe("the Settings pages", () => {
   });
 });
 
-describe("the layer switch", () => {
+describe("the layer a page edits", () => {
   it("opens on Shared", () => {
     expect(DEFAULT_CONFIG_LAYER).toBe("base");
   });
 
-  it("offers Just you, This project and Shared, strongest first — and no project layer without one", () => {
-    expect(settingsLayersFor(true)).toEqual(["you", "project", "base"]);
-    expect(settingsLayersFor(false)).toEqual(["you", "base"]);
+  it("offers Which rows on both personal layers, and only there", () => {
+    expect(settingsFrameOf("models", "you", "changed")).toMatchObject({ under: true, onlyStated: true });
+    expect(settingsFrameOf("models", "projectYou", "every")).toMatchObject({ under: true, onlyStated: false });
+    expect(settingsFrameOf("models", "machine", "changed")).toMatchObject({ under: false, onlyStated: false });
+    expect(settingsFrameOf("machines", "you", "changed")).toMatchObject({ layered: false, under: false });
+  });
+
+  it("says in its lead whose settings these are and where they are kept, by the path's own names", () => {
+    const words = (layer: Parameters<typeof settingsLeadParts>[1]): string => (settingsLeadParts("models", layer, { project: "atlas", machine: "build-01" }) ?? []).map((part) => part.text).join("");
+    expect(words("projectMachine")).toContain("atlas on build-01");
+    expect(words("projectMachine")).toContain(".jaira/settings.local.json");
+    expect(words("machine")).toContain("machine-settings.json");
+    expect(words("projectYou")).toContain("you in atlas");
+    expect(words("base")).toContain("~/.jaira/settings.json");
   });
 });

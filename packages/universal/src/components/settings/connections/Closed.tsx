@@ -62,6 +62,18 @@ export function ActionSlot({ action, waiting, disabled, onPress }: { action: { l
   );
 }
 
+/**
+ * Check again, beside a row's fix (`agentChecksAgain`): every check run again — after signing in from a
+ * terminal, or installing elsewhere. A ghost, so the fix beside it stays the one that stands out.
+ */
+export function CheckAgain({ checking, disabled, onPress }: { checking: boolean; disabled: boolean; onPress: () => void }): JSX.Element {
+  return (
+    <Button kind="ghost" disabled={disabled || checking} title="check it again — after signing in from a terminal" onPress={onPress} font={{ scale: 12 / 12.5 }} paddingVertical={2}>
+      {checking ? "checking…" : "Check again"}
+    </Button>
+  );
+}
+
 /** Who a closed row connects as: the login in use, or the key and where it was found. */
 export function RunsAs({ chip }: { chip: AgentChip }): JSX.Element {
   const t = useTokens();

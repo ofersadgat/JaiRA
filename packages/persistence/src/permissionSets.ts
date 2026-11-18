@@ -22,7 +22,7 @@
  * same `onReferencedFile`.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import {
   loadBundle,
   parseReferencedFile,
@@ -37,7 +37,9 @@ import {
   addToPermissionSetText,
   INLINE_PERMISSION_SET,
   isWritableLayer,
+  isWritableSetLayer,
   isLoweredPermissionSet,
+  layerSees,
   lowerStatePermissionSets,
   newPermissionSetText,
   overridesOf,
@@ -49,7 +51,6 @@ import {
   RESERVED_LAYER_IDS,
   permissionSetNameProblem,
   permissionSetTextFollows,
-  PERMISSION_SET_ROOT_LABELS,
   type JairaPaths,
   type StatePermissionSetIssue,
   type PermissionSetAddition,
@@ -60,8 +61,9 @@ import {
   type PermissionSetReader,
   type PermissionSetRecord,
   type PermissionSetWriteKind,
+  type SetLayer,
   type WorkflowLayer,
-  type WritableLayer,
+  type WritableSetLayer,
   GENERIC_PERMISSION_SET_ICON,
   ownLineCount,
   ownLinesOf,
@@ -79,7 +81,8 @@ import {
   type PermissionStackLayer,
 } from "@jaira/shared";
 import { hostCalleeSignatures, PERMISSION_FUNCTION_STATE, permissionFunctionState } from "@jaira/runtime";
-import { workflowLoadOptions } from "./workflowRefs";
+import { workflowLoadOptions, type JairaLoadOptions } from "./workflowRefs";
+import { ensureLocalLayerIgnored, fileLayerRoots, referenceRootPath, type FileLayerRoot } from "./fileLayers";
 
 /** The folder permission sets live in, under every layer root. */
 export const PERMISSION_SETS_DIR_NAME = "permission-sets";
@@ -211,7 +214,7 @@ export function permissionFunctionRefsOf(bundle: WorkflowBundle): string[] {
   return [...out];
 }
 
-export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
+export interface LoadWorkflowBundleOptions extends JairaLoadOptions {
   /**
    * Collect permission set issues instead of throwing on the first error — the lint surface's mode.
    *
@@ -236,7 +239,11 @@ export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
  * every running task of it follows.
  */
 export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: string, options: LoadWorkflowBundleOptions = {}): WorkflowBundle {
-  const { onPermissionSetIssue, standingLayers, ...loadOptions } = options;
+  const { onPermissionSetIssue, standingLayers, nearerStates, ...loadOptions } = options;
+  // A state a newer settings layer holds stands in front of the project's own file of that id (decision
+  // 0023, amended 2026-11-18) — laid over the files here, so every load agrees on it: a run, the
+  // browser's version of it, the events supervisor's.
+  if (nearerStates !== undefined) files = withNearer(files, nearerStates());
   const read = permissionSetReader(loadOptions);
   // One check for the whole load, so a function every state names is loaded once.
   const check = permissionFunctionCheck(loadOptions);
@@ -270,6 +277,16 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
         }
       : {}),
   }));
+}
+
+/** `files` with each of `nearer`'s ids in place of the file of that id, whatever its extension, or added. */
+function withNearer(files: Record<string, unknown>, nearer: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const ids = Object.keys(nearer);
+  if (ids.length === 0) return files;
+  const out: Record<string, unknown> = {};
+  for (const [file, def] of Object.entries(files)) if (!(stateIdFromPath(file.split("\\").join("/")) in nearer)) out[file] = def;
+  for (const id of ids) out[`${id}.json`] = nearer[id];
+  return out;
 }
 
 /** What a file that only FOLLOWS another may say beside its `$ref`: the switch (decision 0021). */
@@ -324,10 +341,10 @@ function withoutSwitches(bundle: WorkflowBundle): WorkflowBundle {
  */
 export function readPermissionSets(paths: JairaPaths): PermissionSetChoice[] {
   const read = permissionSetReader(workflowLoadOptions(paths, { tolerant: true }));
-  const layerOf = (root: string): WorkflowLayer =>
-    root === paths.builtIn.dir ? "system" : root === paths.base.baseDir ? "base" : "project";
+  const layers = fileLayerRoots(paths);
+  const layerOf = (root: string): SetLayer => layers.find((one) => one.root === root)?.layer ?? "project";
   const out: PermissionSetChoice[] = [];
-  for (const file of listPermissionSets(paths.roots)) {
+  for (const file of listPermissionSets(referenceRootPath(paths))) {
     const issues: PermissionSetIssue[] = [];
     const resolved = resolvePermissionSetDecl(file.reference, read, "", issues);
     if (resolved === undefined || issues.some((issue) => issue.severity === "error")) continue;
@@ -406,29 +423,17 @@ export function listPermissionSets(roots: readonly string[]): PermissionSetFile[
 
 // --- "add to the permission set" (decision 0007 §4) -----------------------------------
 
-/** A layer root, as "add to the permission set" sees it. */
-export interface PermissionSetLayer {
-  layer: WorkflowLayer;
-  /** The layer's root directory: `<project>/.jaira`, `~/.jaira`, what ships. */
-  root: string;
-  /** The explicit root a reference names this layer by: `$JAIRA`, `$BASE`, `$SYSTEM`. */
-  token: string;
-  /** The root as a person reads it in a path: `.jaira`, `~/.jaira`. */
-  label: string;
-}
+/** A layer root, as "add to the permission set" sees it — see `FileLayerRoot`. */
+export type PermissionSetLayer = FileLayerRoot;
 
 /**
- * The layers of a project, nearest first. A project that IS the shared root (the shared session) has
- * no layer of its own: its `.jaira` and the base are one directory, and "for all projects" is the
- * only thing a write there can mean.
+ * The layers of a project, nearest first: the settings' six that hold files and what ships
+ * (`fileLayerRoots`, decision 0023 amended 2026-11-18). A project that IS the shared root (the shared
+ * session) has no layer of its own — its `.jaira` and the base are one directory — and so none of a
+ * project's three: Shared, this machine's and Just you's are what a write there can mean.
  */
 export function permissionSetLayers(paths: JairaPaths): PermissionSetLayer[] {
-  const layers: PermissionSetLayer[] = [
-    { layer: "project", root: paths.jairaDir, token: "$JAIRA", label: PERMISSION_SET_ROOT_LABELS.project },
-    { layer: "base", root: paths.base.baseDir, token: "$BASE", label: PERMISSION_SET_ROOT_LABELS.base },
-    { layer: "system", root: paths.builtIn.dir, token: "$SYSTEM", label: PERMISSION_SET_ROOT_LABELS.system },
-  ];
-  return layers.filter((layer) => !(layer.layer === "project" && resolve(layer.root) === resolve(paths.base.baseDir)));
+  return fileLayerRoots(paths);
 }
 
 /** `[<bucket>/]<name>` from a LAYERED permission set reference (`$/permission-sets/read-only`, `$/permission-sets/<bucket>/<name>`), or nothing. */
@@ -458,7 +463,7 @@ function fileFollows(file: string, follows: string): boolean {
 
 /** One layer a line can be written into: the filesystem half of `ApprovalPermissionSetTarget`. */
 export interface PermissionSetWriteTarget {
-  layer: WritableLayer;
+  layer: WritableSetLayer;
   /** The absolute file the write lands in. */
   path: string;
   /** The same file as a person reads it. */
@@ -473,8 +478,8 @@ export interface PermissionSetWriteTarget {
  * Where a line for the permission set `reference` names could be written, nearest layer first.
  *
  * A layer is offered when it HOLDS the permission set (the line is added in place), or when a LOWER layer
- * does (an override is created that follows the nearest lower one). The built-in layer is never
- * offered. A layer holding a YAML permission set is not offered either: there is no format-preserving
+ * does (an override is created that follows the nearest lower one) — any of the settings' six (decision
+ * 0023, amended 2026-11-18), nearest first. The built-in layer is never offered. A layer holding a YAML permission set is not offered either: there is no format-preserving
  * writer for it here, and rewriting somebody's file is not what "add a line" means.
  *
  * `unwritable` says why when nothing is offered, most often because the map is written on the state.
@@ -497,10 +502,11 @@ export function permissionSetWriteTargets(
   const held = layers.map((layer) => permissionSetFileIn(layer.root, id));
   const targets: PermissionSetWriteTarget[] = [];
   layers.forEach((layer, index) => {
-    if (!isWritableLayer(layer.layer)) return;
+    if (!isWritableSetLayer(layer.layer)) return;
     const own = held[index];
     if (own !== undefined && !own.endsWith(".json")) return;
-    const lower = layers.findIndex((_, at) => at > index && held[at] !== undefined);
+    // The nearest lower copy it can follow: a layer that is no project's never follows a project's (`layerSees`).
+    const lower = layers.findIndex((candidate, at) => at > index && held[at] !== undefined && layerSees(layer.layer, candidate.layer));
     if (own === undefined && lower < 0) return;
     const reference_ = (l: PermissionSetLayer): string => `${l.token}/${PERMISSION_SETS_DIR_NAME}/${id}`;
     // A nearer layer's own copy wins the search, unless that copy keeps following this layer.
@@ -533,14 +539,16 @@ export function permissionSetWriteTargets(
 export function addToPermissionSet(
   paths: JairaPaths,
   reference: string | undefined,
-  layer: WorkflowLayer,
+  layer: SetLayer,
   entries: PermissionSetAddition,
 ): { file: string; created: boolean } {
-  if (!isWritableLayer(layer)) throw new Error("what ships with JaiRA is read-only: a line is added in this project or in the shared root");
+  if (!isWritableSetLayer(layer)) throw new Error("what ships with JaiRA is read-only: a line is added in one of your layers — this project, Shared, this machine or yours");
   if (Object.keys(entries).length === 0) throw new Error("there is nothing to add: no part of this line can be remembered");
   const found = permissionSetWriteTargets(paths, reference);
   const target = found.targets.find((t) => t.layer === layer);
   if (target === undefined) throw new Error(found.unwritable ?? `${found.id ?? "this permission set"} cannot be written in the ${layer} layer`);
+  // The project on this machine is this machine's: kept out of the repository before a file lands there.
+  if (layer === "projectMachine") ensureLocalLayerIgnored(paths.jairaDir);
   if (target.follows !== undefined) {
     mkdirSync(dirname(target.path), { recursive: true });
     // `wx`: a file that appeared since the menu was drawn is somebody's, and is not replaced.
@@ -612,8 +620,8 @@ function checkedPermissionSetId(id: string): void {
  * Throws, having written nothing, for the built-in layer, a layer this project does not have, a YAML
  * file, an id a reference could not carry, and a map that does not parse as a permission set.
  */
-export function writePermissionSet(paths: JairaPaths, id: string, layer: WorkflowLayer, next: PermissionSetDecl): { file: string; kind: PermissionSetWriteKind } {
-  if (!isWritableLayer(layer)) throw new Error("what ships with JaiRA is read-only: override it in this project or in the shared root");
+export function writePermissionSet(paths: JairaPaths, id: string, layer: SetLayer, next: PermissionSetDecl): { file: string; kind: PermissionSetWriteKind } {
+  if (!isWritableSetLayer(layer)) throw new Error("what ships with JaiRA is read-only: override it in this project or in the shared root");
   checkedPermissionSetId(id);
   const broken = parsePermissionSet(next).issues.find((issue) => issue.severity === "error");
   if (broken !== undefined) throw new Error(`that is not a permission set — ${broken.message}`);
@@ -630,6 +638,8 @@ export function writePermissionSet(paths: JairaPaths, id: string, layer: Workflo
     return resolved as PermissionSetDecl;
   };
 
+  // The project on this machine is this machine's: kept out of the repository before a file lands there.
+  if (layer === "projectMachine") ensureLocalLayerIgnored(paths.jairaDir);
   const own = permissionSetFileIn(target.root, id);
   if (own !== undefined) {
     if (!own.endsWith(".json")) throw new Error(`${id} is a YAML file here, and JaiRA only edits a JSON permission set`);
@@ -650,7 +660,8 @@ export function writePermissionSet(paths: JairaPaths, id: string, layer: Workflo
   }
 
   const file = join(target.root, PERMISSION_SETS_DIR_NAME, `${id}.json`);
-  const lower = layers.find((candidate, at) => at > index && permissionSetFileIn(candidate.root, id) !== undefined);
+  // The nearest lower copy it can follow: a layer that is no project's never follows a project's (`layerSees`).
+  const lower = layers.find((candidate, at) => at > index && layerSees(layer, candidate.layer) && permissionSetFileIn(candidate.root, id) !== undefined);
   mkdirSync(dirname(file), { recursive: true });
   // `wx` throughout: a file that appeared since the pane was drawn is somebody's, and is not replaced.
   if (lower === undefined) {
@@ -674,14 +685,14 @@ export function writePermissionSet(paths: JairaPaths, id: string, layer: Workflo
  * Refused where there is nothing below — that is deleting a permission set states may name, which is the
  * Files view's act, with its own question about who refers to it — and for the built-in layer.
  */
-export function resetPermissionSet(paths: JairaPaths, id: string, layer: WorkflowLayer): { file: string } {
-  if (!isWritableLayer(layer)) throw new Error("what ships with JaiRA is read-only, so there is nothing of it to reset");
+export function resetPermissionSet(paths: JairaPaths, id: string, layer: SetLayer): { file: string } {
+  if (!isWritableSetLayer(layer)) throw new Error("what ships with JaiRA is read-only, so there is nothing of it to reset");
   checkedPermissionSetId(id);
   const layers = permissionSetLayers(paths);
   const index = layers.findIndex((candidate) => candidate.layer === layer);
   const own = index < 0 ? undefined : permissionSetFileIn(layers[index]!.root, id);
   if (own === undefined) throw new Error(`${id} is not overridden in the ${layer} layer`);
-  if (!layers.some((candidate, at) => at > index && permissionSetFileIn(candidate.root, id) !== undefined)) {
+  if (!layers.some((candidate, at) => at > index && layerSees(layer, candidate.layer) && permissionSetFileIn(candidate.root, id) !== undefined)) {
     throw new Error(`${id} overrides nothing — no layer below holds it, so resetting it would delete it`);
   }
   unlinkSync(own);
@@ -819,7 +830,8 @@ function bucketsOf(sets: readonly PermissionSetTreeSet[]): PermissionSetTreeBuck
 
 /**
  * Every permission set FILE this project's scopes hold, as the browser draws them (decision 0023 §4.1,
- * ruling 10): one scope per layer root — built in, global (`~/.jaira`), project (`.jaira/`) — each
+ * ruling 10): one scope per layer root — built in, global (`~/.jaira`), project (`.jaira/`), and those
+ * of the settings' four newer layers (`fileLayers.ts`) that hold a set — each
  * holding its buckets (folders, nested) and their sets (files), every file listed in every scope that
  * holds one, with which nearer scope hides it. `inStack(id)` says which sets the stack being looked at
  * holds. A file that cannot be read is listed with its problem. The runtime scope is the service's to
@@ -833,6 +845,9 @@ export function permissionSetTree(paths: JairaPaths, inStack: (id: string) => bo
   for (const layer of layers) {
     const sets = listPermissionSets([layer.root]).map((found) => treeSetOf(layer, found, inStack, nearest.get(found.id)));
     for (const set of sets) if (!nearest.has(set.id)) nearest.set(set.id, set.scope);
+    // The settings' four newer layers are browsed once they hold a set: most never will, and seven
+    // scopes, four of them empty, would bury the three a set is picked from.
+    if (sets.length === 0 && layer.layer !== "project" && layer.layer !== "base" && layer.layer !== "system") continue;
     scopes.push({ scope: SCOPE_OF_LAYER[layer.layer], layer: layer.layer, label: layer.label, buckets: bucketsOf(sets.filter((set) => set.bucket !== "")), sets: sets.filter((set) => set.bucket === "") });
   }
   // Built in first, as the browser reads down to the project.

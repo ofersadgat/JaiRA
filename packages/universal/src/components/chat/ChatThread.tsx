@@ -6,6 +6,7 @@ import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/cha
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { routeDownOf, routeOf } from "@jaira/ui/composerModel";
+import { keepLayersOf } from "@jaira/ui/composerCards";
 import { facesOf } from "@jaira/ui/environmentModel";
 import { placementSummaryOf } from "@jaira/ui/placementSummary";
 import { clockOf } from "@jaira/ui/runActivityModel";
@@ -445,7 +446,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           head={m.status !== null && place === "composer" && runs.walkedIn === null ? <LiveStatusLine status={m.status} {...jumpIf} /> : undefined}
           usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
           stack={{ project: m.project, ...(surface.taskId !== null ? { taskId: surface.taskId } : {}) }}
-          saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
+          saveLayers={keepLayersOf(surface.hasProject)}
           {...mentions}
         />
       </View>

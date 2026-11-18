@@ -78,6 +78,7 @@ import type { Project } from "./project";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { loadWorkflowBundle } from "./permissionSets";
 import { workflowLoadOptions } from "./workflowRefs";
+import { ensureLocalLayerIgnored, workflowLayerDirs } from "./fileLayers";
 
 const log = createLogger("jaira.persistence.dynamicDocuments");
 
@@ -510,7 +511,7 @@ export interface SavedWorkflow {
  * task started from it pins an immutable snapshot, as every real workflow's does.
  */
 export function saveDocumentAsWorkflow(project: Project, request: SaveAsWorkflowRequest): SavedWorkflow {
-  if (!isWritableLayer(request.layer)) throw refusal(log, "what ships with JaiRA is read-only — save the workflow into the project or the shared root");
+  if (!isWritableLayer(request.layer)) throw refusal(log, "what ships with JaiRA is read-only — save the workflow into one of your layers");
   const document = readDocument(project.paths.snapshotsDir, request.documentId);
   const latest = latestVersion(document);
   if (document.kind !== "dynamic" || latest.authored === undefined) {
@@ -525,7 +526,11 @@ export function saveDocumentAsWorkflow(project: Project, request: SaveAsWorkflow
     throw refusal(log, `'${request.as}' is not a state id a workflow can be saved as`);
   }
   if (request.as.startsWith(DYNAMIC_ROOT_PREFIX)) throw refusal(log, `'${DYNAMIC_ROOT_PREFIX}' is where frozen documents are rooted — save the workflow under a name of its own`);
-  const dir = request.layer === "project" ? project.paths.workflowsDir : project.paths.base.workflowsDir;
+  // Any of the settings' six layers (decision 0023, amended 2026-11-18); the project on this machine is
+  // kept out of the repository before a file lands there.
+  const dir = workflowLayerDirs(project.paths).find((one) => one.layer === request.layer)?.dir;
+  if (dir === undefined) throw refusal(log, `there is no ${request.layer} layer in this project`);
+  if (request.layer === "projectMachine") ensureLocalLayerIgnored(project.paths.jairaDir);
   const file = `${join(dir, ...segments)}.json`;
   if (existsSync(file) && request.overwrite !== true) throw refusal(log, `'${request.as}' already exists in the ${request.layer} layer`);
   mkdirSync(dirname(file), { recursive: true });

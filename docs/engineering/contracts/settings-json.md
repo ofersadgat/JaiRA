@@ -2,7 +2,7 @@
 id: engineering/contracts/settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-10-06
+updated: 2026-11-18
 visibility: public
 kind: format
 owned_by: [engineering/units/project-config]
@@ -13,26 +13,35 @@ siblings: [engineering/contracts/user-settings-json, engineering/contracts/secre
 
 # settings.json
 
-`settings.json` is the committed JSON document that says how a project's runs are routed, executed, stored and constrained, and how the app looks, shipped once in the built-in layer, written once in the shared root and optionally again in a project, each laid over the one below — and a last time, with the same schema, as the person's own `personal-settings.json` ("Just you"), laid over all of them.
+`settings.json` is the committed JSON document that says how a project's runs are routed, executed, stored and constrained, and how the app looks, shipped once in the built-in layer, written once in the shared root and optionally again in a project, each laid over the one below — and again, with the same schema, as one machine's own (`machine-settings.json`), a project's on one machine (`.jaira/settings.local.json`), the person's own `personal-settings.json` ("Just you") and the person's for one project, laid over all of them in that order.
 
 ## A caller reaches for settings.json when a choice should travel with the project, and never for a secret or a preference
 
-**Use when.** Configuring model routes and presets, the default executor tree, agent runtimes, the defaults of the functions JaiRA ships, artifact placement, storage modes, the exec environment, the workflow search path, the Files tree's hidden list, the MCP servers agents are handed, or how the app looks (`appearance`). Reading the configuration a run will use: parse the merged document with `parseConfig(mergeConfigLayers([builtIn, base, project, you]))`, or read `Project.config`.
+**Use when.** Configuring model routes and presets, the default executor tree, agent runtimes, the defaults of the functions JaiRA ships, artifact placement, storage modes, the exec environment, the workflow search path, the Files tree's hidden list, the MCP servers agents are handed, or how the app looks (`appearance`). Reading the configuration a run will use: parse the merged document with `parseConfig(mergeConfigLayers([builtIn, base, project, machine, projectMachine, you, projectYou]))`, or read `Project.config`.
 
 **Do not use when.** Storing a credential value: name it in a `credential` field and store it through [secret-sources](secret-sources.md). Recording the window's own state — pane sizes, folds, read marks, the log policy, the open projects: [user-settings-json](user-settings-json.md). Deciding where the files live: [jaira-layout](jaira-layout.md). Saying what a command may run: that is a line under the `shell` tool of a permission set ([tool-policy](../units/tool-policy.md)).
 
 ## The shape is one object per layer, merged before it is parsed
 
-### The four layers merge key by key, weakest first, and only the merge is validated
+### The seven layers merge key by key, weakest first, and only the merge is validated
+
+Least to most specific, compared person first, then machine, then project (the person's design of Settings' path, 2026-11-17):
 
 | Layer | File | Whose |
 | --- | --- | --- |
 | Built in (`system`) | `$SYSTEM/settings.json` | what JaiRA ships; read-only |
 | Shared (`base`) | `<base>/settings.json` | every project on this machine reads it; kept in step with the machines it is paired with, but for what is the machine's own ([decision 0026](../decisions/0026-settings-follow-the-person.md)) |
-| This project (`project`) | `<project>/.jaira/settings.json` | committed with the checkout |
-| Just you (`you`) | `<base>/personal-settings.json` | this person, on this machine and the machines it is paired with (decision 0026); never in a checkout, and read after every other layer |
+| The project (`project`) | `<project>/.jaira/settings.json` | committed with the checkout |
+| The machine (`machine`) | `<base>/machine-settings.json` | this machine alone; never synced, never in a checkout |
+| The project on this machine (`projectMachine`) | `<project>/.jaira/settings.local.json` | this workspace — one folder on one machine; ignored by the `.gitignore` template, which `config:write` back-fills into an older `.gitignore` before the file is first written |
+| Just you (`you`) | `<base>/personal-settings.json` | this person, on this machine and the machines it is paired with (decision 0026); never in a checkout |
+| You in the project (`projectYou`) | `<base>/projects/<key>/personal-settings.json` | this person, for one project, on this machine and the machines it is paired with (decision 0026, amended 2026-11-18) — a clone with no remote keeps it on its machine; `<key>` is the project's repository identity with every character but `A–Z a–z 0–9 . _ -` made `_` (`github.com/me/atlas` → `github.com_me_atlas`), the same for every clone of it; a clone with no remote is keyed by its folder's name and a hash of its path (`projectSettingsKey`) |
 
-The built-in layer is `$SYSTEM/settings.json`: `packages/shared/builtin/settings.json`, copied to `dist/builtin/` by both bundlers and found by `jairaBuiltInPaths().settingsFile` ([decision 0006](../decisions/0006-built-in-layer.md)). It is read-only: nothing writes it, no `ConfigLayer` names it, and editing a value it holds writes that value into the layer being edited. The shared layer is `<base>/settings.json`. The project layer is `<project>/.jaira/settings.json`. Any may be absent; with all absent the configuration is `defaultConfig()`. `loadLayeredConfig` merges built in, then shared, then project, then the personal layer; the shared root opened as a project merges built in, its own file and the personal one, with no project layer between. `config:read` returns the built-in document as `ConfigView.system` and the personal one as `ConfigView.you` beside `base` and `project`, and `config:write` validates a layer merged with all the others. The personal layer is a file of its own rather than a key of `user-settings.json` because that file has its own whole-file writer, and two writers of one file overwrite each other.
+A layer that follows the person brings its files with it: the permission sets, workflows and prompts in Shared's root, in `<base>/personal/` (Just you's) and in `<base>/projects/<key>/` (yours in the project) are kept in step with the paired machines file by file, as its settings are piece by piece. The machine's two layers keep theirs, `<base>/machine/` and `<project>/.jaira/local/` ([decision 0026](../decisions/0026-settings-follow-the-person.md), amended 2026-11-18; [jaira-layout](jaira-layout.md)).
+
+The built-in layer is `$SYSTEM/settings.json`: `packages/shared/builtin/settings.json`, copied to `dist/builtin/` by both bundlers and found by `jairaBuiltInPaths().settingsFile` ([decision 0006](../decisions/0006-built-in-layer.md)). It is read-only: nothing writes it, no `ConfigLayer` names it, and editing a value it holds writes that value into the layer being edited. Any layer may be absent; with all absent the configuration is `defaultConfig()`. `loadLayeredConfig` merges them in the order above (`layerFilesOf`); the shared root opened as a project merges built in, its own file, the machine's and the personal one, with no project layer between (its paths name the base's own files for the project's two, each read once). `config:read` returns the built-in document as `ConfigView.system` and each layer's beside it (`base`, `project`, `machine`, `projectMachine`, `you`, `projectYou`, with their files), and `config:write` validates a layer merged with all the others — a layer under or over every project (Shared, the machine's, Just you) with each open project's own three laid in. The machine's own blocks (`execEnvironment`, `engine`, `updates`) are read from whichever layer states them; About writes the update track and the engine's hosting to the machine's layer and takes them out of Just you, where they were kept before it existed. The personal layer is a file of its own rather than a key of `user-settings.json` because that file has its own whole-file writer, and two writers of one file overwrite each other.
+
+`config:read` and `config:write` take `project` — which project's three layers (`SHARED_SESSION`, `shared`: none) — and `machine`, another machine's id: the request is answered on that machine (`Federation.route`), so a paired machine's layers are read and written where they live. An engine that predates the machine's layers answers without `machineFile`, and Settings does not write those layers through it.
 
 What ships in it:
 
@@ -68,7 +77,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 | `artifacts` | object | no | where artifact bytes land and when a producer asks first |
 | `storage` | object | no | whether each concern is also written to files beside the database |
 | `memo` | object | no | `{enabled?: boolean}`, default `false`; parsed and read by nothing |
-| `execEnvironment` | `"windows"` or `{wsl: non-empty string}` | no, default `"windows"` | where commands, git and agents run; keys beside `wsl` are ignored |
+| `execEnvironment` | `"windows"`, `{wsl: non-empty string}`, or `{container: non-empty string, user?: non-empty string, from?: "devcontainer" \| "docker"}` | no, default `"windows"` | where commands, git and agents run. A container is a workspace's own ([0027](../decisions/0027-open-anywhere-and-project-setup.md)): its setup writes it into `.jaira/settings.local.json`, and only the commands JaiRA runs (`shell`, `run_command`, setup steps) go in through `docker exec` (as `user`), the workspace at the same path inside; git, the files and the agents stay on the machine. Mac and Linux. With `container` present, `wsl` beside it is ignored; other keys are ignored |
 | `agents` | object | no | the agent runtimes this project registers |
 | `workflows` | `{path?: string[]}` | no | the search path a bare workflow reference walks |
 | `files` | `{hidden?: string[]}` | no | the Files tree's shared hidden globs |
@@ -162,7 +171,7 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `storage.journal`, `storage.conversations`, `storage.tasks`, `storage.artifacts` | `"file"` or `"db"` | no, default `"db"` | `file` also writes that concern to files as each change is saved, and imports them at open when they moved; `db` keeps it in the database alone, which is the truth either way ([decision 0018](../decisions/0018-one-truth-per-side.md) §11). The retired `"both"` is read as `"file"`; the modes are [storage-policy](../units/storage-policy.md) |
 | `storage.format` | `"claude"` or `"codex"` | no, default `"claude"` | the line shape a file-backed conversation is written in |
 | `workflows.path` | non-empty array of non-empty strings | no | each entry starts with `$` or is absolute; absent means the layer roots' `workflows` and `functions` in order |
-| `files.hidden` | array of non-empty strings | no | glob rules this layer ADDS, trimmed, order kept; the effective list is the built-in defaults, then the shared layer's, the project's and the person's, and the last rule to match a path decides; absent and `[]` both add nothing |
+| `files.hidden` | array of non-empty strings | no | glob rules this layer ADDS, trimmed, order kept; the effective list is the built-in defaults, then each layer's in the order above, and the last rule to match a path decides; absent and `[]` both add nothing |
 
 ### What the Files tree hides by default, in the groups the Files tree section draws
 
@@ -170,7 +179,7 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 
 | Group | Patterns |
 | --- | --- |
-| JaiRA's own files | `system`, `.jaira/system`, `settings.json`, `.jaira/settings.json`, `user-settings.json`, `sync.json`, `personal-settings.json` |
+| JaiRA's own files | `system`, `.jaira/system`, `settings.json`, `.jaira/settings.json`, `.jaira/settings.local.json`, `user-settings.json`, `sync.json`, `personal-settings.json`, `machine-settings.json` |
 | Secrets | `**/.env`, `**/.env.*` |
 | Version control | `.git` |
 | Dependencies | `**/node_modules`, `**/vendor`, `**/__pycache__` |
@@ -279,6 +288,14 @@ An unknown key inside `agents` is ignored. Inside each block below an unknown fi
 | `agents.genericCli[i].env` | object of strings | no | extra environment for the child |
 | `agents.genericCli[i].enabled` | boolean | no, default on | |
 | `agents.genericCli[i].credential` | secret name | no | |
+| `agents.genericCli[i].mcp` | object | no | how the binary is served JaiRA's tools over MCP; it must name `{mcpUrl}` or `{mcpConfig}` somewhere in `args`, `env` or `config`, and may name `{mcpConfig}` only with a `config` |
+| `agents.genericCli[i].mcp.args` | string array | no | arguments added for a bridged run, after `args` and before an appended prompt |
+| `agents.genericCli[i].mcp.env` | object of strings | no | variables set for a bridged run, over `env` and the key |
+| `agents.genericCli[i].mcp.config` | any JSON | no | written for each bridged run to a file of its own, mode 0600, removed after; its path is `{mcpConfig}` |
+| `agents.genericCli[i].mcp.configName` | file name, no folder | no, default `jaira-mcp.json` | the file's name |
+| `agents.genericCli[i].mcp.builtinsOff` | boolean | no, default false | the person's statement that, started so, the binary has none of its own tools; a call held to a permission set is then held as codex is |
+
+`{mcpUrl}` and `{mcpConfig}` are filled anywhere inside a string of `mcp.args`, `mcp.env` and `mcp.config` (keys included), never in `args` or `env`.
 
 A `credential` anywhere must be a non-empty string with no whitespace.
 
@@ -292,8 +309,9 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 | Either layer is not valid JSON | `readJsonFile` or `JSON.parse` throws | repair the file |
 | The merge fails to parse at a project open | the open throws; the project does not open | fix the layer and reopen |
 | `config:write` is sent a document whose merge fails to parse | the parser's error is thrown and nothing is written | fix and resend |
-| `config:write` names the project layer with no open project | `Refusal` "no project was named, so there is no project config to write" or "project '<ref>' is not open" | name an open project |
-| `config:write` to the shared or the personal layer breaks an open project it reaches | the parser's error, suffixed `(with <file> as the project layer)`, and nothing is written | fix the field, or that project's layer |
+| `config:write` names one of a project's layers with no open project | `Refusal` "no project was named, so there is no project config to write" or "project '<ref>' is not open" | name an open project |
+| `config:write` to Shared, the machine's or the personal layer breaks an open project it reaches | the parser's error, suffixed `(with <file> as the project layer)`, and nothing is written | fix the field, or that project's layers |
+| `config:read` or `config:write` names a machine that is offline | "<label> is offline" | wait for it, or take it out of the path |
 | `artifacts.destination` is not a valid template | the document saves and opens; `parseDestination` throws when a run is wired, see [artifact-placement](../units/artifact-placement.md) | fix the template and start again |
 
 ## A renamed or retyped field breaks every committed document, and nothing migrates one at open

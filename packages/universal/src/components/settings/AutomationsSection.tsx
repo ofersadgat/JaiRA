@@ -2,7 +2,7 @@ import { useRef, useState, type DragEvent as ReactDragEvent, type JSX, type Reac
 import type { View as HostView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { EVENT_SPECS, isEventName } from "@jaira/shared/browser";
-import { INTO_NAME, badgeFor, newLineOf, useAutomationsHost, type AutomationsPaneProps, type AutomationsViewProps } from "@jaira/ui/automationsHost";
+import { INTO_NAME, LAYER_HEADING, LAYER_HERE, badgeFor, newLineOf, useAutomationsHost, type AutomationsPaneProps, type AutomationsViewProps } from "@jaira/ui/automationsHost";
 import {
   automationStateIdOf,
   eventOnAnywhere,
@@ -443,6 +443,15 @@ function WhenRaw({ when, badge, props, look = {}, strike = {} }: { when: string;
   );
 }
 
+/** A layer a line comes from, as "from ___" says it. */
+function fromWord(layer: ShownLine["layer"]): string {
+  if (layer === undefined || layer === "base") return "Shared";
+  if (layer === "system") return "what ships";
+  return INTO_NAME[layer];
+}
+
+const capital = (text: string): string => text.replace(/^./, (c) => c.toUpperCase());
+
 function AutomationsView(props: AutomationsViewProps): JSX.Element {
   const t = useTokens();
   const own = props.shown.filter((shown) => shown.from === "own").map((shown) => shown.line);
@@ -457,21 +466,24 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
     if (next !== undefined) props.onLines(next);
   };
 
-  /** Where a project page's line runs its steps from, when that is worth saying. */
+  /** This page's layer, as a sentence names it: `this project`, `Just you`. */
+  const here = INTO_NAME[props.reads];
+  /** Where a line from under this page's layer runs its steps from, when that is worth saying. */
   const stepsNote = (shown: ShownLine): JSX.Element | null => {
-    if (props.reads !== "project" || shown.line.raw !== undefined) return null;
-    if (shown.from === "shared" && shown.stepsFrom === "project") {
+    if (props.reads === "base" || shown.line.raw !== undefined) return null;
+    const under = fromWord(shown.layer);
+    if (shown.from === "shared" && shown.stepsFrom === props.reads) {
       return (
         <Note>
-          {`Its steps are changed for this project only, in this project's ${automationStateIdOf(shown.line.name)}; Shared's line and every other project keep Shared's. `}
+          {`Its steps are changed ${LAYER_HERE[props.reads]} only, in ${here}'s ${automationStateIdOf(shown.line.name)}; ${under}'s line keeps its own. `}
           <Link disabled={props.locked} onPress={() => props.onUseSharedSteps(shown.line.name)}>
-            Use Shared's steps
+            {`Use ${under}'s steps`}
           </Link>
         </Note>
       );
     }
-    if (shown.from === "shared") return <Note>A change to its steps here is this project's own copy of them; a change to its event or filter makes it a line of this project's.</Note>;
-    if (shown.replaces === true) return <Note>This project's version of Shared's line of this name, which is ignored here.</Note>;
+    if (shown.from === "shared") return <Note>{`A change to its steps here is ${here}'s own copy of them; a change to its event or filter makes it a line of ${here}'s.`}</Note>;
+    if (shown.replaces === true) return <Note>{`${capital(here)}'s version of the line of this name from under it, which is ignored here.`}</Note>;
     return null;
   };
 
@@ -533,8 +545,8 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
               </Link>
             </Txt>
           ) : (
-            <Button kind="ghost" disabled={props.locked} title="Leave this line out of this project's events task (writes the filter in this project's copy)" onPress={() => props.onIgnore(line.name, true)}>
-              Ignore in this project
+            <Button kind="ghost" disabled={props.locked} title={`Leave this line out ${LAYER_HERE[props.reads]} (writes the filter in ${here}'s copy)`} onPress={() => props.onIgnore(line.name, true)}>
+              {`Ignore ${LAYER_HERE[props.reads]}`}
             </Button>
           )
         }
@@ -547,8 +559,8 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
               {line.name}
             </Txt>
           )}
-          <SourceTag first title="A line of Shared's events workflow, read through this project's copy">
-            from Shared
+          <SourceTag first title={`A line of ${fromWord(shown.layer)}'s events workflow, read through ${here}'s copy`}>
+            {`from ${fromWord(shown.layer)}`}
           </SourceTag>
         </View>
         {editable ? (
@@ -592,7 +604,7 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
   };
 
   const items: JSX.Element[] = [];
-  if (props.shown.length > 0 && props.shown[0]!.from === "own" && hasShared) items.push(<EventGroup key="own-head" heading="This project" first={false} />);
+  if (props.shown.length > 0 && props.shown[0]!.from === "own" && hasShared) items.push(<EventGroup key="own-head" heading={LAYER_HEADING[props.reads].name} first={false} />);
   let ownIndex = -1;
   props.shown.forEach((shown, i) => {
     if (shown.from === "own") {
@@ -600,7 +612,12 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
       items.push(ownRow(shown, ownIndex, flags[i] ?? []));
       return;
     }
-    if (i === 0 || props.shown[i - 1]!.from === "own") items.push(<EventGroup key="shared-head" heading="From Shared · ~/.jaira" first={false} />);
+    // A heading wherever the layer a line comes from changes: `From This machine · ~/.jaira/machine`.
+    const before = i === 0 ? undefined : props.shown[i - 1]!;
+    if (before === undefined || before.from === "own" || before.layer !== shown.layer) {
+      const heading = LAYER_HEADING[shown.layer ?? "base"];
+      items.push(<EventGroup key={`shared-head:${i}`} heading={`From ${heading.name} · ${heading.dir}`} first={false} />);
+    }
     items.push(sharedRow(shown, i, flags[i] ?? []));
   });
   if (props.shown.length === 0) {
@@ -608,23 +625,6 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
       <Hint key="empty" paddingVertical={10} paddingHorizontal={16}>
         No automations yet. Add one, and the events task starts waiting for its event.
       </Hint>,
-    );
-  }
-  if (props.asking !== null) {
-    items.push(
-      <View key="ask" alignSelf="flex-start" flexDirection="column" gap={6} maxWidth={560} marginVertical={10} marginHorizontal={16} paddingVertical={8} paddingHorizontal={10} borderRadius={8} backgroundColor={t.v("panel-2") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} role="group" aria-label="Where this change goes">
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, lineHeight: 1.5 }}>Just you is one settings file, and automations are a workflow file. Write this change to:</Txt>
-        <PaneActions>
-          {props.asking.map((into, i) => (
-            <Button key={into} kind={i === 0 ? "primary" : "ghost"} disabled={props.locked} onPress={() => props.onAnswer(into)}>
-              {INTO_NAME[into] === "this project" ? "This project" : INTO_NAME[into]}
-            </Button>
-          ))}
-          <Button kind="ghost" onPress={() => props.onAnswer(null)}>
-            Cancel
-          </Button>
-        </PaneActions>
-      </View>,
     );
   }
   if (props.problem !== null) {
@@ -664,6 +664,7 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
     <SettingsSection
       id="automations"
       title="Automations"
+      holds={props.source === "copy" || props.shown.some((shown) => shown.stepsFrom === props.reads)}
       info="Transitions are first-match: an event goes to the first line whose event and filter it matches. A line's steps run in order, while the task keeps waiting for the next event. A line a line above always catches is flagged."
       lead="What happens when an event arrives. Each line is a transition of the built-in events task: it waits for the event, starts the task you pick, and goes back to waiting."
       plain

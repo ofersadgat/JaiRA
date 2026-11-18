@@ -303,7 +303,11 @@ export class Federation {
   /** A push from another machine's engine, keyed for this one and published here — or dropped. */
   relay(machineId: string, message: PushMessage): void {
     if (MACHINE_LOCAL.has(message.type)) return;
-    // Its own news only: what it relays of other machines — this one's included — is theirs.
+    // Its own news only: what it relays of other machines — this one's included — is theirs. A relayed
+    // push carries `relayedFrom`; news about no project (a Shared save's `store:invalidate`) has no
+    // remote key to tell it by, and without the mark went back and forth between two machines for as
+    // long as both were up.
+    if ((message as { relayedFrom?: unknown }).relayedFrom !== undefined) return;
     const about = (message as { project?: unknown }).project ?? (message as { pending?: { project?: unknown } }).pending?.project ?? (message as { request?: { project?: unknown } }).request?.project;
     if (typeof about === "string" && parseRemoteProjectKey(about) !== undefined) return;
     let out = message as PushMessage & Record<string, unknown>;
@@ -316,6 +320,7 @@ export class Federation {
     if (message.type === "userEvent:requested" && request !== undefined) out = { ...out, request: this.remember(machineId, "userEvent", request) } as unknown as typeof out;
     if (message.type.endsWith(":resolved")) this.pending.delete(String((message as { requestId?: unknown }).requestId));
     if (typeof out["project"] === "string") out = { ...out, project: remoteProjectKey(machineId, out["project"] as string) };
+    out = { ...out, relayedFrom: machineId };
     // The list the sidebar reads follows what the board does.
     if (message.type === "store:invalidate" || message.type === "run:finished") this.refresh(machineId);
     this.options.publish(out as PushMessage);

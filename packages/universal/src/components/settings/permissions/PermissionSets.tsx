@@ -22,7 +22,7 @@ import {
 import {
   INTO_NAME,
   LOWER_NAME,
-  PERSONAL,
+  NO_SETS_HERE,
   choiceOfTab,
   detachingLines,
   newPermissionSetProblem,
@@ -129,7 +129,7 @@ function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
     };
   });
   return (
-    <SettingsSection id="permission-sets" title="Permission sets" lead={HEAD_HINT} wide>
+    <SettingsSection id="permission-sets" title="Permission sets" lead={HEAD_HINT} wide holds={ats.some((at) => at.here)}>
       {/* The rail and the detail's box: the card's padding, inside its own ring. */}
       <View flexDirection="row" alignItems="stretch" borderRadius={8} paddingVertical={13} paddingHorizontal={16} backgroundColor={t.v("panel") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
         <TabRail width={212} pad={[5, 9]} corner={7} label="Permission sets" items={items} selected={tabOfChoice(open !== undefined ? { permissionSet: open.id } : adding ? props.choice : undefined)} onSelect={(id) => props.onChoice(choiceOfTab(id))} />
@@ -247,7 +247,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
   }
   if (copyable) {
     if (props.writesTo !== undefined) line.push(" · your first change copies it to ", mono(permissionSetFileLabel(props.writesTo, at.id)));
-    else line.push(` · ${PERSONAL} holds no permission sets, so your first change asks where to copy it`);
+    else line.push(` · ${NO_SETS_HERE}, so your first change asks where to copy it`);
   }
   return (
     <RailDetail title={title} hints={[]} line={<Hint>{line.map((part, i) => (typeof part === "string" ? part : <Txt key={i}>{part}</Txt>))}</Hint>} minHeight={330}>
@@ -293,7 +293,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
       {asking ? (
         <Ask>
           <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }}>
-            {`${PERSONAL} is one settings file, and a permission set is a file of its own. Copy `}
+            {`${NO_SETS_HERE}. Copy `}
             {at.id}
             {", with your change, to:"}
           </Txt>

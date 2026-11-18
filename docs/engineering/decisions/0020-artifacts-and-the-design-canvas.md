@@ -98,7 +98,8 @@ instructions are passed verbatim and name them:
     a file, under `root` where relative) at `read_file`'s line, the strictest kept. It asks or refuses as a
     read of that file (`placeNarrowingFor`). Because of that, `show_artifact` is never pre-approved under a
     permission set. The tool reads such a file where it is, refusing only `.jaira/`, except this task's own
-    artifact folder.
+    artifact folder (until 2026-11-17: since then nothing in the tool refuses `.jaira/`, and the
+    shipped sets' `read_file` line refuses only the machine key there).
   - "an llm should be able to publish an artifact without sourcing it from a file by giving the contents
     directly." This uses `content`, and `{ "content": … }` in `files`. Text sent in the call reads nothing
     and needs no write permission, so a read-only conversation can draw. It reads an artifact back with

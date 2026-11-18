@@ -14,6 +14,8 @@ export function MenuLayer({ onClose, children }: {
   z?: number;
   /** What a press outside goes through to, on web (`MenuLayer.web.tsx`); a phone's press outside closes. */
   through?: string;
+  /** Whether the window resizing closes it, on web (`MenuLayer.web.tsx`). */
+  closeOnResize?: boolean;
   children: ReactNode;
 }): JSX.Element {
   return (

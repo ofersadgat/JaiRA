@@ -12,6 +12,7 @@ import { MachineChip } from "../MachineChip";
 import { Button } from "./Button";
 import { Artifacts, ConfigBlockSection, ExecEnvironment } from "./ConfigBlocks";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
+import { useSettingsAt } from "./layers";
 
 /**
  * The two pages made only of blocks: **Runs** (how a run behaves while it is going) and **Data &
@@ -29,8 +30,7 @@ import { SettingsRow, SettingsSection } from "./SettingsPage";
 /** A config page's writer: the view, and whether this layer may be written. */
 function usePageWriter() {
   const { state, actions } = useShell();
-  const editable = state.configLayer !== "project" || state.at !== null;
-  return state.config === null ? null : configWriter(state.config, state.configLayer, state.busy || !editable, actions.saveConfig);
+  return state.settingsConfig === null ? null : configWriter(state.settingsConfig, state.configLayer, state.busy, actions.saveConfig);
 }
 
 /** One --dim line where a page or a section has nothing to draw. */
@@ -44,11 +44,12 @@ function Empty({ children }: { children: string }): JSX.Element {
 
 export function RunsPage(): JSX.Element {
   const { state } = useShell();
+  const at = useSettingsAt();
   const writer = usePageWriter();
   if (writer === null) return <Empty>The configuration could not be read.</Empty>;
   return (
     <>
-      <PlacementSection project={state.at} />
+      <PlacementSection project={at} />
       <ExecEnvironment {...writer} />
       <ConfigBlockSection writer={writer} block="memo" />
       <ConfigBlockSection writer={writer} block="autopilot" />
@@ -68,6 +69,7 @@ export function DataPage(): JSX.Element {
     <>
       <Artifacts {...writer} />
       <ConfigBlockSection writer={writer} block="storage" />
+      {/* What the project the shell stands on has stored — not a setting, so not the path's. */}
       {state.at !== null ? <History /> : null}
     </>
   );

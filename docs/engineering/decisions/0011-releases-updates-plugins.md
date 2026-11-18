@@ -2,7 +2,7 @@
 id: engineering/decisions/0011-releases-updates-plugins
 type: decision
 status: accepted
-updated: 2026-09-26
+updated: 2026-11-18
 decides_for: [engineering/units/app-shell, engineering/units/agent-executors, engineering/units/model-routing, engineering/units/cli]
 ---
 
@@ -612,3 +612,37 @@ these should default to releases on github").**
 - A plugin needs a native module built against Electron's ABI. Then `+rN` versions per Electron ABI
   become routine, not rare.
 - Signing accounts exist. Enable the signing steps and macOS updates.
+
+## Amended 2026-11-18: About is about the machine Settings' path names
+
+About has no layer of its own, but it is a machine's page: the build running, its update track and how its
+engine is hosted are kept in that machine's `machine-settings.json` (decision 0026, amended 2026-11-17).
+With a paired machine in Settings' path (`Settings › build-01`, or `Settings › atlas › build-01`), About is
+about that machine (`aboutMachineOf`, `AboutPage.tsx`); with none, or this machine, it is about this one.
+A project or Just you in the path changes nothing here.
+
+- **What it shows of another machine.** Its version as it last said (`PeerView.version`, `not known yet`
+  before it has), with that build's own track; its update track and the engine's two switches, read from
+  its own settings (`config:read` with `machine`, for no project — `useMachineConfig`) and written to its
+  machine layer (`saveMachineConfig(writes, machine)`: `config:write` with `machine`, taken out of its
+  stronger layers and out of Just you there, as here). Read again after a write and when settings change.
+- **What it does not offer.** Checking for an update, downloading it, restarting into it, a plugin's
+  download, update or removal, and installing the `jaira` command are done by the machine itself: the
+  Updates section's Status row says `Checking for an update, downloading it and restarting into it happen
+  on build-01 itself, in JaiRA there: this window sets only its track.`, and the Plugins and Command line
+  sections each hold one row of their own: `Plugins are downloaded on build-01 itself, by JaiRA there: take
+  build-01 out of Settings' path to see this machine's.` and `The jaira command is installed on build-01
+  itself, …`. The Engine section's `Runs in` row says what hosts that machine's engine, as it said when
+  this machine last connected to it (the host kind in its welcome, kept beside its version: `PeerView.host`):
+  `jaira serve` — a server of its own, with no JaiRA window running it, so the switches are for when a
+  window starts there —, `The app`, or `A jaira command`; no row until it has said. Its switches say what a
+  window starting on that machine does: `When JaiRA's window starts on build-01, it starts jaira serve and
+  connects to it.`
+- **Offline.** The Updates section's lead says the machine is offline and that what it last said is shown;
+  the track and the switches are inert until it is back.
+- The third-party notices are this build's, whatever the path.
+
+Verified: `app/test/updateScreens.test.ts` (which machine About is about; another machine's version and
+track, never this updater's; what it says in place of the local actions, and offline). Not seen in the
+app: About on a real paired machine.
+

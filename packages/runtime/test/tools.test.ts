@@ -4,7 +4,7 @@
  * deny / ask. Registering this tool is *why* SPEC §11.2/§11.3 apply to an agent at
  * all, so the test drives the real gate rather than the policy in isolation.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -58,11 +58,16 @@ describe("createShellTool", () => {
     expect(await call(tool, { command: "echo x", cwd: "../elsewhere" })).toMatchObject({
       error: expect.stringMatching(/not allowed/) as unknown as string,
     });
-    // `.jaira/` is engine-owned wherever it appears (§1g item 5).
-    expect(await call(tool, { command: "echo x", cwd: ".jaira" })).toMatchObject({
-      error: expect.stringMatching(/not allowed/) as unknown as string,
-    });
   });
+
+  it("runs where a cwd under the workspace says, `.jaira/` like any: the line was judged there", async () => {
+    // Whether a line may run in `.jaira/` is the permission set's, at its places — the sets JaiRA ships
+    // refuse it (`policy.test.ts`); the tool itself only keeps a cwd inside the workspace.
+    mkdirSync(join(dir, ".jaira"));
+    const result = await call(createShellTool(), { command: "echo in-jaira", cwd: ".jaira" }, ctx({ workspace: { root: dir } }));
+    expect(result.exitCode).toBe(0);
+    expect(String(result.stdout)).toContain("in-jaira");
+  }, 60_000);
 
   it("registers under `shell` on the registry's tools facet", () => {
     const registry = newRegistry();

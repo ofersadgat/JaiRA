@@ -132,12 +132,14 @@ export function fixHealthItem(item: HealthItem, f: HealthFixers): void {
 }
 
 /**
- * Settings → Tools → Permission sets' three calls, for the project the window stands on. At the root the
- * window names the shared root rather than nothing: with several projects open, nothing named is a
- * refusal, and with one it would read that project instead of the root.
+ * Settings → Tools → Permission sets' three calls, for the project Settings' path reads (or the one the
+ * window stands on). At the root the window names the shared root rather than nothing: with several
+ * projects open, nothing named is a refusal, and with one it would read that project instead of the
+ * root. `machine`, a paired machine the path names with no project: that machine's own layers, read and
+ * written there (the engine forwards a request naming it).
  */
-export function permissionSetsChannelOf(at: string | null): PermissionSetsChannel {
-  const project = { project: at ?? SHARED_SESSION };
+export function permissionSetsChannelOf(at: string | null, machine?: string): PermissionSetsChannel {
+  const project = { project: at ?? SHARED_SESSION, ...(machine !== undefined ? { machine } : {}) };
   return {
     read: () => invoke("permissionSets:read", { ...project }),
     write: (request) => invoke("permissionSets:write", { ...request, ...project }),
@@ -145,15 +147,20 @@ export function permissionSetsChannelOf(at: string | null): PermissionSetsChanne
   };
 }
 
-/** Settings → Tools → Automations' calls: the events workflow's three copies, through the ordinary workflow channels. */
-export function automationsChannelOf(at: string | null): AutomationsChannel {
-  const project = at !== null ? { project: at } : {};
+/**
+ * Settings → Tools → Automations' calls: the events workflow and its automations' states, in any of the
+ * settings' six layers, through the ordinary workflow channels. The project is always named — Shared's
+ * when none is — so the layers read are that project's. `machine`, a paired machine the path names with
+ * no project: its layers, read and written there.
+ */
+export function automationsChannelOf(at: string | null, machine?: string): AutomationsChannel {
+  const where = { project: at ?? SHARED_SESSION, ...(machine !== undefined ? { machine } : {}) };
   return {
-    read: (layer, stateId) => invoke("workflow:read", { stateId, layer, ...(layer === "base" ? {} : project) }),
-    write: (layer, stateId, text) => invoke("workflow:write", { stateId, layer, text, ...(layer === "base" ? {} : project) }),
-    // An automation's state taken away: nothing names it once its line is gone, and a project's copy
-    // of a Shared line's state is referred to by Shared's root, so the refusal is not the question.
-    remove: (layer, stateId) => invoke("workflow:delete", { stateId, layer, force: true, ...(layer === "base" ? {} : project) }),
+    read: (layer, stateId) => invoke("workflow:read", { stateId, layer, ...where }),
+    write: (layer, stateId, text) => invoke("workflow:write", { stateId, layer, text, ...where }),
+    // An automation's state taken away: nothing names it once its line is gone, and a layer's copy of a
+    // line's state from under it is referred to by that layer's root, so the refusal is not the question.
+    remove: (layer, stateId) => invoke("workflow:delete", { stateId, layer, force: true, ...where }),
   };
 }
 

@@ -13,11 +13,11 @@ import { isFunctionMode, type PermissionSetMode, type ToolChoice } from "./opera
 import { entryOfDecl, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
 import { samePermissionSet, permissionSetBuckets, permissionSetSummary, type PermissionSetBucket, type PermissionSetChoice } from "./permissionSetBuckets";
 import { samePermissionSetEntry } from "./permissionSetEdit";
-import type { WorkflowLayer } from "./view";
+import type { SetLayer } from "./view";
 
 /** One layer's file for a permission set id. */
 export interface PermissionSetLayerFile {
-  layer: WorkflowLayer;
+  layer: SetLayer;
   /** The file as a person reads it: `.jaira/permission-sets/read-only.json`. */
   file: string;
   /** Only a JSON file is edited in place; a YAML one is read, and overridden or replaced by hand. */
@@ -45,22 +45,41 @@ export interface PermissionSetsView {
   usedBy: Record<string, string[]>;
   /** Every tool a permission set can hold a line for, with what each agent calls its own. */
   tools: ToolChoice[];
-  /** The layers this window has, nearest first. No `project` when none is open. */
-  layers: WorkflowLayer[];
+  /**
+   * The layers this window has, nearest first. No `project`, `projectMachine` or `projectYou` when no
+   * project is read; an engine before 2026-11-18 lists only `project`, `base` and `system`.
+   */
+  layers: SetLayer[];
 }
 
-/** The layers, nearest first — the order a bare `$` reference is searched in. */
-export const PERMISSION_SET_LAYER_ORDER: readonly WorkflowLayer[] = ["project", "base", "system"];
+/**
+ * The layers, nearest first — the order a bare `$` reference is searched in: the settings' order, most
+ * specific first (you in the project, Just you, the project on this machine, this machine, the
+ * project, Shared), then what ships.
+ */
+export const PERMISSION_SET_LAYER_ORDER: readonly SetLayer[] = ["projectYou", "you", "projectMachine", "machine", "project", "base", "system"];
 
-/** A layer's root as a person reads it, the start of {@link PermissionSetLayerFile.file}. */
-export const PERMISSION_SET_ROOT_LABELS: Readonly<Record<WorkflowLayer, string>> = { project: ".jaira", base: "~/.jaira", system: "built in" };
+/**
+ * A layer's root as a person reads it, the start of {@link PermissionSetLayerFile.file}. The person's
+ * for one project is under its key (`~/.jaira/projects/github.com_me_atlas`), which the engine's own
+ * labels name; this one stands for it where the key is not known.
+ */
+export const PERMISSION_SET_ROOT_LABELS: Readonly<Record<SetLayer, string>> = {
+  projectYou: "~/.jaira/projects/…",
+  you: "~/.jaira/personal",
+  projectMachine: ".jaira/local",
+  machine: "~/.jaira/machine",
+  project: ".jaira",
+  base: "~/.jaira",
+  system: "built in",
+};
 
 /** The file a layer holds `id` in, or would once written — `~/.jaira/permission-sets/ask-first.json`. */
-export function permissionSetFileLabel(layer: WorkflowLayer, id: string): string {
+export function permissionSetFileLabel(layer: SetLayer, id: string): string {
   return `${PERMISSION_SET_ROOT_LABELS[layer]}/permission-sets/${id}.json`;
 }
 
-const depthOf = (layer: WorkflowLayer): number => PERMISSION_SET_LAYER_ORDER.indexOf(layer);
+const depthOf = (layer: SetLayer): number => PERMISSION_SET_LAYER_ORDER.indexOf(layer);
 
 /** One permission set as ONE layer's pane shows it. */
 export interface PermissionSetAt {
@@ -74,17 +93,34 @@ export interface PermissionSetAt {
   /** What this layer's file overrides: the nearest file below it. Only when `here`. */
   lower?: PermissionSetLayerFile;
   /** A NEARER layer holds this id too, so a project reading a bare reference gets that one. */
-  shadowedBy?: WorkflowLayer;
+  shadowedBy?: SetLayer;
+}
+
+/** The layers that belong to one project — whose files a reference names differently, or not at all, in another. */
+export function isProjectSetLayer(layer: SetLayer): boolean {
+  return layer === "project" || layer === "projectMachine" || layer === "projectYou";
 }
 
 /**
- * The permission sets a layer's pane lists: everything that layer can SEE — its own files and those of the
- * layers below it. Built in sees only what ships; a project sees all three.
+ * Whether `layer`'s copy of a set can follow `below`'s — what it SEES under it. A layer of one project
+ * sees every layer under it. One that is no project's (this machine's, Just you's, Shared) sees no
+ * project's: its file is read by every project, and a `$ref` to one project's copy would name another
+ * project's, or nothing, there. So such a copy follows Shared's or what ships, and in a project with a
+ * copy of its own, stands in for that copy whole.
  */
-export function permissionSetsAt(records: readonly PermissionSetRecord[], layer: WorkflowLayer): PermissionSetAt[] {
+export function layerSees(layer: SetLayer, below: SetLayer): boolean {
+  return depthOf(below) >= depthOf(layer) && (isProjectSetLayer(layer) || !isProjectSetLayer(below));
+}
+
+/**
+ * The permission sets a layer's pane lists: everything that layer can SEE ({@link layerSees}) — its own
+ * files and those of the layers below it it can follow. Built in sees only what ships; a project sees
+ * itself, Shared and what ships; you in a project sees every layer.
+ */
+export function permissionSetsAt(records: readonly PermissionSetRecord[], layer: SetLayer): PermissionSetAt[] {
   const out: PermissionSetAt[] = [];
   for (const record of records) {
-    const visible = record.files.filter((file) => depthOf(file.layer) >= depthOf(layer)).sort((a, b) => depthOf(a.layer) - depthOf(b.layer));
+    const visible = record.files.filter((file) => layerSees(layer, file.layer)).sort((a, b) => depthOf(a.layer) - depthOf(b.layer));
     const source = visible[0];
     if (source === undefined) continue;
     const here = source.layer === layer;
@@ -113,12 +149,44 @@ export function permissionSetRailOf(ats: readonly PermissionSetAt[]): Array<{ bu
   return permissionSetBuckets(permissionSetChoicesAt(ats)).map((bucket) => ({ bucket, permissionSets: bucket.permissionSets.map((choice) => byId.get(choice.id)!) }));
 }
 
-const OVERRIDDEN: Readonly<Record<WorkflowLayer, string>> = { project: "overridden in this project", base: "overridden for all projects", system: "overridden" };
-const SOURCE: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "all projects", project: "this project" };
+const OVERRIDDEN: Readonly<Record<SetLayer, string>> = {
+  projectYou: "overridden by you in this project",
+  you: "overridden by you",
+  projectMachine: "overridden in this project on this machine",
+  machine: "overridden on this machine",
+  project: "overridden in this project",
+  base: "overridden for all projects",
+  system: "overridden",
+};
+const SOURCE: Readonly<Record<SetLayer, string>> = {
+  system: "built in",
+  base: "all projects",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "just you",
+  projectYou: "you in this project",
+};
 /** A layer as the head of a COPY names the one holding it: `shared · copied from built in`. */
-const HOLDER: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "shared", project: "this project" };
-/** …and the one it was copied from. `Shared` is the switch's own word for the layer. */
-const COPIED_FROM: Readonly<Record<WorkflowLayer, string>> = { system: "built in", base: "Shared", project: "this project" };
+const HOLDER: Readonly<Record<SetLayer, string>> = {
+  system: "built in",
+  base: "shared",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "just you",
+  projectYou: "you in this project",
+};
+/** …and the one it was copied from. `Shared` and `Just you` are the path's own words for those layers. */
+const COPIED_FROM: Readonly<Record<SetLayer, string>> = {
+  system: "built in",
+  base: "Shared",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "Just you",
+  projectYou: "you in this project",
+};
 
 /**
  * Where a permission set's value comes from, as the pills beside its path say it.
@@ -142,7 +210,7 @@ export function permissionSetStanding(at: PermissionSetAt): { here: boolean; lab
  * Decided by WHERE the files are and not by whether the copy still `$ref`s the lower one: a copy that
  * took a line out had to stop following (`detach`), and is no less a copy of what ships for that.
  */
-export function copiedFrom(at: PermissionSetAt): WorkflowLayer | undefined {
+export function copiedFrom(at: PermissionSetAt): SetLayer | undefined {
   return at.here ? at.lower?.layer : undefined;
 }
 
@@ -161,9 +229,9 @@ export function copyDifferences(at: PermissionSetAt): number | undefined {
  * The same change, made to another map: every line on which `to` differs from `from` is set (or taken
  * out) in `onto`, and every other line of `onto` is left as it says.
  *
- * What a change made on the personal layer is, once the person says where it goes. That layer holds
- * no permission sets (it is one settings file, and a set is a file of its own), so the card there shows
- * what the NEAREST layer says; the layer chosen may say something else, and copying the whole map
+ * What a change made on a layer with no permission sets of its own is, once the person says where it
+ * goes — a layer an engine before 2026-11-18 does not list (`PermissionSetsView.layers`). The card there
+ * shows what the NEAREST layer says; the layer chosen may say something else, and copying the whole map
  * shown would write that nearer layer's lines into it along with the one line that was changed.
  */
 export function rebasePermissionSetChange(from: PermissionSetDecl, to: PermissionSetDecl, onto: PermissionSetDecl): PermissionSetDecl {

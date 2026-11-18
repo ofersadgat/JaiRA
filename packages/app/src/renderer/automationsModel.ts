@@ -23,21 +23,30 @@
  *
  * ## Layers
  *
- * Shared's copy is a whole file. A project's copy `$ref`s Shared's (REFERENCES.md §4.2a): its own
- * lines first, then Shared's spliced in minus any it ignores —
- * `{ "$ref": "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))" }`
- * — and its children beside Shared's (`"children": { "$ref": "$BASE/workflows/system/events.children", … }`).
+ * The settings' six (decision 0023, amended 2026-11-18): Shared < the project < this machine < the
+ * project on this machine < Just you < you in the project, most specific wins.
  *
- * An automation's STATE resolves through the layers on its own, so a project changes a Shared line's
- * steps by writing its own `system/events/<name>.json` — a copy of that one file, for that project
- * alone — and needs no copy of the root for it. Changing a Shared line's event or filter from a project
- * is a line of the project's own: Shared's is ignored there (the splice's filter) and the project's
- * copy gets a rule of the same name.
+ * Shared's copy is a whole file. Every other layer's copy `$ref`s the layer directly under it
+ * (`EVENTS_FOLLOWS`: a project's names `$BASE`, this machine's `$JAIRA`, Just you's `$PROJECTMACHINE`, …;
+ * REFERENCES.md §4.2a): its own lines first, then that layer's spliced in minus any it ignores —
+ * `{ "$ref": "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))" }`
+ * — and its children beside that layer's (`"children": { "$ref": "$BASE/workflows/system/events.children", … }`).
+ * A layer with no copy passes the one under it through, so what a layer splices in is everything under
+ * it, each line from the layer that says it.
+ *
+ * An automation's STATE resolves through the layers on its own, so a layer changes a line's steps from
+ * under it by writing its own `system/events/<name>.json` — a copy of that one file, for that layer
+ * alone — and needs no copy of the root for it. Changing such a line's event or filter is a line of the
+ * layer's own: the one under is ignored there (the splice's filter) and the layer's copy gets a rule of
+ * the same name.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import {
+  AUTOMATION_LAYERS,
   automationStateIdOf,
   automationStateOf,
+  EVENTS_FOLLOWS,
+  eventsRefOf,
   EVENT_NAMES,
   EVENT_SPECS,
   EVENTS_STATE_ID,
@@ -49,7 +58,7 @@ import {
   type EventName,
   type JairaEventsConfig,
   type StepValue,
-  type WritableLayer,
+  type WritableSetLayer,
 } from "@jaira/shared/browser";
 import type { ValueSourceOption } from "./schemaForm/types";
 
@@ -62,8 +71,14 @@ export { EVENTS_STATE_ID, automationStateIdOf, type AutomationStep, type StepVal
 export const eventsTaskOf = <T extends { title: string; workflow: string }>(tasks: readonly T[]): T | undefined =>
   tasks.find((task) => (task as { system?: unknown }).system === "events") ?? tasks.find((task) => task.title === "events" && task.workflow === EVENTS_STATE_ID);
 
-/** Where the base layer's events workflow is named from a project's copy. */
-const BASE_EVENTS = "$BASE/workflows/system/events";
+/** The root a copy splices when it names none: Shared's, as a project's copy always has. */
+const BASE_ROOT = "$BASE";
+
+/** The roots a copy may splice — each layer's neighbour (`EVENTS_FOLLOWS`). */
+const SPLICED_ROOTS: ReadonlySet<string> = new Set(Object.values(EVENTS_FOLLOWS).filter((root) => root !== "$SYSTEM"));
+
+/** A layer a line comes from: one of the six, or what ships. */
+export type LineLayer = WritableSetLayer | "system";
 
 // --- the model -------------------------------------------------------------------------------
 
@@ -88,7 +103,7 @@ export interface AutomationLine {
 export interface StepsRead {
   steps?: AutomationStep[];
   /** The layer whose `system/events/<name>` answered. Absent: none has one. */
-  from?: WritableLayer;
+  from?: WritableSetLayer;
   /** That file is there but is not an operation list this editor writes. */
   unreadable?: boolean;
 }
@@ -202,32 +217,44 @@ const isRecord = (value: unknown): value is Record<string, unknown> => value !==
 /** The rule's `inputs`, exactly: the event and nothing else. */
 const RULE_INPUTS = { event: ".event" } as const;
 
-/** How a project's copy splices the base layer's lines in, when it does. */
+/** How a layer's copy splices the lines under it in, when it does. */
 export interface Splice {
-  /** The base layer's lines it leaves out, by name. */
+  /** The lines under it it leaves out, by name. */
   ignored: string[];
+  /** The root it splices: `$JAIRA`, `$MACHINE`, … Absent: `$BASE`, Shared's, as a project's copy names. */
+  under?: string;
 }
 
 export interface EventsDoc {
   /** The layer's OWN lines, in order. */
   lines: AutomationLine[];
-  /** A project's copy: where it splices Shared's lines in. Absent: this document splices nothing. */
+  /** A layer's copy above Shared: where it splices the lines under it in. Absent: this document splices nothing. */
   splice?: Splice;
-  /** The document `$ref`s the base layer's — a project's copy. */
+  /** The document `$ref`s another — a copy of a layer above Shared, or Shared's following the built-in. */
   follows: boolean;
 }
 
-/** Shared's lines, minus the ones listed — the spliced `$ref` a project's copy holds. */
-export function spliceRefOf(ignored: readonly string[]): { $ref: string } {
-  if (ignored.length === 0) return { $ref: `...${BASE_EVENTS}.transitions` };
-  return { $ref: `...filter(${BASE_EVENTS}.transitions, (t) => ![${ignored.map(quote).join(", ")}].includes(t.name))` };
+/** The lines under a copy, minus the ones listed — the spliced `$ref` it holds. `under`: the root it splices (`$BASE`). */
+export function spliceRefOf(ignored: readonly string[], under: string = BASE_ROOT): { $ref: string } {
+  const events = eventsRefOf(under);
+  if (ignored.length === 0) return { $ref: `...${events}.transitions` };
+  return { $ref: `...filter(${events}.transitions, (t) => ![${ignored.map(quote).join(", ")}].includes(t.name))` };
 }
 
 /** What a spliced `$ref` leaves out, or `undefined` when it is not one {@link spliceRefOf} writes. */
 export function ignoredOfSplice(ref: unknown): string[] | undefined {
+  return spliceOfRef(ref)?.ignored;
+}
+
+/** A spliced `$ref` read back: what it leaves out, and the root it splices — `undefined` when it is not one {@link spliceRefOf} writes. */
+export function spliceOfRef(ref: unknown): Splice | undefined {
   if (typeof ref !== "string") return undefined;
-  if (ref === `...${BASE_EVENTS}.transitions`) return [];
-  const prefix = `...filter(${BASE_EVENTS}.transitions, (t) => ![`;
+  const root = /^\.\.\.(?:filter\()?(\$[A-Z]+)\//.exec(ref)?.[1];
+  if (root === undefined || !SPLICED_ROOTS.has(root)) return undefined;
+  const events = eventsRefOf(root);
+  const under = root === BASE_ROOT ? {} : { under: root };
+  if (ref === `...${events}.transitions`) return { ignored: [], ...under };
+  const prefix = `...filter(${events}.transitions, (t) => ![`;
   const suffix = "].includes(t.name))";
   if (!ref.startsWith(prefix) || !ref.endsWith(suffix)) return undefined;
   const list = ref.slice(prefix.length, ref.length - suffix.length);
@@ -239,7 +266,7 @@ export function ignoredOfSplice(ref: unknown): string[] | undefined {
     out.push(name);
     if (!r.done() && !r.eat(",")) return undefined;
   }
-  return out;
+  return { ignored: out, ...under };
 }
 
 /**
@@ -254,9 +281,9 @@ export function parseEventsDoc(doc: unknown, stepsOf: StepsOf = NO_STEPS): Event
   let splice: Splice | undefined;
   rules.forEach((rule, index) => {
     if (isRecord(rule) && typeof rule["$ref"] === "string" && Object.keys(rule).length === 1) {
-      const ignored = ignoredOfSplice(rule["$ref"]);
-      if (ignored !== undefined) {
-        splice = { ignored };
+      const spliced = spliceOfRef(rule["$ref"]);
+      if (spliced !== undefined) {
+        splice = spliced;
         return;
       }
     }
@@ -304,8 +331,8 @@ function ownedKeys(doc: EventsDoc): Set<string> {
 
 /**
  * A layer's events workflow with `lines` in place of the ones it held — every other key of `previous`
- * kept, and every child not a line's own kept too. `splice` is a project's copy: it follows the base
- * layer's document and splices its lines in after its own, minus those ignored.
+ * kept, and every child not a line's own kept too. `splice` is a copy above Shared: it follows the layer
+ * under it (`splice.under`, else Shared) and splices its lines in after its own, minus those ignored.
  */
 export function writeEventsDoc(previous: unknown, lines: readonly AutomationLine[], splice?: Splice): Record<string, unknown> {
   const before = isRecord(previous) ? previous : {};
@@ -320,12 +347,13 @@ export function writeEventsDoc(previous: unknown, lines: readonly AutomationLine
     Object.assign(children, written.children);
   }
   if (splice !== undefined) {
-    rules.push(spliceRefOf(splice.ignored));
+    const under = eventsRefOf(splice.under ?? BASE_ROOT);
+    rules.push(spliceRefOf(splice.ignored, splice.under));
     return {
       ...before,
-      $ref: BASE_EVENTS,
+      $ref: under,
       transitions: rules,
-      children: { $ref: `${BASE_EVENTS}.children`, ...Object.fromEntries(Object.entries(children).filter(([key]) => key !== "$ref")) },
+      children: { $ref: `${under}.children`, ...Object.fromEntries(Object.entries(children).filter(([key]) => key !== "$ref")) },
     };
   }
   // Shared's copy follows the built-in (`$SYSTEM`) and states its own lines: both keys always, since a
@@ -371,7 +399,7 @@ export const eventsDocText = (doc: unknown): string => `${JSON.stringify(doc, nu
  * A line's steps as a page reads them from the state files it has: `own`'s layer first, then the ones
  * behind it — the project's copy of `system/events/<name>`, else Shared's.
  */
-export function stepsReaderOf(layers: ReadonlyArray<{ layer: WritableLayer; states: Readonly<Record<string, unknown>> }>): StepsOf {
+export function stepsReaderOf(layers: ReadonlyArray<{ layer: WritableSetLayer; states: Readonly<Record<string, unknown>> }>): StepsOf {
   return (name) => {
     for (const { layer, states } of layers) {
       const doc = states[name];
@@ -399,57 +427,113 @@ export interface LayerFiles {
   states: Readonly<Record<string, unknown>>;
 }
 
-export interface Copies {
-  project?: LayerFiles;
-  base?: LayerFiles;
+/**
+ * Every layer's files a page read, by layer — a layer it did not read (one of a project's, with no project
+ * open) is absent — and what ships.
+ */
+export type Copies = Partial<Record<WritableSetLayer, LayerFiles>> & {
   /** What JaiRA ships: the root only (it ships no automation). */
   system?: { root?: unknown };
-}
+};
 
 /** One file a change writes, or takes away. */
-export type AutomationWrite = { layer: WritableLayer; stateId: string; text: string } | { layer: WritableLayer; stateId: string; remove: true };
+export type AutomationWrite = { layer: WritableSetLayer; stateId: string; text: string } | { layer: WritableSetLayer; stateId: string; remove: true };
 
-/** The layers a page on `layer` reads a state through, nearest first. */
-export function stateLayersOf(copies: Copies, layer: WritableLayer): Array<{ layer: WritableLayer; states: Readonly<Record<string, unknown>> }> {
-  const base = { layer: "base" as const, states: copies.base?.states ?? {} };
-  return layer === "project" ? [{ layer: "project", states: copies.project?.states ?? {} }, base] : [base];
+/** The layers a page read, least specific first: Shared always, the others where they were read. */
+const layersIn = (copies: Copies): WritableSetLayer[] => AUTOMATION_LAYERS.filter((layer) => layer === "base" || copies[layer] !== undefined);
+
+/** The layer under `layer` among those read: Shared's is what ships. */
+export function layerUnder(copies: Copies, layer: WritableSetLayer): LineLayer {
+  if (layer === "base") return "system";
+  const order = layersIn(copies);
+  const at = AUTOMATION_LAYERS.indexOf(layer);
+  return [...order].reverse().find((one) => AUTOMATION_LAYERS.indexOf(one) < at) ?? "base";
 }
 
-/** What a page on `reads` lists: its own lines, Shared's (on a project page), and where each line's steps come from. */
-export function automationsReadOf(copies: Copies, reads: WritableLayer): { own: EventsDoc; source: "copy" | "built in" | "none"; shared: AutomationLine[] | undefined; stepsOf: StepsOf } {
+/** The layer each root a copy may splice names. */
+const LAYER_OF_ROOT: Readonly<Record<string, WritableSetLayer>> = { $BASE: "base", $JAIRA: "project", $MACHINE: "machine", $PROJECTMACHINE: "projectMachine", $YOU: "you", $PROJECTYOU: "projectYou" };
+
+/** The layer a spliced root names, among those read: a layer not read passes the one under it through. */
+function layerOfRoot(copies: Copies, root: string): LineLayer {
+  const layer = LAYER_OF_ROOT[root];
+  if (layer === undefined) return "system";
+  return layer === "base" || copies[layer] !== undefined ? layer : layerUnder(copies, layer);
+}
+
+/** The layers a page on `layer` reads a state through, nearest first: it, and every layer read under it. */
+export function stateLayersOf(copies: Copies, layer: WritableSetLayer): Array<{ layer: WritableSetLayer; states: Readonly<Record<string, unknown>> }> {
+  const at = AUTOMATION_LAYERS.indexOf(layer);
+  return AUTOMATION_LAYERS.slice(0, at + 1)
+    .filter((one) => one === layer || one === "base" || copies[one] !== undefined)
+    .reverse()
+    .map((one) => ({ layer: one, states: copies[one]?.states ?? {} }));
+}
+
+/** One line of a layer's events workflow as the chain composes it, and the layer whose copy says it. */
+export interface ComposedLine {
+  line: AutomationLine;
+  layer: LineLayer;
+}
+
+/**
+ * The lines `layer`'s events workflow comes to, in the order a task reads them: its copy's own, then
+ * those of the layer it splices less the ones it ignores — and a layer with no copy, the one under it.
+ * Shared's copy states its lines whole; with none, what ships.
+ */
+export function composedLinesOf(copies: Copies, layer: LineLayer, stepsOf: StepsOf = NO_STEPS, depth = 0): ComposedLine[] {
+  if (depth > AUTOMATION_LAYERS.length + 1) return [];
+  if (layer === "system") return parseEventsDoc(copies.system?.root ?? skeleton(), stepsOf).lines.map((line) => ({ line, layer }));
+  const root = copies[layer]?.root;
+  if (root === undefined) return layer === "base" ? composedLinesOf(copies, "system", stepsOf, depth + 1) : composedLinesOf(copies, layerUnder(copies, layer), stepsOf, depth + 1);
+  const doc = parseEventsDoc(root, stepsOf);
+  const own = doc.lines.map((line) => ({ line, layer }));
+  if (doc.splice === undefined) return own;
+  const ignored = new Set(doc.splice.ignored);
+  return [...own, ...composedLinesOf(copies, layerOfRoot(copies, doc.splice.under ?? BASE_ROOT), stepsOf, depth + 1).filter((one) => !ignored.has(one.line.name))];
+}
+
+/**
+ * What a page on `reads` lists: its own lines, the lines under it (on any page but Shared's) with the
+ * layer each comes from, and where each line's steps come from. `shared` keeps its name from when the
+ * only layer under a page was Shared.
+ */
+export function automationsReadOf(
+  copies: Copies,
+  reads: WritableSetLayer,
+): { own: EventsDoc; source: "copy" | "built in" | "none"; shared: AutomationLine[] | undefined; sharedFrom: LineLayer[] | undefined; stepsOf: StepsOf } {
   const stepsOf = stepsReaderOf(stateLayersOf(copies, reads));
   const base = copies.base?.root;
   const system = copies.system?.root;
-  const sharedDoc = base ?? system;
-  // Shared's lines as THIS page runs them: on a project page, a line's steps are the project's own copy
-  // of its state where there is one.
-  const shared = sharedDoc !== undefined ? parseEventsDoc(sharedDoc, stepsOf).lines : [];
   if (reads === "base") {
-    if (base !== undefined) return { own: parseEventsDoc(base, stepsOf), source: "copy", shared: undefined, stepsOf };
-    return { own: parseEventsDoc(system ?? skeleton(), stepsOf), source: system !== undefined ? "built in" : "none", shared: undefined, stepsOf };
+    if (base !== undefined) return { own: parseEventsDoc(base, stepsOf), source: "copy", shared: undefined, sharedFrom: undefined, stepsOf };
+    return { own: parseEventsDoc(system ?? skeleton(), stepsOf), source: system !== undefined ? "built in" : "none", shared: undefined, sharedFrom: undefined, stepsOf };
   }
-  const project = copies.project?.root;
-  if (project !== undefined) return { own: parseEventsDoc(project, stepsOf), source: "copy", shared, stepsOf };
-  return { own: { lines: [], splice: { ignored: [] }, follows: true }, source: "none", shared, stepsOf };
+  const held = copies[reads]?.root;
+  const own: EventsDoc = held !== undefined ? parseEventsDoc(held, stepsOf) : { lines: [], splice: { ignored: [] }, follows: true };
+  // The lines under it as THIS page runs them: a line's steps are this layer's own copy of its state
+  // where there is one. Read from the root its copy splices, else the layer under it.
+  const under = own.splice?.under !== undefined ? layerOfRoot(copies, own.splice.under) : layerUnder(copies, reads);
+  const below = composedLinesOf(copies, under, stepsOf);
+  return { own, source: held !== undefined ? "copy" : "none", shared: below.map((one) => one.line), sharedFrom: below.map((one) => one.layer), stepsOf };
 }
 
 /**
  * The files one change to a layer's OWN lines writes (`before` → `after`), in order:
  *
- *  1. Shared's copy made from the built-in, when a project's copy is being made and Shared has none (a
- *     project's copy `$ref`s Shared's, and a `$BASE` that is not there does not fall back);
+ *  1. Shared's copy made from the built-in, when another layer's copy is being made and Shared has none
+ *     (every copy's chain ends at `$BASE`, and a `$BASE` that is not there does not fall back);
  *  2. each line's state, `system/events/<name>` in the layer — only where the steps now differ from
- *     what the layer reads through its layers (so a project line of a Shared name, with Shared's steps,
+ *     what the layer reads through its layers (so a line of a name from under it, with those steps,
  *     writes no copy of them);
  *  3. the layer's events root, when its rules or its ignored list changed;
- *  4. the state of each line taken out — unless Shared still has a line of that name, whose steps a
- *     project's file of that name is changing.
+ *  4. the state of each line taken out — unless a layer under it still has a line of that name, whose
+ *     steps this layer's file of that name is changing.
  *
- * `ignored` is a project's new ignore list; absent: as it stands.
+ * `ignored` is a layer's new ignore list (any but Shared); absent: as it stands.
  */
 export function automationsWritesOf(
   copies: Copies,
-  into: WritableLayer,
+  into: WritableSetLayer,
   before: readonly AutomationLine[],
   after: readonly AutomationLine[],
   ignored?: readonly string[],
@@ -459,18 +543,23 @@ export function automationsWritesOf(
   const system = copies.system?.root;
   const mine = copies[into];
   const stepsOf = stepsReaderOf(stateLayersOf(copies, into));
-  const sharedNames = new Set(into === "project" && (base ?? system) !== undefined ? parseEventsDoc(base ?? system).lines.map((line) => line.name) : []);
 
   let root: Record<string, unknown>;
+  let belowNames = new Set<string>();
   if (into === "base") root = writeEventsDoc(base ?? sharedSeedOf(system), after);
   else {
-    const held = copies.project?.root;
-    const splice = { ignored: [...(ignored ?? (held !== undefined ? (parseEventsDoc(held).splice?.ignored ?? []) : []))] };
+    const held = mine?.root;
+    const was = held !== undefined ? parseEventsDoc(held).splice : undefined;
+    // A copy made now follows the layer directly under it (`EVENTS_FOLLOWS`); one already there keeps
+    // the root it names.
+    const under = was !== undefined ? (was.under ?? BASE_ROOT) : EVENTS_FOLLOWS[into];
+    const splice: Splice = { ignored: [...(ignored ?? was?.ignored ?? [])], ...(under !== BASE_ROOT ? { under } : {}) };
     root = writeEventsDoc(held ?? {}, after, splice);
+    belowNames = new Set(composedLinesOf(copies, layerOfRoot(copies, under)).map((one) => one.line.name));
   }
   const rootChanged = JSON.stringify(root) !== JSON.stringify(mine?.root);
   // A `$BASE` that is not there does not fall back to the built-in: Shared's copy is written first.
-  if (into === "project" && rootChanged && base === undefined) out.push({ layer: "base", stateId: EVENTS_STATE_ID, text: eventsDocText(sharedSeedOf(system)) });
+  if (into !== "base" && rootChanged && base === undefined) out.push({ layer: "base", stateId: EVENTS_STATE_ID, text: eventsDocText(sharedSeedOf(system)) });
   for (const line of after) {
     if (line.raw !== undefined || sameSteps(stepsOf(line.name).steps, line.steps)) continue;
     out.push({ layer: into, stateId: automationStateIdOf(line.name), text: automationStateText(line.name, line.steps, mine?.states[line.name]) });
@@ -478,21 +567,24 @@ export function automationsWritesOf(
   if (rootChanged) out.push({ layer: into, stateId: EVENTS_STATE_ID, text: eventsDocText(root) });
   const kept = new Set(after.map((line) => line.name));
   for (const line of before) {
-    if (line.raw !== undefined || kept.has(line.name) || sharedNames.has(line.name) || mine?.states[line.name] === undefined) continue;
+    if (line.raw !== undefined || kept.has(line.name) || belowNames.has(line.name) || mine?.states[line.name] === undefined) continue;
     out.push({ layer: into, stateId: automationStateIdOf(line.name), remove: true });
   }
   return out;
 }
 
 /**
- * A Shared line's STEPS changed from a project page: that project's own `system/events/<name>` — a
- * copy of that one file, for that project alone. Steps back to Shared's own take the copy away.
+ * The STEPS of a line from under a layer changed on that layer's page (a project's, by default): its
+ * own `system/events/<name>` — a copy of that one file, for that layer alone. Steps back to those read
+ * under it take the copy away.
  */
-export function sharedStepsWritesOf(copies: Copies, name: string, steps: readonly AutomationStep[]): AutomationWrite[] {
-  const shared = stepsReaderOf(stateLayersOf(copies, "base"))(name).steps;
-  const own = copies.project?.states[name];
-  if (sameSteps(shared, steps)) return own !== undefined ? [{ layer: "project", stateId: automationStateIdOf(name), remove: true }] : [];
-  return [{ layer: "project", stateId: automationStateIdOf(name), text: automationStateText(name, steps, own ?? copies.base?.states[name]) }];
+export function sharedStepsWritesOf(copies: Copies, name: string, steps: readonly AutomationStep[], into: WritableSetLayer = "project"): AutomationWrite[] {
+  const under = layerUnder(copies, into);
+  const read = under === "system" ? {} : stepsReaderOf(stateLayersOf(copies, under))(name);
+  const own = copies[into]?.states[name];
+  if (sameSteps(read.steps, steps)) return own !== undefined ? [{ layer: into, stateId: automationStateIdOf(name), remove: true }] : [];
+  const previous = own ?? (read.from !== undefined ? copies[read.from]?.states[name] : undefined);
+  return [{ layer: into, stateId: automationStateIdOf(name), text: automationStateText(name, steps, previous) }];
 }
 
 // --- what a layer shows ---------------------------------------------------------------------------
@@ -500,26 +592,28 @@ export function sharedStepsWritesOf(copies: Copies, name: string, steps: readonl
 /** One line as a layer's section draws it. */
 export interface ShownLine {
   line: AutomationLine;
-  /** Whose line it is: the layer's own, or the base layer's spliced into a project's copy. */
+  /** Whose line it is: the layer's own, or one from under it spliced into its copy. `shared` keeps its name from when only Shared's could be. */
   from: "own" | "shared";
-  /** A Shared line this project leaves out. */
+  /** The layer whose copy says a line from under it. */
+  layer?: LineLayer;
+  /** A line from under it this layer leaves out. */
   ignored: boolean;
-  /** Where its steps are read from — the project's own `system/events/<name>`, or Shared's. */
-  stepsFrom?: WritableLayer;
-  /** An own line standing in for a Shared line of the same name, which this project ignores. */
+  /** Where its steps are read from — this layer's own `system/events/<name>`, or one under it. */
+  stepsFrom?: WritableSetLayer;
+  /** An own line standing in for a line of the same name from under it, which this layer ignores. */
   replaces?: boolean;
 }
 
 /**
- * What the section lists for a layer: its own lines, then — on a project page — Shared's, each marked
- * ignored or not. `shared` is the base layer's lines (its copy, or the built-in's); a project with no
- * copy of its own shows every Shared line, none ignored. `stepsOf` says where each line's steps come
- * from on this page.
+ * What the section lists for a layer: its own lines, then — on any page but Shared's — the lines under
+ * it, each marked ignored or not. `shared` is those lines (with `sharedFrom`, the layer each comes from);
+ * a layer with no copy of its own shows every one of them, none ignored. `stepsOf` says where each
+ * line's steps come from on this page.
  */
-export function shownLinesOf(own: EventsDoc, shared: readonly AutomationLine[] | undefined, stepsOf: StepsOf = NO_STEPS): ShownLine[] {
+export function shownLinesOf(own: EventsDoc, shared: readonly AutomationLine[] | undefined, stepsOf: StepsOf = NO_STEPS, sharedFrom?: readonly LineLayer[]): ShownLine[] {
   const ignored = new Set(own.splice?.ignored ?? []);
   const sharedNames = new Set((shared ?? []).map((line) => line.name));
-  const from = (name: string): { stepsFrom?: WritableLayer } => {
+  const from = (name: string): { stepsFrom?: WritableSetLayer } => {
     const layer = stepsOf(name).from;
     return layer !== undefined ? { stepsFrom: layer } : {};
   };
@@ -531,7 +625,10 @@ export function shownLinesOf(own: EventsDoc, shared: readonly AutomationLine[] |
     ...(shared !== undefined && ignored.has(line.name) && sharedNames.has(line.name) ? { replaces: true } : {}),
   }));
   if (shared !== undefined && own.splice !== undefined) {
-    for (const line of shared) out.push({ line, from: "shared", ignored: ignored.has(line.name), ...from(line.name) });
+    shared.forEach((line, i) => {
+      const layer = sharedFrom?.[i];
+      out.push({ line, from: "shared", ...(layer !== undefined ? { layer } : {}), ignored: ignored.has(line.name), ...from(line.name) });
+    });
   }
   return out;
 }

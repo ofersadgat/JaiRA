@@ -349,6 +349,78 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     }
   });
 
+  /**
+   * `.jaira/` is a DEFAULT, not a rule (2026-11-17): "if we want an agent to modify the jaira files, that
+   * should be a permission layer". Nothing in the code refuses it; every line that can write does, at the
+   * project's and the worktree's — the folder itself (a bare path, deeper than `$PROJECT`) and every file
+   * in it (`/**​/*`, a FILE pattern with a literal prefix, which outranks `**​/.env.*` so that
+   * `.jaira/.env.local` is refused rather than asked about). The key that signs this machine's approvals
+   * is refused to the readers too: the one part of `.jaira/` no agent reads.
+   */
+  describe("the .jaira/ lines", () => {
+    const WRITERS = ["write_file", "edit", "shell", "script", "runner:*"];
+    const KEY = "C:/Users/me/.jaira/system/machine.key";
+    const REFUSED = [
+      `${ROOT}/.jaira`,
+      `${ROOT}/.jaira/settings.json`,
+      `${ROOT}/.jaira/workflows/feature/plan.json`,
+      `${ROOT}/.jaira/.env.local`,
+      `${ROOT}/.jaira/certs/server.pem`,
+      "C:/work/app-wt/.jaira",
+      "C:/work/app-wt/.jaira/setup.json",
+      KEY,
+    ];
+
+    it.each(["read-only", "read-only-scratch", "ask-first", "auto", "full"])("%s refuses every writer the project's and the worktree's .jaira/, and the machine key", (file) => {
+      for (const tool of WRITERS) for (const path of REFUSED) expect(at(file, tool, path), `${file} ${tool} ${path}`).toBe("deny");
+    });
+
+    it("refuses nothing beside them: a name that only starts like it, and the worktrees' own folder, answer as before", () => {
+      for (const tool of WRITERS) {
+        const own = at("full", tool, `${ROOT}/src/index.ts`);
+        expect(own, tool).toBe("allow");
+        for (const path of [`${ROOT}/.jaira-notes/x.md`, `${ROOT}/docs/.jaira.md`, "C:/work/.jaira-worktrees/app/t-1/src/x.ts", "C:/Users/me/.jaira/settings.json"]) {
+          expect(at("full", tool, path), `${tool} ${path}`).toBe("allow");
+        }
+      }
+    });
+
+    it.each([
+      ["read-only", "allow"],
+      ["ask-first", "ask"],
+      ["auto", SMART_MODE],
+      ["full", "allow"],
+    ] as const)("%s reads, globs and greps .jaira/ as any of the project — but never the machine key", (file, mode) => {
+      for (const tool of ["read_file", "glob", "grep"]) {
+        expect(at(file, tool, `${ROOT}/.jaira/settings.json`), `${file} ${tool}`).toEqual(mode);
+        expect(at(file, tool, `${ROOT}/.jaira/system/logs/run.log`), `${file} ${tool}`).toEqual(mode);
+        expect(at(file, tool, KEY), `${file} ${tool}`).toBe("deny");
+      }
+    });
+
+    it("is a line like any other: a layer above opens what it names, and the rest stays shut", () => {
+      const over = (layer: Record<string, unknown>) => {
+        const entry = composePermissionSetLayers([
+          { id: "full", decl: shipped("full") as Record<string, unknown> },
+          { id: "project", decl: layer },
+        ]).permissionSet.entries["write_file"]!;
+        const map = { ...(entry.mode !== undefined ? { "**": entry.mode } : {}), ...entry.places };
+        return (path: string) => resolvePlace(map, "path", path, options)?.decision;
+      };
+      // A file pattern under it outranks the line's own (more literal segments)…
+      const workflows = over({ write_file: { "$PROJECT/.jaira/workflows/**/*": "allow" } });
+      expect(workflows(`${ROOT}/.jaira/workflows/plan.json`)).toBe("allow");
+      expect(workflows(`${ROOT}/.jaira/settings.json`)).toBe("deny");
+      // …a FOLDER does not: a file pattern beats every folder that holds the file (decision 0023 ruling 3).
+      expect(over({ write_file: { "$PROJECT/.jaira/workflows": "allow" } })(`${ROOT}/.jaira/workflows/plan.json`)).toBe("deny");
+      // The same places, said again, replace them.
+      const reopened = over({ write_file: { "$PROJECT/.jaira": "allow", "$PROJECT/.jaira/**/*": "allow" } });
+      expect(reopened(`${ROOT}/.jaira/settings.json`)).toBe("allow");
+      // A plain decision covers everywhere and clears the places below it — the person's own choice.
+      expect(over({ write_file: "allow" })(`${ROOT}/.jaira/settings.json`)).toBe("allow");
+    });
+  });
+
   it("auto judges a push with smart, and asks before pushing main, master or a release branch", () => {
     const { permissionSet } = parsePermissionSet(shipped("auto"));
     const push = permissionSet.entries["git_push"]!;

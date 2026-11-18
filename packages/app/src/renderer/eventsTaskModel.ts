@@ -11,7 +11,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SHARED_SESSION, type ConfigView, type WorkflowLayer } from "@jaira/shared/browser";
 import type { AutomationsChannel, AutomationsPaneProps } from "./automationsHost";
 import { eventsConfigOf } from "./eventsModel";
-import { useEventStatus } from "./settingsShell";
+import { automationsChannelOf, useEventStatus } from "./settingsShell";
 import type { RunField } from "./runForm";
 import { invoke } from "./store";
 
@@ -46,14 +46,7 @@ export function useEventsTaskAutomations(props: EventsTaskAutomationsProps): Aut
     return () => void (live = false);
   }, [project]);
   const status = useEventStatus(() => invoke("events:status", { project }), project);
-  const channel = useMemo<AutomationsChannel>(() => {
-    const at = (layer: WorkflowLayer): { project?: string } => (layer === "base" || shared ? {} : { project });
-    return {
-      read: (layer, stateId) => invoke("workflow:read", { stateId, layer, ...at(layer) }),
-      write: (layer, stateId, text) => invoke("workflow:write", { stateId, layer, text, ...at(layer) }),
-      remove: (layer, stateId) => invoke("workflow:delete", { stateId, layer, force: true, ...at(layer) }),
-    };
-  }, [project, shared]);
+  const channel = useMemo<AutomationsChannel>(() => automationsChannelOf(shared ? null : project), [project, shared]);
   return {
     channel,
     layer: shared ? "base" : "project",

@@ -3,6 +3,7 @@
  * where a value came from, and a mentioned or attached file. The cards themselves are
  * `packages/universal/src/components/chat/ComposerCards.tsx`.
  */
+import type { WritableSetLayer } from "@jaira/shared/browser";
 import { ROUTE_BORROWS } from "./composerModel";
 
 /** What each thinking level buys, so the word is not the only thing to go on. */
@@ -147,8 +148,24 @@ export function originWordsOf(origin: "override" | "unset" | "inherited" | strin
   return { text: from === undefined ? "inherited" : `inherited from ${from}`, tone: "plain" };
 }
 
-/** Where a kept permission set goes, as the form words it. */
-export const KEEP_WHERE: Readonly<Record<"project" | "base", string>> = { project: "in this project", base: "for all projects" };
+/** Where a kept permission set goes, as the form words it — any of the settings' six layers (decision 0023, amended 2026-11-18). */
+export const KEEP_WHERE: Readonly<Record<WritableSetLayer, string>> = {
+  project: "in this project",
+  base: "for all projects",
+  projectYou: "for you in this project",
+  you: "for just you",
+  projectMachine: "in this project on this machine",
+  machine: "on this machine",
+};
+
+/**
+ * The layers a stack can be kept in, in the order the form offers them: this project's first (else
+ * Shared's), as before the other four could be written; then the rest, nearest first. With no project
+ * open, none of a project's three.
+ */
+export function keepLayersOf(hasProject: boolean): WritableSetLayer[] {
+  return hasProject ? ["project", "base", "projectYou", "you", "projectMachine", "machine"] : ["base", "you", "machine"];
+}
 
 /** Where a bucket is, in a sentence: `at the top level`, `in control`. */
 export function bucketPhraseOf(bucket: string): string {

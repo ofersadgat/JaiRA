@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { View } from "@tamagui/core";
 import { ARTIFACT_DESTINATIONS, ARTIFACT_VARIABLES, CONFIG_SECTIONS } from "@jaira/shared/browser";
-import { execDistroOf, type Writer } from "@jaira/ui/configWriter";
+import { containerLine, execDistroOf, type Writer } from "@jaira/ui/configWriter";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { Txt } from "../../primitives";
 import { Field, FieldGrid } from "../form/Field";
@@ -101,9 +101,27 @@ export function Artifacts({ effective, locked, set, layer }: Writer): JSX.Elemen
   );
 }
 
-/** `"windows" | { wsl: string }` — its own control, because no object schema describes it honestly. */
+/** `"windows" | { wsl: string } | { container }` — its own control, because no object schema describes it honestly. */
 export function ExecEnvironment({ effective, locked, set, layer }: Writer): JSX.Element {
-  const { value, distro } = execDistroOf(effective);
+  const { value, distro, container } = execDistroOf(effective);
+  if (container !== undefined) {
+    // A workspace's container (decision 0027): made by the project's setup and written into this
+    // workspace's settings on this machine. Not a third choice beside Windows and WSL — the field's
+    // own Inherit takes it away, and the setup makes it again.
+    return (
+      <SettingsSection
+        id="exec-environment"
+        title="Where commands run"
+        info="This workspace's setup runs its commands in a container on this machine, the workspace mounted at its own path inside. The commands JaiRA runs — its shell tool, a state's run_command, setup steps — run inside; git, the files and the agents stay on the machine."
+      >
+        <FieldGrid>
+          <Field label="Environment" param="execEnvironment" hint="Set by the project's setup in this workspace's settings on this machine (.jaira/settings.local.json); taken away there, its commands run on the machine again." wide layer={layer("execEnvironment")}>
+            <Txt spec={{ voice: "data", scale: 1, lineHeight: 1.4 }}>{containerLine(container)}</Txt>
+          </Field>
+        </FieldGrid>
+      </SettingsSection>
+    );
+  }
   return (
     <SettingsSection
       id="exec-environment"

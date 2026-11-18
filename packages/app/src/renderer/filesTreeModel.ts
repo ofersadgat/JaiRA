@@ -32,7 +32,10 @@ export const LAYER_WORDS: Record<HiddenRuleLayer, { origin: string; group: strin
   "built in": { origin: "built in", group: "Built in", says: "JaiRA" },
   base: { origin: "shared", group: "Added in Shared", says: "Shared" },
   project: { origin: "this project", group: "Added in this project", says: "this project" },
+  machine: { origin: "this machine", group: "Added on this machine", says: "this machine" },
+  projectMachine: { origin: "this project here", group: "Added in this project on this machine", says: "this project on this machine" },
   you: { origin: "just you", group: "Added just for you", says: "you alone" },
+  projectYou: { origin: "you here", group: "Added just for you in this project", says: "you alone, in this project" },
 };
 
 /** Weakest first — a rule of a layer AFTER the one being edited cannot be undone from it. */

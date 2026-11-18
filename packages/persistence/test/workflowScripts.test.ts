@@ -165,3 +165,55 @@ export default async function fix() { return await agent("fix the build"); }
     expect(readWorkflowFiles(p.paths.workflowsDir)["greet.json"]).toMatchObject({ label: "Greet loudly" });
   });
 });
+
+/**
+ * The same script in one of the settings' newer layers (decision 0023, amended 2026-11-18): Just you's
+ * `~/.jaira/personal/workflows/` is read as a project's `workflows/` is — compiled through the same
+ * compiler and cache — and stands in front of the project's.
+ */
+describe("a workflow script in Just you", { timeout: 30_000 }, () => {
+  const PLAIN = `export const meta = { name: "Hello", description: "Say hello." };
+
+export default async function hello(who: string) {
+  const line = await llm("Say hello to " + who);
+  return { line };
+}
+`;
+
+  it("is compiled, listed under its file in Just you, loaded in front of the project's, and runs", async () => {
+    const personal = join(testHome(), "personal", "workflows");
+    mkdirSync(personal, { recursive: true });
+    writeFileSync(join(personal, "hello.ts"), PLAIN, "utf8");
+    const p = await open();
+    // The browser lists it as the workflow it is, under the file a person edits, in Just you.
+    const browser = browseWorkflows(p);
+    expect(browser.workflows.find((w) => w.rootId === "hello")).toMatchObject({ layer: "you", label: "Hello" });
+    expect(browser.files.find((f) => f.stateId === "hello")).toMatchObject({ file: "hello.ts", layer: "you" });
+    // A run loads its compiled states by id, from the project's own files and Just you's laid over them.
+    const bundle = loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir), "hello", workflowLoadOptions(p.paths));
+    expect(Object.keys(bundle.states).sort()).toEqual(["hello", "hello/call_0"]);
+    expect(validateBundle(bundle).errors).toEqual([]);
+    const ran = await executeWorkflow({
+      bundle,
+      inputs: { who: "ada" },
+      registry: newRegistry(),
+      prompt: buildPromptExecutor({ fakeRules: [{ promptIncludes: "ada", output: "hello, ada" }] }),
+      scripts: scriptModuleOptions()!,
+    });
+    expect(statusOfResult(ran)).toBe("completed");
+    expect((ran as { value?: unknown }).value).toEqual({ line: "hello, ada" });
+    // A project's state file of the same id is behind it.
+    writeFileSync(join(p.paths.workflowsDir, "hello.json"), JSON.stringify({ label: "the project's" }), "utf8");
+    const again = loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir), "hello", workflowLoadOptions(p.paths));
+    expect(again.states["hello"]?.label).toBe("Hello");
+  });
+
+  it("is refused, as in a project, beside a state file of the same id in the same layer", async () => {
+    const personal = join(testHome(), "personal", "workflows");
+    mkdirSync(personal, { recursive: true });
+    writeFileSync(join(personal, "hello.ts"), PLAIN, "utf8");
+    writeFileSync(join(personal, "hello.json"), JSON.stringify({ label: "a file too" }), "utf8");
+    const p = await open();
+    expect(() => loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir), "hello", workflowLoadOptions(p.paths))).toThrow(/both define this state/);
+  });
+});

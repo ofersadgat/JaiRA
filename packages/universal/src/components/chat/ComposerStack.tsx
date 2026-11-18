@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { View as RNView, TextInput, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { PermissionSetTree, PermissionSetTreeRequest, PermissionSetTreeSet, ToolChoice, WritableLayer } from "@jaira/shared/browser";
+import type { PermissionSetTree, PermissionSetTreeRequest, PermissionSetTreeSet, ToolChoice, WritableSetLayer } from "@jaira/shared/browser";
 import { permissionSetIdAt } from "@jaira/shared/browser";
 import {
   UNFOLDED_HEIGHT,
@@ -1514,7 +1514,7 @@ export function ToolsSwitch({ everything, onEverything }: { everything: boolean;
  * "Save this stack as a set" (§7.4), in Everything's head: a name and where it goes, asked through the
  * schema form; `Save` keeps the stack's layers and its tools layer's lines as a file of the bucket.
  */
-export function SaveStack({ bucket, layers, onSave }: { bucket: string; layers: readonly WritableLayer[]; onSave: ((name: string, layer: WritableLayer) => Promise<void>) | undefined }): JSX.Element {
+export function SaveStack({ bucket, layers, onSave }: { bucket: string; layers: readonly WritableSetLayer[]; onSave: ((name: string, layer: WritableSetLayer) => Promise<void>) | undefined }): JSX.Element {
   const t = useTokens();
   const [ref, measure] = useAnchorRect();
   const [at, setAt] = useState<FloatRect | null>(null);

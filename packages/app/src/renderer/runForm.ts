@@ -326,7 +326,8 @@ export function runTargetOf(layer: WorkflowLayer, at: string | null): RunTarget 
   // What ships belongs to no root, so it runs where the person is standing: the open checkout, whose
   // search path ends with the built-in layer — or, on an empty window, the shared root, whose path
   // does too. That is the routing the Chat view and the self-test already use for their own states.
-  if (layer === "system" && at === null) return { project: SHARED_SESSION, label: "the shared root", open: true };
+  // So do Just you's and this machine's (decision 0023, amended 2026-11-18): every project searches them.
+  if ((layer === "system" || layer === "you" || layer === "machine") && at === null) return { project: SHARED_SESSION, label: "the shared root", open: true };
   const name = at === null ? null : (at.split(/[/\\]/).filter(Boolean).pop() ?? at);
   return { label: name ?? "this project", open: at !== null };
 }

@@ -40,12 +40,20 @@ function writeState(id: string, doc: unknown, layer = "project"): void {
   writeFileSync(file, JSON.stringify(doc), "utf8");
 }
 
-/** Only `paths.roots` is read — and `paths.builtIn.dir`, which the tree leaves out of it (decision 0006). */
+/**
+ * What the tree reads of a project's paths: its roots, the layers' (decision 0023, amended 2026-11-18,
+ * whose four newer ones are absent here) and `paths.builtIn.dir`, which the tree leaves out of `roots`
+ * (decision 0006).
+ */
 const projectOf = (): Project =>
   ({
     paths: {
       projectDir: join(dir, "project"),
-      builtIn: { dir: join(dir, "builtin") },
+      // Its layer root is the project directory itself (see below), so `.jaira/local/` is `local/` there.
+      jairaDir: join(dir, "project"),
+      workflowsDir: join(dir, "project", "workflows"),
+      base: { baseDir: join(dir, "base"), workflowsDir: join(dir, "base", "workflows"), projectSettingsDir: join(dir, "base", "projects") },
+      builtIn: { dir: join(dir, "builtin"), workflowsDir: join(dir, "builtin", "workflows") },
       roots: [join(dir, "project"), join(dir, "base"), join(dir, "builtin")],
     },
   }) as unknown as Project;

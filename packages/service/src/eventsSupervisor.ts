@@ -22,7 +22,7 @@
  * The task runs UNATTENDED. What it may call is restricted where its run is built (the service's
  * `startRun`, by the marker), so every path that starts or resumes it gets the same registry.
  */
-import { createTask, DEFAULT_STALE_MS, EVENTS_TASK, EVENTS_WORKFLOW, eventsTaskOf, readEventsWorkflow, type EventsWorkflowReading, type Project } from "@jaira/persistence";
+import { createTask, DEFAULT_STALE_MS, EVENTS_TASK, EVENTS_WORKFLOW, eventsTaskOf, readEventsWorkflow, workflowLayerDirs, type EventsWorkflowReading, type Project } from "@jaira/persistence";
 import type { LogEntry } from "@jaira/shared";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -45,7 +45,7 @@ export interface EventsSupervisorDeps {
 
 /** Whether any layer this project searches holds a `system/events` file — none: nothing to supervise. */
 export function hasEventsWorkflow(project: Project): boolean {
-  const dirs = [project.paths.workflowsDir, project.paths.base.workflowsDir, project.paths.builtIn.workflowsDir];
+  const dirs = workflowLayerDirs(project.paths).map((one) => one.dir);
   return dirs.some((dir) => [".json", ".yaml", ".yml"].some((ext) => existsSync(join(dir, `${EVENTS_WORKFLOW}${ext}`))));
 }
 

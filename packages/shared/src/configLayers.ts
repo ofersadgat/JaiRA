@@ -2,12 +2,14 @@
  * The configuration's layers, as one ordered list — and the two questions a settings screen asks of
  * them about one key: what would it be WITHOUT this layer, and which layer says so.
  *
- * Four layers, weakest first: what JaiRA ships (the built-in defaults, and whatever a built-in
- * document states), the shared root's `settings.json`, the project's `.jaira/settings.json`, and the
- * person's own `personal-settings.json` ("Just you"). Every document has the same schema; objects
- * merge key by key and the stronger layer wins (`mergeConfigDocuments`). The personal layer is last
- * so that what one person chose wins for that person everywhere on this machine — and reaches nobody
- * else, because it is never in a checkout.
+ * Seven layers, weakest first: what JaiRA ships (the built-in defaults, and whatever a built-in
+ * document states), then {@link CONFIG_LAYERS} — Shared (`<base>/settings.json`), the project
+ * (`.jaira/settings.json`), this machine (`machine-settings.json`), the project on this machine
+ * (`.jaira/settings.local.json`), Just you (`personal-settings.json`) and you in the project
+ * (`projects/<key>/personal-settings.json`). Least to most specific, compared person first, then
+ * machine, then project (the person's ruling, 2026-11-17). Every document has the same schema; objects
+ * merge key by key and the stronger layer wins (`mergeConfigDocuments`). Still one total order, so every
+ * question here walks it in a line.
  *
  * Pure, and browser-safe: the renderer asks these to draw a row's "instead of … from …" line, and main
  * uses the merge to read and validate what it writes.
@@ -24,7 +26,47 @@ export type ConfigSource = ConfigLayer | typeof BUILT_IN_SOURCE;
 
 /** One layer's own document as the view holds it — what that layer's rows edit. */
 export function layerDocument(view: ConfigView, layer: ConfigLayer): JsonValue | null {
-  return view[layer];
+  return view[layer] ?? null;
+}
+
+/**
+ * The parts of a Settings path (a project, a machine, Just you), as kinds: which are in it. A part left
+ * out means "all".
+ */
+export interface ConfigScope {
+  project?: boolean;
+  machine?: boolean;
+  you?: boolean;
+}
+
+/**
+ * The layer a path's parts make, or undefined for the one pair that makes none: a machine with Just you
+ * (the machines are the person's own, so there is nothing between them to tell apart).
+ */
+export function layerOfScope(scope: ConfigScope): ConfigLayer | undefined {
+  if (scope.you === true && scope.machine === true) return undefined;
+  if (scope.you === true) return scope.project === true ? "projectYou" : "you";
+  if (scope.machine === true) return scope.project === true ? "projectMachine" : "machine";
+  return scope.project === true ? "project" : "base";
+}
+
+/** The parts a layer's path has — {@link layerOfScope} backwards. */
+export function scopeOfLayer(layer: ConfigLayer): Required<ConfigScope> {
+  return {
+    project: layer === "project" || layer === "projectMachine" || layer === "projectYou",
+    machine: layer === "machine" || layer === "projectMachine",
+    you: layer === "you" || layer === "projectYou",
+  };
+}
+
+/** The layers that belong to one project: written only with a project named, and read only for one. */
+export function isProjectLayer(layer: ConfigLayer): boolean {
+  return scopeOfLayer(layer).project;
+}
+
+/** The layers that stay on their machine: never synced, and not read or written on another. */
+export function isMachineLayer(layer: ConfigLayer): boolean {
+  return layer === "machine" || layer === "projectMachine";
 }
 
 /** The layers weaker than `layer`, weakest first. */
@@ -38,7 +80,7 @@ export function layersBelow(layer: ConfigLayer): ConfigLayer[] {
  * one nothing below states).
  */
 export function inheritedDoc(view: ConfigView, layer: ConfigLayer): Record<string, unknown> {
-  const merged = mergeConfigLayers([view.system, ...layersBelow(layer).map((below) => view[below])]);
+  const merged = mergeConfigLayers([view.system, ...layersBelow(layer).map((below) => layerDocument(view, below))]);
   return merged !== null && typeof merged === "object" && !Array.isArray(merged) ? (merged as Record<string, unknown>) : {};
 }
 
@@ -76,7 +118,7 @@ export function statesPath(doc: unknown, path: ConfigPath): boolean {
 export function statingLayer(view: ConfigView, path: ConfigPath, below?: ConfigLayer): ConfigSource {
   const candidates = below === undefined ? [...CONFIG_LAYERS] : layersBelow(below);
   for (const layer of candidates.reverse()) {
-    if (statesPath(view[layer], path)) return layer;
+    if (statesPath(layerDocument(view, layer), path)) return layer;
   }
   return BUILT_IN_SOURCE;
 }
@@ -168,7 +210,7 @@ export function clearedAbove(
     return value === undefined ? [] : statedChanges(undefined, value, pathKeys(path));
   });
   const seen = new Set<string>();
-  const changed = [...statedChanges(view[layer], next), ...stated].filter((keys) => {
+  const changed = [...statedChanges(layerDocument(view, layer), next), ...stated].filter((keys) => {
     const key = JSON.stringify(keys);
     if (seen.has(key)) return false;
     seen.add(key);
@@ -177,7 +219,7 @@ export function clearedAbove(
   if (changed.length === 0) return [];
   const out: Array<{ layer: ConfigLayer; doc: Record<string, unknown> }> = [];
   for (const above of layersAbove(layer)) {
-    const doc = view[above];
+    const doc = layerDocument(view, above);
     if (!isPlainRecord(doc)) continue;
     // Keyed by the JSON of the keys: a key may hold dots of its own.
     const removals = new Map<string, readonly string[]>();

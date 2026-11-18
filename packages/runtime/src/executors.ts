@@ -39,11 +39,12 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK } from "./agents";
-import { agentInstallOf, agentPackageOf, gatherInstallFacts, type InstallDeps } from "./agentInstall";
+import { agentInstallOf, agentPackageOf } from "./agentInstall";
+import { gatherInstallFacts, type InstallDeps } from "./install";
 import { SIGN_IN_COMMANDS, signInCommand } from "./agentOutcome";
-import { AGENT_GENERIC_CLI } from "./genericAgent";
+import { AGENT_GENERIC_CLI, bridgesOnly } from "./genericAgent";
 import type { Exec } from "./exec";
-import type { ExecEnv } from "./paths";
+import { onMachine, type ExecEnv } from "./paths";
 import { SecretResolver } from "./secrets";
 import { SDK_KEY_NAMES } from "./sdkCredential";
 import { resolvePluginRoot } from "./plugins";
@@ -127,8 +128,9 @@ export function listExecutors(agents: JairaAgentConfig = {}): ExecutorInfo[] {
             kind: "generic",
             enabled: isEnabled(spec),
             credentialUse: credentialUseOf("generic"),
-            // A generic binary has no permission callback, which is the whole of §8.2's objection.
-            policyEnforcement: "none",
+            // A generic binary has no permission callback, which is the whole of §8.2's objection —
+            // unless its registration turns its own tools off and serves it ours over the bridge.
+            policyEnforcement: bridgesOnly(spec) ? "config" : "none",
           },
           { command: spec.command, credential: spec.credential },
         )
@@ -204,7 +206,9 @@ export function defaultResolve(id: string): string {
  * expect to happen. A runtime that signs itself in is then asked its sign-in status, which is as
  * free: installed and signed out is `failed`, because no session it starts can make a call.
  */
-export async function probeExecutor(info: ExecutorInfo, options: ProbeOptions): Promise<ProbeResult> {
+export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Promise<ProbeResult> {
+  // An agent is the machine's: a workspace's container (decision 0027) is not where it is looked for.
+  const options = onMachine(given);
   if (!info.enabled) {
     return { name: info.name, status: "disabled", detail: "turned off in this project's configuration" };
   }
@@ -490,7 +494,7 @@ function probeCredential(
  * with no login to hang it on (a key, or a sign-in that could not be read) fails with the reason, since
  * a refused key is broken. A probe that already concluded otherwise, or no refusal, is left as it is.
  */
-export function withSignInRefusal(info: ExecutorInfo, probe: ProbeResult, refusal: string | undefined): ProbeResult {
+export function withSignInRefusal(info: Pick<ExecutorInfo, "name" | "command">, probe: ProbeResult, refusal: string | undefined): ProbeResult {
   if (refusal === undefined || probe.status !== "ok") return probe;
   // The agent's own sentence, without the layers that wrapped it (`claude-cli: AgentError: claude-cli
   // agent error: …`); a reason in another shape is shown whole.
@@ -530,7 +534,8 @@ export async function signOutAgent(info: ExecutorInfo, options: SignInOptions): 
   return runSignInCommand(info, SIGN_IN_COMMANDS[info.name]?.logout, "sign out", options);
 }
 
-async function runSignInCommand(info: ExecutorInfo, args: readonly string[] | undefined, verb: string, options: SignInOptions): Promise<SignInOutcome> {
+async function runSignInCommand(info: ExecutorInfo, args: readonly string[] | undefined, verb: string, given: SignInOptions): Promise<SignInOutcome> {
+  const options = onMachine(given);
   const known = SIGN_IN_COMMANDS[info.name];
   if (known === undefined || args === undefined) return { ok: false, reason: `${info.name} has no ${verb} of its own` };
   const command = info.command ?? known.command;

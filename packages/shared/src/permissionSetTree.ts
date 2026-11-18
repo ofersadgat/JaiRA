@@ -21,18 +21,37 @@
 import { composePermissionSetLayers, RUNTIME_LAYER, TOOLS_LAYER, type LayerIssue, type PermissionStackLayer, type PermissionStackRole } from "./permissionLayers";
 import { isPermissionSetInstructionKey, normalizeSubject, OTHER_SUBJECT, type PermissionSetIssue } from "./permissionSets";
 import { PLACE_ANYWHERE } from "./places";
-import type { WorkflowLayer } from "./view";
+import type { SetLayer } from "./view";
 
 /**
  * Where a layer LIVES (decision 0023 §2.6): `built in` (what ships), `global` (`~/.jaira`), `project`
- * (`.jaira/`), `runtime` (this task's answers, in memory), `this conversation` (the tools layer, kept on
- * the task) and `this state` (lines written on a state itself, `inline`). A stack's layers are the same
- * kind of thing whatever their scope (ruling 8).
+ * (`.jaira/`), `machine` (`~/.jaira/machine`), `project on machine` (`.jaira/local`), `you`
+ * (`~/.jaira/personal`), `you in project` (`~/.jaira/projects/<key>`), `runtime` (this task's answers, in
+ * memory), `this conversation` (the tools layer, kept on the task) and `this state` (lines written on a
+ * state itself, `inline`). A stack's layers are the same kind of thing whatever their scope (ruling 8).
  */
-export type PermissionSetScope = "built in" | "global" | "project" | "runtime" | "this conversation" | "this state";
+export type PermissionSetScope =
+  | "built in"
+  | "global"
+  | "project"
+  | "machine"
+  | "project on machine"
+  | "you"
+  | "you in project"
+  | "runtime"
+  | "this conversation"
+  | "this state";
 
 /** The scope of a layer root. */
-export const SCOPE_OF_LAYER: Readonly<Record<WorkflowLayer, PermissionSetScope>> = { system: "built in", base: "global", project: "project" };
+export const SCOPE_OF_LAYER: Readonly<Record<SetLayer, PermissionSetScope>> = {
+  system: "built in",
+  base: "global",
+  project: "project",
+  machine: "machine",
+  projectMachine: "project on machine",
+  you: "you",
+  projectYou: "you in project",
+};
 
 /** One set file as the browser lists it. */
 export interface PermissionSetTreeSet {
@@ -43,7 +62,7 @@ export interface PermissionSetTreeSet {
   bucket: string;
   scope: PermissionSetScope;
   /** The layer root it is in. Absent for the runtime layer. */
-  layer?: WorkflowLayer;
+  layer?: SetLayer;
   /** What a stack names it by: `$/permission-sets/<id>`, which finds the NEAREST scope's copy. Absent for runtime. */
   reference?: string;
   /** This scope's copy exactly — `$SYSTEM/permission-sets/ask-first` — what an override follows. */
@@ -83,7 +102,7 @@ export interface PermissionSetTreeBucket {
 /** One scope of the tree. */
 export interface PermissionSetTreeScope {
   scope: PermissionSetScope;
-  layer?: WorkflowLayer;
+  layer?: SetLayer;
   /** The scope's root as a person reads it: `built in`, `~/.jaira`, `.jaira`, `runtime`. */
   label: string;
   buckets: PermissionSetTreeBucket[];

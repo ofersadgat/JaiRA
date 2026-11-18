@@ -30,7 +30,8 @@ import type {
   AgentInstallOutcome,
   GitCliName,
 } from "./executors";
-import type { ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
+import type { ForgeBranch, ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
+import type { ForgeRepositoriesView, WorkspaceCheckout, WorkspaceCreateRequest, WorkspaceFinished, WorkspacePlan, WorkspacePlanRequest, WorkspaceProgress } from "./workspaces";
 import type { JairaSettings } from "./settings";
 import type { HiddenReport, HiddenVerdict } from "./hiddenPaths";
 import type { SchemaFormat, SchemaViolation } from "./schemas";
@@ -76,8 +77,10 @@ import type {
   TaskDetail,
   TaskSummary,
   WorkflowBrowser,
+  SetLayer,
   WorkflowLayer,
   WritableLayer,
+  WritableSetLayer,
 } from "./view";
 
 // --- invoke channels ---------------------------------------------------------
@@ -248,7 +251,8 @@ export interface PendingApproval {
 
 /** One layer an answer can be written into — see {@link ApprovalPermissionSet}. */
 export interface ApprovalPermissionSetTarget {
-  layer: WritableLayer;
+  /** Any of the settings' six layers (decision 0023, amended 2026-11-18). */
+  layer: WritableSetLayer;
   /** The file, as a person reads it: `.jaira/permission-sets/ask-first.json`, `~/.jaira/permission-sets/…`. */
   file: string;
   /**
@@ -305,9 +309,10 @@ export interface SubmitApprovalRequest {
    * "Add to the permission set": write the asking parts, at the widths {@link remember} names, into the
    * permission set file that asked, in this layer — then answer, remembering them for the run as well (a
    * started task reads its pinned snapshot, so the file alone would not stop this run asking). A
-   * write that fails refuses the submit and leaves the request parked.
+   * write that fails refuses the submit and leaves the request parked. Any of the settings' six layers
+   * (`ApprovalPermissionSetTarget.layer`).
    */
-  addTo?: WritableLayer;
+  addTo?: WritableSetLayer;
   /**
    * WHERE the answer holds (decision 0023 §3.8, §4.4): one of the asking parts' `where.widths` places
    * (`packages`, `$PROJECT`, `claude/**`, `**`). "For this run" keeps it at that place; "Add to" writes
@@ -318,7 +323,7 @@ export interface SubmitApprovalRequest {
   /**
    * WHICH layer of the stack "Add to" writes into (§2.8), by its id from {@link PendingApproval.layers}
    * (`app/build`). Absent: the set that asked (`CommandApproval.permissionSet`). `addTo` is still which
-   * scope's FILE of it is written — this project's or the shared root's.
+   * scope's FILE of it is written — one of the settings' six layers.
    */
   layer?: string;
   /**
@@ -346,7 +351,8 @@ export interface PermissionSetTreeRequest {
 /** Save a stack as a set FILE (§7.4): `{ "layers": [ … ], …the tools layer's own lines }`, in a writable scope. */
 export interface SavePermissionStackRequest {
   project?: ProjectRef;
-  layer: WritableLayer;
+  /** Any of the settings' six layers (decision 0023, amended 2026-11-18). */
+  layer: WritableSetLayer;
   bucket: string;
   name: string;
   /** The stack, as `ChatSettings.permissionSet` holds it — `layers` oldest first, and the tools layer's own lines. */
@@ -526,17 +532,26 @@ export interface PruneRequest {
 // --- configuration, executors and workflow authoring -------------------------
 
 /**
- * The three configuration layers a person writes, as the settings UI addresses them — weakest first
- * in {@link CONFIG_LAYERS}.
+ * The configuration layers a person writes, as the settings UI addresses them — weakest first in
+ * {@link CONFIG_LAYERS}. Settings names one by a path of up to three parts (a project, a machine, Just
+ * you; a part left out means "all"), and each path that makes a layer is one of these:
  *
- * `base` is the shared root behind every project on this machine; `project` is this checkout's own
- * `.jaira/settings.json`, laid over it; `you` is `personal-settings.json` in the shared root, laid over
- * both — the settings that are one person's on this machine and never arrive through a pull request.
- * Every write names its layer explicitly — there is no "current" layer — because "did I just change
- * this project, every project, or only what I see?" is precisely the question a settings screen must
- * never leave ambiguous.
+ *  - `base` — no part: Shared, `<base>/settings.json`, under every project on every machine.
+ *  - `project` — a project: its committed `.jaira/settings.json`.
+ *  - `machine` — a machine: that machine's own `<base>/machine-settings.json`, never synced.
+ *  - `projectMachine` — a project on one machine: that workspace's `.jaira/settings.local.json`,
+ *    ignored by git.
+ *  - `you` — Just you: `<base>/personal-settings.json`, synced to the person's machines.
+ *  - `projectYou` — the person's settings for one project: `<base>/projects/<key>/personal-settings.json`,
+ *    keyed by the project's repository identity.
+ *
+ * The order is least to most specific, compared person first, then machine, then project — so Just
+ * you is more specific than a project on a machine. A machine together with Just you makes no layer:
+ * the machines are the person's own. Every write names its layer explicitly — there is no "current"
+ * layer — because "did I just change this project, every project, or only what I see?" is precisely the
+ * question a settings screen must never leave ambiguous.
  */
-export type ConfigLayer = "you" | "project" | "base";
+export type ConfigLayer = "base" | "project" | "machine" | "projectMachine" | "you" | "projectYou";
 
 /** See `files:hiddenReport`. */
 export interface HiddenReportRequest {
@@ -547,8 +562,11 @@ export interface HiddenReportRequest {
   layer?: ConfigLayer;
 }
 
-/** The layers in the order they are merged, weakest first: the shared root, the project, you. */
-export const CONFIG_LAYERS: readonly ConfigLayer[] = ["base", "project", "you"];
+/**
+ * The layers in the order they are merged, weakest first: Shared, the project, this machine, the
+ * project on this machine, you, and you in the project.
+ */
+export const CONFIG_LAYERS: readonly ConfigLayer[] = ["base", "project", "machine", "projectMachine", "you", "projectYou"];
 
 /** Every layer as authored, plus what they add up to. */
 export interface ConfigView {
@@ -561,22 +579,42 @@ export interface ConfigView {
    * edited. Here so a screen can say which values are the built-in ones.
    */
   system: JsonValue | null;
-  /** `personal-settings.json` — the same schema as `settings.json`, read after every other layer. */
+  /** `personal-settings.json` — the same schema as `settings.json`, read after the machine's and the project's. */
   you: JsonValue | null;
-  /** Every layer merged, weakest first (built in, base, project, you), parsed and defaulted — what a run would actually use. */
+  /**
+   * This machine's own (`machine-settings.json`), the project's on this machine (`.jaira/settings.local.json`)
+   * and the person's for the project (`projects/<key>/personal-settings.json`). Absent from an engine
+   * that predates them, which cannot write them either — see {@link machineFile}.
+   */
+  machine: JsonValue | null;
+  projectMachine: JsonValue | null;
+  projectYou: JsonValue | null;
+  /** Every layer merged, weakest first (built in, then {@link CONFIG_LAYERS}), parsed and defaulted — what a run would actually use. */
   effective: JsonValue;
-  /** Where each layer's file lives, so the UI can show the path it is editing. */
+  /** Where each layer's file lives, so the UI can show the path it is editing. Empty for a layer with no file here (no project). */
   baseFile: string;
   projectFile: string;
   youFile: string;
+  /** Absent from an engine that predates the machine's own layers: it would write them into the wrong file. */
+  machineFile?: string;
+  projectMachineFile?: string;
+  projectYouFile?: string;
+  /** The machine this view was read on (its id), when the engine says. */
+  machineId?: string;
   /** The shared root itself, for the "where does this come from" line. */
   baseDir: string;
 }
 
 export interface WriteConfigRequest {
   layer: ConfigLayer;
-  /** WHICH project, for the `project` layer — see {@link ReadWorkflowRequest.project}. The other two need none. */
+  /**
+   * WHICH project, for the three layers of one project — see {@link ReadWorkflowRequest.project}. For
+   * the others it is which project's view the answer is read back for; {@link SHARED_SESSION} reads it
+   * for none.
+   */
   project?: ProjectRef;
+  /** Another machine's id: the write is that machine's, forwarded to it (`Federation.route`). */
+  machine?: string;
   /** The whole document for that layer. Parsed and validated before it is written. */
   config: JsonValue;
 }
@@ -586,13 +624,17 @@ export interface ReadWorkflowRequest {
   stateId: string;
   layer: WorkflowLayer;
   /**
-   * WHICH project, when {@link layer} is `project`. See {@link ProjectRef}.
+   * WHICH project, when {@link layer} is one of a project's — `project`, `projectMachine`, `projectYou`.
+   * See {@link ProjectRef}.
    *
-   * A layer is not a project: `project` says which of the two roots an address is in, and the
-   * window holds several projects at once (SHELL.md §2.2), so the pair is what identifies a file.
-   * Absent is only valid for a `base` address, where there is one root and it is the shared one.
+   * A layer is not a project: `project` says which of the roots an address is in, and the window holds
+   * several projects at once (SHELL.md §2.2), so the pair is what identifies a file. Absent is only
+   * valid for a layer that is no project's — Shared, this machine, Just you, what ships — each of which
+   * has one root on a machine.
    */
   project?: ProjectRef;
+  /** Another machine's id: its file, read there (`Federation.route`) — Settings' path naming that machine. */
+  machine?: string;
 }
 
 export interface WorkflowSource {
@@ -688,6 +730,8 @@ export interface WriteWorkflowRequest {
   layer: WorkflowLayer;
   /** WHICH project — see {@link ReadWorkflowRequest.project}. */
   project?: ProjectRef;
+  /** Another machine's id — see {@link ReadWorkflowRequest.machine}. */
+  machine?: string;
   /** The full file contents. Must parse as JSON; the workflow is re-linted after the write. */
   text: string;
 }
@@ -1204,9 +1248,12 @@ export interface SavePermissionSetRequest {
 export interface WritePermissionSetRequest {
   /** `<bucket>/<name>`. */
   id: string;
-  layer: WorkflowLayer;
+  /** Any layer a set can be in but what ships — the settings' six (`SetLayer`). */
+  layer: SetLayer;
   /** WHICH project — see {@link ReadWorkflowRequest.project}. */
   project?: ProjectRef;
+  /** Another machine's id, for that machine's own layers with no project named: forwarded there (`Federation.route`). */
+  machine?: string;
   permissionSet: PermissionSetDecl;
 }
 
@@ -1230,8 +1277,10 @@ export interface WritePermissionSetResult {
 /** "Put back the built-in" (or "Reset to shared"): delete a layer's copy, so the layer below answers again. */
 export interface ResetPermissionSetRequest {
   id: string;
-  layer: WorkflowLayer;
+  layer: SetLayer;
   project?: ProjectRef;
+  /** Another machine's id — see {@link WritePermissionSetRequest.machine}. */
+  machine?: string;
 }
 
 /** Delete a file or a directory under a layer root. A directory takes everything in it. */
@@ -2433,7 +2482,7 @@ export interface IpcContract {
    * the state editor's Tools field wants the permission sets and nothing else, and pays for a directory
    * walk of the permission sets alone.
    */
-  "permissionSets:read": { request: { project?: ProjectRef; usedBy?: boolean }; response: PermissionSetsView };
+  "permissionSets:read": { request: { project?: ProjectRef; machine?: string; usedBy?: boolean }; response: PermissionSetsView };
   /** Save a whole permission set into a layer — see {@link WritePermissionSetRequest}. */
   "permissionSets:write": { request: WritePermissionSetRequest; response: WritePermissionSetResult };
   /** Delete a layer's override of a permission set — see {@link ResetPermissionSetRequest}. */
@@ -2463,7 +2512,7 @@ export interface IpcContract {
    * `.git/config` — or the shared root's, with no project named — each with its connection and how
    * the repository watcher stands with it, and what has arrived per event. Read-only; asks no forge.
    */
-  "events:status": { request: { project?: ProjectRef }; response: EventsStatusView };
+  "events:status": { request: { project?: ProjectRef; machine?: string }; response: EventsStatusView };
   /**
    * The notices the events tasks posted in this process, oldest first — the backlog a window reads
    * once before following `notice:posted`. Machine-wide: every open project's, and Shared's.
@@ -2481,7 +2530,7 @@ export interface IpcContract {
   "file:delete": { request: DeleteFileRequest; response: FileMutationResult };
   /** Delete a state file. Refuses while other states reference it, unless `force`. */
   "workflow:delete": {
-    request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: ProjectRef };
+    request: { stateId: string; layer: WorkflowLayer; force?: boolean; project?: ProjectRef; machine?: string };
     response: WorkflowMutationResult;
   };
   /**
@@ -2539,7 +2588,11 @@ export interface IpcContract {
    */
   "settings:read": { request: void; response: JairaSettings };
   "settings:write": { request: Partial<JairaSettings>; response: JairaSettings };
-  "config:read": { request: { project?: ProjectRef } | void; response: ConfigView };
+  /**
+   * `project` as {@link WriteConfigRequest.project} ({@link SHARED_SESSION}: no project); `machine` reads
+   * another machine's layers, there.
+   */
+  "config:read": { request: { project?: ProjectRef; machine?: string } | void; response: ConfigView };
   "config:write": { request: WriteConfigRequest; response: ConfigView };
   "executor:list": { request: void; response: ExecutorInfo[] };
   /** Health-check executors. Without `name`, every one of them. */
@@ -2605,10 +2658,19 @@ export interface IpcContract {
   "cli:install": { request: void; response: CliCommandStatus };
   /** Where this window's engine runs (decision 0012 §5). */
   "engine:status": { request: void; response: EngineStatus };
-  /** This machine and the ones it is paired with (decision 0013 §1–§3). */
-  "machines:view": { request: void; response: MachinesView };
-  "machines:rename": { request: { label: string }; response: MachinesView };
-  "machines:tags": { request: { tags: string[] }; response: MachinesView };
+  /**
+   * This machine and the ones it is paired with (decision 0013 §1–§3). `machine` asks a paired machine
+   * for its own view, there (Settings → Machines with that machine in the path); rename, tags and what
+   * it is take it too, and change that machine.
+   */
+  "machines:view": { request: { machine?: string } | void; response: MachinesView };
+  "machines:rename": { request: { label: string; machine?: string }; response: MachinesView };
+  "machines:tags": { request: { tags: string[]; machine?: string }; response: MachinesView };
+  /**
+   * Where a machine's new workspaces go (`MachineView.projectsFolder`): a folder of the person's, or
+   * absent to go back to the guess. `machine` sets a paired machine's, there.
+   */
+  "machines:projectsFolder": { request: { folder?: string; machine?: string }; response: MachinesView };
   /**
    * The Tailscale sign-in (decision 0022 §3): sign in (and so be reachable), sign out keeping the
    * registration, or remove this machine from the tailnet — which opens its admin console page and
@@ -2655,6 +2717,18 @@ export interface IpcContract {
    * what the folder picker shows when a project is opened or made on another machine.
    */
   "files:browse": { request: { dir?: string; machine?: string }; response: FolderListing };
+  /** The repositories every signed-in forge connection can reach, for Open's project list. */
+  "forge:repositories": { request: { search?: string; machine?: string }; response: ForgeRepositoriesView };
+  /** A forge repository's branches. */
+  "forge:branches": { request: { host: string; project: string; machine?: string }; response: ForgeBranch[] };
+  /** A folder's git state on the machine that holds it — what copying it would bring. */
+  "workspace:inspect": { request: { dir: string; machine?: string }; response: WorkspaceCheckout };
+  /** Where a new workspace would go and what its setup would take there, before anything happens. */
+  "workspace:plan": { request: WorkspacePlanRequest; response: WorkspacePlan };
+  /** Make a workspace on a machine: clone or copy, open, bring, set up. Answers at once; pushes `workspace:progress`, then `workspace:finished`. */
+  "workspace:create": { request: WorkspaceCreateRequest; response: { jobId: string } };
+  /** Stop making a workspace: what runs is stopped, and what was made stays. */
+  "workspace:cancel": { request: { jobId: string; machine?: string }; response: void };
   /** Answers waiting for machines that are offline (decision 0013 §7). */
   "machines:outbox": { request: void; response: OutboxView[] };
   /** Take an answer back before it is delivered: its request is waiting again. */
@@ -2676,7 +2750,7 @@ export interface IpcContract {
    */
   "environment:view": { request: { workspace: string }; response: EnvironmentView };
   /** Say what this machine is: a desktop, a laptop, a mini or a server. */
-  "machines:form": { request: { form: MachineForm }; response: MachinesView };
+  "machines:form": { request: { form: MachineForm; machine?: string }; response: MachinesView };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2905,6 +2979,12 @@ export const IPC_CHANNELS = [
   "machines:forget",
   "placement:view",
   "files:browse",
+  "forge:repositories",
+  "forge:branches",
+  "workspace:inspect",
+  "workspace:plan",
+  "workspace:create",
+  "workspace:cancel",
   "machines:outbox",
   "machines:withdraw",
   "placement:setRules",
@@ -2913,6 +2993,7 @@ export const IPC_CHANNELS = [
   "placement:change",
   "environment:view",
   "machines:form",
+  "machines:projectsFolder",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -3272,6 +3353,8 @@ export type PushMessage =
    * machine's.
    */
   | { type: "install:output"; target: InstallTarget; text: string }
+  | ({ type: "workspace:progress" } & WorkspaceProgress)
+  | ({ type: "workspace:finished" } & WorkspaceFinished)
 
 /** Whose install an `install:output` is: an agent, by its executor's name, or a git program. */
 export interface InstallTarget {

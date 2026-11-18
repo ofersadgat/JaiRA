@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FolderListing } from "@jaira/shared/browser";
@@ -34,13 +34,17 @@ export function FolderBrowser({
   onClose,
   onChosen,
   staged = false,
+  startDir,
 }: {
   machines: readonly BrowseMachine[];
   initial: string;
-  mode: "open" | "init";
+  /** `folder`: any folder, for a setting (a machine's projects folder) rather than a project. */
+  mode: "open" | "init" | "folder";
   onClose: () => void;
   onChosen: (machine: BrowseMachine, dir: string) => void;
   staged?: boolean;
+  /** Where the listing opens, on the first machine shown; its roots when absent or unreadable. */
+  startDir?: string | undefined;
 }): JSX.Element {
   const t = useTokens();
   const [machineId, setMachineId] = useState(initial);
@@ -51,13 +55,21 @@ export function FolderBrowser({
     setError(undefined);
     invoke("files:browse", { machine: machine.id, ...(dir !== undefined ? { dir } : {}) }).then(setListing, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
+  const started = useRef(false);
   useEffect(() => {
     setListing(undefined);
-    go();
+    const from = started.current ? undefined : startDir;
+    started.current = true;
+    if (from === undefined) go();
+    else {
+      // A folder that is not there (yet) opens on the roots instead.
+      setError(undefined);
+      invoke("files:browse", { machine: machine.id, dir: from }).then(setListing, () => go());
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
   const chosen = listing?.dir;
-  const title = mode === "init" ? "New project" : "Open a project";
+  const title = mode === "init" ? "New project" : mode === "folder" ? "Choose a folder" : "Open a project";
   const hint = { voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const;
   const rows: JSX.Element[] = [];
   if (listing?.parent !== undefined) rows.push(<FolderRow key=".." glyph="↑" name=".." onPress={() => go(listing.parent)} />);
@@ -111,7 +123,7 @@ export function FolderBrowser({
             Cancel
           </Button>
           <Button kind="primary" disabled={chosen === undefined} onPress={() => chosen !== undefined && onChosen(machine, chosen)}>
-            {`${mode === "init" ? "Make a project" : "Open"} ${chosen !== undefined ? `${chosen.split(/[\\/]/).filter(Boolean).pop() ?? chosen} on ${machine.label}` : ""}`}
+            {`${mode === "init" ? "Make a project" : mode === "folder" ? "Use" : "Open"} ${chosen !== undefined ? `${chosen.split(/[\\/]/).filter(Boolean).pop() ?? chosen} on ${machine.label}` : ""}`}
           </Button>
         </View>
       </View>

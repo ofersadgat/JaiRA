@@ -99,6 +99,12 @@ export interface MachineView {
   form: MachineForm;
   /** The person's tags, not counting the OS. */
   tags: string[];
+  /**
+   * The folder this machine's new workspaces go in, each in a folder named after its project
+   * ({@link workspaceFolderName}). The person's choice, else {@link guessProjectsFolder}'s. Absent from
+   * a machine that predates it.
+   */
+  projectsFolder?: string;
 }
 
 export interface PeerView extends MachineView {
@@ -106,6 +112,8 @@ export interface PeerView extends MachineView {
   /** `online`: connected now. `mismatch`: connected, but on another protocol — see {@link reason}. */
   state: "online" | "offline" | "connecting" | "mismatch";
   version?: string;
+  /** What hosts its engine, as it last said: the desktop app, `jaira serve`, or a CLI command. */
+  host?: "desktop" | "server" | "cli";
   lastSeenAt?: number;
   /** Why it is not online, when known. */
   reason?: string;
@@ -327,11 +335,16 @@ export interface PlacementAsk {
 /** One thing done to get a placed task going, once it had somewhere to run. */
 export interface StartStep {
   at: number;
-  /** `workspace`: its worktree was made. `pin`: its workflow was frozen as it stood. */
-  kind: "workspace" | "pin";
-  /** What it was done to: the worktree's branch, the workflow's id. */
+  /**
+   * `workspace`: its worktree was made. `pin`: its workflow was frozen as it stood. `setup`: the
+   * project's setup target its workflow asks for ran on the machine first (decision 0027).
+   */
+  kind: "workspace" | "pin" | "setup";
+  /** What it was done to: the worktree's branch, the workflow's id, the setup target. */
   what: string;
   tookMs: number;
+  /** How it went, when there is more to say: `3 steps, 2 already done`, `waits for approval`. */
+  detail?: string;
 }
 
 /**
@@ -450,4 +463,34 @@ export interface OutboxView {
   /** What it is, in words: "a decision at a gate". */
   what: string;
   at: number;
+}
+
+
+/**
+ * Where a machine's new workspaces go when its person has not said: the folder most of its open
+ * workspaces already sit in, else `Code` in the home folder. `sep` is the machine's own separator.
+ */
+export function guessProjectsFolder(home: string, workspaceDirs: readonly string[], sep: "/" | "\\" = "/"): string {
+  const parents = new Map<string, number>();
+  for (const dir of workspaceDirs) {
+    const trimmed = dir.replace(/[\\/]+$/, "");
+    const at = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    if (at <= 0) continue;
+    const parent = trimmed.slice(0, at);
+    parents.set(parent, (parents.get(parent) ?? 0) + 1);
+  }
+  let best: string | undefined;
+  let count = 0;
+  for (const [parent, n] of parents) if (n > count || (n === count && best !== undefined && parent < best)) [best, count] = [parent, n];
+  return best ?? `${home.replace(/[\\/]+$/, "")}${sep}Code`;
+}
+
+/**
+ * A new workspace's folder name in a projects folder: the project's name, or `name-1`, `name-2`, …
+ * when that is taken (a folder already there, or another workspace's).
+ */
+export function workspaceFolderName(name: string, taken: (candidate: string) => boolean): string {
+  const base = name.trim().replace(/[\\/:*?"<>|]+/g, "-").replace(/^\.+/, "") || "project";
+  if (!taken(base)) return base;
+  for (let n = 1; ; n++) if (!taken(`${base}-${n}`)) return `${base}-${n}`;
 }

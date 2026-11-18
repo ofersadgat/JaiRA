@@ -7,7 +7,8 @@ import { posix, win32 } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecutorInfo } from "@jaira/shared";
 import type { Exec, ExecResult } from "../src/exec";
-import { AGENT_PACKAGES, agentInstallOf, agentPackageOf, installAgent, installFactsOf, installOriginOf, locateBinary, parseWslFacts, planOf, type InstallDeps } from "../src/agentInstall";
+import { AGENT_PACKAGES, agentInstallOf, agentPackageOf, installAgent } from "../src/agentInstall";
+import { installFactsOf, installOriginOf, locateBinary, parseWslFacts, planOf, type InstallDeps } from "../src/install";
 import { probeExecutor } from "../src/executors";
 
 const CLAUDE = AGENT_PACKAGES["claude"]!;

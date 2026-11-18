@@ -22,10 +22,45 @@
   },
   "agents": {
     "genericCli": [
-      { "name": "gemini-cli", "command": "gemini", "args": ["--approval-mode", "auto_edit", "-p", "{prompt}"] },
+      {
+        "name": "gemini-cli",
+        "command": "gemini",
+        "args": ["--approval-mode", "auto_edit", "-p", "{prompt}"],
+        "mcp": {
+          "args": ["--allowed-mcp-server-names", "dai"],
+          "env": { "GEMINI_CLI_SYSTEM_SETTINGS_PATH": "{mcpConfig}" },
+          "config": {
+            "mcpServers": { "dai": { "httpUrl": "{mcpUrl}", "trust": true, "timeout": 86400000 } },
+            "tools": { "core": ["mcp_dai_*"] }
+          },
+          "configName": "settings.json",
+          "builtinsOff": true
+        }
+      },
       { "name": "antigravity-cli", "command": "agy", "args": ["--mode", "accept-edits", "-p", "{prompt}"] },
       { "name": "muse-code", "command": "muse", "args": ["exec", "--approval-mode", "never"] },
-      { "name": "opencode", "command": "opencode", "args": ["run"] }
+      {
+        "name": "opencode",
+        "command": "opencode",
+        "args": ["run"],
+        "mcp": {
+          "args": ["--agent", "jaira"],
+          "env": {
+            "OPENCODE_CONFIG": "{mcpConfig}",
+            "OPENCODE_DISABLE_PROJECT_CONFIG": "1",
+            "OPENCODE_PERMISSION": "{\"*\":\"deny\",\"dai_*\":\"allow\"}"
+          },
+          "config": {
+            "$schema": "https://opencode.ai/config.json",
+            "mcp": { "dai": { "type": "remote", "url": "{mcpUrl}", "oauth": false, "timeout": 86400000 } },
+            "agent": {
+              "jaira": { "mode": "primary", "description": "Works only through the tools JaiRA serves it.", "permission": { "*": "deny", "dai_*": "allow" } }
+            }
+          },
+          "configName": "opencode.json",
+          "builtinsOff": true
+        }
+      }
     ]
   },
   "functions": {

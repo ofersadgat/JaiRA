@@ -4,7 +4,7 @@ import { GALLERY_SURFACES, type GallerySurface, type ModuleApproval, type Pendin
 import { approvalOf, initialState, parsedDoc } from "@jaira/ui/galleryModel";
 import { invoke } from "@jaira/ui/store";
 import { publishUpdate } from "@jaira/ui/updatesStore";
-import { ApprovalDialog, FolderBrowser, GalleryStage as Stage, ModuleApprovalDialog, TokenScope, UpdateRow, useLook, useTokens } from "@jaira/universal";
+import { AddWorkspacePop, ApprovalDialog, FolderBrowser, GalleryStage as Stage, ModuleApprovalDialog, OpenProject, TokenScope, UpdateRow, useLook, useTokens } from "@jaira/universal";
 
 /**
  * The shell's floats and dialogs, and the gates and dialogs the Components room stages, as specimens
@@ -120,11 +120,70 @@ const staged = (rn: () => JSX.Element): FloatSpecimen => ({
 
 const NOOP = (): void => undefined;
 const MACHINES = [{ id: "m-unpaired", label: "build box" }];
+/** Open's machines: this one and a paired build server (decision 0027). */
+const OPEN_MACHINES = {
+  self: { id: "m-self", label: "mac-air", os: "mac", form: "laptop", tags: [] },
+  machines: [{ id: "m-build", label: "build-01", os: "linux", form: "server", tags: [], state: "online" }],
+} as unknown as Parameters<typeof OpenProject>[0]["machines"];
+
+/** Add's card (decision 0027): atlas from GitLab onto build-01, numbered because atlas is taken there. */
+const ADD_SOURCE = { kind: "forge", host: "gitlab.com", project: "mistlabs/atlas", url: "https://gitlab.com/mistlabs/atlas.git", label: "gitlab.com/mistlabs/atlas" } as const;
+const ADD_PLAN = {
+  name: "atlas",
+  dir: "/srv/work/atlas-1",
+  taken: "atlas",
+  projectsFolder: "/srv/work",
+  bring: [".env*.local"],
+  setup: {
+    from: "file",
+    readiness: "installs",
+    steps: [
+      { label: "Install node 22", status: "installs" },
+      { label: "Bring .env*.local", status: "brings" },
+      { label: "pnpm install", status: "runs" },
+      { label: "pnpm db:migrate", status: "runs" },
+    ],
+  },
+} as unknown as NonNullable<Parameters<typeof AddWorkspacePop>[0]["plan"]>;
+const ADD_JOB = {
+  "j-1": {
+    jobId: "j-1",
+    machine: "m-build",
+    label: "atlas on build-01",
+    phase: "setup",
+    steps: [{ index: 0, label: "Install node 22", status: "done" }, { index: 1, label: "pnpm install", status: "running" }],
+    text: "Cloning into '/srv/work/atlas-1'...\nProgress: resolved 812, reused 790, downloaded 22\n",
+    request: { source: ADD_SOURCE, machine: "m-build" },
+  },
+} as unknown as Parameters<typeof AddWorkspacePop>[0]["jobs"];
+const addCard = (job: boolean): JSX.Element => (
+  <View height={job ? 260 : 300}>
+    <AddWorkspacePop
+      anchor={{ left: 12, top: 8, right: 12, bottom: 8 }}
+      source={ADD_SOURCE}
+      name="atlas"
+      machine="m-build"
+      machines={OPEN_MACHINES}
+      jobs={job ? ADD_JOB : {}}
+      onCreate={async () => undefined}
+      onCancelJob={NOOP}
+      onFull={NOOP}
+      onClose={NOOP}
+      plan={ADD_PLAN}
+      {...(job ? { job: "j-1" } : {})}
+    />
+  </View>
+);
 
 Object.assign(FLOAT_SPECIMENS, {
+  "add-workspace": { width: 440, rn: () => addCard(false) },
+  "add-workspace-running": { width: 440, rn: () => addCard(true) },
   "approval-dialog": staged(() => <ApprovalDialog staged pending={ORPHAN} onDecide={NOOP} />),
   "module-approval": staged(() => <ModuleApprovalDialog staged files={MODULES} onApprove={NOOP} onCancel={NOOP} />),
   "folder-browser": staged(() => <FolderBrowser staged machines={MACHINES} initial="m-unpaired" mode="open" onClose={NOOP} onChosen={NOOP} />),
+  "open-project": staged(() => (
+    <OpenProject staged start={{ mode: "open" }} machines={OPEN_MACHINES} jobs={{}} onClose={NOOP} onCreate={async () => undefined} onCancelJob={NOOP} onOpenThere={NOOP} />
+  )),
   ...Object.fromEntries(
     (["available", "downloading", "downloaded", "error"] as const).map((status): [string, FloatSpecimen] => [
       `update-row-${status}`,

@@ -2,7 +2,7 @@
 id: engineering/decisions/0006-built-in-layer
 type: decision
 status: built
-updated: 2026-09-23
+updated: 2026-11-18
 decides_for: [engineering/units/project-layout, engineering/units/workflow-snapshots, engineering/units/workflow-browser, engineering/units/tool-policy, engineering/units/chat-turns]
 ---
 
@@ -317,6 +317,17 @@ What the build settled:
   along, and is remembered for that set while the page is open.
 - **The Functions sections below the pane take the page's layer**: their defaults were read-only on
   `Built in` and are now always written into the layer being shown.
+
+## Amended 2026-11-18: six layers above what ships
+
+What ships is still the bottom of the search path, and still read-only. Above it there are now the
+settings' six layers rather than two (decision 0023, amended 2026-11-18, last): you in the project, Just
+you, the project on this machine, this machine, the project, Shared. A bare state id is read from the
+most specific of them that has a file for it, and from what ships only when none does. Overriding a
+shipped state is a copy up into any of the six — the tree's `Edit a copy in Shared` and `Override here`
+first, as before, then, behind `Edit a copy elsewhere…` (the editor's `Elsewhere…`), `for you in this
+project`, `for just you`, `in this project on this machine` and `on this machine`. A built-in row shadowed by any of them says so, and by which (`shadowedBy`); a
+person's file of an id that ships says `overrides built in` in whichever layer it is.
 
 ## Revisit when
 

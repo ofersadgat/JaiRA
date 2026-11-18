@@ -32,6 +32,8 @@ siblings: [engineering/units/project-store, engineering/units/project-config, en
 - The layer ships `chat/session`, `chat/control` and the three `debug/hello_world` states under `workflows/`, beside its `README.md`. Nothing installs them anywhere: the Chat view and the self-test name the ids and the search path finds the files. A copy of one in the shared root or a project wins, as any override does.
 - Under vitest the layer is an absent directory, registered by `test/setup.ts`, so a test's listings hold only what it wrote. `shippedLayer()` in `test/testing.ts` gives one test the real files.
 
+A `$` reference searches four more roots ahead of `roots`: the settings layers that are no workflow root, each holding permission sets of its own — you in the project (`<base>/projects/<key>/`, `$PROJECTYOU`), Just you (`<base>/personal/`, `$YOU`), the project on this machine (`.jaira/local/`, `$PROJECTMACHINE`, ignored by the `.gitignore` template) and this machine (`<base>/machine/`, `$MACHINE`). `fileLayerRoots` and `referenceRootPath` in `@jaira/persistence` `fileLayers.ts` list them; `roots` itself, and so a bare state id's search path, is unchanged ([decision 0023](../decisions/0023-overlays-and-scopes.md), amended 2026-11-18).
+
 Beside the path builders it owns:
 
 - `defaultBaseDir(env)`, which answers `JAIRA_HOME` when it is set, throws under `VITEST` when it is not, and otherwise answers `~/.jaira`; and `takeHomeFlag(argv)`, which lifts `--home <dir>` out of a command line.

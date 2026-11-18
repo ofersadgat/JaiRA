@@ -14,6 +14,7 @@ import { FunctionsSections } from "./FunctionsSections";
 import { goToPart } from "./parts";
 import { PermissionSetsSection } from "./permissions/PermissionSets";
 import { standingLayersOf } from "@jaira/ui/permissionSetsHost";
+import { useSettingsWhere } from "./layers";
 
 /**
  * Settings → Tools: the permission sets, the functions a run can call, the events and the automations
@@ -22,29 +23,35 @@ import { standingLayersOf } from "@jaira/ui/permissionSetsHost";
  */
 export function ToolsPage(): JSX.Element {
   const { state, actions } = useShell();
-  const channel = useMemo(() => permissionSetsChannelOf(state.at), [state.at]);
-  const automationsChannel = useMemo(() => automationsChannelOf(state.at), [state.at]);
-  const mcp = useMcpData(true, state.config);
+  // The project Settings' path names (or the one the shell stands on): its files are what the
+  // permission sets, events and automations here read and write — or a paired machine's, when the
+  // path names one and no project.
+  const { at, machine } = useSettingsWhere();
+  const config = state.settingsConfig;
+  const channel = useMemo(() => permissionSetsChannelOf(at, machine), [at, machine]);
+  const automationsChannel = useMemo(() => automationsChannelOf(at, machine), [at, machine]);
+  const mcp = useMcpData(true, config);
   const [data, setData] = useState<PermissionSetsData | null>(null);
-  const standing = useMemo(() => standingLayersOf(state.config), [state.config]);
+  const standing = useMemo(() => standingLayersOf(config), [config]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>(undefined);
-  const editable = state.configLayer !== "project" || state.at !== null;
-  const eventsProject = eventsProjectOf(state.configLayer, state.at);
-  const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject }), eventsProject);
+  const editable = config !== null;
+  const eventsProject = eventsProjectOf(state.configLayer, at);
+  // A paired machine the path names: its watcher's word, asked there (the engine forwards a request naming it).
+  const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject, ...(machine !== undefined ? { machine } : {}) }), `${machine ?? ""}:${eventsProject}`);
   return (
     <>
-      <PermissionSetsSection key={state.at ?? "shared"} channel={channel} layer={state.configLayer} busy={state.busy} focus={focus} onData={setData} mcp={mcp.report?.servers} standing={standing} />
+      <PermissionSetsSection key={`${machine ?? ""}:${at ?? "shared"}`} channel={channel} layer={state.configLayer} busy={state.busy} focus={focus} onData={setData} mcp={mcp.report?.servers} standing={standing} />
       <FunctionsSections
         data={data}
         layer={state.configLayer}
-        config={state.config}
+        config={config}
         busy={state.busy || !editable}
         onSave={actions.saveConfig}
         agents={state.executors.map((e) => e.name)}
         rules={state.availability.tree?.function?.rules}
         onRules={(next) => {
-          if (state.config === null) return;
-          void actions.saveDefinition(...functionRulesOverlay(state.config, state.configLayer, next));
+          if (config === null) return;
+          void actions.saveDefinition(...functionRulesOverlay(config, state.configLayer, next));
         }}
         onOpenSet={(id) => {
           setFocus({ id, nonce: Date.now() });
@@ -53,28 +60,28 @@ export function ToolsPage(): JSX.Element {
       />
       <EventsSection
         status={eventStatus.status}
-        events={eventsConfigOf(state.config)}
-        layerDoc={state.config?.[state.configLayer] ?? null}
-        locked={state.busy || state.config === null || !editable}
+        events={eventsConfigOf(config)}
+        layerDoc={config?.[state.configLayer] ?? null}
+        locked={state.busy || config === null || !editable}
         now={eventStatus.now}
         onWrite={(writes) => {
-          if (state.config === null) return;
-          void actions.saveConfig(state.configLayer, withPaths(state.config[state.configLayer], writes), writes.map(([path]) => path));
+          if (config === null) return;
+          void actions.saveConfig(state.configLayer, withPaths(config[state.configLayer], writes), writes.map(([path]) => path));
         }}
         onOpenConnections={() => actions.setSection("connections")}
       />
       <AutomationsSection
-        key={`${state.at ?? "shared"}`}
+        key={`${machine ?? ""}:${at ?? "shared"}`}
         channel={automationsChannel}
         layer={state.configLayer}
-        hasProject={state.at !== null}
+        hasProject={at !== null}
         busy={state.busy}
-        events={eventsConfigOf(state.config)}
+        events={eventsConfigOf(config)}
         status={eventStatus.status}
         workflows={state.workflows.map((entry) => ({ id: entry.rootId, label: entry.label }))}
         forms={state.workflowForms}
         onWorkflow={actions.pickWorkflow}
-        projectName={state.at !== null ? (state.at.split(/[\\/]/).filter(Boolean).pop() ?? state.at) : "Shared"}
+        projectName={at !== null ? (at.split(/[\\/]/).filter(Boolean).pop() ?? at) : "Shared"}
         hasTask={eventsTaskOf(state.tasks) !== undefined}
         onOpenConversation={() => {
           const task = eventsTaskOf(state.tasks);

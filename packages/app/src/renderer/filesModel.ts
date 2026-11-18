@@ -45,12 +45,66 @@ export interface FileSelection {
 export const LAYER_LABEL: Record<WorkflowLayer, string> = {
   project: "this project",
   base: "shared",
+  // The settings' newer layers (decision 0023, amended 2026-11-18).
+  projectMachine: "this project on this machine",
+  projectYou: "you in this project",
+  you: "just you",
+  machine: "this machine",
   // What ships (decision 0006): the tree's last root, read-only.
   system: "built in",
 };
 
 /** What a layer's ROOT is called in the address bar — a directory's name, or the reference that names it. */
-export const ROOT_WORD: Record<WorkflowLayer, string> = { project: ".jaira", base: "~/.jaira", system: "$SYSTEM" };
+export const ROOT_WORD: Record<WorkflowLayer, string> = {
+  project: ".jaira",
+  base: "~/.jaira",
+  projectMachine: ".jaira/local",
+  projectYou: "~/.jaira/projects/…",
+  you: "~/.jaira/personal",
+  machine: "~/.jaira/machine",
+  system: "$SYSTEM",
+};
+
+/**
+ * Where a copy of a state can go, as a menu says it — every writable layer, most specific first, each
+ * with where its files are. A project's own three need a project.
+ */
+export const COPY_TO: ReadonlyArray<{ layer: WritableLayer; label: string; note: string }> = [
+  { layer: "projectYou", label: "for you in this project", note: "~/.jaira/projects/…" },
+  { layer: "you", label: "for just you", note: "~/.jaira/personal" },
+  { layer: "projectMachine", label: "in this project on this machine", note: ".jaira/local" },
+  { layer: "machine", label: "on this machine", note: "~/.jaira/machine" },
+  { layer: "project", label: "in this project", note: ".jaira" },
+  { layer: "base", label: "in Shared", note: "~/.jaira" },
+];
+
+/** A layer that belongs to one project — a copy into it needs one open. */
+const PROJECT_LAYERS: ReadonlySet<WorkflowLayer> = new Set(["project", "projectMachine", "projectYou"]);
+
+/**
+ * The second menu the tree opens for a copy into the settings' other layers (decision 0023, amended
+ * 2026-11-18): every writable layer but `leave`, most specific first, each saying only WHERE — `for
+ * just you`, `in this project on this machine` — under the menu's title, which says what (`Edit a
+ * copy`, `Copy`). No folder beside them: at a menu's width the folder would cut the words off. A
+ * project's layers are disabled with none open.
+ */
+export function elsewhereOf(leave: readonly WorkflowLayer[], hasProject: boolean, onSelect: (layer: WritableLayer) => void): MenuItem[] {
+  return COPY_TO.filter((one) => !leave.includes(one.layer)).map((one) => ({
+    label: one.label,
+    ...(PROJECT_LAYERS.has(one.layer) && !hasProject ? { disabled: true } : {}),
+    onSelect: () => onSelect(one.layer),
+  }));
+}
+
+/**
+ * A state's copy targets from `from`: the layer it has always been offered first (Shared's copy goes to
+ * the project, everything else's to Shared), then the others, most specific first.
+ */
+export function copyTargetsOf(from: WorkflowLayer): Array<{ layer: WritableLayer; label: string; note: string }> {
+  const first: WritableLayer = from === "base" ? "project" : "base";
+  const rest = COPY_TO.filter((one) => one.layer !== from && one.layer !== first);
+  return [COPY_TO.find((one) => one.layer === first)!, ...rest];
+}
 
 /** What each file kind looks like in the tree. Glyphs, not colour, so the meaning survives a theme. */
 export const KIND_GLYPH: Record<string, string> = {
@@ -255,7 +309,8 @@ export function childStateDraft(root: FileRoot, node: FileNode, stateId: string)
 export function standingRoot(tree: FileTree | null, project: string | null): FileRoot | null {
   if (tree === null || tree.roots.length === 0) return null;
   if (project !== null) {
-    const here = tree.roots.find((root) => root.dir === project || root.project === project);
+    // The project's own checkout — not the layers it has over it (on this machine, you in it), which carry its name too.
+    const here = tree.roots.find((root) => (root.layer === "project" || root.layer === "base") && (root.dir === project || root.project === project));
     if (here !== undefined) return here;
   }
   return tree.roots.find((root) => root.layer === "base") ?? tree.roots[0] ?? null;
@@ -279,11 +334,13 @@ export function builtInItems(
   act: {
     hasProject: boolean;
     onOpen: (stateId: string, layer: WorkflowLayer) => void;
-    onOverride: (stateId: string, toLayer: "base" | "project") => void;
+    onOverride: (stateId: string, toLayer: WritableLayer) => void;
     /** Switch the state off in a layer above (decision 0021) — absent where the host cannot. */
     onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
     onCopy: (text: string) => void;
     onReveal: (file: string) => void;
+    /** Open a second menu where this one was — see {@link TreeVerbs.more}. */
+    more: (menu: { title: string; items: MenuItem[] }) => void;
   },
 ): MenuItem[] {
   const abs = `${root.dir}/${node.path}`;
@@ -297,6 +354,18 @@ export function builtInItems(
     { label: "Open", note: "an edit copies it", onSelect: () => act.onOpen(id, root.layer) },
     { label: "Edit a copy in Shared", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
     { label: "Override here", note: ".jaira", disabled: !act.hasProject, onSelect: () => act.onOverride(id, "project") },
+    // The settings' other layers (decision 0023, amended 2026-11-18), after the two it has always offered:
+    // behind one item, as the editor's top bar has them behind `Elsewhere…`, in a menu of their own titled
+    // `Edit a copy` — where `Edit a copy in this project on this machine` beside its folder would be cut
+    // off at a menu's width.
+    {
+      label: "Edit a copy elsewhere…",
+      onSelect: () =>
+        act.more({
+          title: "Edit a copy",
+          items: elsewhereOf(["base", "project"], act.hasProject, (layer) => act.onOverride(id, layer)),
+        }),
+    },
     // Switched off with a file in a layer above that follows this one (decision 0021) — never in
     // place, and not at all once a nearer file shadows it: that file decides.
     ...(act.onSetDisabled !== undefined && node.shadowed !== true
@@ -360,8 +429,10 @@ export function newItems(root: FileRoot, dir: string, start: (draft: TreeDraft) 
  * stand. Standing there, a stamp-only test can never be true, so the one root on screen went on
  * introducing itself inside itself.
  */
-export function rootNeedsName(root: Pick<FileRoot, "dir" | "project">, project: string | null): boolean {
+export function rootNeedsName(root: Pick<FileRoot, "dir" | "project"> & { layer?: WorkflowLayer }, project: string | null): boolean {
   if (project === null) return true;
+  // A project's other layers carry its name too, and are introduced: `atlas on this machine`, `You in atlas`.
+  if (root.layer !== undefined && root.layer !== "project" && root.layer !== "base") return true;
   return root.dir !== project && root.project !== project;
 }
 
@@ -868,6 +939,11 @@ export interface TreeVerbs {
   startDraft: (draft: TreeDraft) => void;
   /** Switch a state off or back on in a layer (decision 0021). Absent ⇒ the menus offer no switch. */
   onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
+  /**
+   * Open a second menu, titled, where the first one was — the copies into the settings' other layers,
+   * which a row's menu offers behind one item rather than as six lines too long for its width.
+   */
+  more: (menu: { title: string; items: MenuItem[] }) => void;
 }
 
 /**
@@ -875,7 +951,7 @@ export interface TreeVerbs {
  * ask a refused move or delete makes. `FileTreePanel` opens them (a long press on a phone).
  */
 export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: FileRoot) => MenuItem[]; rootItems: (root: FileRoot, writable: boolean) => MenuItem[] } {
-  const { hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, setAsk, startDraft, onSetDisabled } = verbs;
+  const { hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, setAsk, startDraft, onSetDisabled, more } = verbs;
   const copyText = verbs.copy;
   /**
    * Run a move, and if it was refused because other states point at this one, say who and offer to
@@ -959,7 +1035,7 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
             title: `Rename '${node.name}'`,
             field: "Path",
             initial: node.path,
-            note: `Relative to ${node.layer === "base" ? "~/.jaira/" : ".jaira/"}`,
+            note: `Relative to ${node.layer === "project" ? "the project" : `${ROOT_WORD[node.layer]}/`}`,
             confirmLabel: "Rename",
             onConfirm: (v) => {
               setAsk(null);
@@ -1018,6 +1094,7 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
         onSetDisabled,
         onCopy: copyText,
         onReveal,
+        more,
       });
     }
     const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
@@ -1042,7 +1119,6 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
     }
 
     const id = node.stateId;
-    const other: WorkflowLayer = node.layer === "base" ? "project" : "base";
     return [
       { label: "Open", onSelect: () => onOpen(id, node.layer) },
       ...ask,
@@ -1091,14 +1167,27 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
             (item, i) => (i === 0 ? { ...item, separator: true } : item),
           )
         : []),
-      {
-        // The point of the shared layer: changing a shared workflow for ONE project should not mean
-        // copying files by hand. Shadowed already means the project has its own copy.
-        label: node.layer === "base" ? "Override in this project" : "Copy to shared root",
-        separator: true,
-        disabled: node.shadowed === true || (node.layer === "base" && !hasProject),
-        onSelect: () => void move({ stateId: id, layer: node.layer, to: id, toLayer: other, copy: true }, "Copy"),
-      },
+      // The point of the layers: changing a workflow for ONE project, one machine or just you should not
+      // mean copying files by hand. The first is what it has always been — a shared one into this project,
+      // anything else to Shared — then the settings' other layers (decision 0023, amended 2026-11-18),
+      // behind `Copy elsewhere…` in a menu of their own titled `Copy`, each saying where.
+      ...((): MenuItem[] => {
+        const [first] = copyTargetsOf(node.layer);
+        const copyTo = (layer: WritableLayer): void => void move({ stateId: id, layer: node.layer, to: id, toLayer: layer, copy: true }, "Copy");
+        return [
+          {
+            label: node.layer === "base" ? "Override in this project" : "Copy to shared root",
+            note: first!.note,
+            separator: true,
+            disabled: node.shadowed === true || (PROJECT_LAYERS.has(first!.layer) && !hasProject && node.project === undefined),
+            onSelect: () => copyTo(first!.layer),
+          },
+          {
+            label: "Copy elsewhere…",
+            onSelect: () => more({ title: "Copy", items: elsewhereOf([node.layer, first!.layer], hasProject || node.project !== undefined, copyTo) }),
+          },
+        ];
+      })(),
       { label: "Copy state id", separator: true, onSelect: () => copyText(id) },
       { label: "Copy path", onSelect: () => copyText(abs) },
       { label: "Reveal in file explorer", onSelect: () => onReveal(abs) },

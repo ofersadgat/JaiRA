@@ -22,11 +22,19 @@
  * next to a database, a WAL file, a snapshot cache and a pile of run logs. The layout said nothing
  * about which of those they owned; now the top level of a root is exactly what they own.
  */
+import { createHash } from "node:crypto";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+import {
+  LOCAL_SETTINGS_FILE_NAME,
+  MACHINE_SETTINGS_FILE_NAME,
+  PERSONAL_SETTINGS_FILE_NAME,
+  PROJECT_SETTINGS_DIR_NAME,
+  SETTINGS_FILE_NAME,
+  USER_SETTINGS_FILE_NAME,
+} from "./settings";
 // Declared in `./hiddenPaths` rather than here, and re-exported so `@jaira/shared` is unchanged:
 // the Files screen needs the spelling too, and this module imports `node:fs`, which a renderer
 // bundle must not. A second constant with the same value was the alternative, and a spelling three
@@ -40,6 +48,12 @@ export interface JairaPaths {
   jairaDir: string;
   /** How this project runs — see {@link SETTINGS_FILE_NAME}. Layered under the base's. */
   settingsFile: string;
+  /**
+   * This project on this machine — `.jaira/settings.local.json` ({@link LOCAL_SETTINGS_FILE_NAME}),
+   * read over this machine's own layer and under the person's. For the shared root standing as a
+   * project it is the machine's own file: the root has no project layer.
+   */
+  localSettingsFile: string;
   workflowsDir: string;
   skillsDir: string;
   /**
@@ -167,6 +181,16 @@ export interface JairaBasePaths {
    * See {@link PERSONAL_SETTINGS_FILE_NAME}.
    */
   personalSettingsFile: string;
+  /**
+   * This machine's own layer — `machine-settings.json` ({@link MACHINE_SETTINGS_FILE_NAME}), read over
+   * the projects' and under the person's. Never synced.
+   */
+  machineSettingsFile: string;
+  /**
+   * Where the person's settings for one project live, one folder per project
+   * (`projects/<key>/personal-settings.json`, {@link personalProjectSettingsFile}).
+   */
+  projectSettingsDir: string;
   workflowsDir: string;
   functionsDir: string;
   skillsDir: string;
@@ -430,6 +454,8 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     settingsFile: join(root, SETTINGS_FILE_NAME),
     userSettingsFile: join(root, USER_SETTINGS_FILE_NAME),
     personalSettingsFile: join(root, PERSONAL_SETTINGS_FILE_NAME),
+    machineSettingsFile: join(root, MACHINE_SETTINGS_FILE_NAME),
+    projectSettingsDir: join(root, PROJECT_SETTINGS_DIR_NAME),
     workflowsDir: join(root, "workflows"),
     functionsDir: join(root, "functions"),
     skillsDir: join(root, "skills"),
@@ -477,6 +503,9 @@ export function baseAsProjectPaths(baseDir: string = defaultBaseDir(), builtInDi
     // root, which is what makes the two layouts the same shape one level down.
     jairaDir: base.baseDir,
     settingsFile: base.settingsFile,
+    // The root has no project layer, so none on this machine either: the machine's own file, which
+    // a reader that names both reads once.
+    localSettingsFile: base.machineSettingsFile,
     workflowsDir: base.workflowsDir,
     skillsDir: base.skillsDir,
     systemDir: base.systemDir,
@@ -513,6 +542,7 @@ export function jairaPaths(projectDir: string, baseDir?: string, builtInDir?: st
     projectDir: root,
     jairaDir,
     settingsFile: join(jairaDir, SETTINGS_FILE_NAME),
+    localSettingsFile: join(jairaDir, LOCAL_SETTINGS_FILE_NAME),
     workflowsDir: join(jairaDir, "workflows"),
     skillsDir: join(jairaDir, "skills"),
     systemDir: system,
@@ -582,7 +612,32 @@ export { SHARED_SESSION } from "./ipc";
  * `ipc.ts`: the renderer needs them (the Files tree labels one, the config pane opens the other) and
  * this module is Node-only. Re-exported from here, where the rest of the layout lives.
  */
-export { PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+export {
+  LOCAL_SETTINGS_FILE_NAME,
+  MACHINE_SETTINGS_FILE_NAME,
+  PERSONAL_SETTINGS_FILE_NAME,
+  PROJECT_SETTINGS_DIR_NAME,
+  SETTINGS_FILE_NAME,
+  USER_SETTINGS_FILE_NAME,
+} from "./settings";
+
+/**
+ * The folder name the person's settings for one project are kept under in the shared root: the
+ * project's repository identity (`github.com/me/atlas` → `github.com_me_atlas`), the same on every
+ * machine that has a clone of it — or, for a clone with no remote, which is a project of its own, its
+ * folder's name and a short hash of where it is.
+ */
+export function projectSettingsKey(identity: string | undefined, projectDir: string): string {
+  const safe = (text: string): string => text.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^\.+/, "_");
+  if (identity !== undefined && identity.trim() !== "") return safe(identity.trim());
+  const dir = resolve(projectDir);
+  return `${safe(basename(dir)) || "project"}-${createHash("sha256").update(dir).digest("hex").slice(0, 10)}`;
+}
+
+/** The person's settings for one project: `<base>/projects/<key>/personal-settings.json` ({@link projectSettingsKey}). */
+export function personalProjectSettingsFile(base: Pick<JairaBasePaths, "projectSettingsDir">, key: string): string {
+  return join(base.projectSettingsDir, key, PERSONAL_SETTINGS_FILE_NAME);
+}
 
 export function sessionKey(dir: string): string {
   const resolved = resolve(dir);

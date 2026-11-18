@@ -61,6 +61,11 @@ export interface SidebarView {
    */
   panel?: ReactNode;
   /**
+   * What the pane's head shows in place of {@link label} — Settings' path (`SettingsCrumb`), which
+   * starts with the name itself.
+   */
+  crumb?: ReactNode;
+  /**
    * A root row that is a room across every project rather than the root's own view of one (the Inbox):
    * choosing it leaves the address where it stands, and it is "here" from any address.
    */

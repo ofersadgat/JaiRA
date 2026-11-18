@@ -566,26 +566,61 @@ export interface LintIssue {
 }
 
 /**
- * Which layer of the search path supplied a state file.
+ * Which layer of the search path supplied a state file — one of the settings' six, or what ships
+ * (decision 0023, amended 2026-11-18): most specific first, you in the project (`projectYou`,
+ * `~/.jaira/projects/<key>/`), Just you (`you`, `~/.jaira/personal/`), the project on this machine
+ * (`projectMachine`, `.jaira/local/`, which git ignores), this machine (`machine`, `~/.jaira/machine/`),
+ * the project (`project`, `.jaira/`), Shared (`base`, `~/.jaira/`), and `system`. Each keeps its
+ * workflows under its own `workflows/`, and a bare id is found in the most specific one that has it.
  *
- * `project` is the project's own `.jaira/`; `base` is the shared root behind every project on the
- * machine. The distinction is not cosmetic — editing a `base` file changes every project that has
- * not overridden it, so the UI has to be able to say so before someone types.
+ * The distinction is not cosmetic — editing a `base` file changes every project that has not
+ * overridden it, and a `you` file every project of yours, so the UI has to be able to say so before
+ * someone types.
  *
- * `system` is what JaiRA ships (`$SYSTEM`, decision 0006): the last layer, behind both. It is
+ * `system` is what JaiRA ships (`$SYSTEM`, decision 0006): the last layer, behind all of them. It is
  * READ-ONLY — every write surface that takes a layer refuses this one, and "override" means copying
- * the file up into one of the other two.
+ * the file up into one of the others.
  */
-export type WorkflowLayer = "project" | "base" | "system";
+export type WorkflowLayer = "project" | "base" | "system" | "machine" | "projectMachine" | "you" | "projectYou";
 
 /** The layers a person can write to — every layer but the one that ships. */
 export type WritableLayer = Exclude<WorkflowLayer, "system">;
+
+/** The root a reference names each layer by: `$YOU/workflows/feature`, `$JAIRA/permission-sets/x`. */
+export const LAYER_ROOT_TOKEN: Readonly<Record<WorkflowLayer, string>> = {
+  projectYou: "$PROJECTYOU",
+  you: "$YOU",
+  projectMachine: "$PROJECTMACHINE",
+  machine: "$MACHINE",
+  project: "$JAIRA",
+  base: "$BASE",
+  system: "$SYSTEM",
+};
 
 /**
  * Whether a write may land in this layer. The one spelling of the rule, so a new write surface has
  * something to call rather than a comparison to remember.
  */
 export function isWritableLayer(layer: WorkflowLayer): layer is WritableLayer {
+  return layer !== "system";
+}
+
+/** The workflow layers that belong to one project — addressed with which project, as `project` always was. */
+export function isProjectWorkflowLayer(layer: WorkflowLayer): layer is "project" | "projectMachine" | "projectYou" {
+  return layer === "project" || layer === "projectMachine" || layer === "projectYou";
+}
+
+/**
+ * A layer a PERMISSION SET file can be in — every workflow layer: each holds a `permission-sets/` of its
+ * own, searched as the settings are layered, most specific first (decision 0023, amended 2026-11-18).
+ */
+export type SetLayer = WorkflowLayer;
+
+/** The permission set layers a person can write to — every one but what ships. */
+export type WritableSetLayer = WritableLayer;
+
+/** {@link isWritableLayer}, for a permission set's layer. */
+export function isWritableSetLayer(layer: SetLayer): layer is WritableSetLayer {
   return layer !== "system";
 }
 
@@ -602,10 +637,13 @@ export interface WorkflowFileEntry {
   /** The root it is relative to, absolute — what an editor needs to open it. */
   root: string;
   /**
-   * Set on a BASE file that a project file of the same state id shadows. The base copy is inert in
-   * this project: it is listed so the override is visible rather than looking like a missing file.
+   * Set on a file that a more specific layer's file of the same state id shadows — a Shared file the
+   * project overrides, a project file Just you overrides. The copy is inert here: it is listed so the
+   * override is visible rather than looking like a missing file.
    */
   shadowed?: boolean;
+  /** With {@link shadowed}: the layer whose copy is read instead. */
+  shadowedBy?: WorkflowLayer;
   /**
    * Set on the file that wins for its state when it says `"disabled": true` — itself, or through the
    * file it follows (decision 0021). Never on a shadowed copy: that one decides nothing here.
@@ -718,10 +756,12 @@ export interface FileNode {
   /** The state this file defines, when `kind` is `workflow`. */
   stateId?: string;
   /**
-   * Set on a file a layer AHEAD of it shadows: a base file the project overrides, or a built-in one
-   * that either of the others does (see {@link WorkflowFileEntry}).
+   * Set on a file a layer AHEAD of it shadows: a base file the project overrides, a project file Just
+   * you overrides, or a built-in one any of the others does (see {@link WorkflowFileEntry}).
    */
   shadowed?: boolean;
+  /** With {@link shadowed}, for a state: the layer whose copy is read instead. */
+  shadowedBy?: WorkflowLayer;
   /**
    * Set on a project or shared state file whose id JaiRA also ships (decision 0006) — the other end
    * of a built-in row's `shadowed`. It is what lets a row say "this is an override of something that
@@ -772,6 +812,11 @@ export interface FileNode {
  *
  * The LAST root is always what ships (`layer: "system"`, decision 0006): read-only, listed once, and
  * the one root every tree has whatever the shell is standing in — it is behind all of them.
+ *
+ * Between them, the settings' newer layers (decision 0023, amended 2026-11-18), each a root of its own:
+ * per project shown, the project on this machine (`.jaira/local/`) and you in the project
+ * (`~/.jaira/projects/<key>/`); once, Just you (`~/.jaira/personal/`) and this machine
+ * (`~/.jaira/machine/`).
  */
 export interface FileTree {
   roots: FileRoot[];
@@ -780,8 +825,9 @@ export interface FileTree {
 export interface FileRoot {
   layer: WorkflowLayer;
   /**
-   * Which project this root IS, for a `project` root. Absent on the shared root, which belongs to
-   * no project — see {@link FileTree}.
+   * Which project this root IS, for a `project` root — and whose it is, for the project on this
+   * machine's and you in the project's. Absent on a root that belongs to no project (Shared, Just you,
+   * this machine, what ships) — see {@link FileTree}.
    */
   project?: string;
   /** What to call it: the project's basename, `~/.jaira` for the shared root, `Built in` for what ships. */

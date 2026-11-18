@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, View as RNView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
-import { JUST_YOU_VIEWS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsProjectLabel, type JustYouView } from "@jaira/ui/settingsSections";
+import { JUST_YOU_VIEWS, settingsFrameOf, settingsLeadParts, type JustYouView } from "@jaira/ui/settingsSections";
+import { pathNamesOf } from "@jaira/ui/settingsScope";
+import { useMachines } from "@jaira/ui/machinesModel";
 import { PLAIN_SCROLLER, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { AppearancePage } from "../components/settings/AppearancePage";
 import { ConnectionsPage } from "../components/settings/ConnectionsPage";
 import { SettingsLayerContext } from "../components/settings/layers";
-import { LayerPicker } from "../components/settings/LayerPicker";
 import { MachinesPage } from "../components/settings/MachinesPage";
 import { DataPage, RunsPage } from "../components/settings/RunsPage";
 import { ModelsPage } from "../components/settings/ModelsPage";
@@ -23,8 +24,10 @@ import { useShell } from "./shell";
 
 /**
  * The Settings room: one scrolling column (padding 14 16 on --bg) holding the page — its title, whose
- * settings these are, the layer switch and, on the personal layer, "Which rows" — around the open
- * section's own sections. What the frame says is `settingsSections.ts`'s. Every section has a page here.
+ * settings these are and, on a personal layer, "Which rows" — around the open section's own sections.
+ * Whose they are is Settings' path, beside its name in the sidebar's head (`SettingsCrumb`); a page
+ * edits the layer it makes, read where it lives (`settingsConfig`). What the frame says is
+ * `settingsSections.ts`'s. Every section has a page here.
  */
 export function SettingsView(): JSX.Element {
   const t = useTokens();
@@ -34,8 +37,20 @@ export function SettingsView(): JSX.Element {
   const section = state.section;
   const layer = state.configLayer;
   const frame = settingsFrameOf(section, layer, justYou);
-  const layerView = useMemo(() => ({ layer, view: state.config, onlyStated: frame.onlyStated }), [layer, state.config, frame.onlyStated]);
-  const project = settingsProjectLabel(state.projects, state.at);
+  const [machines] = useMachines();
+  const names = pathNamesOf(state.settingsPath, {
+    projects: state.projects,
+    grouped: state.settings.ui.groupWorkspaces !== false,
+    self: machines !== undefined ? { id: machines.self.id, label: machines.self.label } : undefined,
+    machines: (machines?.machines ?? []).map((m) => ({ id: m.id, label: m.label })),
+  });
+  const namesKey = `${names.project ?? ""}\u0000${names.machine ?? ""}`;
+  const layerView = useMemo(
+    () => ({ layer, view: state.settingsConfig, onlyStated: frame.onlyStated, names }),
+    // `names` stands for its two strings.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [layer, state.settingsConfig, frame.onlyStated, namesKey],
+  );
   // What the room holds for its pages: the health board, its fixes, and the forge sign-ins in flight.
   const health = useHealth();
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
@@ -104,10 +119,13 @@ export function SettingsView(): JSX.Element {
         <SettingsLayerContext.Provider value={layerView}>
           <SettingsPage
             title={frame.title}
-            lead={settingsLeadParts(section, layer, state.at)}
+            lead={[
+              ...(settingsLeadParts(section, layer, names) ?? []),
+              // The path's own layers could not be read — its machine is offline, an older JaiRA.
+              ...(frame.layered && state.settingsProblem !== null ? [{ text: ` ${state.settingsProblem}`, bold: true }] : []),
+            ]}
             {...(frame.layered
               ? {
-                  aside: <LayerPicker value={layer} layers={settingsLayersFor(state.at !== null)} projectName={project ?? undefined} onChange={actions.setConfigLayer} disabled={state.busy} />,
                   onlyStated: frame.onlyStated,
                   ...(frame.under ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={setJustYou} /> } : {}),
                 }

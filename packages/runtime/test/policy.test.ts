@@ -4,11 +4,13 @@
  * §11.3's classes ask, the strictest verdict on a line wins, and anything
  * unparsable escalates rather than passing.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import type { FunctionInputs } from "@declarative-ai/exec";
 import type { PermissionRequest, SmartApprover } from "@declarative-ai/permissions";
 import { askingParts, entriesToRemember, parsePermissionSet } from "@jaira/shared";
 import { shellPermissionSetOf } from "../src/commandParts";
-import { CommandGrants, compilePolicy, decideCommand, isDeniedPath, policyCanEscalate, projectPolicy, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
+import { CommandGrants, commandDecisionOf, compilePolicy, decideCommand, policyCanEscalate, projectPolicy, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
 
 const OPEN: JairaPolicy = {};
 const action = (line: string, policy: JairaPolicy = OPEN): string => decideCommand(policy, line).action;
@@ -370,7 +372,7 @@ describe("a line is judged part by part, against the permission set", () => {
     expect(decideCommand(OPEN, "npm @params", "powershell", { permissionSet: full, root: "/repo", packages }).action).toBe("require_approval");
   });
 
-  it("keeps the destructive floor and `.jaira/` above EVERY permission set, however the command is dressed", () => {
+  it("keeps the destructive floor above EVERY permission set, however the command is dressed", () => {
     const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" }).permissionSet)!;
     for (const line of [
       "git reset --hard",
@@ -388,11 +390,6 @@ describe("a line is judged part by part, against the permission set", () => {
       const decision = decideCommand(OPEN, line, "posix", { permissionSet: open });
       expect(decision.action, line).toBe("deny");
       expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("builtin");
-    }
-    for (const line of ["cat .jaira/settings.json", "echo x > .jaira/tasks/t.json", "cd .jaira", "cp a --target-directory=.jaira/x"]) {
-      const decision = decideCommand(OPEN, line, "posix", { permissionSet: open });
-      expect(decision.action, line).toBe("deny");
-      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("path");
     }
     // PowerShell's spellings of the same.
     const openPs = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", "remove-item": "allow", other: "allow" }).permissionSet)!;
@@ -412,11 +409,6 @@ describe("a line is judged part by part, against the permission set", () => {
       const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
       expect(decision.action, line).toBe("deny");
       expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("builtin");
-    }
-    for (const line of ["Get-Content .jaira\\settings.json", "Set-Content -Path:.jaira/x.json -Value 1", "'x' > .jaira/t.json"]) {
-      const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
-      expect(decision.action, line).toBe("deny");
-      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("path");
     }
   });
 
@@ -499,15 +491,106 @@ describe("CommandGrants lets go of an answer by the key it lists it by (decision
   });
 });
 
-describe("isDeniedPath", () => {
-  it("denies .jaira wherever it appears", () => {
-    // §1g item 5: a worktree normally contains .jaira/, so this is the enforcement.
-    for (const p of [".jaira/settings.json", "C:\\repo\\.jaira\\jaira.db", "/repo/.jaira", "sub/.jaira/tasks/x.json"]) {
-      expect(isDeniedPath(p), p).toBe(true);
+// --- `.jaira/`: the shipped sets' lines, not a rule (2026-11-17) ---------------
+
+/** A set as JaiRA ships it. */
+const shipped = (name: string) =>
+  parsePermissionSet(JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url), "utf8")) as unknown).permissionSet;
+
+const SHIPPED = ["full", "auto", "ask-first", "read-only", "read-only-scratch"];
+const PROJECT = "/work/app";
+const HOME = "/home/me";
+
+/**
+ * "If we want an agent to modify the jaira files, that should be a permission layer… simply a default
+ * in the permission sets to exclude write permission to that directory." Nothing in the policy knows
+ * `.jaira/`; every set JaiRA ships refuses writing at `$PROJECT/.jaira` and `$WORKTREE/.jaira` (and
+ * reading the machine key) with lines of its own — so a line however it writes there is refused by the
+ * PERMISSION SET, at the place, and a set that says otherwise is obeyed.
+ */
+describe("`.jaira/` is the shipped sets' to refuse, by their lines", () => {
+  const under = (set: string | ReturnType<typeof shipped>, line: string, dialect: "posix" | "powershell" = "posix", extra: Parameters<typeof decideCommand>[3] = {}) =>
+    decideCommand(OPEN, line, dialect, {
+      permissionSet: shellPermissionSetOf(typeof set === "string" ? shipped(set) : set)!,
+      root: PROJECT,
+      places: { root: PROJECT, named: { $PROJECT: PROJECT, $WORKTREE: PROJECT, "~": HOME } },
+      ...extra,
+    });
+  const refused = (decision: ReturnType<typeof decideCommand>) => decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy;
+
+  it("refuses writing it under every shipped set, however the line writes", () => {
+    const posix = [
+      "echo x > .jaira/settings.json",
+      "rm -rf .jaira",
+      "cp a .jaira/x",
+      "cp a --target-directory=.jaira/x",
+      "mv notes.md .jaira/notes.md",
+      "touch .jaira/workflows/x.json",
+      "mkdir .jaira/functions",
+      "sed -i s/a/b/ .jaira/settings.json",
+      "git checkout -- .jaira/settings.json",
+      "npx prettier --write .jaira/settings.json",
+      "cd .jaira && npm test",
+      `echo x > ${PROJECT}/.jaira/settings.json`,
+    ];
+    const powershell = ["Set-Content -Path:.jaira/x.json -Value 1", "'x' > .jaira/t.json", "Remove-Item -Recurse .jaira"];
+    for (const set of SHIPPED) {
+      for (const [line, dialect] of [...posix.map((l) => [l, "posix"] as const), ...powershell.map((l) => [l, "powershell"] as const)]) {
+        const decision = under(set, line, dialect);
+        expect(decision.action, `${set}: ${line}`).toBe("deny");
+        // The set's line refused it, at its place — not a rule above every set.
+        expect(refused(decision)?.source, `${set}: ${line}`).toBe("permissionSet");
+        expect(refused(decision)?.place, `${set}: ${line}`).toMatch(/^\$PROJECT\/\.jaira/);
+      }
     }
-    for (const p of ["src/index.ts", "artifacts/x.md", "notjaira/x", ".jairaish/x"]) {
-      expect(isDeniedPath(p), p).toBe(false);
+  });
+
+  it("refuses it in the worktree too, where `$WORKTREE` is not the project", () => {
+    const tree = "/work/.jaira-worktrees/app/t-1";
+    const decision = decideCommand(OPEN, "echo x > .jaira/setup.json", "posix", {
+      permissionSet: shellPermissionSetOf(shipped("full"))!,
+      root: tree,
+      places: { root: tree, named: { $PROJECT: PROJECT, $WORKTREE: tree, "~": HOME } },
+    });
+    expect(decision.action).toBe("deny");
+    expect(refused(decision)?.place).toBe("$WORKTREE/.jaira/**/*");
+    // The worktree's own work is not under it.
+    expect(decideCommand(OPEN, "echo x > src/x.ts", "posix", { permissionSet: shellPermissionSetOf(shipped("full"))!, root: tree, places: { root: tree, named: { $PROJECT: PROJECT, $WORKTREE: tree } } }).action).toBe("allow");
+  });
+
+  it("reads it as any other path of the project, and refuses only the machine key", () => {
+    for (const line of ["cat .jaira/settings.json", "ls .jaira/workflows", "grep -r model .jaira"]) expect(under("full", line).action, line).toBe("allow");
+    expect(under("full", "Get-Content .jaira\\settings.json", "powershell").action).toBe("allow");
+    expect(under("read-only", "cat .jaira/setup.json").action).toBe("allow");
+    for (const set of SHIPPED) {
+      for (const line of [`cat ${HOME}/.jaira/system/machine.key`, `xxd ${HOME}/.jaira/system/machine.key`]) {
+        const decision = under(set, line);
+        expect(decision.action, `${set}: ${line}`).toBe("deny");
+        expect(refused(decision)?.place, `${set}: ${line}`).toBe("~/.jaira/system/machine.key");
+      }
     }
+  });
+
+  it("is obeyed where a set says otherwise — and a set that says nothing is not overruled", () => {
+    // A layer that opens the workflows' files: a file pattern under the line's own outranks it.
+    const opened = shipped("full");
+    opened.entries["write_file"] = { ...opened.entries["write_file"]!, places: { ...opened.entries["write_file"]!.places, "$PROJECT/.jaira/workflows/**/*": "allow" } };
+    expect(under(opened, "echo x > .jaira/workflows/plan.json").action).toBe("allow");
+    expect(under(opened, "echo x > .jaira/settings.json").action).toBe("deny");
+    // A set with no such line, and no set at all: the built-ins know nothing of `.jaira/`.
+    const open = parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", other: "allow" }).permissionSet;
+    expect(under(open, "echo x > .jaira/settings.json").action).toBe("allow");
+    expect(decideCommand(OPEN, "echo x > .jaira/settings.json && cat .jaira/settings.json").action).toBe("allow");
+  });
+
+  it("is never lifted by an answer remembered for the run — that only settles what asks", () => {
+    const grants = new CommandGrants();
+    grants.remember("write_file", "allow");
+    grants.remember("rm", "allow");
+    expect(under("ask-first", "rm .jaira/settings.json", "posix", { grants }).action).toBe("deny");
+    expect(under("ask-first", "echo x > .jaira/settings.json", "posix", { grants }).action).toBe("deny");
+    // …where it lifts an ask elsewhere as before.
+    expect(under("ask-first", "rm notes.md", "posix", { grants }).action).toBe("allow");
   });
 });
 
@@ -541,10 +624,25 @@ describe("compilePolicy", () => {
     expect(await verdict(OPEN, "shell", { command: "git push" })).toBe("ask");
   });
 
-  it("denies .jaira/ by path, for command and file tools alike", async () => {
-    expect(await verdict(OPEN, "shell", { command: "cat .jaira/settings.json" })).toBe("deny");
-    expect(await verdict(OPEN, "show_artifact", { path: ".jaira/tasks/x.json", content: "x" })).toBe("deny");
+  it("leaves .jaira/ to the permission set's lines, for command and file tools alike", async () => {
+    // With no set, the approver refuses only what the built-ins refuse: they know nothing of `.jaira/`.
+    expect(await verdict(OPEN, "shell", { command: "cat .jaira/settings.json" })).toBe("allow");
+    expect(await verdict(OPEN, "show_artifact", { path: ".jaira/tasks/x.json", content: "x" })).toBe("allow");
     expect(await verdict(OPEN, "show_artifact", { path: "src/x.html", content: "x" })).toBe("allow");
+    // Under a shipped set the narrowing refuses a write there, by any tool, and lets a read through.
+    const policy = compilePolicy(OPEN, { permissionSet: shipped("full"), workspaceRoot: PROJECT });
+    const at = (tool: string, input: Record<string, unknown>) => policy.scopeOf!({ name: tool }, input as FunctionInputs);
+    expect(at("write_file", { path: ".jaira/settings.json", content: "{}" })).toBe("deny");
+    expect(at("edit", { path: `${PROJECT}/.jaira/workflows/plan.json` })).toBe("deny");
+    expect(at("shell", { command: "echo x > .jaira/settings.json" })).toBe("deny");
+    expect(at("shell", { command: "git status", cwd: ".jaira" })).toBe("deny");
+    // The line's own decision says which line refused it, and where.
+    const removal = { command: "rm -rf .jaira" };
+    expect(at("shell", removal)).toBe("deny");
+    expect(commandDecisionOf(removal)!.parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "write_file", place: "$PROJECT/.jaira" });
+    expect(at("read_file", { path: ".jaira/settings.json" })).not.toBe("deny");
+    expect(at("shell", { command: "cat .jaira/settings.json" })).not.toBe("deny");
+    expect(at("write_file", { path: "src/x.ts", content: "x" })).not.toBe("deny");
   });
 
   it("escalates when a command tool has no command to read", async () => {
@@ -600,8 +698,9 @@ describe("compilePolicy", () => {
       expect(await sized("show_artifact", { path: "a.html", content: "x".repeat(50_000_000) }, 0)).toBe("allow");
     });
 
-    it("still refuses .jaira/ whatever the size", async () => {
-      expect(await sized("show_artifact", { path: ".jaira/x.html", content: "tiny" }, 1024)).toBe("deny");
+    it("judges a payload by its size wherever it is named, `.jaira/` too — where it may go is the set's", async () => {
+      expect(await sized("show_artifact", { path: ".jaira/x.html", content: "tiny" }, 1024)).toBe("allow");
+      expect(await sized("show_artifact", { path: ".jaira/x.html", content: "x".repeat(2048) }, 1024)).toBe("ask");
     });
 
     it("escalates a producing call with nothing to judge, rather than assuming", async () => {

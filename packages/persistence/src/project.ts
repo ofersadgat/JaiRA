@@ -16,8 +16,12 @@ import {
   jairaBasePaths,
   jairaPaths,
   JAIRA_DIR_NAME,
+  LOCAL_SETTINGS_FILE_NAME,
+  MACHINE_SETTINGS_FILE_NAME,
   mergeConfigLayers,
   parseConfig,
+  personalProjectSettingsFile,
+  projectSettingsKey,
   readJsonFile,
   SYSTEM_DIR_NAME,
   type JairaBasePaths,
@@ -41,6 +45,8 @@ import { RemoteHandleStore } from "./remoteHandles";
 import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
+import { readRepositoryIdentity } from "./repositoryIdentity";
+import { ensureLocalLayerIgnored, LOCAL_LAYER_IGNORE } from "./fileLayers";
 import { TaskFileStore } from "./taskStore";
 import { registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
 import { touch } from "./sync";
@@ -164,6 +170,19 @@ ${SYS}/workspace.id
 # secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
 # to commit a non-secret default has to be able to.
 .env.local
+
+# Settings of one machine: this project on this machine (settings.local.json, and its permission
+# sets under local/), and in the shared root the machine's own (machine-settings.json). A workspace is
+# one folder on one machine, so they are that machine's, and a clone elsewhere must not take them.
+${LOCAL_SETTINGS_FILE_NAME}
+${LOCAL_LAYER_IGNORE}
+${MACHINE_SETTINGS_FILE_NAME}
+
+# The project's setup for this machine alone (decision 0027): a target it names replaces the
+# committed one in setup.json, here and nowhere else.
+setup.local.json
+setup.local.yaml
+setup.local.yml
 `;
 
 /**
@@ -190,6 +209,29 @@ function ensureKeyIgnored(ignoreFile: string): void {
     `# Added by JaiRA: this workspace's id in the shared database (decision 0013 §4). Committed,
 # every clone of the repository would claim the same tasks.`,
   );
+}
+
+/**
+ * Make sure an EXISTING `.gitignore` hides this machine's settings for the project
+ * (`settings.local.json`) and its files (`local/`, its permission sets) — the lines a root made before
+ * those layers existed lacks, appended the way {@link ensureKeyIgnored} appends its own. Called before
+ * either is first written, and at init. No file: the template, which carries both.
+ */
+export function ensureLocalSettingsIgnored(jairaDir: string): void {
+  const ignoreFile = join(jairaDir, ".gitignore");
+  let text: string;
+  try {
+    text = readFileSync(ignoreFile, "utf8");
+  } catch {
+    mkdirSync(jairaDir, { recursive: true });
+    writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
+    return;
+  }
+  if (!text.split(/\r?\n/).some((line) => line.trim() === LOCAL_SETTINGS_FILE_NAME || line.trim() === `/${LOCAL_SETTINGS_FILE_NAME}`)) {
+    const separator = text.length === 0 || text.endsWith("\n") ? "" : "\n";
+    writeFileSync(ignoreFile, `${text}${separator}\n# Added by JaiRA: this project's settings on this machine, which a clone elsewhere must not take.\n${LOCAL_SETTINGS_FILE_NAME}\n`, "utf8");
+  }
+  ensureLocalLayerIgnored(jairaDir);
 }
 
 /** Append `system/<name>` to an existing ignore file that does not already hide it. */
@@ -243,8 +285,10 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
-  if (existsSync(ignoreFile)) ensureKeyIgnored(ignoreFile);
-  else writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
+  if (existsSync(ignoreFile)) {
+    ensureKeyIgnored(ignoreFile);
+    ensureLocalSettingsIgnored(paths.jairaDir);
+  } else writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
   return paths;
 }
 
@@ -317,7 +361,7 @@ export function initBase(baseDir?: string): JairaBasePaths {
 export function openSharedProject(opts?: { now?: () => number; staleMs?: number; baseDir?: string; builtInDir?: string }): Project {
   const base = initBase(opts?.baseDir);
   const paths = baseAsProjectPaths(base.baseDir, opts?.builtInDir);
-  return openAt(paths, layeredConfigOf([paths.builtIn.settingsFile, base.settingsFile, base.personalSettingsFile]), "shared", opts);
+  return openAt(paths, loadLayeredConfig(paths), "shared", opts);
 }
 
 /**
@@ -339,12 +383,44 @@ export function sessionStoreFor(project: Project, scope: SessionScope = {}, open
 
 /**
  * The effective configuration: every layer, weakest first — what JaiRA ships (`$SYSTEM/settings.json`,
- * decision 0006), the shared base root's `settings.json`, the project's laid over it, and the person's
- * own `personal-settings.json` over all of them (DESIGN §3, and the fourth layer of 2026-09-23). Absent
- * files are empty layers, so a machine with no base root behaves exactly as before one existed.
+ * decision 0006), the shared base root's `settings.json`, the project's, this machine's own
+ * (`machine-settings.json`), the project's on this machine (`.jaira/settings.local.json`), the person's
+ * own `personal-settings.json`, and the person's for this project (`projects/<key>/personal-settings.json`)
+ * — least to most specific, person first, then machine, then project (DESIGN §3; the layers of
+ * 2026-09-23 and 2026-11-17). Absent files are empty layers, so a machine with no base root behaves
+ * exactly as before one existed.
+ *
+ * The shared root standing as a project has no project layer: its paths name the base's own files for
+ * the project's two, read once (see {@link layeredConfigOf}), and nobody's settings for it as a project.
  */
 export function loadLayeredConfig(paths: JairaPaths): JairaConfig {
-  return layeredConfigOf([paths.builtIn.settingsFile, paths.base.settingsFile, paths.settingsFile, paths.base.personalSettingsFile]);
+  return layeredConfigOf(layerFilesOf(paths));
+}
+
+/** The layer files of {@link loadLayeredConfig}, weakest first. */
+export function layerFilesOf(paths: JairaPaths): string[] {
+  const root = paths.projectDir === paths.base.baseDir;
+  return [
+    paths.builtIn.settingsFile,
+    paths.base.settingsFile,
+    paths.settingsFile,
+    paths.base.machineSettingsFile,
+    paths.localSettingsFile,
+    paths.base.personalSettingsFile,
+    ...(root ? [] : [personalProjectSettingsFileOf(paths)]),
+  ];
+}
+
+// A project's repository identity — `readRepositoryIdentity` — is read in `repositoryIdentity.ts`, which
+// the permission sets' layer roots read too without reaching for everything a project opens.
+export { readRepositoryIdentity } from "./repositoryIdentity";
+
+/**
+ * The person's settings for this project — `<base>/projects/<key>/personal-settings.json`, keyed by its
+ * repository identity, so every clone of it, on any machine, has the same one.
+ */
+export function personalProjectSettingsFileOf(paths: Pick<JairaPaths, "projectDir" | "base">): string {
+  return personalProjectSettingsFile(paths.base, projectSettingsKey(readRepositoryIdentity(paths.projectDir), paths.projectDir));
 }
 
 /**

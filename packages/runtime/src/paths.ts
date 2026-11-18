@@ -22,11 +22,61 @@ import { refusal } from "@jaira/shared";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.runtime.paths");
-/** The execution environment a project's commands run in (DESIGN §9.1). */
-export type ExecEnv = "windows" | { wsl: string };
+/**
+ * The execution environment a project's commands run in (DESIGN §9.1): natively, inside a WSL
+ * distro, or (decision 0027) inside a workspace's container.
+ *
+ * The first two are the MACHINE: git, the agents, their installers and MCP servers run there too. A
+ * container is narrower — the workspace is mounted at the same path inside it, so everything that
+ * reads files or runs git stays on the machine, and only the commands JaiRA runs (its shell tool, a
+ * state's `run_command`, setup steps) go in through `docker exec`. {@link machineEnvOf} is where a
+ * thing of the machine's asks which machine that is.
+ */
+export type ExecEnv = MachineExecEnv | ContainerExecEnv;
+
+/** Where the machine's own programs run: natively, or inside a WSL distro. */
+export type MachineExecEnv = "windows" | { wsl: string };
+
+/** A workspace's container (`execEnvironment: { container }`), its commands run through `docker exec`. */
+export interface ContainerExecEnv {
+  container: string;
+  /** `docker exec -u`: a Dev Container's `remoteUser`. */
+  user?: string;
+  from?: "devcontainer" | "docker";
+}
 
 export function isWslEnv(env: ExecEnv): env is { wsl: string } {
-  return typeof env === "object" && typeof env.wsl === "string";
+  // A merged layer may hold both; a container, named only by a workspace's own layer, is the one meant.
+  return typeof env === "object" && typeof (env as { wsl?: unknown }).wsl === "string" && !isContainerEnv(env);
+}
+
+export function isContainerEnv(env: ExecEnv | undefined): env is ContainerExecEnv {
+  return typeof env === "object" && env !== null && typeof (env as { container?: unknown }).container === "string";
+}
+
+/**
+ * The machine under `env`: a container's is the machine it runs on (native — containers run on Macs
+ * and Linux only), the others are their own. What git, the agent CLIs, their installers and MCP
+ * servers run in, whatever the project's commands run in.
+ */
+export function machineEnvOf(env: ExecEnv): MachineExecEnv {
+  return isContainerEnv(env) ? "windows" : env;
+}
+
+/** An options bag with its `execEnv` moved to {@link machineEnvOf} — for the code of the machine's own programs. */
+export function onMachine<T extends { execEnv?: ExecEnv }>(options: T): T {
+  return options.execEnv !== undefined && isContainerEnv(options.execEnv) ? { ...options, execEnv: machineEnvOf(options.execEnv) } : options;
+}
+
+/**
+ * Why a container cannot run here, or undefined when it can: Docker's containers share the
+ * workspace's path only from a Mac or a Linux machine (a Windows path is not a Linux one, and WSL is
+ * its own machine).
+ */
+export function containerRefusal(platform: string = process.platform, machine: ExecEnv = "windows"): string | undefined {
+  if (isWindowsHost(platform)) return "A workspace runs in a container on a Mac or a Linux machine only; on Windows, run it on the machine (leave out in: container) or in WSL.";
+  if (isWslEnv(machine)) return "A workspace runs in a container from a Mac or a Linux machine only, not from inside WSL; run it on the machine (leave out in: container).";
+  return undefined;
 }
 
 export function distroOf(env: ExecEnv): string | undefined {
@@ -52,7 +102,7 @@ export function isWindowsHost(platform: string = process.platform): boolean {
  * host shapes are testable from either OS.
  */
 export function dialectFor(env: ExecEnv, platform: string = process.platform): "posix" | "powershell" {
-  if (isWslEnv(env)) return "posix";
+  if (isWslEnv(env) || isContainerEnv(env)) return "posix";
   return isWindowsHost(platform) ? "powershell" : "posix";
 }
 
@@ -64,6 +114,9 @@ export function dialectFor(env: ExecEnv, platform: string = process.platform): "
  */
 export function interpreterFor(env: ExecEnv, platform: string = process.platform): [string, ...string[]] {
   if (isWslEnv(env)) return ["bash", "-lc"];
+  // An image need not have bash; every one with a shell has `sh`. A login shell, so the image's
+  // profile (a version manager's PATH) is read as it is in WSL.
+  if (isContainerEnv(env)) return ["sh", "-lc"];
   return isWindowsHost(platform)
     ? ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command"]
     : ["/bin/sh", "-c"];
@@ -158,7 +211,8 @@ export function samePath(a: string, b: string): boolean {
 
 /**
  * The path to hand a command running in `env`. Windows execution keeps Windows
- * paths; WSL execution needs the distro's view.
+ * paths; WSL execution needs the distro's view. A container's workspace is mounted at the same path
+ * inside as outside (decision 0027), so its paths are the machine's.
  */
 export function pathFor(env: ExecEnv, windowsPath: string): string {
   return isWslEnv(env) ? toWslPath(windowsPath, env.wsl) : windowsPath;

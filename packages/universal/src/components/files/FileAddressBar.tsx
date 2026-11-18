@@ -57,9 +57,9 @@ export function FileAddressBar({
     <DocBar input={barFor(doc)} label={context.state?.label} counts={issueCountsOf(context.state)} onInspect={onInspect}>
       {toggleable && context.onRunMode !== undefined ? <RunModeToggle mode={context.runMode ?? "board"} onMode={context.onRunMode} /> : undefined}
       {doc.layer === "system" && doc.stateId === undefined ? (
-        doc.builtIn?.layers.includes("base") === true ? (
-          <Chip tone="warn" title="Shared already has its own copy of this file, and that copy is the one in use.">
-            built in · Shared has its copy
+        doc.builtIn?.layers.some((layer) => layer !== "system") === true ? (
+          <Chip tone="warn" title={`${LAYER_LABEL[doc.builtIn.layers[0]!]} already has its own copy of this file, and that copy is the one in use.`}>
+            {`built in · ${LAYER_LABEL[doc.builtIn.layers[0]!]} has its copy`}
           </Chip>
         ) : (
           <Chip title="This file ships with JaiRA. The first change you make copies it into ~/.jaira with the change in it, and the copy is what is used.">built in · an edit copies it to Shared</Chip>

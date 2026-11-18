@@ -275,6 +275,17 @@ export function agentActionOf(spec: ProviderSpec, probe: ProbeResult | undefined
   return undefined;
 }
 
+/**
+ * Whether an agent row offers Check again beside its button: it is signed out, its sign-in was refused,
+ * or the check found it not working — what a sign-in from a terminal, or an install done elsewhere,
+ * fixes without this app seeing it (the person, 2026-11-18: "the settings / connections pane should
+ * also have check again / sign in (if not signed in or an error)"). The conversation's error and the
+ * composer's line offer the same pair (`RouteFixes`).
+ */
+export function agentChecksAgain(probe: ProbeResult | undefined, state: ProviderState): boolean {
+  return probe !== undefined && (state === "needs-sign-in" || state === "unavailable");
+}
+
 /** Who a closed agent row runs as, in a chip: the login in use, or the key it names and where that was found. */
 export type AgentChip = { kind: "login"; who: string; fact: string | undefined; more: number } | { kind: "key"; name: string; where: string | undefined; missing: boolean };
 

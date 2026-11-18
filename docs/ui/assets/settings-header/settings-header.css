@@ -1,0 +1,182 @@
+/*
+ * Settings' path, beside its name in the settings sheet's head (captured 2026-11-18). The universal shell
+ * draws it from `packages/universal/src/components/settings/SettingsCrumb.tsx` and the sheet's head from
+ * `Sidebar.tsx`, not from a stylesheet, so these rules restate their measures over the frozen
+ * stylesheet's tokens and faces (`../styles.css`, which is not edited) and the rail sidebar's own
+ * (`../sidebar/sidebar.css`). Linked by the settings-header and settings-toolsets mockups only. 12.5px is
+ * the app face's size; the code's scales are of it. The frozen sheet has no `--faint`: it is drawn as
+ * `--dim` at 60%.
+ */
+
+/* The settings sheet (the sidebar's panel, without its rail) beside the page it heads. */
+.sh-frame {
+  display: flex;
+  align-items: stretch;
+}
+
+.sh-frame > .rsb {
+  width: 262px;
+  height: auto;
+  flex-shrink: 0;
+}
+
+.sh-frame > .sh-page {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The sheet's head grows to wrap a long path: 40 tall at least, 6 above and below once it holds one. */
+.rsb-phead.sh-phead {
+  height: auto;
+  min-height: 40px;
+  padding: 6px 8px;
+  gap: 6px;
+}
+
+/* Over the page, for a mockup of the page alone: the sheet's head as the sidebar draws it. */
+.sh-strip {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-app);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.sh-strip .rsb-phead {
+  flex: 1;
+}
+
+.sh-strip button {
+  border: 0;
+  margin: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: default;
+}
+
+.sh-strip-note {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--dim);
+}
+
+/* The path: wraps, centred, gap 2. */
+.crumbs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+}
+
+.crumbs .app-title {
+  white-space: nowrap;
+}
+
+/* "Settings", with a path: a ghost press (radius 6, padding 0 4) that goes back to Shared. */
+.crumb-home {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.crumb-sep {
+  flex-shrink: 0;
+  font-size: 12.5px;
+  color: color-mix(in srgb, var(--dim) 60%, transparent);
+}
+
+/* One part and, on hover, its ×. */
+.crumb-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  flex-shrink: 1;
+}
+
+.crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 6px;
+  min-width: 0;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb.hover,
+.crumb-home.hover,
+.crumb-add.hover {
+  background: var(--fill-ghost-hover);
+}
+
+/* A paired machine's dot: --ok online, --warn otherwise. */
+.crumb-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.crumb-dot.off {
+  background: var(--warn);
+}
+
+/* The × (the cross icon, 10, --dim, in a 16 square), and the square it leaves while not hovered. */
+.crumb-x,
+.crumb-gap {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+.crumb-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--dim);
+}
+
+.crumb-x svg {
+  width: 10px;
+  height: 10px;
+}
+
+/* + : data 13/12.5 600 --dim, 22 square, radius 6. */
+.crumb-add {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dim);
+}
+
+/* `Narrow to`, hung 4 under `+` (the context menu's own look, `../styles.css`). */
+.sh-menu {
+  position: absolute;
+  z-index: 2;
+  width: 270px;
+}

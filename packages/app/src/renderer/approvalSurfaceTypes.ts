@@ -3,7 +3,7 @@
  * `ApprovalSurface` and the approval dialogs take (`packages/universal/src/components/floats/`).
  * Types only, so a module that passes them along imports no component.
  */
-import type { ApprovalScope, PartAnswer, PendingApproval, WritableLayer } from "@jaira/shared/browser";
+import type { ApprovalScope, PartAnswer, PendingApproval, WritableSetLayer } from "@jaira/shared/browser";
 
 /**
  * What rides beside the scope: the part widths to remember, and the layer to write them into — or, once
@@ -11,7 +11,7 @@ import type { ApprovalScope, PartAnswer, PendingApproval, WritableLayer } from "
  */
 export interface ApprovalAnswerExtras {
   remember?: string[];
-  addTo?: WritableLayer;
+  addTo?: WritableSetLayer;
   answers?: PartAnswer[];
 }
 

@@ -4,6 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { ChatPlanView, ChatSettings } from "@jaira/shared/browser";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { startSentenceOf } from "@jaira/ui/environmentModel";
+import { keepLayersOf } from "@jaira/ui/composerCards";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { invoke } from "@jaira/ui/store";
 import { PLAIN_SCROLLER, Txt, scrollbarProps } from "../../primitives";
@@ -140,7 +141,7 @@ export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
           {...(start.disabled && runAs === null ? { disabled: "choose what this conversation runs, above" } : {})}
           stack={{ project }}
           // With no project open this runs in JaiRA's own root, which has no "this project" to keep in.
-          saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
+          saveLayers={keepLayersOf(surface.hasProject)}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
           {...mentions}
         />

@@ -31,8 +31,9 @@ import {
   type PermissionSetDecl,
   type PermissionSetDrafts,
   type PermissionSetsView as PermissionSetsData,
-  type WorkflowLayer,
+  type SetLayer,
   type WritableLayer,
+  type WritableSetLayer,
 } from "@jaira/shared/browser";
 
 /** What the rail has chosen: a permission set, the `+ permission set` of one bucket, or `+ bucket`. */
@@ -54,14 +55,16 @@ export function tabOfChoice(choice: PermissionSetChoiceOf | undefined): string |
 }
 
 /**
- * What the pane reads, and where a change lands, for the layer the page's switch is on.
+ * What the pane reads, and where a change lands, for the layer Settings' path makes.
  *
- * A layer that holds files reads its own and writes its own. Any other — the personal layer, one
- * settings file with no `permission-sets/` beside it — reads as the nearest layer that does (this
- * project when one is open, else Shared), and has nowhere to write until the person says which.
+ * Every one of the settings' six holds permission sets of its own (`SetLayer`, decision 0023 amended
+ * 2026-11-18): a layer the engine lists reads its own and writes its own. One it does not — an engine
+ * from before, which keeps sets only in the project and Shared, read on another machine — reads as the
+ * nearest layer that does (this project when one is read, else Shared), and has nowhere to write until
+ * the person says which.
  */
-export function permissionSetLayersOf(layer: ConfigLayer, layers: readonly WorkflowLayer[]): { reads: WritableLayer; writesTo: WritableLayer | undefined } {
-  if (layer === "project" || layer === "base") return { reads: layer, writesTo: layer };
+export function permissionSetLayersOf(layer: ConfigLayer, layers: readonly SetLayer[]): { reads: SetLayer; writesTo: WritableSetLayer | undefined } {
+  if (layers.includes(layer)) return { reads: layer, writesTo: layer };
   return { reads: layers.includes("project") ? "project" : "base", writesTo: undefined };
 }
 
@@ -111,7 +114,7 @@ export type PermissionSetRailRow =
  * you are editing states it", and that layer states nothing. With `folds`, each bucket is a fold; a
  * closed one lists nothing under it, a bucket inside it included.
  */
-export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo: WritableLayer | undefined, drafts: PermissionSetDrafts, folds?: RailFolds, standing: StandingLayers = {}): PermissionSetRailRow[] {
+export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo: WritableSetLayer | undefined, drafts: PermissionSetDrafts, folds?: RailFolds, standing: StandingLayers = {}): PermissionSetRailRow[] {
   const writable = writesTo !== undefined;
   const rows: PermissionSetRailRow[] = [];
   const isOpen = (path: string): boolean => folds === undefined || folds.open.has(path);
@@ -174,26 +177,44 @@ export function newPermissionSetProblem(ats: readonly PermissionSetAt[], bucket:
 /** The map a new permission set starts as: nothing offered, and everything else asked about. */
 export const NEW_PERMISSION_SET: PermissionSetDecl = { other: "ask" };
 
-export const LOWER_NAME: Readonly<Record<WorkflowLayer, string>> = { system: "what ships", base: "the shared one", project: "this project's" };
+export const LOWER_NAME: Readonly<Record<SetLayer, string>> = {
+  system: "what ships",
+  base: "the shared one",
+  project: "this project's",
+  machine: "this machine's",
+  projectMachine: "this project's on this machine",
+  you: "yours",
+  projectYou: "yours for this project",
+};
 /** A layer a copy can be written into, as "Copy to …" and "copied to …" name it. */
-export const INTO_NAME: Readonly<Record<WritableLayer, string>> = { base: "Shared", project: "this project" };
-/** The personal layer, as the page's switch names it. */
-export const PERSONAL = "Just you";
+export const INTO_NAME: Readonly<Record<WritableSetLayer, string>> = {
+  base: "Shared",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "Just you",
+  projectYou: "you in this project",
+};
+/**
+ * What a layer the engine keeps no permission sets for is told, in place of a copy of its own — an
+ * engine before 2026-11-18, read on another machine, has them only in the project and Shared.
+ */
+export const NO_SETS_HERE = "That machine's JaiRA is older and keeps permission sets only in a project and in Shared";
 
 const NO_STANDING: StandingLayers = {};
 
 /** The three calls the pane makes — the host's, so the view has no channel of its own. */
 export interface PermissionSetsChannel {
   read: () => Promise<PermissionSetsData>;
-  write: (request: { id: string; layer: WritableLayer; permissionSet: PermissionSetDecl }) => Promise<unknown>;
-  reset: (request: { id: string; layer: WritableLayer }) => Promise<unknown>;
+  write: (request: { id: string; layer: WritableSetLayer; permissionSet: PermissionSetDecl }) => Promise<unknown>;
+  reset: (request: { id: string; layer: WritableSetLayer }) => Promise<unknown>;
 }
 
 /** Everything the view is drawn from, and every write it asks for — `PermissionSetsView`'s props. */
 export interface PermissionSetsViewProps {
   data: PermissionSetsData;
-  layer: WritableLayer;
-  writesTo: WritableLayer | undefined;
+  layer: SetLayer;
+  writesTo: WritableSetLayer | undefined;
   choice: PermissionSetChoiceOf | undefined;
   onChoice: (next: PermissionSetChoiceOf) => void;
   drafts: PermissionSetDrafts;
@@ -325,7 +346,7 @@ export function usePermissionSetsHost({
     setOpenBuckets((current) => new Set([...current, ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))]));
   }
 
-  const dropDraft = (at: WorkflowLayer, id: string): void =>
+  const dropDraft = (at: SetLayer, id: string): void =>
     setDrafts((current) => {
       const { [id]: _gone, ...rest } = current[at] ?? {};
       return { ...current, [at]: rest };

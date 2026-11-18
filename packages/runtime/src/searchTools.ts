@@ -18,11 +18,10 @@
  * rather than a defensive afterthought.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { basename, join, relative, resolve, sep } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
-import { globToRegExp } from "@jaira/shared";
+import { globToRegExp, JAIRA_DIR_NAME, SYSTEM_DIR_NAME } from "@jaira/shared";
 import { withinWorkspace } from "./artifactPath";
-import { isDeniedPath } from "./policy";
 
 export const GLOB = "glob";
 export const GREP = "grep";
@@ -37,10 +36,18 @@ export interface SearchToolOptions {
  *
  * Not a performance tweak: a `node_modules` in a real project holds more files than the rest of the
  * repository by two orders of magnitude, so a walk that entered one would spend its whole budget
- * there and report a truncated list that happens to contain nothing anybody asked about. `.jaira` is
- * excluded for the reason `isDeniedPath` exists — it is the app's own state, not the project's work.
+ * there and report a truncated list that happens to contain nothing anybody asked about.
  */
-const SKIP = new Set([".git", ".jaira", "node_modules", "dist", "build", "out", "target", "vendor", "coverage", "__pycache__", ".venv"]);
+const SKIP = new Set([".git", "node_modules", "dist", "build", "out", "target", "vendor", "coverage", "__pycache__", ".venv"]);
+
+/**
+ * Whether a walk passes a directory by without entering it: one of {@link SKIP}, or the `system/` of a
+ * `.jaira/` — the run database, its logs, snapshots and task records, which are JaiRA's bookkeeping and
+ * the same noise for the same reason. Not a permission: the rest of `.jaira/` (its settings, setup,
+ * workflows) is walked like any folder, whether a call may look there is the permission set's, at its
+ * places, and a call that names `.jaira/system` itself is walked from there.
+ */
+const skipped = (parent: string, name: string): boolean => SKIP.has(name) || (name === SYSTEM_DIR_NAME && basename(parent) === JAIRA_DIR_NAME);
 
 /** How much of a tree either tool will look at before it stops and says so. */
 const MAX_VISIT = 20_000;
@@ -65,7 +72,7 @@ function walk(root: string, limit: number): { files: string[]; truncated: boolea
     for (const entry of entries) {
       if (++visited > limit) return { files, truncated: true };
       if (entry.isDirectory()) {
-        if (!SKIP.has(entry.name)) stack.push(join(dir, entry.name));
+        if (!skipped(dir, entry.name)) stack.push(join(dir, entry.name));
         continue;
       }
       if (!entry.isFile()) continue;
@@ -102,13 +109,12 @@ function rootOf(options: SearchToolOptions, ctx?: ExecServices): string | undefi
  * `path` is the natural way to say "only under `src`", and also to say `../..` or `~/.claude/…`.
  * Somewhere outside the workspace is searched where it is: whether it may be is the permission set's to
  * say, at its places (decision 0023 §3.2), and the gate said so before the tool ran — as `read_file`
- * reads there. `.jaira/` is never searched, here or anywhere.
+ * reads there. `.jaira/` is searched like any folder (its `system/` is passed by, {@link skipped}).
  */
-function scopeOf(root: string, path: unknown): { dir: string } | { error: string } {
-  if (typeof path !== "string" || path.trim() === "") return { dir: root };
+function scopeOf(root: string, path: unknown): string {
+  if (typeof path !== "string" || path.trim() === "") return root;
   const rel = path.replace(/\\/g, "/").replace(/^\.\//, "");
-  if (isDeniedPath(rel)) return { error: `'${rel}' is inside .jaira/, which is not searchable` };
-  return { dir: withinWorkspace(root, rel) ?? resolve(root, path) };
+  return withinWorkspace(root, rel) ?? resolve(root, path);
 }
 
 /**
@@ -138,7 +144,6 @@ export function createGlobTool(options: SearchToolOptions = {}): Tool {
       const root = rootOf(options, ctx);
       if (root === undefined) return { error: "this operation has no workspace to search" };
       const scope = scopeOf(root, args.path);
-      if ("error" in scope) return { error: scope.error };
 
       let matcher: RegExp;
       try {
@@ -146,12 +151,12 @@ export function createGlobTool(options: SearchToolOptions = {}): Tool {
       } catch (e) {
         return { error: `'${pattern}' is not a usable pattern: ${(e as Error).message}` };
       }
-      const { files, truncated } = walk(scope.dir, MAX_VISIT);
+      const { files, truncated } = walk(scope, MAX_VISIT);
       const matched = files
         .filter((file) => matcher.test(file))
         // SILENTLY. "12 results were withheld" tells the model exactly where to aim, which is the
         // one thing a withheld listing must not do. The count belongs in the journal.
-        .filter((file) => !refuses(ctx, GLOB, join(scope.dir, file)))
+        .filter((file) => !refuses(ctx, GLOB, join(scope, file)))
         .sort();
       return {
         // Relative to the SCOPE, which is what the caller named — a path it can hand straight back
@@ -203,7 +208,6 @@ export function createGrepTool(options: SearchToolOptions = {}): Tool {
       const root = rootOf(options, ctx);
       if (root === undefined) return { error: "this operation has no workspace to search" };
       const scope = scopeOf(root, args.path);
-      if ("error" in scope) return { error: scope.error };
 
       let matcher: RegExp;
       try {
@@ -213,12 +217,12 @@ export function createGrepTool(options: SearchToolOptions = {}): Tool {
       }
       const only = typeof args.glob === "string" && args.glob.trim() !== "" ? globToRegExp(args.glob.replace(/\\/g, "/")) : undefined;
 
-      const { files, truncated: walkTruncated } = walk(scope.dir, MAX_VISIT);
+      const { files, truncated: walkTruncated } = walk(scope, MAX_VISIT);
       const hits: Hit[] = [];
       let searched = 0;
       for (const file of files) {
         if (only !== undefined && !only.test(file)) continue;
-        const full = join(scope.dir, file);
+        const full = join(scope, file);
         // See `refuses`: a search that reports matches from a denied directory has leaked the very
         // content the scope withholds, whatever a later open would have been told.
         if (refuses(ctx, GREP, full)) continue;

@@ -69,42 +69,69 @@ afterEach(() => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
+/** The targets in the project and in Shared — the two an approval offered before the settings' six. */
+const projectAndShared = <T extends { layer: string }>(targets: readonly T[]): T[] => targets.filter((t) => t.layer === "project" || t.layer === "base");
+
 describe("where a line can be written", () => {
-  it("offers both writable layers for a BUILT-IN permission set, each as an override that follows it — and never the built-in layer", () => {
+  it("offers every writable layer for a BUILT-IN permission set, each as an override that follows it — and never the built-in layer", () => {
     write(builtIn, "permission-sets/ask-first.json", SHIPPED);
     const found = permissionSetWriteTargets(paths, REF);
     expect(found.id).toBe("ask-first");
+    // The settings' six, nearest first (decision 0023, amended 2026-11-18).
     expect(found.targets.map((t) => [t.layer, t.file, t.follows, t.shadowed])).toEqual([
+      ["projectYou", expect.stringMatching(/^~\/\.jaira\/projects\/[^/]+\/permission-sets\/ask-first\.json$/), "$SYSTEM/permission-sets/ask-first", undefined],
+      ["you", "~/.jaira/personal/permission-sets/ask-first.json", "$SYSTEM/permission-sets/ask-first", undefined],
+      ["projectMachine", ".jaira/local/permission-sets/ask-first.json", "$SYSTEM/permission-sets/ask-first", undefined],
+      ["machine", "~/.jaira/machine/permission-sets/ask-first.json", "$SYSTEM/permission-sets/ask-first", undefined],
       ["project", ".jaira/permission-sets/ask-first.json", "$SYSTEM/permission-sets/ask-first", undefined],
       ["base", "~/.jaira/permission-sets/ask-first.json", "$SYSTEM/permission-sets/ask-first", undefined],
     ]);
     expect(found.targets.every((t) => !t.path.startsWith(builtIn))).toBe(true);
   });
 
-  it("follows the NEAREST lower layer, edits in place where the layer holds the file, and says when a nearer copy shadows a write", () => {
-    write(builtIn, "permission-sets/ask-first.json", SHIPPED);
-    write(paths.base.baseDir, "permission-sets/ask-first.json", { ...SHIPPED, "git log": "allow" });
-    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.follows])).toEqual([
-      ["project", "$BASE/permission-sets/ask-first"],
-      ["base", undefined],
-    ]);
-    // A project copy that does NOT follow the shared one wins the search, so a shared write is not read here…
+  it("a layer that is no project's never follows a project's copy: over a set only the project holds, it is not offered", () => {
     write(paths.jairaDir, "permission-sets/ask-first.json", SHIPPED);
-    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.follows, t.shadowed])).toEqual([
-      ["project", undefined, undefined],
-      ["base", undefined, true],
+    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.follows])).toEqual([
+      ["projectYou", "$JAIRA/permission-sets/ask-first"],
+      ["projectMachine", "$JAIRA/permission-sets/ask-first"],
+      ["project", undefined],
     ]);
-    // …and one that does follow it is not in the way.
-    write(paths.jairaDir, "permission-sets/ask-first.json", { $ref: "$BASE/permission-sets/ask-first", "git commit": "allow" });
-    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.shadowed])).toEqual([
+    // Over Shared's, Just you and this machine follow Shared's — and the project's layers the nearest.
+    write(paths.base.baseDir, "permission-sets/ask-first.json", SHIPPED);
+    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.follows])).toEqual([
+      ["projectYou", "$JAIRA/permission-sets/ask-first"],
+      ["you", "$BASE/permission-sets/ask-first"],
+      ["projectMachine", "$JAIRA/permission-sets/ask-first"],
+      ["machine", "$BASE/permission-sets/ask-first"],
       ["project", undefined],
       ["base", undefined],
     ]);
   });
 
-  it("offers only the layer that holds a permission set nothing lower does", () => {
+  it("follows the NEAREST lower layer, edits in place where the layer holds the file, and says when a nearer copy shadows a write", () => {
+    write(builtIn, "permission-sets/ask-first.json", SHIPPED);
+    write(paths.base.baseDir, "permission-sets/ask-first.json", { ...SHIPPED, "git log": "allow" });
+    expect(projectAndShared(permissionSetWriteTargets(paths, REF).targets).map((t) => [t.layer, t.follows])).toEqual([
+      ["project", "$BASE/permission-sets/ask-first"],
+      ["base", undefined],
+    ]);
+    // A project copy that does NOT follow the shared one wins the search, so a shared write is not read here…
     write(paths.jairaDir, "permission-sets/ask-first.json", SHIPPED);
-    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => t.layer)).toEqual(["project"]);
+    expect(projectAndShared(permissionSetWriteTargets(paths, REF).targets).map((t) => [t.layer, t.follows, t.shadowed])).toEqual([
+      ["project", undefined, undefined],
+      ["base", undefined, true],
+    ]);
+    // …and one that does follow it is not in the way.
+    write(paths.jairaDir, "permission-sets/ask-first.json", { $ref: "$BASE/permission-sets/ask-first", "git commit": "allow" });
+    expect(projectAndShared(permissionSetWriteTargets(paths, REF).targets).map((t) => [t.layer, t.shadowed])).toEqual([
+      ["project", undefined],
+      ["base", undefined],
+    ]);
+  });
+
+  it("offers only the layer that holds a permission set nothing lower does — and the project's own layers above it", () => {
+    write(paths.jairaDir, "permission-sets/ask-first.json", SHIPPED);
+    expect(projectAndShared(permissionSetWriteTargets(paths, REF).targets).map((t) => t.layer)).toEqual(["project"]);
   });
 
   it("offers NOTHING, and says why, for a map written on the state, a reference that is not layered, a YAML file and a missing file", () => {
@@ -114,7 +141,14 @@ describe("where a line can be written", () => {
     expect(permissionSetWriteTargets(paths, "./mine")).toMatchObject({ targets: [] });
     expect(permissionSetWriteTargets(paths, REF)).toMatchObject({ id: "ask-first", targets: [], unwritable: expect.stringMatching(/No layer holds/) });
     write(paths.jairaDir, "permission-sets/ask-first.yaml", "read_file: allow\n");
-    expect(permissionSetWriteTargets(paths, REF)).toMatchObject({ targets: [], unwritable: expect.stringMatching(/YAML/) });
+    // The YAML file itself is never written; a layer of the project above it may make a JSON copy that follows it.
+    expect(permissionSetWriteTargets(paths, REF).targets.map((t) => [t.layer, t.follows])).toEqual([
+      ["projectYou", "$JAIRA/permission-sets/ask-first"],
+      ["projectMachine", "$JAIRA/permission-sets/ask-first"],
+    ]);
+    rmSync(join(paths.jairaDir, "permission-sets/ask-first.yaml"));
+    write(paths.base.baseDir, "permission-sets/ask-first.yaml", "read_file: allow\n");
+    expect(projectAndShared(permissionSetWriteTargets(paths, REF).targets)).toEqual([expect.objectContaining({ layer: "project", follows: "$BASE/permission-sets/ask-first" })]);
     // A reference cannot climb out of `permission-sets/`.
     expect(permissionSetIdOfReference("$/permission-sets/../settings")).toBeUndefined();
     expect(permissionSetIdOfReference("$/permission-sets/../../settings")).toBeUndefined();

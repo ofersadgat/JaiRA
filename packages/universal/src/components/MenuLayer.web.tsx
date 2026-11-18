@@ -42,10 +42,10 @@ function onEscape(event: KeyboardEvent): void {
 
 /**
  * The web half of `MenuLayer.tsx`: a fixed layer in `<body>`, out of every stacking context and
- * `overflow` round the row it was opened from. Closed by a press outside the menu, Escape, or the window
- * resizing.
+ * `overflow` round the row it was opened from. Closed by a press outside the menu, Escape, or — a menu,
+ * not a dialog — the window resizing.
  */
-export function MenuLayer({ onClose, z = 1000, through, children }: {
+export function MenuLayer({ onClose, z = 1000, through, closeOnResize = true, children }: {
   onClose: () => void;
   /** Its place in the stack: a menu's over everything, a dialog's (`--z-modal` 50) under the toast (`--z-toast` 60). */
   z?: number;
@@ -55,6 +55,12 @@ export function MenuLayer({ onClose, z = 1000, through, children }: {
    * same float is carried there (2026-11-14) — the element under the press is pressed instead.
    */
   through?: string;
+  /**
+   * `false` for a dialog: a menu is placed against what it was opened from, which a resize moves, so it
+   * goes; a dialog is centred and holds what the person has chosen so far — Open's four steps — so a
+   * resize must not throw that away.
+   */
+  closeOnResize?: boolean;
   children: ReactNode;
 }): JSX.Element {
   const root = useRef<HTMLElement | null>(null);
@@ -88,9 +94,10 @@ export function MenuLayer({ onClose, z = 1000, through, children }: {
     };
   }, []);
   useEffect(() => {
+    if (!closeOnResize) return undefined;
     window.addEventListener("resize", onClose);
     return () => window.removeEventListener("resize", onClose);
-  }, [onClose]);
+  }, [onClose, closeOnResize]);
   return createPortal(
     <View ref={root as never} style={{ position: "fixed" as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: z }}>
       {/* Out of the Tab order: a menu is closed by a press anywhere else, which is no control at all. */}

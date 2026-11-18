@@ -15,6 +15,8 @@ import {
   EVENTS_STATE_ID,
   SYSTEM_EVENTS,
   automationStateIdOf,
+  composedLinesOf,
+  spliceOfRef,
   automationsReadOf,
   automationsWritesOf,
   eventPicksOf,
@@ -406,5 +408,86 @@ describe("editing a line", () => {
     expect(eventsTaskOf([{ title: "events", workflow: "feature/plan" }, { title: "events", workflow: EVENTS_STATE_ID }])).toEqual({ title: "events", workflow: EVENTS_STATE_ID });
     expect(eventsTaskOf([])).toBeUndefined();
     expect(eventsTaskOf([{ title: "events", workflow: EVENTS_STATE_ID }, { title: "listener", workflow: EVENTS_STATE_ID, system: "events" }])).toMatchObject({ system: "events" });
+  });
+});
+
+describe("the settings' six layers (decision 0023, amended 2026-11-18)", () => {
+  const nightly: AutomationLine = { name: "nightly", event: "git.pushed", filter: { branch: "release/*" }, steps: [{ kind: "notify", text: "a release branch moved" }] };
+  const mine: AutomationLine = { name: "mine", event: "git.pushed", filter: {}, steps: [{ kind: "notify", text: "something moved" }] };
+  const shared = (): NonNullable<Copies["base"]> => ({ root: writeEventsDoc({ $ref: SYSTEM_EVENTS }, [mrOpened]), states: statesOf(mrOpened) });
+
+  it("splices the layer a copy names — `$MACHINE`, `$JAIRA` — and reads it back", () => {
+    expect(spliceRefOf([], "$MACHINE")).toEqual({ $ref: "...$MACHINE/workflows/system/events.transitions" });
+    expect(spliceOfRef(spliceRefOf(["a"], "$PROJECTMACHINE").$ref)).toEqual({ ignored: ["a"], under: "$PROJECTMACHINE" });
+    // Shared's, as a project's copy has always named it, reads with no `under`.
+    expect(spliceOfRef(spliceRefOf(["a"]).$ref)).toEqual({ ignored: ["a"] });
+    expect(spliceOfRef("...$NOWHERE/workflows/system/events.transitions")).toBeUndefined();
+    const doc = writeEventsDoc({}, [mine], { ignored: ["x"], under: "$JAIRA" });
+    expect(doc["$ref"]).toBe("$JAIRA/workflows/system/events");
+    expect(doc["children"]).toEqual({ $ref: "$JAIRA/workflows/system/events.children", mine: { async: true } });
+    expect(parseEventsDoc(doc).splice).toEqual({ ignored: ["x"], under: "$JAIRA" });
+  });
+
+  it("a page on Just you lists its own lines, then each layer's under it — a layer with no copy passes its own under-layer through", () => {
+    const copies: Copies = {
+      base: shared(),
+      project: { root: writeEventsDoc({}, [pushMainDocs], { ignored: [] }), states: statesOf(pushMainDocs) },
+      // The project on this machine has no copy: it passes this machine's through.
+      projectMachine: { states: {} },
+      machine: { root: writeEventsDoc({}, [nightly], { ignored: ["mr_opened"], under: "$JAIRA" }), states: statesOf(nightly) },
+      you: { root: writeEventsDoc({}, [mine], { ignored: ["push_main_docs"], under: "$PROJECTMACHINE" }), states: statesOf(mine) },
+      projectYou: { states: {} },
+    };
+    const read = automationsReadOf(copies, "you");
+    expect(read.own.lines.map((line) => line.name)).toEqual(["mine"]);
+    expect(read.shared?.map((line) => line.name)).toEqual(["nightly", "push_main_docs"]);
+    expect(read.sharedFrom).toEqual(["machine", "project"]);
+    const shown = shownLinesOf(read.own, read.shared, read.stepsOf, read.sharedFrom);
+    expect(shown.map((one) => [one.line.name, one.from, one.layer, one.ignored])).toEqual([
+      ["mine", "own", undefined, false],
+      ["nightly", "shared", "machine", false],
+      ["push_main_docs", "shared", "project", true],
+    ]);
+    // What a task in this project runs, top to bottom: you in the project has no copy, so Just you's.
+    expect(composedLinesOf(copies, "projectYou").map((one) => [one.line.name, one.layer])).toEqual([
+      ["mine", "you"],
+      ["nightly", "machine"],
+    ]);
+  });
+
+  it("a newer layer's first line writes its copy following the layer directly under it — Shared's first, when Shared has none", () => {
+    const copies: Copies = { base: { states: {} }, project: { states: {} }, machine: { states: {} }, projectMachine: { states: {} }, you: { states: {} }, projectYou: { states: {} }, system: { root: writeEventsDoc(undefined, [mrOpened]) } };
+    const writes = automationsWritesOf(copies, "you", [], [mine]);
+    expect(writes.map((w) => [w.layer, w.stateId])).toEqual([
+      ["base", EVENTS_STATE_ID],
+      ["you", automationStateIdOf("mine")],
+      ["you", EVENTS_STATE_ID],
+    ]);
+    const root = written(writes, "you", EVENTS_STATE_ID) as Record<string, unknown>;
+    expect(root["$ref"]).toBe("$PROJECTMACHINE/workflows/system/events");
+    expect(parseEventsDoc(root).splice).toEqual({ ignored: [], under: "$PROJECTMACHINE" });
+    // This machine's follows the project's; the project on this machine's, this machine's.
+    expect((written(automationsWritesOf({ ...copies, base: shared() }, "machine", [], [mine]), "machine", EVENTS_STATE_ID) as Record<string, unknown>)["$ref"]).toBe("$JAIRA/workflows/system/events");
+    expect((written(automationsWritesOf({ ...copies, base: shared() }, "projectMachine", [], [mine]), "projectMachine", EVENTS_STATE_ID) as Record<string, unknown>)["$ref"]).toBe("$MACHINE/workflows/system/events");
+  });
+
+  it("with no project read, Just you's copy still names `$PROJECTMACHINE`, and reads this machine's and Shared's under it", () => {
+    const copies: Copies = { base: shared(), machine: { root: writeEventsDoc({}, [nightly], { ignored: [], under: "$JAIRA" }), states: statesOf(nightly) }, you: { states: {} } };
+    const read = automationsReadOf(copies, "you");
+    expect(read.source).toBe("none");
+    expect(read.shared?.map((line) => line.name)).toEqual(["nightly", "mr_opened"]);
+    expect(read.sharedFrom).toEqual(["machine", "base"]);
+    expect((written(automationsWritesOf(copies, "you", [], [mine]), "you", EVENTS_STATE_ID) as Record<string, unknown>)["$ref"]).toBe("$PROJECTMACHINE/workflows/system/events");
+  });
+
+  it("a line's steps from under a layer are that layer's own copy of its state — and back to those under it, the copy goes", () => {
+    const copies: Copies = { base: shared(), machine: { states: {} }, you: { states: {} } };
+    const steps = [{ kind: "notify" as const, text: "only for me" }];
+    expect(sharedStepsWritesOf(copies, "mr_opened", steps, "you")).toEqual([{ layer: "you", stateId: automationStateIdOf("mr_opened"), text: expect.stringContaining("only for me") }]);
+    const held: Copies = { ...copies, you: { states: { mr_opened: automationStateOf("mr_opened", steps) } } };
+    expect(automationsReadOf(held, "you").stepsOf("mr_opened")).toEqual({ steps, from: "you" });
+    expect(sharedStepsWritesOf(held, "mr_opened", mrOpened.steps, "you")).toEqual([{ layer: "you", stateId: automationStateIdOf("mr_opened"), remove: true }]);
+    // This machine's page does not see Just you's copy: it reads Shared's steps.
+    expect(automationsReadOf(held, "machine").stepsOf("mr_opened")).toEqual({ steps: mrOpened.steps, from: "base" });
   });
 });

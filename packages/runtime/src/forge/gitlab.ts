@@ -31,6 +31,7 @@ import {
   type PipelineTests,
   type ForgeAnchor,
   type ForgeBranch,
+  type ForgeRepository,
   type ForgeCommit,
   type ForgeComment,
   type ForgeIdentity,
@@ -391,6 +392,43 @@ export class GitLabProvider implements ForgeProvider {
     const response = await this.call("GET", this.mr({ project, number }));
     if (response.status === 404) throw new ForgeError(`${project} has no merge request !${number} this token can see`, 404);
     return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}!${number}`).body));
+  }
+
+  /** `GET /projects?membership=true`, most recently active first. */
+  async repositories(query: { search?: string; limit?: number } = {}): Promise<ForgeRepository[]> {
+    const limit = query.limit ?? 200;
+    const search = query.search?.trim();
+    const params = new URLSearchParams({ membership: "true", simple: "true", order_by: "last_activity_at", sort: "desc" });
+    if (search !== undefined && search !== "") params.set("search", search);
+    const rows = await this.pages(`/projects?${params.toString()}`, "listing your projects");
+    return rows.slice(0, limit).map((row) => {
+      const r = asRecord(row);
+      const description = asText(r["description"]);
+      return {
+        project: asText(r["path_with_namespace"]),
+        name: asText(r["name"]),
+        ...(description.length > 0 ? { description } : {}),
+        defaultBranch: asText(r["default_branch"]) || "main",
+        cloneUrl: asText(r["http_url_to_repo"]),
+        private: asText(r["visibility"]) !== "public",
+        updatedAt: asText(r["last_activity_at"]),
+        webUrl: asText(r["web_url"]),
+      };
+    });
+  }
+
+  /** `GET /projects/{id}/repository/files/{path}/raw`; undefined for a file that is not there. */
+  async fileText(project: string, path: string, ref?: string): Promise<string | undefined> {
+    const at = `/projects/${encodeURIComponent(project)}/repository/files/${encodeURIComponent(path)}/raw?ref=${encodeURIComponent(ref ?? "HEAD")}`;
+    const response = await this.options.http({
+      method: "GET",
+      url: `${this.api}${at}`,
+      headers: { Authorization: `Bearer ${this.options.token}`, "User-Agent": "jaira" },
+      expect: "bytes",
+    });
+    if (response.status === 404) return undefined;
+    const body = expectStatus(response, [200], `reading ${path} in ${project}`).body;
+    return body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body ?? "");
   }
 
   async branches(project: string): Promise<ForgeBranch[]> {

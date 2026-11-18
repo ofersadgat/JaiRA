@@ -465,10 +465,13 @@ phase 6 settled:
    tools get `PermissionMode: "smart"`, and the approver parses the call and
    answers `allow`/`deny`/`ask`. Authored rules win over the SPEC §11.2/§11.3
    built-ins, first match first, and the strictest verdict on a line wins.
-4. **`.jaira/**` is denied by path** — the enforcement §1g item 5 said it had to be,
-   since a worktree normally contains `.jaira/`. Screening happens per *parsed
-   word*: a path matcher applied to a whole command line never matches, because the
-   path is preceded by a space.
+4. **`.jaira/` is a permission set's default, not a rule** (2026-11-17). A
+   worktree normally contains `.jaira/` (§1g item 5), and what keeps an agent from
+   writing it is a line every shipped permission set carries — `$PROJECT/.jaira`
+   and `$WORKTREE/.jaira` refused to every writer, the machine key refused to the
+   readers too — which a person's layer can change like any other. The policy
+   itself knows nothing of `.jaira/`; a shell line meets those lines through the
+   places its *parsed* parts name, never a matcher over the whole line.
 5. **Approvals are a separate channel from workflow gates** (§10.2). Both surface
    in one inbox, but a gate is an authored UI state while an approval is
    provider-initiated and unpredictable. The hub carries a `PermissionScope`, so
@@ -764,7 +767,7 @@ For a JaiRA project rooted at `<project>/`:
 
 ```text
 <project>/
-  .jaira/                     engine-owned; agents denied all access
+  .jaira/                     engine-owned; the shipped permission sets refuse agents writing it
     settings.json           how this project runs (models, exec env, policy, artifacts)
     workflows/                state files (authoritative, user-edited)
       feature.json
@@ -1512,7 +1515,7 @@ adapter needs:
 interface RunSpec {
   taskId: string; operationId: string;
   cwd: string;                    // task worktree (or project dir if unbound)
-  execEnv: ExecEnv;               // windows | { wsl: distro }
+  execEnv: ExecEnv;               // windows | { wsl: distro } | { container } (decision 0027)
   prompt: string;                 // rendered template + injected contract text
   conversation: ConversationRef;  // mode + provider session / transcript refs
   outputContract: OutputContract; // §7.5
@@ -2252,6 +2255,15 @@ project is stored on the WSL filesystem, the engine reads its files for
 display via `\\wsl$` UNC paths, and runs all git/agent commands inside the
 distro (running git against `\\wsl$` from Windows is slow and
 permission-fragile — avoided entirely).
+
+A third environment, `{ container: "<name>" }` (decision 0027), is narrower: a
+workspace's setup brings up a container with the workspace mounted at the SAME
+path inside, and writes it into that workspace's `.jaira/settings.local.json`.
+Only the commands JaiRA runs — its shell tool, `run_command`, setup steps — go
+in, as `docker exec -i -w <cwd> <container> sh -lc …`, each in a process group
+of its own there, which a stop or a timeout signals with a second `docker exec`
+(ending the first does not end what it started); git, the file tools and the
+agents stay on the machine (`machineEnvOf`). Mac and Linux hosts only.
 
 ### 9.2 Branch Binding and Worktrees (spec §10.5)
 

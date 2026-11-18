@@ -64,9 +64,13 @@ describe("read-only-scratch", () => {
     const writes = (list: string[]) => list.filter((rule) => rule.startsWith("Write("));
     expect(writes(rules.allow)).toEqual([`Write(${claudeFolder})`, `Write(${claudeFolder}/**)`]);
     expect(writes(rules.deny)).toEqual(expect.arrayContaining(["Write(**/.env)"]));
-    // No writer rule names the project: a write there is not pre-allowed, and is put to the gate, which refuses it.
-    const writers = [...rules.allow, ...rules.ask, ...rules.deny].filter((rule) => /^(Write|Edit|MultiEdit|NotebookEdit)\(/.test(rule));
-    expect(writers.some((rule) => rule.includes(ROOT))).toBe(false);
+    // No writer rule lets the project be written: a write there is not pre-allowed, and is put to the gate,
+    // which refuses it. The only writer rules that name it refuse its `.jaira/` up front — the lines every
+    // shipped set carries (2026-11-17).
+    const writers = (list: string[]) => list.filter((rule) => /^(Write|Edit|MultiEdit|NotebookEdit)\(/.test(rule));
+    expect([...writers(rules.allow), ...writers(rules.ask)].some((rule) => rule.includes(ROOT))).toBe(false);
+    expect(writers(rules.deny).filter((rule) => rule.includes(ROOT)).every((rule) => rule.includes(`${ROOT}/.jaira`))).toBe(true);
+    expect(writes(rules.deny)).toEqual(expect.arrayContaining([`Write(${ROOT}/.jaira)`, `Write(${ROOT}/.jaira/**)`, `Write(${ROOT}/.jaira/**/*)`]));
     expect(rules.allow.filter((rule) => rule.startsWith("Edit("))).toEqual([`Edit(${claudeFolder})`, `Edit(${claudeFolder}/**)`]);
   });
 

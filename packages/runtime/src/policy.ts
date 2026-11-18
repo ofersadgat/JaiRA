@@ -31,9 +31,11 @@
  *     reset --hard`), inside a wrapper, a substitution or a `find -exec`.
  *  2. **Unparsable ⇒ ask.** A command the parser cannot model never resolves to
  *     `allow` (DESIGN §10.1's stated default).
- *  3. **`.jaira/**` is denied by path**, because a worktree normally *does* contain
- *     `.jaira/` (§1g item 5) — the deny rule is the real enforcement, not the
- *     directory layout.
+ *  3. **Nothing here knows `.jaira/`.** A worktree normally *does* contain `.jaira/` (§1g item 5),
+ *     and what keeps an agent from writing it is a LINE: every permission set JaiRA ships refuses
+ *     writes at `$PROJECT/.jaira` and `$WORKTREE/.jaira`, and reads of the machine key, where a person
+ *     can change them like any other line (2026-11-17). A line no permission set judges answers to the
+ *     built-ins alone.
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
@@ -182,9 +184,6 @@ const COMMAND_KEYS = ["command", "cmd", "script", "input", "commandLine"];
 /** Input keys that carry a PAYLOAD — the bytes a producing tool is about to keep. */
 const CONTENT_KEYS = ["content", "text"];
 
-/** Input keys that carry a filesystem path. */
-const PATH_KEYS = ["path", "file", "file_path", "filePath", "target", "directory", "dir"];
-
 // --- SPEC §11.2: destructive git (deny) --------------------------------------
 
 const DESTRUCTIVE: FloorRule[] = [
@@ -325,9 +324,9 @@ export interface CommandDecision {
  * Keyed by a WIDTH (`git commit`, or `git`; `rm`; `script`; `write_file`), never by a line: the same
  * answer then covers the next line that holds the same request, whatever else shares it. An `allow`
  * lifts a part that would have ASKED and nothing else — a denied part stays denied, so a remembered
- * answer never reaches over the destructive floor, `.jaira/`, a rule's or a permission set's `deny`, or a
- * line the parser could not read. Writing the entry into a permission set FILE is the other reach ("add to
- * the permission set"), and is not done here.
+ * answer never reaches over the destructive floor, a rule's or a permission set's `deny` (the shipped
+ * sets' `.jaira/` lines among them), or a line the parser could not read. Writing the entry into a
+ * permission set FILE is the other reach ("add to the permission set"), and is not done here.
  *
  * An answer may also be kept at a PLACE (decision 0023 §3.8): `npm run build` allowed "in packages"
  * is (`npm run build`, `packages`), and covers the next `npm run build` only where every place it is
@@ -566,20 +565,23 @@ const SCOPED_PACKAGE = /^@[a-z0-9][\w.-]*\/[\w.-]+(@[^/\\\s]*)?$/i;
  * tool's line, and `script`'s, by the paths the part names (the file run, the file written) — else the
  * directory it runs in; any other path line (a command line, `shell`, `runner:*`) by the directory it
  * runs in — the package's, for a package script — and every path it names; `git push`'s by the
- * branches it pushes; a network program's by its URL; `runner:ssh` by the host.
+ * branches it pushes; a network program's by its URL; `runner:ssh` by the host. A path written into a
+ * flag (`--output=dist/x`, `cp --target-directory=.jaira/x`) is one the part names, for every path line.
  */
 function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: readonly string[] | undefined, placeOptions: PlaceOptions): PartPlaces & { primary(kind: PlaceKind, line: string): string | undefined } {
   const resolve = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
   const paths = part.paths.filter((path) => path !== "{}").map(resolve);
   const named = part.command !== undefined && part.kind !== "tool" && part.kind !== "redirect" ? commandWords(part.command).filter(looksLikePath).map(resolve) : [];
+  const flagged = part.command !== undefined ? part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : [])).filter(looksLikePath).map(resolve) : [];
   const where = here ?? placeOptions.root;
   const dirs = runDirs !== undefined && runDirs.length > 0 ? [...runDirs] : where !== undefined ? [where] : [];
   const byFile = (line: string): boolean => line === SCRIPT_SUBJECT || (TOOL_SPEC_BY_NAME.has(line) && line !== SHELL_SUBJECT);
+  const files = [...new Set([...paths, ...flagged])];
   const of = (kind: PlaceKind, line: string): string[] => {
     switch (kind) {
       case "path":
-        if (byFile(line)) return paths.length > 0 ? paths : dirs;
-        return [...new Set([...dirs, ...paths, ...named])];
+        if (byFile(line)) return files.length > 0 ? files : dirs;
+        return [...new Set([...dirs, ...paths, ...named, ...flagged])];
       case "branch":
         return part.command !== undefined ? pushedBranchesOf(part.command) : [];
       case "site": {
@@ -724,36 +726,30 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
 /**
  * Judge one part. `undefined` when it is no request at all (`cd foo`, `echo hi`).
  *
- * The order, and what each layer may do:
+ * The order, and what each layer may do. No step knows `.jaira/`: the shipped sets refuse writing
+ * there with LINES, read at (2) like any other place (2026-11-17).
  *
- *  1. `.jaira/` anywhere in the part ⇒ denied. Nothing below is consulted.
- *  2. The BUILT-INS (unless `functions.shell.builtins` is off): the destructive floor (deny), else a
+ *  1. The BUILT-INS (unless `functions.shell.builtins` is off): the destructive floor (deny), else a
  *     built-in ask, else nothing — `default`, which allows.
- *  3. The PERMISSION_SET's answer for the part's subject ({@link lookUp}: the most specific line, the
+ *  2. The PERMISSION_SET's answer for the part's subject ({@link lookUp}: the most specific line, the
  *     most specific of its places that matches where the part acts, a place that matches nothing
- *     falling to a less specific line). It composes with (2) as the STRICTER of the two,
+ *     falling to a less specific line). It composes with (1) as the STRICTER of the two,
  *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
  *     or the `default` — naming it is the decision those two stand in for. It never replaces the
  *     floor: the floor stays above every permission set. An entry that names a FUNCTION answers `function`,
  *     which ranks between `allowed` and `asks`: the function is asked unless something stricter
  *     already answered — a built-in ask on a push is still a person's to answer, unless the entry
  *     that names the function names the program too.
- *  4. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
+ *  3. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
  *     never allowed without a person, whatever the permission set hands it to.
- *  5. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied` — at its
+ *  4. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied` — at its
  *     place, where it was kept at one. It never lifts `denied`, and never what the parser could not
  *     read, and never a part a function decides.
- *  6. The executor's scope FLOOR's answer for the part's place, by the standard tool the part is.
- *     Strictest again, and after (5): a remembered `rm` does not open a place the floor shut.
+ *  5. The executor's scope FLOOR's answer for the part's place, by the standard tool the part is.
+ *     Strictest again, and after (4): a remembered `rm` does not open a place the floor shut.
  */
 function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined, where: PartPlaces): Composed | undefined {
-  // Every word, and the value written into a flag (`--output=.jaira/x`).
-  const words = part.command !== undefined ? [...commandWords(part.command), ...part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : []))] : [];
-  if ([...words, ...part.paths].some(isDeniedPath)) {
-    return { verdict: "denied", source: "path", reason: ".jaira/ is engine-owned" };
-  }
-
-  // (2) the built-ins
+  // (1) the built-ins
   let fromPolicy: Composed | undefined;
   if (policy.builtins !== false) {
     if (part.command !== undefined) {
@@ -771,7 +767,7 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
 
   let composed: Composed = fromPolicy ?? { verdict: "allowed", source: "default", reason: "no built-in applies" };
 
-  // (3) the permission set
+  // (2) the permission set
   if (options.permissionSet !== undefined && part.noRequest !== true) {
     const answer = lookUp(options.permissionSet, part, where);
     if (answer.mode !== undefined) {
@@ -802,12 +798,12 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     }
   }
 
-  // (4) what the parser cannot vouch for
+  // (3) what the parser cannot vouch for
   if (part.unmodelled !== undefined && composed.verdict !== "denied") {
     composed = { verdict: "asks", source: "parser", reason: part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled };
   }
 
-  // (5) remembered for this run — at the part's place, where the answer was kept at one. The runtime
+  // (4) remembered for this run — at the part's place, where the answer was kept at one. The runtime
   // layer stands over every set below it (decision 0023 §2.6 step 4), so a refusal kept "for this
   // run" also refuses what a layer below ALLOWS at a line no more specific than the width it was kept
   // at; an allowance only settles what asks — it never lifts a refusal (invariant 28).
@@ -825,7 +821,7 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     }
   }
 
-  // (6) where — the executor's floor
+  // (5) where — the executor's floor
   if (options.scopeOf !== undefined && part.tool !== undefined && composed.verdict !== "denied") {
     const resolved = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
     const places: Array<{ path?: string; url?: string }> = [...part.paths.map((path) => ({ path: resolved(path) })), ...(part.url !== undefined ? [{ url: part.url }] : [])];
@@ -1041,12 +1037,6 @@ export function policyCanEscalate(policy: JairaPolicy): boolean {
   return policy.builtins !== false;
 }
 
-/** `.jaira/` is engine-owned: agents are denied it wherever it appears. */
-export function isDeniedPath(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/");
-  return /(^|\/)\.jaira(\/|$)/.test(normalized);
-}
-
 /** Pull a command string out of a tool's inputs, if it has one. */
 function commandOf(input: Record<string, unknown>): string | undefined {
   for (const key of COMMAND_KEYS) {
@@ -1070,15 +1060,6 @@ function describeBytes(bytes: number): string {
   if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} bytes`;
-}
-
-/** Pull a filesystem path out of a tool's inputs, if it has one. */
-function pathOf(input: Record<string, unknown>): string | undefined {
-  for (const key of PATH_KEYS) {
-    const value = input[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return undefined;
 }
 
 export interface CompilePolicyOptions {
@@ -1188,14 +1169,6 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
 
   const verdictFor = (tool: string, req: PermissionRequest): SmartVerdict => {
     const input = req.input as Record<string, unknown>;
-
-    // A path-taking tool is refused `.jaira/**` outright, whatever else it may do.
-    const path = pathOf(input);
-    if (path !== undefined && isDeniedPath(path)) {
-      audit({ tool, action: "deny", reason: ".jaira/ is engine-owned", sessionId: req.sessionId });
-      return "deny";
-    }
-
     const line = commandOf(input);
     if (line === undefined) {
       // Not a command, but there may still be something here to judge: a PAYLOAD, whose size is the
@@ -1218,7 +1191,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       return "ask";
     }
     // The narrowing below has usually judged this very call already — with the STATE's permission set in
-    // hand, which this approver is never given. `.jaira/` is screened inside, part by part.
+    // hand, which this approver is never given.
     const decision = lineDecisionFor(input, undefined, tool);
     auditLine(tool, line, decision, req.sessionId);
     return decision.action === "allow" ? "allow" : decision.action === "deny" ? "deny" : "ask";
@@ -1283,7 +1256,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   /**
    * The line's verdict, as a NARROWING — the one seam that runs whatever mode the tool resolved to.
    *
-   * A `deny` always narrows, so the destructive floor, `.jaira/` and a permission set's deny stand above a
+   * A `deny` always narrows, so the destructive floor and a permission set's deny stand above a
    * state that authored `shell: "allow"` and above an "allow for this run" remembered against the
    * whole tool. An `ask` narrows when a permission set is judging the line: a remembered `shell: allow` would
    * otherwise wave through the next line's asking parts, and it is parts that are remembered, never
@@ -1528,11 +1501,8 @@ export function refusedByOfCall(refused: RefusedCall): RefusedBy {
       }
       return { kind: "rule", rule: "scopes" };
     }
-    case "smart": {
-      const path = pathOf((refused.input ?? {}) as Record<string, unknown>);
-      if (path !== undefined && isDeniedPath(path)) return { kind: "rule", rule: "built-in rules", reason: ".jaira/ is engine-owned" };
+    case "smart":
       return decided?.action === "deny" ? refusedByOfDecision(decided) : (noted ?? { kind: "rule", rule: "built-in rules" });
-    }
     case "approver":
       return noted ?? { kind: "approver" };
   }

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type {
+  WorkspaceCreateRequest,
   ApprovalScope,
   TaskConnectResult,
   BoardView,
@@ -71,6 +72,7 @@ import type {
   WorkflowLayer,
   PartAnswer,
   WritableLayer,
+  WritableSetLayer,
   WorkflowSource,
   RendererEdit,
   PathWrite,
@@ -82,8 +84,10 @@ import type {
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
 import { appendInstallLog, installLogKey, type InstallLog } from "./installLog";
+import { appendJobText, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
 import {
   clearedAbove,
+  statesPath,
   withPaths,
   CONFIG_JSON,
   defaultLogPolicy,
@@ -156,6 +160,7 @@ const windowIo: WindowIo = { invoke: ((channel: "window:keep" | "window:last", r
 import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
 import { parseUiState, surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
+import { configTargetOf, layerOfPath, pathOfLayer, prunedPath, sameTarget, SHARED_PATH, viewKnowsLayer, type ConfigTarget, type SettingsPath, type SettingsPathContext } from "./settingsScope";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
@@ -365,6 +370,10 @@ export interface AppState {
    * what it installs is not there — a failed install's last words are the reason to keep looking.
    */
   installLogs: Record<string, InstallLog>;
+  /** The Open dialog, while it is up (decision 0027): how it was opened. */
+  opening: OpenFlowStart | null;
+  /** Workspaces being made from this window, by job id: what each says as it goes, and how it ended. */
+  workspaceJobs: Record<string, WorkspaceJob>;
   /** What the secret store can do here — decides which "save key to…" options are offered. */
   secrets: SecretCapabilities;
   /**
@@ -736,14 +745,28 @@ export interface AppState {
   /** Which section the Settings view is showing. */
   section: SettingsSection;
   /**
-   * Which configuration layer the Settings view is editing — Just you, This project or Shared.
+   * Which configuration layer the Settings view is editing — the one {@link settingsPath} makes.
    *
    * An axis rather than a section, because it crosses every page: listing the layers as siblings of
    * the pages made the layer a place you navigated to for one and a picker you operated for another
    * — two mechanisms for one question, which is how the two ended up able to disagree. Opens on
-   * Shared ({@link DEFAULT_CONFIG_LAYER}) and stays where the switch puts it.
+   * Shared ({@link DEFAULT_CONFIG_LAYER}) and stays where the path puts it.
    */
   configLayer: ConfigLayer;
+  /**
+   * Settings' path — `Settings › [project] › [machine] › [Just you]` (`settingsScope.ts`, 2026-11-17):
+   * whose settings a page edits, a part left out meaning "all". Changed only with
+   * `setSettingsPath`, which keeps {@link configLayer} the layer it makes.
+   */
+  settingsPath: SettingsPath;
+  /**
+   * The configuration as Settings' path reads it: {@link config} itself (the same object) when the path
+   * reads what the window does, else its own — another project's, another machine's. Null until read,
+   * and when it could not be ({@link settingsProblem}).
+   */
+  settingsConfig: ConfigView | null;
+  /** Why the path's configuration could not be read — its machine is offline, say — when it could not. */
+  settingsProblem: string | null;
 }
 
 /**
@@ -936,6 +959,8 @@ const EMPTY: AppState = {
   installing: [],
   installingGitClis: [],
   installLogs: {},
+  opening: null,
+  workspaceJobs: {},
   secrets: { keychain: false },
   schemaChoice: {},
   sync: { status: null, result: null, running: false, error: null, progress: [] },
@@ -983,6 +1008,9 @@ const EMPTY: AppState = {
   trailState: null,
   section: "connections",
   configLayer: DEFAULT_CONFIG_LAYER,
+  settingsPath: SHARED_PATH,
+  settingsConfig: null,
+  settingsProblem: null,
 };
 
 /** Keep the live log bounded — a long run would otherwise grow without limit. */
@@ -1506,7 +1534,8 @@ export function useApp() {
    */
   const inLayer = useCallback(
     (layer: WorkflowLayer, project?: string): { project?: string } => {
-      if (layer === "base") return {};
+      // A layer that is no project's names one root on a machine; a project's three need which project.
+      if (layer === "base" || layer === "you" || layer === "machine" || layer === "system") return {};
       const at = project ?? ref.current.at;
       return at === null || at === undefined ? {} : { project: at };
     },
@@ -2225,19 +2254,42 @@ export function useApp() {
     }
   }, [patch, fail, keepingUi]);
 
+  /** What Settings' path is read against: the window's projects, as it groups them. */
+  const pathContext = useCallback(
+    (): SettingsPathContext => ({ projects: cur().projects, grouped: ref.current.settings.ui.groupWorkspaces !== false, machines: [] }),
+    [cur],
+  );
+
+  /** Where Settings' path reads and writes (`configTargetOf`); undefined when it names nothing that exists. */
+  const settingsTarget = useCallback((): ConfigTarget | undefined => configTargetOf(ref.current.settingsPath, pathContext(), ref.current.at), [pathContext]);
+
   const refreshConfig = useCallback(async () => {
+    const windowTarget = inLayer("project");
+    const target = settingsTarget();
+    const shared = sameTarget(windowTarget, target);
     try {
       const [config, executors, secrets] = await Promise.all([
-        invoke("config:read", { ...inLayer("project") }),
+        invoke("config:read", { ...windowTarget }),
         invoke("executor:list", undefined),
         invoke("secret:capabilities", undefined),
       ]);
-      patch({ config, executors, secrets });
+      patch({ config, executors, secrets, ...(shared ? { settingsConfig: config, settingsProblem: null } : {}) });
     } catch {
       // Nothing here needs a project, so a failure is a real one — but the panes render their own
       // emptiness and an error banner over a settings screen helps nobody.
     }
-  }, [patch]);
+    if (shared) return;
+    // Another project's, or another machine's: read as the path names it — forwarded there by the engine.
+    if (target === undefined) return patch({ settingsConfig: null, settingsProblem: "Nothing to show: that project has no workspace on that machine." });
+    // An answer for a path moved on from since it was asked is dropped: the newer read lands instead.
+    const still = (): boolean => sameTarget(target, settingsTarget());
+    try {
+      const view = await invoke("config:read", { ...target });
+      if (still()) patch({ settingsConfig: view, settingsProblem: null });
+    } catch (e) {
+      if (still()) patch({ settingsConfig: null, settingsProblem: e instanceof Error ? e.message : String(e) });
+    }
+  }, [patch, settingsTarget]);
 
   /**
    * Read the availability snapshot main already computed.
@@ -2284,15 +2336,13 @@ export function useApp() {
 
   const refreshAll = useCallback(async () => {
     const current = await invoke("project:current", undefined).catch(() => null);
-    // With no project there is no project LAYER either, and the settings screens must not merely
-    // hide the switch — they have to actually be editing the layer they say they are. Left on
-    // `project`, every control rendered disabled with no visible reason, which is what a screen that
-    // says one thing and does another looks like. Shared and Just you exist in every window, so a
-    // switch on either stays where it is.
-    patch({
-      at: current?.dir ?? null,
-      ...(current || ref.current.configLayer !== "project" ? {} : { configLayer: DEFAULT_CONFIG_LAYER }),
-    });
+    patch({ at: current?.dir ?? null });
+    // A project Settings' path names that the window no longer has is taken out of the path: the pages
+    // must not go on saying they edit a document there is no way to reach. Only once the window lists
+    // projects at all — before its first list, every project would look closed.
+    const context = pathContext();
+    const pruned = context.projects.length > 0 ? prunedPath(ref.current.settingsPath, context) : ref.current.settingsPath;
+    if (pruned !== ref.current.settingsPath) patch({ settingsPath: pruned, configLayer: layerOfPath(pruned) });
     // Before the early return: preferences are the person's, and the shared root is the machine's.
     // Both mean something with no project open, and the Files view and Settings are reachable on an
     // empty window — which is where someone goes to set the shared layer up in the first place.
@@ -2535,6 +2585,24 @@ export function useApp() {
           liveDraw.hold(foldLiveTurn(live, message));
           break;
         }
+        case "workspace:progress": {
+          // Only a job this window started: another window's has no row here.
+          const job = ref.current.workspaceJobs[message.jobId];
+          if (job === undefined) break;
+          let next: WorkspaceJob = { ...job, phase: message.phase };
+          if (message.step !== undefined) next = withStep(next, message.step);
+          if (message.text !== undefined) next = appendJobText(next, message.text);
+          patch({ workspaceJobs: { ...ref.current.workspaceJobs, [message.jobId]: next } });
+          break;
+        }
+        case "workspace:finished": {
+          const job = ref.current.workspaceJobs[message.jobId];
+          if (job === undefined) break;
+          patch({ workspaceJobs: { ...ref.current.workspaceJobs, [message.jobId]: { ...job, finished: message } } });
+          // The new workspace is a project now: the lists and the groups follow.
+          if (message.dir !== undefined) void refreshAll();
+          break;
+        }
         case "install:output": {
           // Only an install this window started and is still showing: one another window started has
           // no row here waiting for it, and would never be told it ended.
@@ -2743,9 +2811,6 @@ export function useApp() {
         patch({
           at: project,
           taskFocus: project,
-          // With no project there is no project LAYER either, and the settings screens must not
-          // merely hide the switch — they have to be editing the layer they say they are.
-          ...(project === null && ref.current.configLayer === "project" ? { configLayer: DEFAULT_CONFIG_LAYER } : {}),
           trail: [],
           trailState: null,
         });
@@ -2918,6 +2983,32 @@ export function useApp() {
        * Open — or make — a project on another machine (decision 0013 §8). A folder that is not a project
        * yet is set up there when opened, as the OS dialog's "Open" asks here.
        */
+      /** Open the Open dialog (decision 0027): a project from `+ Open`, or another workspace of one. */
+      openProjectDialog: (start: OpenFlowStart) => patch({ opening: start }),
+      closeOpenDialog: () => patch({ opening: null }),
+      /**
+       * Make a workspace on a machine — cloned or copied, opened, brought, set up — and follow it here.
+       * Answers with the job's id; its progress arrives as pushes.
+       */
+      createWorkspace: async (request: WorkspaceCreateRequest, label: string): Promise<string | undefined> => {
+        try {
+          const { jobId } = await invoke("workspace:create", request);
+          const job: WorkspaceJob = { jobId, machine: request.machine ?? "", label, phase: "fetch", steps: [], text: "", request };
+          patch({ workspaceJobs: { ...ref.current.workspaceJobs, [jobId]: job } });
+          return jobId;
+        } catch (e) {
+          fail(e);
+          return undefined;
+        }
+      },
+      cancelWorkspace: (jobId: string) => {
+        const job = ref.current.workspaceJobs[jobId];
+        void invoke("workspace:cancel", { jobId, ...(job?.request.machine !== undefined ? { machine: job.request.machine } : {}) }).catch(() => undefined);
+      },
+      dismissWorkspaceJob: (jobId: string) => {
+        const { [jobId]: _gone, ...rest } = ref.current.workspaceJobs;
+        patch({ workspaceJobs: rest });
+      },
       openOnMachine: async (machine: string, dir: string, mode: "open" | "init") => {
         patch({ busy: true, error: null });
         try {
@@ -3523,7 +3614,7 @@ export function useApp() {
         decision: "allow" | "deny",
         scope: ApprovalScope = "once",
         /** The part widths to remember, and the layer to write them into (decision 0007 §4) — or each row's own answer (decision 0023 ruling 7). */
-        extras: { remember?: string[]; addTo?: WritableLayer; answers?: PartAnswer[] } = {},
+        extras: { remember?: string[]; addTo?: WritableSetLayer; answers?: PartAnswer[] } = {},
       ) => {
         try {
           waited(
@@ -3669,7 +3760,10 @@ export function useApp() {
        * in `clearedAbove`). `written` narrows that to what was picked, for a block written whole.
        */
       writeLook: async (writes: readonly PathWrite[], layer?: ConfigLayer, written: readonly ConfigPath[] = writes.map(([path]) => path)) => {
-        const current = ref.current.config;
+        // A layer named is a Settings page's, at Settings' path; none is a change made outside Settings,
+        // in what the window reads.
+        const where = layer === undefined ? "window" : "settings";
+        const current = where === "settings" ? ref.current.settingsConfig : ref.current.config;
         if (current === null || writes.length === 0) return;
         const into = layer ?? targetLayerOf(current, writes[0]![0]);
         const doc = withPaths(current[into], writes);
@@ -3677,8 +3771,11 @@ export function useApp() {
         const above = clearedAbove(current, into, doc, written);
         const effective = { ...(current.effective as Record<string, unknown>), appearance: lookWith(lookOf(current), writes) } as unknown as JsonValue;
         const moved = Object.fromEntries(above.map((write) => [write.layer, write.doc as JsonValue]));
-        patch({ config: { ...current, ...moved, [into]: doc as JsonValue, effective } });
-        await actions.saveConfigFile(into, doc, above);
+        const next = { ...current, ...moved, [into]: doc as JsonValue, effective };
+        // The window moves only when the view written is the one it paints with.
+        const same = ref.current.settingsConfig === ref.current.config;
+        patch(same ? { config: next, settingsConfig: next } : where === "settings" ? { settingsConfig: next } : { config: next });
+        await actions.saveConfigFile(into, doc, above, where);
       },
 
       /** Switch the mode — light, dark or the system's. See {@link writeLook} for where it lands. */
@@ -3815,12 +3912,28 @@ export function useApp() {
         // of "not checked" that fills in a second later — which is what the old on-open probe did.
         if (section === "connections" || section === "models") void refreshAvailability();
       },
-      // Refused rather than silently accepted when there is nothing to write: the shell hides the
-      // switch without a project, and an action that could still be reached another way should agree
-      // with it rather than leaving the panes claiming to edit a document that does not exist.
+      /**
+       * Settings' path (`settingsScope.ts`): whose settings the pages edit. The layer it makes goes with
+       * it, and the path's own configuration is read — another project's, or another machine's, there.
+       */
+      setSettingsPath: (path: SettingsPath) => {
+        const before = settingsTarget();
+        patch({ settingsPath: path, configLayer: layerOfPath(path), settingsProblem: null });
+        // A path read somewhere else drops the view it was reading at once: a page must not write the
+        // new layer from the old place's documents while the new one is on its way.
+        const after = settingsTarget();
+        if (!sameTarget(before, after)) patch({ settingsConfig: sameTarget(after, inLayer("project")) ? ref.current.config : null });
+        void refreshConfig();
+      },
+      /**
+       * A door that names a layer rather than a path — a project's ⚙ opens "This project": the path
+       * that layer makes, with the project the shell stands on. Refused when there is nothing to write:
+       * a project layer with no project to name.
+       */
       setConfigLayer: (configLayer: ConfigLayer) => {
-        if (configLayer === "project" && ref.current.at === null) return;
-        patch({ configLayer });
+        const path = pathOfLayer(configLayer, ref.current.settingsPath, ref.current.at);
+        if (layerOfPath(path) !== configLayer) return;
+        actionsRef.current.setSettingsPath(path);
       },
 
       /**
@@ -4019,24 +4132,41 @@ export function useApp() {
        * the page is editing, and taken out of every STRONGER layer that states the same setting, so
        * what was picked is what shows (`clearedAbove`). Main validates each write before it lands,
        * so a rejected save leaves the file untouched and the message names the offending field.
+       *
+       * Read from and written to where Settings' path says (`settingsTarget`): another project's
+       * layers, another machine's — forwarded there by the engine.
        */
       saveConfig: async (layer: ConfigLayer, config: unknown, written?: readonly ConfigPath[]) => {
-        const view = ref.current.config;
-        await actionsRef.current.saveConfigFile(layer, config, view === null ? [] : clearedAbove(view, layer, config, written));
+        const view = ref.current.settingsConfig;
+        await actionsRef.current.saveConfigFile(layer, config, view === null ? [] : clearedAbove(view, layer, config, written), "settings");
       },
 
       /**
        * Replace one configuration layer's document as it is — the Files view's `settings.json` editor,
        * where a person writes one file and nothing else should move — then any `also` writes.
+       *
+       * `where` says whose: the window's (the project the shell stands on, as the Files view edits it),
+       * or Settings' path's.
        */
-      saveConfigFile: async (layer: ConfigLayer, config: unknown, also: ReadonlyArray<{ layer: ConfigLayer; doc: unknown }> = []) => {
+      saveConfigFile: async (
+        layer: ConfigLayer,
+        config: unknown,
+        also: ReadonlyArray<{ layer: ConfigLayer; doc: unknown }> = [],
+        where: "window" | "settings" = "window",
+      ) => {
         patch({ busy: true, error: null });
         try {
           // The project named whatever the layer: it is where a project write lands, and for the
-          // other two it is which project's view the answer is read back for.
-          let next = await invoke("config:write", { layer, config: config as never, ...inLayer("project") });
-          for (const write of also) next = await invoke("config:write", { layer: write.layer, config: write.doc as never, ...inLayer("project") });
-          patch({ config: next, busy: false });
+          // others it is which project's view the answer is read back for.
+          const target: ConfigTarget | undefined = where === "settings" ? settingsTarget() : inLayer("project");
+          if (target === undefined) throw new Error("Settings' path names a project that has no workspace on that machine, so there is nothing to write");
+          // An engine that predates a machine's own layers would write them into Just you's file.
+          const view = where === "settings" ? ref.current.settingsConfig : ref.current.config;
+          const refused = [layer, ...also.map((write) => write.layer)].find((l) => !viewKnowsLayer(view, l));
+          if (refused !== undefined && view !== null) throw new Error("That machine runs an older JaiRA, which keeps no settings for one machine or one project there: update it to change them from here");
+          let next = await invoke("config:write", { layer, config: config as never, ...target });
+          for (const write of also) next = await invoke("config:write", { layer: write.layer, config: write.doc as never, ...target });
+          patch({ ...(where === "settings" ? { settingsConfig: next } : { config: next }), busy: false });
           await refreshConfig();
           // `settings.json` is the one editor that does not save through `saveDoc` — it writes a
           // parsed document so main can validate it — so its draft has to be released here. Only
@@ -4052,6 +4182,42 @@ export function useApp() {
       },
 
       /**
+       * Write a machine's own settings — About's update track and how the engine is hosted, which are
+       * the machine's whatever else Settings' path names: into that machine's layer (Just you on an
+       * engine that predates it), taken out of every stronger layer, and out of Just you, where they
+       * were kept before the machine had a layer of its own (decision 0026). `machine` names a paired
+       * machine (the path's), whose own are written there — the engine forwards the request; absent,
+       * this one's.
+       */
+      saveMachineConfig: async (writes: readonly PathWrite[], machine?: string) => {
+        patch({ busy: true, error: null });
+        try {
+          const target = { project: SHARED_SESSION, ...(machine !== undefined ? { machine } : {}) };
+          const view = await invoke("config:read", target);
+          const layer: ConfigLayer = viewKnowsLayer(view, "machine") ? "machine" : "you";
+          const doc = withPaths(view[layer], writes);
+          const stated = writes.filter(([, value]) => value !== undefined).map(([path]) => path);
+          const also = clearedAbove(view, layer, doc, stated);
+          if (layer === "machine") {
+            const gone = writes.filter(([path]) => statesPath(view.you, path)).map(([path]) => [path, undefined] as const);
+            if (gone.length > 0) {
+              const you = also.find((write) => write.layer === "you");
+              const from = you?.doc ?? view.you;
+              const cleaned = withPaths(from, gone);
+              if (you !== undefined) you.doc = cleaned;
+              else also.push({ layer: "you", doc: cleaned });
+            }
+          }
+          await invoke("config:write", { layer, config: doc as never, ...target });
+          for (const write of also) await invoke("config:write", { layer: write.layer, config: write.doc as never, ...target });
+          patch({ busy: false });
+          await refreshConfig();
+        } catch (e) {
+          fail(e);
+        }
+      },
+
+      /**
        * Write `config.models` into a named layer — the default id, the routes, the presets.
        *
        * The same layering rule the executor form follows, for the same reason: patched into that
@@ -4059,7 +4225,7 @@ export function useApp() {
        * shared root's settings out of it.
        */
       saveModels: async (fields: ModelPatch, layer: ConfigLayer) => {
-        const current = ref.current.config;
+        const current = ref.current.settingsConfig;
         if (!current) return;
         const doc = applyModelPatch(current[layer], fields);
         // The write itself makes main re-check and push, so nothing is probed from here: a probe
@@ -4238,7 +4404,7 @@ export function useApp() {
        * `undefined` is removed, which is how a project stops overriding the shared root.
        */
       setExecutorConfig: async (executor: ExecutorTarget, fields: ExecutorPatch, layer: ConfigLayer) => {
-        const current = ref.current.config;
+        const current = ref.current.settingsConfig;
         if (!current) return;
         const doc = applyExecutorPatch(current[layer], executor, fields);
         // The write may have changed the binary or the credential, so what was known about this
@@ -4259,7 +4425,7 @@ export function useApp() {
         definition: JairaOperationNode | undefined,
         layer: ConfigLayer,
       ) => {
-        const current = ref.current.config;
+        const current = ref.current.settingsConfig;
         if (!current) return;
         const doc = structuredClone(
           (current[layer]) ?? {},
@@ -4283,7 +4449,7 @@ export function useApp() {
 
       /** Declare a new non-Claude CLI executor in a layer (DESIGN §8.1's `generic-cli`). */
       addExecutor: async (spec: { name: string; command: string }, layer: ConfigLayer) => {
-        const current = ref.current.config;
+        const current = ref.current.settingsConfig;
         if (!current) return;
         try {
           const doc = addGenericExecutor(current[layer], spec);
@@ -4295,7 +4461,7 @@ export function useApp() {
 
       /** Delete a configured CLI executor from a layer. Built-ins are turned off, never removed. */
       removeExecutor: async (name: string, layer: ConfigLayer) => {
-        const current = ref.current.config;
+        const current = ref.current.settingsConfig;
         if (!current) return;
         const doc = removeGenericExecutor(current[layer], name);
         await actionsRef.current.saveConfig(layer, doc);
@@ -4359,7 +4525,7 @@ export function useApp() {
           await invoke("secret:set", { name, value, target });
           patch({ busy: false });
           if (name !== named) {
-            const view = ref.current.config;
+            const view = ref.current.settingsConfig;
             const doc = structuredClone(((view?.[layer]) ?? {}) as Record<string, unknown>);
             const integrations = (doc["integrations"] ??= {}) as Record<string, unknown>;
             const forges = (integrations["forges"] ??= {}) as Record<string, unknown>;
@@ -4640,7 +4806,7 @@ export function useApp() {
        * that default changes.
        */
       setRenderer: async (edits: readonly RendererEdit[], layer?: ConfigLayer) => {
-        const current = ref.current.config;
+        const current = layer === undefined ? ref.current.config : ref.current.settingsConfig;
         if (current === null) return;
         const into = layer ?? targetLayerOf(current, "appearance.renderers");
         await actions.writeLook(rendererWrites(current[into], edits), into, rendererWritten(edits));

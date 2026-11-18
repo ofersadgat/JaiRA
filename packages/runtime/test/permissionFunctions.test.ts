@@ -197,7 +197,8 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   it("never hands a function what the floor, a rule's deny or the parser already answered", async () => {
     const { call, decided, asked, hub } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
     expect(isPermissionDenied((await call({ command: "git reset --hard" })) as never)).toBe(true);
-    expect(isPermissionDenied((await call({ command: "cat .jaira/settings.json" })) as never)).toBe(true);
+    // `cat` is `read_file`, which this set does not hold: its `other` refuses it.
+    expect(isPermissionDenied((await call({ command: "cat notes.md" })) as never)).toBe(true);
     // A line the parser cannot read asks a PERSON, whatever a function would say about the parts it can see.
     const pending = call({ command: "cargo check && $TOOL --run" });
     await eventually(() => asked.length > 0, "the gate to ask a person");

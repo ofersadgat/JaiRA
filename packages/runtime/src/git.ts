@@ -25,7 +25,7 @@
  * yet is maintenance paid in advance.
  */
 import { execOk, ExecError, type Exec, type ExecOptions } from "./exec";
-import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
+import { isWslEnv, machineEnvOf, toWslPath, type ExecEnv } from "./paths";
 
 export interface GitOptions {
   exec: Exec;
@@ -112,8 +112,12 @@ export interface GitLifecycle {
 export class Git implements GitRead, GitLifecycle {
   constructor(private readonly options: GitOptions) {}
 
+  /**
+   * Where git runs: the project's environment — except a workspace's container (decision 0027), whose
+   * files are the machine's at the same path, so the machine's git (and its credentials) answers.
+   */
   private get env(): ExecEnv {
-    return this.options.execEnv ?? "windows";
+    return machineEnvOf(this.options.execEnv ?? "windows");
   }
 
   /** A path as the git process will see it. */
