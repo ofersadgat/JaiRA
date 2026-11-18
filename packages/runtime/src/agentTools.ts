@@ -86,6 +86,7 @@ import { noteCallAgent } from "./callAgent";
 import type { StackedExecutor } from "./executorStack";
 import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
 import { compileClaudePlaceRules, namedPlacesOf } from "./linePlaces";
+import { withCallingAgent } from "./shellSessions";
 
 // --- what each executor declares ----------------------------------------------
 
@@ -498,7 +499,10 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
     ...(executor.capabilitiesFor !== undefined
       ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
       : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
+    start: (op: Operation<InlineFamily>, outer: ExecServices) => {
+      // Which agent the tools it is handed are called by (decision 0030): the shell tool runs each call
+      // in the shell that agent is set to.
+      const ctx = withCallingAgent(outer, options.label);
       if (op.kind !== "prompt") return executor.start(op, ctx);
       const known = permissionSetOf(ctx);
       const view = known !== undefined ? viewOfPermissionSet(known) : viewOfServices(ctx);

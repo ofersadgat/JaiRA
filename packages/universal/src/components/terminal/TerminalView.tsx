@@ -160,7 +160,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
           </Txt>
           <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
             {status.text}
-            {summary?.by === "you" ? " · yours" : ""}
+            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
           </Txt>
           {verbs}
         </View>
@@ -171,7 +171,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
         <View flexDirection="row" alignItems="center" gap={8} paddingVertical={7} paddingLeft={12} paddingRight={8} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
           <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
             {status.text}
-            {summary?.by === "you" ? " · yours" : ""}
+            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
           </Txt>
           {verbs}
         </View>

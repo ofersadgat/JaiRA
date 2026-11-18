@@ -465,6 +465,11 @@ export interface DecideCommandOptions {
   packages?: PackageReader | undefined;
   /** How many scripts deep this line is (`npm test` running `npm run build`); past {@link MAX_SCRIPT_DEPTH} a script is `script` again. */
   scriptDepth?: number | undefined;
+  /**
+   * A word as the shell would expand its `~` and `$NAME` (decision 0030, ruling 7), applied to every path
+   * a part names and every `cd` before it is resolved. Absent, words are taken as written.
+   */
+  expand?: ((word: string) => string) | undefined;
 }
 
 const MAX_SCRIPT_DEPTH = 4;
@@ -568,11 +573,12 @@ const SCOPED_PACKAGE = /^@[a-z0-9][\w.-]*\/[\w.-]+(@[^/\\\s]*)?$/i;
  * branches it pushes; a network program's by its URL; `runner:ssh` by the host. A path written into a
  * flag (`--output=dist/x`, `cp --target-directory=.jaira/x`) is one the part names, for every path line.
  */
-function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: readonly string[] | undefined, placeOptions: PlaceOptions): PartPlaces & { primary(kind: PlaceKind, line: string): string | undefined } {
-  const resolve = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: readonly string[] | undefined, placeOptions: PlaceOptions, expand: (word: string) => string = (word) => word): PartPlaces & { primary(kind: PlaceKind, line: string): string | undefined } {
+  const at = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+  const resolve = (path: string): string => at(expand(path));
   const paths = part.paths.filter((path) => path !== "{}").map(resolve);
-  const named = part.command !== undefined && part.kind !== "tool" && part.kind !== "redirect" ? commandWords(part.command).filter(looksLikePath).map(resolve) : [];
-  const flagged = part.command !== undefined ? part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : [])).filter(looksLikePath).map(resolve) : [];
+  const named = part.command !== undefined && part.kind !== "tool" && part.kind !== "redirect" ? commandWords(part.command).map(expand).filter(looksLikePath).map(at) : [];
+  const flagged = part.command !== undefined ? part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : [])).map(expand).filter(looksLikePath).map(at) : [];
   const where = here ?? placeOptions.root;
   const dirs = runDirs !== undefined && runDirs.length > 0 ? [...runDirs] : where !== undefined ? [where] : [];
   const byFile = (line: string): boolean => line === SCRIPT_SUBJECT || (TOOL_SPEC_BY_NAME.has(line) && line !== SHELL_SUBJECT);
@@ -823,7 +829,10 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
 
   // (5) where — the executor's floor
   if (options.scopeOf !== undefined && part.tool !== undefined && composed.verdict !== "denied") {
-    const resolved = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+    const resolved = (written: string): string => {
+      const path = options.expand?.(written) ?? written;
+      return isAbsolutePath(path) || here === undefined ? path : absolutize(path, here);
+    };
     const places: Array<{ path?: string; url?: string }> = [...part.paths.map((path) => ({ path: resolved(path) })), ...(part.url !== undefined ? [{ url: part.url }] : [])];
     for (const place of places) {
       const mode = options.scopeOf(part.tool, place);
@@ -868,7 +877,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     // `find docs -exec rm {} +` removes under `docs`: `{}` stands for the places the find walks.
     if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
     else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
-    const where = partPlacesOf(classified, here, runs?.map((run) => run.dir), placeOptions);
+    const where = partPlacesOf(classified, here, runs?.map((run) => run.dir), placeOptions, options.expand);
     const gate = runnerGateFor(classified, options, where);
     // The runner's row, when it has one: what it runs is judged under it.
     let runner: number | undefined;
@@ -906,7 +915,8 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     const judged = judgePart(policy, classified, options, here, where);
     // `cd infra && rm x` is about `infra/x`: the directory moves for what follows it on the line.
     if (classified.noRequest === true && DIRECTORY_CHANGERS.includes(classified.command?.program ?? "") && classified.paths[0] !== undefined && here !== undefined) {
-      here = isAbsolutePath(classified.paths[0]) ? classified.paths[0] : absolutize(classified.paths[0], here);
+      const target = options.expand?.(classified.paths[0]) ?? classified.paths[0];
+      here = isAbsolutePath(target) ? target : absolutize(target, here);
     }
     if (judged === undefined) continue;
     // A command is named by the entry that decided it (`git commit`, or `git`), unless that entry is a fallback.
@@ -1065,6 +1075,11 @@ function describeBytes(bytes: number): string {
 export interface CompilePolicyOptions {
   /** Chooses the parser dialect: a WSL project's commands are POSIX. */
   execEnv?: ExecEnv;
+  /**
+   * The task's shell, read as each `shell` call is judged (decision 0030, ruling 7): the directory a line
+   * starts in when the call names none, and how a word's `~` and `$VARS` expand there.
+   */
+  shellAt?: () => { cwd?: string | undefined; expand?: ((word: string) => string) | undefined } | undefined;
   /**
    * The configured MCP servers — what each server's tools COUNT AS among the standard tools (decision
    * 0019, ruling 5), so a mapped tool's call is judged by that tool's line too. Absent ⇒ none is mapped.
@@ -1234,9 +1249,14 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const lineDecisionFor = (input: Record<string, unknown>, authored: PermissionsDecl | undefined, tool: string): CommandDecision => {
     const known = LINE_DECISIONS.get(input);
     if (known !== undefined) return known;
-    const cwd = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
+    // A line starts where the task's shell stands (decision 0030), unless the call names its own `cwd`;
+    // its `~` and `$VARS` expand as that shell would expand them.
+    const shell = tool === SHELL_SUBJECT || tool.endsWith("__shell") ? options.shellAt?.() : undefined;
+    const own = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
+    const cwd = own ?? shell?.cwd;
     const decideUnder = (judging: { permissionSet: ShellPermissionSet; source: string; stack?: PermissionStackDecl } | undefined): CommandDecision =>
       decideCommand(policy, commandOf(input) ?? "", callDialectOf(input, tool) ?? dialect, {
+        ...(shell?.expand !== undefined ? { expand: shell.expand } : {}),
         permissionSet: judging?.permissionSet,
         permissionSetSource: judging?.source,
         stack: judging?.stack,

@@ -87,6 +87,8 @@ export { isEventEnabled, enabledEvents, type JairaEventsConfig, type JairaEventS
 export type { JairaEngineConfig } from "./config";
 // Which workflow a conversation runs (decision 0021) — the Chat room and Settings → Runs read it.
 export { DEFAULT_CONVERSATIONS, conversationWorkflowOf, type JairaConversationsConfig } from "./config";
+// An agent's shell setting, checked where it is chosen as where it is read (decision 0030).
+export { AGENT_SHELLS, agentShellProblem } from "./config";
 // Which states are switched off, and the text edits that switch them (decision 0021).
 export * from "./disabled";
 // What the Licenses page reads: the build's manifest of third-party notices, its decoder and search.

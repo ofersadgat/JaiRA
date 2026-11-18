@@ -299,6 +299,15 @@ An unknown key inside `agents` is ignored. Inside each block below an unknown fi
 
 A `credential` anywhere must be a non-empty string with no whitespace.
 
+Every block above also takes `shell` ([decision 0030](../decisions/0030-the-agents-shell.md)): `agents.claudeCode.shell`, `agents.claudeCli.shell`, `agents.codex.shell`, `agents.genericCli[i].shell`.
+
+| Value | Meaning |
+| --- | --- |
+| absent, or `"emulated"` | the emulated shell: each of the agent's commands runs on its own, starting where the last ended |
+| the absolute path of a `zsh`, `bash` or `sh` | one live shell per conversation, `cd`, variables and functions carrying over; a path is this machine's and does not travel to another |
+
+Anything else is refused, naming why (`agents.claudeCli.shell must name a zsh, bash or sh ('fish' is none of them)`).
+
 ## Every refusal is an Error naming the field, thrown where the document is parsed
 
 | Condition | Response | Caller does |

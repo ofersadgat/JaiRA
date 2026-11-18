@@ -12,7 +12,7 @@
 import type { JsonValue } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig, Scope } from "@jaira/shared";
-import { compilePolicy, projectPolicy, type CommandGrants, type PolicyAuditEntry, type RuleRefusal } from "./policy";
+import { compilePolicy, projectPolicy, type CommandGrants, type CompilePolicyOptions, type PolicyAuditEntry, type RuleRefusal } from "./policy";
 import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 /** The parts of a project's configuration a run's policy is compiled from. */
@@ -62,6 +62,8 @@ export interface RunPolicyOptions {
   grants?: CommandGrants | undefined;
   /** Every call a rule refused — see `CompilePolicyOptions.onRefused`. */
   onRefused?: ((refused: RuleRefusal) => void) | undefined;
+  /** The task's shell — see `CompilePolicyOptions.shellAt` (decision 0030). */
+  shellAt?: CompilePolicyOptions["shellAt"];
 }
 
 /**
@@ -84,6 +86,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     askAboveBytes: config.artifacts.askAboveBytes,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
     ...(options.onRefused !== undefined ? { onRefused: options.onRefused } : {}),
+    ...(options.shellAt !== undefined ? { shellAt: options.shellAt } : {}),
     // What the configured servers' tools count as (decision 0019, ruling 5).
     ...(config.mcp !== undefined ? { mcp: config.mcp } : {}),
   });

@@ -179,6 +179,25 @@ export interface JairaContainerEnvironment {
 export interface JairaExecutorConfig {
   enabled?: boolean;
   credential?: string;
+  /**
+   * The shell JaiRA's `shell` tool runs this agent's commands in (decision 0030): absent or
+   * `"emulated"`, the emulated shell, which carries the directory between calls; otherwise the
+   * absolute path of a `zsh`, `bash` or `sh`, kept live for the conversation. A path is this machine's.
+   */
+  shell?: string;
+}
+
+/** The live shells an agent's `shell` may name (decision 0030). */
+export const AGENT_SHELLS = ["zsh", "bash", "sh"] as const;
+
+/** Why an agent's `shell` value is refused, or undefined when it is one. */
+export function agentShellProblem(value: unknown): string | undefined {
+  if (value === undefined || value === "emulated") return undefined;
+  if (typeof value !== "string" || value.length === 0) return `must be "emulated" or the path of a zsh, bash or sh`;
+  if (!/^(\/|[A-Za-z]:[\\/])/.test(value)) return `must be an absolute path (it was '${value}')`;
+  const name = value.split(/[\\/]/).pop() ?? "";
+  if (!(AGENT_SHELLS as readonly string[]).includes(name)) return `must name a zsh, bash or sh ('${name}' is none of them)`;
+  return undefined;
 }
 
 /** The built-in executors, by the registry name a state's `functionRef` uses. */
@@ -1082,6 +1101,8 @@ function checkExecutorFields(
   if (spec["enabled"] !== undefined && typeof spec["enabled"] !== "boolean") {
     throw new Error(`${where}.enabled must be a boolean`);
   }
+  const shellProblem = agentShellProblem(spec["shell"]);
+  if (shellProblem !== undefined) throw new Error(`${where}.shell ${shellProblem}`);
   const credential = spec["credential"];
   if (credential === undefined) return;
   // Refused rather than ignored, for the reason `parseModelRoute` refuses a misplaced field: a key
@@ -1112,7 +1133,7 @@ function parseClaudeCode(raw: unknown, where: string): JairaClaudeCodeConfig | u
   // `command` is listed so the SPECIFIC refusal below fires rather than the generic "not a setting":
   // someone who wrote it has a real misconception — that this adapter is a binary — and the message
   // that names the other one is worth far more than the shorter refusal.
-  allowedFields(spec, ["enabled", "credential", "command"], where);
+  allowedFields(spec, ["enabled", "credential", "command", "shell"], where);
   checkExecutorFields(spec, where, "required");
   if (spec["command"] !== undefined) {
     throw new Error(
@@ -1132,7 +1153,7 @@ function parseClaudeCli(raw: unknown, where: string): JairaClaudeCliConfig | und
   // silently accepting it here would leave someone believing a limit was in force that is not.
   // `credential` is listed for the reason `command` is on the SDK block: the specific refusal
   // explains that this runtime signs itself in, and the generic one would not.
-  allowedFields(spec, ["enabled", "command", "credential"], where);
+  allowedFields(spec, ["enabled", "command", "credential", "shell"], where);
   checkExecutorFields(spec, where, "none");
   if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
     throw new Error(`${where}.command must be a non-empty string`);
@@ -1184,7 +1205,7 @@ function parseAgents(raw: unknown): JairaAgentConfig {
       throw new Error(`${where}.env must be an object of strings`);
     }
     if (spec["mcp"] !== undefined) parseGenericCliMcp(spec["mcp"], `${where}.mcp`);
-    allowedFields(spec, ["enabled", "credential", "name", "command", "args", "prompt", "env", "mcp"], where);
+    allowedFields(spec, ["enabled", "credential", "name", "command", "args", "prompt", "env", "mcp", "shell"], where);
     checkExecutorFields(spec, where);
     return spec as unknown as JairaGenericCliAgent;
   });
@@ -1227,7 +1248,7 @@ function parseCodexAgent(raw: unknown): JairaCodexAgentConfig | undefined {
     throw new Error("config.agents.codex must be an object");
   }
   const spec = raw as Record<string, unknown>;
-  allowedFields(spec, ["enabled", "command", "sandbox", "credential"], "config.agents.codex");
+  allowedFields(spec, ["enabled", "command", "sandbox", "credential", "shell"], "config.agents.codex");
   checkExecutorFields(spec, "config.agents.codex");
   if (spec["command"] !== undefined && (typeof spec["command"] !== "string" || spec["command"].length === 0)) {
     throw new Error("config.agents.codex.command must be a non-empty string");

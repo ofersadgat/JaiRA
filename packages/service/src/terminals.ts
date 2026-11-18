@@ -49,6 +49,7 @@ export interface OpenCall {
   command: string;
   cwd: string | undefined;
   dialect: CommandDialect;
+  shell?: string;
   by: TerminalBy;
 }
 
@@ -72,6 +73,7 @@ export class TerminalHub {
           command: call.command,
           cwd: call.cwd,
           dialect: call.dialect,
+          ...(call.shell !== undefined ? { shell: call.shell } : {}),
           by: "agent",
         }),
     };
@@ -90,6 +92,7 @@ export class TerminalHub {
       command: call.command,
       dialect: call.dialect,
       ...(call.cwd !== undefined ? { cwd: call.cwd } : {}),
+      ...(call.shell !== undefined ? { shell: call.shell } : {}),
       by: call.by,
       startedAt: this.now(),
       length: 0,

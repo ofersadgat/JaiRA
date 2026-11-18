@@ -102,6 +102,24 @@ describe("another machine's piece laid into this one's layer", () => {
     ]);
   });
 
+  it("keeps an agent's shell path on this machine, every kind of agent, and lets `emulated` travel (decision 0030)", () => {
+    const pieces = settingsPieces({
+      agents: {
+        claudeCode: { shell: "/bin/zsh" },
+        claudeCli: { shell: "/opt/homebrew/bin/bash", enabled: true },
+        codex: { shell: "emulated" },
+        genericCli: [{ name: "aider", command: "aider", shell: "/bin/sh" }],
+      },
+    } as never);
+    expect(pieces.find((p) => p.path[1] === "claudeCode")!.value).toEqual({});
+    expect(pieces.find((p) => p.path[1] === "claudeCli")!.value).toEqual({ enabled: true });
+    expect(pieces.find((p) => p.path[1] === "codex")!.value).toEqual({ shell: "emulated" });
+    expect(pieces.find((p) => p.path[1] === "genericCli")!.value).toEqual([{ name: "aider", command: "aider" }]);
+    const here = { agents: { claudeCode: { shell: "/bin/zsh" }, genericCli: [{ name: "aider", command: "aider", shell: "/bin/sh" }] } };
+    expect(layPiece(here, ["agents", "claudeCode"], { enabled: false }).doc.agents).toMatchObject({ claudeCode: { enabled: false, shell: "/bin/zsh" } });
+    expect(valueAt(layPiece(here, ["agents", "genericCli"], [{ name: "aider", command: "aider" }]).doc, ["agents", "genericCli"])).toEqual([{ name: "aider", command: "aider", shell: "/bin/sh" }]);
+  });
+
   it("reads one value one way, whatever order its keys were written in", () => {
     expect(canonicalJson({ b: 1, a: { d: [1, { z: 1, y: 2 }], c: null } })).toBe(canonicalJson({ a: { c: null, d: [1, { y: 2, z: 1 }] }, b: 1 }));
     expect(isMachinePiece(["appearance", "mode"], "dark")).toBe(false);

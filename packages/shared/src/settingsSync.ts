@@ -160,20 +160,37 @@ function cutFurther(path: readonly string[], value: JsonValue): boolean {
 export function shareable(path: readonly string[], value: JsonValue): JsonValue {
   const [block, key] = path;
   if (block !== "agents" || path.length !== 2) return value;
-  if ((key === "claudeCli" || key === "codex") && isObject(value) && isCommandPath(value["command"])) {
-    const { command: _local, ...rest } = value;
-    return rest;
+  if ((key === "claudeCli" || key === "codex" || key === "claudeCode") && isObject(value)) {
+    return withoutLocal(value, key !== "claudeCode");
   }
   if (key === "genericCli" && Array.isArray(value)) {
     return value.map((entry) => {
-      if (!isObject(entry) || !isCommandPath(entry["command"])) return entry;
+      if (!isObject(entry)) return entry;
       const name = typeof entry["name"] === "string" ? entry["name"] : "generic-cli";
-      if (BUILTIN_GENERIC_AGENTS[name] === undefined) return entry;
-      const { command: _local, ...rest } = entry;
-      return rest;
+      return withoutLocal(entry, BUILTIN_GENERIC_AGENTS[name] !== undefined);
     });
   }
   return value;
+}
+
+/**
+ * An agent block without its machine's own paths: its `shell` when that is a path (decision 0030), and
+ * its `command` when that is a path and `command` may go (a CLI the person added keeps it).
+ */
+function withoutLocal(entry: Record<string, JsonValue>, commandMayGo: boolean): Record<string, JsonValue> {
+  const out: Record<string, JsonValue> = { ...entry };
+  if (commandMayGo && isCommandPath(out["command"])) delete out["command"];
+  if (isCommandPath(out["shell"])) delete out["shell"];
+  return out;
+}
+
+/** This machine's paths in an agent block (`command`, `shell`), to put back into another machine's. */
+function localOf(entry: JsonValue | undefined, commandStays: boolean): Record<string, JsonValue> {
+  if (!isObject(entry)) return {};
+  return {
+    ...(commandStays && isCommandPath(entry["command"]) ? { command: entry["command"]! } : {}),
+    ...(isCommandPath(entry["shell"]) ? { shell: entry["shell"]! } : {}),
+  };
 }
 
 /**
@@ -246,22 +263,18 @@ export function layPiece(doc: JsonValue | null | undefined, path: readonly strin
 function withLocalFields(path: readonly string[], incoming: JsonValue, here: JsonValue | undefined): JsonValue {
   const [block, key] = path;
   if (block !== "agents" || path.length !== 2) return structuredClone(incoming);
-  if ((key === "claudeCli" || key === "codex") && isObject(incoming)) {
-    const local = isObject(here) && isCommandPath(here["command"]) ? here["command"] : undefined;
-    return local !== undefined ? { ...structuredClone(incoming), command: local } : structuredClone(incoming);
+  if ((key === "claudeCli" || key === "codex" || key === "claudeCode") && isObject(incoming)) {
+    return { ...structuredClone(incoming), ...localOf(here, key !== "claudeCode") };
   }
   if (key === "genericCli" && Array.isArray(incoming)) {
-    const localPaths = new Map<string, JsonValue>();
+    const localByName = new Map<string, JsonValue>();
     if (Array.isArray(here)) {
-      for (const entry of here) {
-        if (isObject(entry) && isCommandPath(entry["command"])) localPaths.set(typeof entry["name"] === "string" ? entry["name"] : "generic-cli", entry["command"]!);
-      }
+      for (const entry of here) if (isObject(entry)) localByName.set(typeof entry["name"] === "string" ? entry["name"] : "generic-cli", entry);
     }
     return incoming.map((entry) => {
       if (!isObject(entry)) return structuredClone(entry);
       const name = typeof entry["name"] === "string" ? entry["name"] : "generic-cli";
-      const local = localPaths.get(name);
-      return local !== undefined && BUILTIN_GENERIC_AGENTS[name] !== undefined ? { ...structuredClone(entry), command: local } : structuredClone(entry);
+      return { ...structuredClone(entry), ...localOf(localByName.get(name), BUILTIN_GENERIC_AGENTS[name] !== undefined) };
     });
   }
   return structuredClone(incoming);
@@ -288,7 +301,7 @@ export const MACHINE_PIECE_WORDS: readonly string[] = [
   "the update track",
   "the local and embedded model routes",
   "MCP servers started as a command, or reached at a loopback address",
-  "an agent's binary given as a path",
+  "an agent's binary or shell given as a path",
   "a workflow search path that names a folder",
   "your settings, permission sets and workflows for a project with no remote, which is keyed by where it is on that machine",
   "this machine's own settings, and a project's on this machine, with their permission sets and workflows",

@@ -642,7 +642,20 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { TerminalHub } from "./terminals";
-import { createShellTool } from "@jaira/runtime";
+import { agentShellSetting, idleShellVerdict, SHELL_REAP_EVERY_MS } from "./shells";
+import {
+  createShellTool,
+  expandShellWord,
+  isContainerEnv,
+  isWslEnv,
+  listensOnAPort,
+  processTreeOf,
+  shellChoiceOf,
+  ShellSessions,
+  treeCpuSeconds,
+  type LiveShell,
+  type TaskShells,
+} from "@jaira/runtime";
 import type { TerminalRead, TerminalSignal, TerminalSummary } from "@jaira/shared";
 import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
@@ -4128,6 +4141,9 @@ export class AppService {
   async close(): Promise<void> {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
+    // Live shells are their own process groups: they would outlive the engine.
+    clearInterval(this.shellReaper);
+    this.shells.closeAll("was closed when the app quit");
     clearInterval(this.placementTimer);
     clearInterval(this.headTimer);
     clearInterval(this.archiveTimer);
@@ -6097,7 +6113,7 @@ export class AppService {
       // Our own tools, so an agent's commands go through the policy at all: an agent
       // calling its native shell would be invisible to it (DESIGN §10.1). Each call is a terminal a
       // window can watch and type into (decision 0028).
-      registerTools(registry, { execEnv: config.execEnvironment, exec, terminals: this.terminals.forTask(taskId, open.key) });
+      registerTools(registry, { execEnv: config.execEnvironment, exec, terminals: this.terminals.forTask(taskId, open.key), shells: this.taskShells(open, taskId, config) });
       // A state can also run a command directly, without delegating to an agent; it
       // gates itself with the same policy (DESIGN §10.1).
       registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
@@ -6503,6 +6519,8 @@ export class AppService {
         grants: open.approvals.grants(taskId),
         // A call a rule refused is a step under the call, as a function's verdict is.
         onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
+        // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
+        shellAt: () => this.shellAt(taskId, config.execEnvironment),
       }),
       permissionsOf: (call, stated) =>
         live.permissionSet === undefined || instanceStates.get(call.instanceId) !== started.bundle.rootId
@@ -7454,6 +7472,8 @@ export class AppService {
       exec: new NodeExec({ execEnv: config.execEnvironment }),
       // Each command a terminal the conversation can watch and type into (decision 0028).
       terminals: this.terminals.forTask(request.taskId, open.key),
+      // Each call starts where the last ended, in the shell its agent is set to (decision 0030).
+      shells: this.taskShells(open, request.taskId, config),
     });
     // The same artifact wiring the run used, so a file this turn writes lands where that run's files
     // landed rather than somewhere only this conversation knows about.
@@ -7540,6 +7560,8 @@ export class AppService {
       mcp: config.mcp,
       // A call a rule refused is a step under the call, as a function's verdict is.
       onRefused: (refused) => this.recordRuleRefusal(open, request.taskId, refused),
+      // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
+      shellAt: () => this.shellAt(request.taskId, config.execEnvironment),
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
@@ -7911,7 +7933,10 @@ export class AppService {
     const open = this.session(request.project);
     const project = open.project;
     const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
-    const root = recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
+    const workspace = recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
+    // Where the task's shell stands (decision 0030); the person's command does not move it.
+    const standing = this.shells.peek(request.taskId)?.cwd;
+    const root = standing !== undefined && existsSync(standing) ? standing : workspace;
     const execEnv = project.config.execEnvironment;
     const callId = this.terminals.nextYours();
     const tool = createShellTool({
@@ -7925,6 +7950,80 @@ export class AppService {
     const read = this.terminals.read(request.taskId, callId);
     if (read === null) throw new Error("the command could not be started");
     return read.summary;
+  }
+
+  // --- the agent's shell (decision 0030) --------------------------------------
+
+  /** Each task's shell: where it stands, its live shell, what its agent is to be told. */
+  readonly shells = new ShellSessions();
+  /** The project session each task with a shell belongs to — what the idle rule asks whether it runs. */
+  private readonly shellOwners = new Map<string, ProjectSession>();
+  /** When each live shell's processes last used the CPU, and how much they had used then. */
+  private readonly shellCpu = new Map<LiveShell, { seconds: number; since: number }>();
+  private readonly shellReaper: ReturnType<typeof setInterval> = (() => {
+    const timer = setInterval(() => this.reapIdleShells(), SHELL_REAP_EVERY_MS);
+    timer.unref?.();
+    return timer;
+  })();
+
+  /** A task's shell for its `shell` tool: its session, the shell each agent is set to, and where a live one cannot run. */
+  private taskShells(open: ProjectSession, taskId: string, config: JairaConfigOf): TaskShells {
+    this.shellOwners.set(taskId, open);
+    const env = config.execEnvironment;
+    const liveRefusal = isWslEnv(env)
+      ? "this project's commands run in WSL"
+      : isContainerEnv(env)
+        ? "this project's commands run in a container"
+        : process.platform === "win32"
+          ? "this machine runs Windows"
+          : undefined;
+    return {
+      session: this.shells.of(taskId),
+      choiceFor: (agent) => shellChoiceOf(agentShellSetting(config.agents, agent)),
+      ...(liveRefusal !== undefined ? { liveRefusal } : {}),
+    };
+  }
+
+  /**
+   * The task's shell for the permission check (ruling 7): where its lines start, and how their `~` and
+   * `$VARS` expand — a live shell's environment as its last command left it, else this engine's, which
+   * an emulated command starts with. In WSL or a container the values are not this engine's, so nothing
+   * expands.
+   */
+  private shellAt(taskId: string, execEnv: JairaConfigOf["execEnvironment"]): { cwd?: string; expand?: (word: string) => string } | undefined {
+    const session = this.shells.peek(taskId);
+    const native = !isWslEnv(execEnv) && !isContainerEnv(execEnv);
+    const env: Record<string, string | undefined> | undefined = session?.live?.alive === true ? (session.env ?? process.env) : native ? process.env : undefined;
+    return {
+      ...(session?.cwd !== undefined ? { cwd: session.cwd } : {}),
+      ...(env !== undefined ? { expand: (word: string) => expandShellWord(word, (name) => env[name]) } : {}),
+    };
+  }
+
+  /**
+   * The idle rule (ruling 5), once a minute: a live shell is closed when nothing it started listens on
+   * a port, its processes have used no CPU for {@link SHELL_IDLE_MS}, and nothing runs in its task.
+   */
+  private reapIdleShells(): void {
+    const now = Date.now();
+    for (const { taskId, shell } of this.shells.live()) {
+      const pid = shell.pid;
+      if (pid === undefined || shell.busy) continue;
+      const seconds = treeCpuSeconds(pid);
+      if (seconds === undefined) continue;
+      const seen = this.shellCpu.get(shell);
+      if (seen === undefined || seconds > seen.seconds + 0.01) {
+        this.shellCpu.set(shell, { seconds, since: now });
+        continue;
+      }
+      const open = this.shellOwners.get(taskId);
+      const running = open !== undefined && (open.live.has(taskId) || (open.chatTurns.get(taskId)?.size ?? 0) > 0);
+      const verdict = idleShellVerdict({ running, quietSince: seen.since, now, listens: listensOnAPort(processTreeOf(pid)) });
+      if (verdict !== undefined) {
+        this.shellCpu.delete(shell);
+        shell.close(verdict);
+      }
+    }
   }
 
   /** How a permission set reference is followed in this project — the reader a state's `tools` is followed with. */

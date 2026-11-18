@@ -10,6 +10,7 @@ import { SettingsLayerContext } from "../layers";
 import { SettingsGroup } from "../SettingsPage";
 import { ActionSlot, CheckAgain, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { InstallLogBox } from "./InstallLog";
+import { ShellChoice } from "./ShellChoice";
 import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
 import { AnotherTile, InstallTile, Shelf, ShelfCard } from "./Shelf";
@@ -163,6 +164,12 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
             <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
           </Wide>
         ) : null,
+        // The shell its commands run in (decision 0030): emulated, or a live zsh, bash or sh.
+        <Wide key="shell">
+          <LabelledBoxes label="Shell">
+            {[<ShellChoice key="shell" here={row.here["shell"]} merged={merged["shell"]} locked={locked} onWrite={(shell) => write({ shell })} />]}
+          </LabelledBoxes>
+        </Wide>,
         // The form is the provider's own, drawn whole once its fold is open.
         <SettingsFold key="form" gist={settingsGistOf(spec)}>
           <Stack>

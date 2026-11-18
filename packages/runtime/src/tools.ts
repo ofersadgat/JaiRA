@@ -90,7 +90,11 @@ import {
 } from "./policy";
 import type { PackageReader } from "./packageScripts";
 import { refusalOf } from "./approval";
-import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
+import { dialectFor, hostPathFor, interpreterFor, type ExecEnv } from "./paths";
+import { existsSync } from "node:fs";
+import { MarkFilter, shellQuote, withCwdMark, withoutMarks } from "./shellMarks";
+import { liveShellKindOf } from "./liveShell";
+import { callingAgentOf, startLive, type ShellChoice, type ShellSession } from "./shellSessions";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.runtime.tools");
@@ -111,12 +115,27 @@ export interface ToolOptions {
    * what it was, with what the person typed added as `input`.
    */
   terminals?: ShellTerminals;
+  /**
+   * The task's shell (decision 0030): where each call starts — where the last one ended — and which
+   * shell the calling agent is set to, the emulated one or a live zsh, bash or sh. Absent, every call
+   * starts afresh at the workspace root, as it always did.
+   */
+  shells?: TaskShells;
+}
+
+/** A task's shell, as the shell tool is handed it. */
+export interface TaskShells {
+  readonly session: ShellSession;
+  /** The shell the calling agent (`callingAgentOf`) is set to. */
+  choiceFor(agent: string | undefined): ShellChoice;
+  /** Why a live shell cannot run where this task's commands run (WSL, a container, Windows), if so. */
+  liveRefusal?: string | undefined;
 }
 
 /** The terminals a shell tool streams its calls to — the service's per-task hub. */
 export interface ShellTerminals {
   /** A call is starting; undefined when nobody is keeping its terminal. */
-  open(call: { callId: string | undefined; command: string; cwd: string | undefined; dialect: CommandDialect }): ShellCallTerminal | undefined;
+  open(call: { callId: string | undefined; command: string; cwd: string | undefined; dialect: CommandDialect; shell?: string }): ShellCallTerminal | undefined;
 }
 
 /** One call's terminal, as the shell tool feeds it. */
@@ -161,12 +180,14 @@ export function createShellTool(options: ToolOptions = {}): Tool {
   const exec = options.exec ?? new NodeExec();
   return {
     description:
-      "Run a shell command in the task's workspace. Subject to the project's safety policy: destructive commands are refused and some require the user's approval.",
+      options.shells === undefined
+        ? "Run a shell command in the task's workspace. Subject to the project's safety policy: destructive commands are refused and some require the user's approval."
+        : "Run a shell command in the task's workspace. Each call starts in the directory the previous call ended in (the workspace root at first), so `cd` carries over; pass `cwd`, relative to the workspace root, to start somewhere else. The result says where the command ended (`cwd`) and in which shell. In the emulated shell, variables, aliases and functions do not carry over between calls; in a live shell (when this agent is set to one) they do. Subject to the project's safety policy: destructive commands are refused and some require the user's approval.",
     inputSchema: {
       type: "object",
       properties: {
         command: { type: "string", description: "The command line to run." },
-        cwd: { type: "string", description: "Optional working directory, relative to the workspace root." },
+        cwd: { type: "string", description: "Optional working directory, relative to the workspace root. Without it, the command starts where the previous one ended." },
       },
       required: ["command"],
     },
@@ -194,6 +215,19 @@ export function createShellTool(options: ToolOptions = {}): Tool {
       // has no PowerShell.
       const env: ExecEnv = options.execEnv ?? "windows";
       const [interpreter, ...prefix] = interpreterFor(env);
+
+      if (options.shells !== undefined && root !== undefined) {
+        return runInTaskShell(exec, options.shells, options, {
+          command,
+          root,
+          ...(relative !== undefined && cwd !== undefined ? { cwd } : {}),
+          env,
+          argv: [interpreter!, ...prefix],
+          callId: ctx?.toolCallId,
+          agent: callingAgentOf(ctx),
+          ...(ctx?.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
+        });
+      }
 
       const terminal = options.terminals?.open({ callId: ctx?.toolCallId, command, cwd, dialect: dialectFor(env) });
       if (terminal !== undefined) {
@@ -233,81 +267,246 @@ export function createShellTool(options: ToolOptions = {}): Tool {
  */
 async function runInTerminal(
   exec: Exec,
-  terminal: ShellCallTerminal,
+  terminal: ShellCallTerminal | undefined,
   argv: readonly string[],
-  options: { cwd?: string; execEnv: ExecEnv; limitMs: number; max: number; abortSignal?: AbortSignal },
+  options: { cwd?: string; execEnv: ExecEnv; limitMs: number; max: number; abortSignal?: AbortSignal; onMark?: (kind: string, payload: string) => void },
 ): Promise<Record<string, unknown>> {
   const [file, ...args] = argv;
   const limit = new AbortController();
-  let timedOut = false;
-  let stopped = false;
-  let endsAt: number | undefined;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const arm = (): void => {
-    // No limit at all (0): what the person runs runs until it ends or is stopped.
-    if (options.limitMs <= 0) return;
-    if (timer !== undefined) clearTimeout(timer);
-    endsAt = Date.now() + options.limitMs;
-    timer = setTimeout(() => {
-      timedOut = true;
-      limit.abort();
-    }, options.limitMs);
-  };
-  arm();
   // The turn's stop and the time limit, as one signal for exec to kill the tree on.
-  const onTurnAbort = (): void => limit.abort();
-  if (options.abortSignal?.aborted) limit.abort();
-  else options.abortSignal?.addEventListener("abort", onTurnAbort, { once: true });
-
-  const typed: string[] = [];
-  let pending = "";
+  const watch = new CallWatch(options.limitMs, () => limit.abort(), options.abortSignal);
+  // JaiRA's marks (decision 0030) come out of what the terminal shows and what the model reads.
+  const marks = { stdout: new MarkFilter(options.onMark ?? (() => undefined)), stderr: new MarkFilter(options.onMark ?? (() => undefined)) };
   try {
     const result = await exec.run(file!, args, {
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
       execEnv: options.execEnv,
       abortSignal: limit.signal,
-      onOutput: (_stream, chunk) => terminal.output(chunk),
+      onOutput: (stream, chunk) => {
+        const text = marks[stream].feed(chunk);
+        if (text.length > 0) terminal?.output(text);
+      },
       interactive: (io) =>
-        terminal.attach({
-          type: (text) => {
-            const sent = io.write(text);
-            if (!sent) return false;
-            arm();
-            // Kept by line, for the model: what was answered for it.
-            pending += text;
-            const lines = pending.split(/\r?\n/);
-            pending = lines.pop() ?? "";
-            typed.push(...lines);
-            return true;
-          },
+        terminal?.attach({
+          type: (text) => watch.type(text, (t) => io.write(t)),
           interrupt: () => {
-            stopped = true;
+            watch.stopped = true;
             io.signal("SIGINT");
           },
           stop: () => {
-            stopped = true;
+            watch.stopped = true;
             io.signal("SIGTERM");
           },
-          endsAt: () => endsAt,
+          endsAt: () => watch.endsAt,
         }),
     });
-    if (pending.length > 0) typed.push(pending);
-    terminal.ended({ exitCode: result.code, signal: result.signal, timedOut, stopped: stopped || (result.aborted && !timedOut) });
+    const typed = watch.done();
+    const stopped = watch.stopped || (result.aborted && !watch.timedOut);
+    terminal?.ended({ exitCode: result.code, signal: result.signal, timedOut: watch.timedOut, stopped });
     return {
       exitCode: result.code,
-      stdout: clamp(result.stdout, options.max),
-      stderr: clamp(result.stderr, options.max),
-      ...(timedOut ? { timedOut: true } : {}),
+      stdout: clamp(withoutMarks(result.stdout), options.max),
+      stderr: clamp(withoutMarks(result.stderr), options.max),
+      ...(watch.timedOut ? { timedOut: true } : {}),
       ...(stopped ? { stopped: true } : {}),
       ...(typed.length > 0 ? { input: typed } : {}),
     };
   } catch (error) {
-    terminal.ended({ exitCode: null, signal: null, timedOut, stopped });
+    watch.done();
+    terminal?.ended({ exitCode: null, signal: null, timedOut: watch.timedOut, stopped: watch.stopped });
     throw error;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    options.abortSignal?.removeEventListener("abort", onTurnAbort);
   }
+}
+
+/**
+ * One call's time limit, typing and stopping, whatever runs it (decisions 0028, 0030): the limit counts
+ * from the last line typed, and the turn's stop ends the call as the limit does.
+ */
+class CallWatch {
+  timedOut = false;
+  stopped = false;
+  endsAt: number | undefined;
+  private readonly typed: string[] = [];
+  private pending = "";
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private readonly onAbort: () => void;
+
+  constructor(
+    private readonly limitMs: number,
+    private readonly onLimit: () => void,
+    private readonly abortSignal?: AbortSignal,
+  ) {
+    this.onAbort = () => {
+      this.stopped = true;
+      onLimit();
+    };
+    this.arm();
+    if (abortSignal?.aborted) this.onAbort();
+    else abortSignal?.addEventListener("abort", this.onAbort, { once: true });
+  }
+
+  /** (Re)start the limit; 0 is no limit at all — what the person runs runs until it ends or is stopped. */
+  arm(): void {
+    if (this.limitMs <= 0) return;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.endsAt = Date.now() + this.limitMs;
+    this.timer = setTimeout(() => {
+      this.timedOut = true;
+      this.onLimit();
+    }, this.limitMs);
+  }
+
+  /** A person typed: it goes to stdin, the limit starts again, and each whole line is kept for the model. */
+  type(text: string, write: (text: string) => boolean): boolean {
+    if (!write(text)) return false;
+    this.arm();
+    this.pending += text;
+    const lines = this.pending.split(/\r?\n/);
+    this.pending = lines.pop() ?? "";
+    this.typed.push(...lines);
+    return true;
+  }
+
+  /** The call is over: the timer and the listener go, and what was typed is handed back. */
+  done(): string[] {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.abortSignal?.removeEventListener("abort", this.onAbort);
+    if (this.pending.length > 0) {
+      this.typed.push(this.pending);
+      this.pending = "";
+    }
+    return [...this.typed];
+  }
+}
+
+/**
+ * A call in the task's shell (decision 0030): it starts where the last one ended — or at its own `cwd`,
+ * or at the root — runs in the shell its agent is set to, and leaves the session where it ended. What
+ * the agent should know (a shell started again, a directory gone, a live shell refused here) is said in
+ * `note`.
+ */
+async function runInTaskShell(
+  exec: Exec,
+  shells: TaskShells,
+  options: ToolOptions,
+  call: { command: string; root: string; cwd?: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; agent: string | undefined; abortSignal?: AbortSignal },
+): Promise<Record<string, unknown>> {
+  const session = shells.session;
+  const notes: string[] = [];
+  if (session.note !== undefined) {
+    notes.push(session.note);
+    delete session.note;
+  }
+  let start = call.cwd ?? session.cwd ?? call.root;
+  if (call.cwd === undefined && session.cwd !== undefined && !existsSync(session.cwd)) {
+    notes.push(`${session.cwd}, where the previous command ended, no longer exists, so this one ran at the workspace root.`);
+    delete session.cwd;
+    start = call.root;
+  }
+  const dialect = dialectFor(call.env);
+  const limitMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const max = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;
+  const choice = shells.choiceFor(call.agent);
+  const kind = choice.kind === "live" ? liveShellKindOf(choice.path) : undefined;
+  const refusal = choice.kind !== "live" ? undefined : shells.liveRefusal ?? (dialect !== "posix" ? "this project's commands run in PowerShell" : kind === undefined ? `${choice.path} is not a zsh, bash or sh` : undefined);
+
+  if (choice.kind === "live" && refusal === undefined) {
+    let shell = session.live;
+    if (shell !== undefined && shell.alive && shell.path !== choice.path) {
+      shell.close(`was replaced by ${choice.path}, the shell this agent is set to`);
+      shell = undefined;
+    }
+    if (shell === undefined || !shell.alive) {
+      const before = session.gone;
+      const where = session.cwd !== undefined && existsSync(session.cwd) ? session.cwd : call.root;
+      try {
+        shell = await startLive(session, choice.path, where);
+      } catch (error) {
+        notes.push(`The live ${kind} could not be started (${error instanceof Error ? error.message : String(error)}), so this ran in the emulated shell.`);
+        return runEmulated(exec, options, call, start, dialect, limitMs, max, notes);
+      }
+      if (before !== undefined) notes.push(`JaiRA started a new ${shell.kind} in ${where}: the previous one ${before}. Variables, aliases and functions set in it are gone.`);
+    }
+    const toRun = call.cwd !== undefined ? `cd ${shellQuote(call.cwd)} && ${call.command}` : call.command;
+    const terminal = options.terminals?.open({ callId: call.callId, command: call.command, cwd: call.cwd ?? session.cwd ?? call.root, dialect, shell: shell.kind });
+    const live = shell;
+    let io: { write: (text: string) => boolean; interrupt: () => void; stop: () => void } | undefined;
+    const watch = new CallWatch(limitMs, () => io?.stop(), call.abortSignal);
+    const run = await live.run(toRun, {
+      onOutput: (text) => terminal?.output(text),
+      onStart: (started) => {
+        io = started;
+        terminal?.attach({
+          type: (text) => watch.type(text, started.write),
+          interrupt: () => {
+            watch.stopped = true;
+            started.interrupt();
+          },
+          stop: () => {
+            watch.stopped = true;
+            started.stop();
+          },
+          endsAt: () => watch.endsAt,
+        });
+      },
+    });
+    const typed = watch.done();
+    const stopped = watch.stopped || run.stopped;
+    terminal?.ended({ exitCode: run.exitCode, signal: null, timedOut: watch.timedOut, stopped });
+    if (run.cwd !== undefined && run.cwd !== "") session.cwd = run.cwd;
+    if (run.env !== undefined) session.env = run.env;
+    if (run.ended !== undefined) notes.push(`The ${live.kind} ${run.ended}; the next command starts a new one in ${session.cwd ?? call.root}.`);
+    return {
+      exitCode: run.exitCode,
+      stdout: clamp(run.stdout, max),
+      stderr: clamp(run.stderr, max),
+      cwd: session.cwd ?? call.root,
+      shell: live.kind,
+      ...(watch.timedOut ? { timedOut: true } : {}),
+      ...(stopped ? { stopped: true } : {}),
+      ...(typed.length > 0 ? { input: typed } : {}),
+      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
+    };
+  }
+
+  if (choice.kind === "live" && refusal !== undefined && session.refusalTold !== true) {
+    session.refusalTold = true;
+    notes.push(`This agent is set to a live ${kind ?? "shell"}, but ${refusal}; it ran in the emulated shell, which keeps the directory between calls and nothing else.`);
+  }
+  return runEmulated(exec, options, call, start, dialect, limitMs, max, notes);
+}
+
+/**
+ * The emulated shell (decision 0030, ruling 3): a fresh process through the project's interpreter, in
+ * the directory the task's shell stands in, a trap after the command saying where it ended. PowerShell
+ * has no such trap: there every call starts where it was told to, as before.
+ */
+async function runEmulated(
+  exec: Exec,
+  options: ToolOptions,
+  call: { command: string; root: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; abortSignal?: AbortSignal },
+  start: string,
+  dialect: CommandDialect,
+  limitMs: number,
+  max: number,
+  notes: string[],
+): Promise<Record<string, unknown>> {
+  const session = options.shells!.session;
+  let ended: string | undefined;
+  const line = dialect === "posix" ? withCwdMark(call.command) : call.command;
+  const terminal = options.terminals?.open({ callId: call.callId, command: call.command, cwd: start, dialect, shell: "emulated" });
+  const result = await runInTerminal(exec, terminal, [...call.argv, line], {
+    cwd: start,
+    execEnv: call.env,
+    limitMs,
+    max,
+    ...(call.abortSignal !== undefined ? { abortSignal: call.abortSignal } : {}),
+    onMark: (kind, payload) => {
+      if (kind === "cwd" && payload.length > 0) ended = hostPathFor(call.env, payload);
+    },
+  });
+  if (dialect === "posix") session.cwd = ended ?? start;
+  return { ...result, cwd: session.cwd ?? start, shell: "emulated", ...(notes.length > 0 ? { note: notes.join(" ") } : {}) };
 }
 
 /** Register JaiRA's tool set on a registry's `tools` facet. */
