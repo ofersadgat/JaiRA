@@ -79,7 +79,7 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
   {
     key: "execEnvironment",
     title: "Where commands run",
-    hint: "Natively on Windows, or inside a WSL distro — which is where git and every agent then run too.",
+    hint: "Natively on Windows, or inside a WSL distro — which is where git and every agent then run too. A project's setup may run one workspace's commands in a container.",
     schema: {
       $type: "exec-environment",
       type: "object",
@@ -90,6 +90,14 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
           description:
             "Empty runs everything natively. Named, git and agents run INSIDE that distro — deliberately not Windows git against \\\\wsl$, which is slow and permission-fragile.",
         },
+        container: {
+          type: "string",
+          title: "container",
+          description:
+            "Set by a project's setup (use: docker, or use: devcontainer with in: container) in that workspace's settings on this machine: the commands JaiRA runs go through docker exec into it. Git, files and agents stay on the machine. Mac and Linux.",
+        },
+        user: { type: "string", title: "container user", description: "Who commands in the container run as — a Dev Container's remoteUser." },
+        from: { type: "string", enum: ["devcontainer", "docker"], title: "made by", description: "What made the container." },
       },
     },
   },

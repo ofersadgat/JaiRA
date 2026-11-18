@@ -84,6 +84,22 @@ describe.skipIf(!posix)("the shell tool, watched", () => {
     expect(watched.end?.stopped).toBe(true);
   });
 
+  it("ends a command whose shell a Ctrl-C ended while what it started lived on, every time", async () => {
+    // Measured 2026-11-18: about one SIGINT in twenty lands as `sh` forks `sleep`; the shell dies and
+    // `sleep` holds the output open for its 30 s. Each of these ends within the grace instead.
+    for (let i = 0; i < 20; i++) {
+      const { terminals, watched } = watcher();
+      const started = Date.now();
+      const pending = run(createShellTool({ terminals }), "echo start; sleep 30; echo never");
+      const io = await watched.attached;
+      await watched.printed("start");
+      io.interrupt();
+      const result = await pending;
+      expect(result["stopped"]).toBe(true);
+      expect(Date.now() - started).toBeLessThan(5_000);
+    }
+  }, 60_000);
+
   it("ends a command at its limit, and typing restarts the limit", async () => {
     const { terminals, watched } = watcher();
     const started = Date.now();

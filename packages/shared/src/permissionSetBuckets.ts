@@ -19,7 +19,7 @@
 import { modeWord, sameMode, SMART_MODE, type PermissionModeDecl, type ToolImplementation, type PermissionSetMode } from "./operationVocabulary";
 import { holdsTool, MODE_WHEN_UNSET, modeDeclOf, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
 import { RESERVED_LAYER_IDS } from "./permissionLayers";
-import type { WorkflowLayer } from "./view";
+import type { SetLayer } from "./view";
 
 /** The bucket a conversation opens on when nothing it inherits is any bucket's permission set: the top level. */
 export const DEFAULT_PERMISSION_SET_BUCKET = "";
@@ -32,7 +32,7 @@ export interface PermissionSetChoice {
   bucket: string;
   name: string;
   /** The layer whose file this is — the first on the search path to hold the id. */
-  layer: WorkflowLayer;
+  layer: SetLayer;
   /** The map, references already followed. What picking the row writes. */
   decl: PermissionSetDecl;
 }
@@ -240,14 +240,14 @@ export interface PermissionSetBucket {
    * bucket with one file overridden here is still the shipped bucket. A folder holding only other
    * buckets takes it from what is inside.
    */
-  layer: WorkflowLayer;
+  layer: SetLayer;
   /** The permission sets directly in it. */
   permissionSets: PermissionSetChoice[];
   /** What it holds, in a line. */
   hint: string;
 }
 
-const LAYER_DEPTH: Readonly<Record<WorkflowLayer, number>> = { system: 0, base: 1, project: 2 };
+const LAYER_DEPTH: Readonly<Record<SetLayer, number>> = { system: 0, base: 1, project: 2, machine: 3, projectMachine: 4, you: 5, projectYou: 6 };
 
 /**
  * The bucket hierarchy, parents before children, siblings by name.
@@ -275,7 +275,7 @@ export function permissionSetBuckets(choices: readonly PermissionSetChoice[]): P
     const own = permissionSetsOfBucket(choices, path);
     const under = choices.filter((choice) => choice.bucket === path || choice.bucket.startsWith(`${path}/`));
     const inside = ordered.filter((other) => other.startsWith(`${path}/`) && !other.slice(path.length + 1).includes("/")).length;
-    const layer = under.reduce<WorkflowLayer>((deepest, choice) => (LAYER_DEPTH[choice.layer] < LAYER_DEPTH[deepest] ? choice.layer : deepest), "project");
+    const layer = under.reduce<SetLayer>((deepest, choice) => (LAYER_DEPTH[choice.layer] < LAYER_DEPTH[deepest] ? choice.layer : deepest), "projectYou");
     const counted = `${own.length} ${own.length === 1 ? "permission set" : "permission sets"}`;
     const hint =
       (layer === "system" ? SHIPPED_BUCKET_HINTS[path] : undefined) ??
@@ -298,10 +298,14 @@ export function bucketNameOf(path: string): string {
 export const TOP_LEVEL_BUCKET_NAME = "top level";
 
 /** A layer, as the picker names it beside a bucket. */
-export const PERMISSION_SET_LAYER_LABELS: Readonly<Record<WorkflowLayer, string>> = {
+export const PERMISSION_SET_LAYER_LABELS: Readonly<Record<SetLayer, string>> = {
   system: "built in",
   base: "all projects",
   project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "just you",
+  projectYou: "you in this project",
 };
 
 // --- keeping a map as a new permission set ------------------------------------------

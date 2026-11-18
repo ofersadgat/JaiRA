@@ -48,7 +48,7 @@ import { SettingsSection, useDrawnRow } from "./SettingsPage";
 export function ModelsPage(): JSX.Element {
   const { state, actions } = useShell();
   const catalog = useCatalogStatus(state.availability.checkedAt);
-  const config = state.config;
+  const config = state.settingsConfig;
   if (config === null) {
     return (
       <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
@@ -57,8 +57,7 @@ export function ModelsPage(): JSX.Element {
     );
   }
   const layer = state.configLayer;
-  const editable = layer !== "project" || state.at !== null;
-  const locked = state.busy || !editable;
+  const locked = state.busy;
   const overlay = defaultOverlayOf(config, layer);
   const onOverlay = (next: Parameters<typeof actions.saveDefinition>[1]): void => void actions.saveDefinition(DEFAULT_EXECUTOR, next, layer);
   const tree = state.availability.tree;
@@ -124,7 +123,7 @@ function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
 /** Named LLM configurations a state selects with `operation.configRef`. */
 function PresetsGroup({ layer, locked, lookup, catalogIds, onSave }: { layer: ConfigLayer; locked: boolean; lookup: CandidateLookup; catalogIds: readonly string[]; onSave: (fields: Record<string, unknown>, layer: ConfigLayer) => void }): JSX.Element {
   const { state } = useShell();
-  const config = state.config!;
+  const config = state.settingsConfig!;
   const builtIn = presetsOf(config.system);
   const effective = presetsOf(config.effective);
   const other = otherLayerOf(layer);

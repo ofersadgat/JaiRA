@@ -27,7 +27,7 @@ siblings: [engineering/units/task-lifecycle, engineering/units/fan-out-host, eng
 
 `removeWorktree(project, taskId, { force? })` answers `{ removed, reason? }` and never throws a git refusal. A task with no recorded path answers `task '<id>' has no worktree`. A recorded path whose directory is gone is pruned and its mapping cleared. Otherwise it runs `git worktree remove`, clears the mapping on success, and returns git's message on refusal. It never deletes the branch.
 
-`gitFor(project, dir, options?)` builds a `Git` over an unobserved `NodeExec` in the project's `execEnvironment`.
+`gitFor(project, dir, options?)` builds a `Git` over an unobserved `NodeExec` in the project's `execEnvironment` — the machine's under a workspace's container, whose worktrees' folder is mounted at its own path inside so a task's commands can run there.
 
 It deliberately does not own:
 

@@ -13,7 +13,7 @@ import {
   type ContextReading,
   type PermissionSet,
   type ReasoningEffort,
-  type WritableLayer,
+  type WritableSetLayer,
 } from "@jaira/shared/browser";
 import { fileFromText, mentionAt, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
 import { useKeptDraft } from "@jaira/ui/composerDrafts";
@@ -154,7 +154,7 @@ export function Composer({
    */
   stack?: StackHost | undefined;
   /** Where "save this stack as a set" may write; `project` also lets a layer be pinned to the project. */
-  saveLayers?: readonly WritableLayer[] | undefined;
+  saveLayers?: readonly WritableSetLayer[] | undefined;
   /** What is tucked under the frame: the session's environment bar. */
   tray?: ReactNode;
   /** The shell's first line, over what is typed: what the agent is doing (`LiveStatusLine`). */

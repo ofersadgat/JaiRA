@@ -4,18 +4,20 @@
  *
  * The two groups it replaced — "Just you" (Appearance, no switch) and "Project & shared" (layered) —
  * stopped meaning anything the moment the look became a layered setting and "Just you" became a
- * LAYER: every page now has the same switch, `Just you | This project | Shared`, and which of them
- * you are editing is the switch's to say, not the sidebar's. The order is the order a person sets
+ * LAYER: every page is edited at the same path, `Settings › [project] › [machine] › [Just you]`
+ * (`settingsScope.ts`, 2026-11-17, in place of the switch of round 5), and which layer you are editing
+ * is the path's to say, not the sidebar's. The order is the order a person sets
  * things up in: how it looks, what it can reach, which model answers, what the tools may do, how a
  * run behaves, and what it leaves behind. About comes last and is the one page that is not layered: the
- * build, its updates, its plugins and what it is built from — its one setting, the update track, is
- * the machine's own and always the personal layer's (the person's ruling, 2026-09-26: "no layer switch").
+ * build, its updates, its plugins and what it is built from — its settings, the update track and how
+ * the engine is hosted, are the machine's own, kept in its machine layer (the person's ruling,
+ * 2026-09-26: "no layer switch"); with a paired machine in the path it is about that machine.
  *
  * Pure data, so the list is testable without drawing the sidebar.
  */
 import type { ConfigLayer, HealthItem } from "@jaira/shared/browser";
 import type { PillCounts } from "./pillModel";
-import { projectName } from "./projects";
+import { isPersonalLayer } from "./settingsRows";
 import { healthCounts } from "./updatesModel";
 import type { SettingsSection } from "./store";
 
@@ -51,16 +53,11 @@ export const SECTIONS: readonly SettingsPageMeta[] = [
 ];
 
 /**
- * The layer Settings opens on: Shared — the one that exists on every machine and in every window,
- * and the one a person setting things up usually means. Opening a project does not move it; the
- * switch does.
+ * The layer Settings opens on: Shared — the path with no part, the one that exists on every machine
+ * and in every window, and the one a person setting things up usually means. Opening a project does
+ * not move it; the path does.
  */
 export const DEFAULT_CONFIG_LAYER: ConfigLayer = "base";
-
-/** The layer switch's segments, strongest first — "This project" only while there is one. */
-export function settingsLayersFor(hasProject: boolean): ConfigLayer[] {
-  return hasProject ? ["you", "project", "base"] : ["you", "base"];
-}
 
 /**
  * One glyph per page, in the icon set's own hand (`iconPaths.ts`: 24-unit strokes at 1.7). Models and
@@ -79,7 +76,7 @@ export const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   about: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 11v5.5", "M12 7.6v.1"],
 };
 
-/** The Just you view's two readings: only what the personal layer states, or every row. */
+/** A personal view's two readings (Just you, you in a project): only what the layer states, or every row. */
 export type JustYouView = "changed" | "every";
 
 export const JUST_YOU_VIEWS: ReadonlyArray<readonly [string, JustYouView]> = [
@@ -88,14 +85,15 @@ export const JUST_YOU_VIEWS: ReadonlyArray<readonly [string, JustYouView]> = [
 ];
 
 /**
- * What a page's frame draws around it: its title, and whether it has the layer switch and (on the
- * personal layer) the "Which rows" choice — a page with no setting on it (About) has neither — and
- * whether only the rows the layer states are drawn.
+ * What a page's frame draws around it: its title, and whether it is layered and (on a personal layer)
+ * has the "Which rows" choice — a page with no setting on it (About) has neither — and whether only the
+ * rows the layer states are drawn.
  */
 export function settingsFrameOf(section: SettingsSection, layer: ConfigLayer, justYou: JustYouView): { title: string; layered: boolean; under: boolean; onlyStated: boolean } {
   const meta = SECTIONS.find((s) => s.id === section);
   if (meta?.layered === false) return { title: meta.label, layered: false, under: false, onlyStated: false };
-  return { title: meta?.label ?? "Settings", layered: true, under: layer === "you", onlyStated: layer === "you" && justYou === "changed" };
+  const personal = isPersonalLayer(layer);
+  return { title: meta?.label ?? "Settings", layered: true, under: personal, onlyStated: personal && justYou === "changed" };
 }
 
 /** A run of the lead, bold where it names a layer's file or a project. */
@@ -105,42 +103,67 @@ export interface LeadPart {
 }
 
 /**
- * The page's lead: what the page is FOR, in one clause, then WHOSE settings these are and what anything
- * left unset falls back to — what the layer switch at the head's right edge changes, said in words.
+ * The page's lead: what the page is FOR, in one clause, then WHOSE settings these are, where they are
+ * kept, and what overrides them — what the path beside "Settings" says, in words. `names` are the
+ * path's own (`pathNamesOf`): "atlas", "build-01".
  */
-export function settingsLeadParts(section: SettingsSection, layer: ConfigLayer, project: string | null): LeadPart[] | undefined {
+export function settingsLeadParts(section: SettingsSection, layer: ConfigLayer, names: { project?: string | undefined; machine?: string | undefined } = {}): LeadPart[] | undefined {
   const meta = SECTIONS.find((s) => s.id === section);
   if (meta === undefined) return undefined;
   const purpose = meta.purpose;
   if (!meta.layered) return [{ text: purpose }];
-  if (layer === "you") {
-    return [
-      { text: `${purpose} Showing ` },
-      { text: "Just you", bold: true },
-      { text: ": kept in " },
-      { text: "personal-settings.json", bold: true },
-      { text: ", on this machine and the machines it is paired with, never in a checkout, and read after every other layer." },
-    ];
+  const project = names.project ?? "this project";
+  const machine = names.machine ?? "this machine";
+  switch (layer) {
+    case "you":
+      return [
+        { text: `${purpose} Showing ` },
+        { text: "Just you", bold: true },
+        { text: ": kept in " },
+        { text: "personal-settings.json", bold: true },
+        { text: ", on this machine and the machines it is paired with, never in a checkout. It overrides every project and machine; only your settings for one project override it." },
+      ];
+    case "projectYou":
+      return [
+        { text: `${purpose} Showing ` },
+        { text: `you in ${project}`, bold: true },
+        { text: ": your own settings for this project, kept in " },
+        { text: `projects/…/personal-settings.json`, bold: true },
+        { text: ", on this machine and the machines it is paired with (a clone with no remote keeps them on its machine), never in a checkout, and read after every other layer." },
+      ];
+    case "project":
+      return [
+        { text: `${purpose} Editing ` },
+        { text: project, bold: true },
+        { text: ": its " },
+        { text: ".jaira/settings.json", bold: true },
+        { text: ", committed with it. Anything left unset comes from Shared; a machine's settings and yours override it." },
+      ];
+    case "machine":
+      return [
+        { text: `${purpose} Editing ` },
+        { text: machine, bold: true },
+        { text: "'s own: " },
+        { text: "machine-settings.json", bold: true },
+        { text: " on that machine, never synced. They override Shared and every project there; yours override them." },
+      ];
+    case "projectMachine":
+      return [
+        { text: `${purpose} Editing ` },
+        { text: `${project} on ${machine}`, bold: true },
+        { text: ": " },
+        { text: ".jaira/settings.local.json", bold: true },
+        { text: " in that workspace, which git ignores. It overrides the project's and the machine's settings; yours override it." },
+      ];
+    case "base":
+      return [
+        { text: `${purpose} Editing ` },
+        { text: "Shared", bold: true },
+        { text: ": " },
+        { text: "~/.jaira/settings.json", bold: true },
+        { text: ", under every project on this machine and the machines it is paired with. A project's, a machine's and your own settings override it." },
+      ];
   }
-  if (layer === "project" && project !== null) {
-    return [
-      { text: `${purpose} Editing ` },
-      { text: projectName(project), bold: true },
-      { text: "; anything left unset comes from " },
-      { text: "~/.jaira", bold: true },
-      { text: ", and yours override both." },
-    ];
-  }
-  return [
-    { text: `${purpose} Editing ` },
-    { text: "~/.jaira", bold: true },
-    { text: ", shared by every project on this machine and the machines it is paired with; a project's own settings override it, and yours override both." },
-  ];
-}
-
-/** The name the layer switch's project segment wears: the open project's label, or its folder's name. */
-export function settingsProjectLabel(projects: readonly { project: string; label?: string | undefined }[], at: string | null): string | null {
-  return at === null ? null : (projects.find((p) => p.project === at)?.label ?? projectName(at));
 }
 
 /** What needs attention on a page, as the Settings row's pills say it for all of them — only Connections, Machines and About have any. */

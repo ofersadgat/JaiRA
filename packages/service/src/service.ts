@@ -184,6 +184,9 @@ import {
   stackLayerInfo,
   resetPermissionSet,
   permissionSetLayers,
+  fileLayerRoots,
+  ensureLocalLayerIgnored,
+  workflowLayerDirs,
   permissionSetUsers,
   writePermissionSet,
   policyAuditRow,
@@ -359,6 +362,8 @@ import {
   projectPolicy,
   allowsCall,
   dialectFor,
+  ensureContainer,
+  machineEnvOf,
   filePackages,
   ScriptedFunctions,
   sessionServicesFor,
@@ -460,6 +465,12 @@ import {
   type Changeset,
   parseChangesetSource,
   isWritableLayer,
+  isWritableSetLayer,
+  isProjectWorkflowLayer,
+  layerSees,
+  LAYER_ROOT_TOKEN,
+  MACHINE_LAYER_DIR_NAME,
+  PERSONAL_LAYER_DIR_NAME,
   chosenWidths,
   entriesToRemember,
   partAnswersDecision,
@@ -472,6 +483,10 @@ import {
   type PermissionSetAddition,
   jairaBasePaths,
   jairaBuiltInPaths,
+  jairaPaths,
+  type JairaExecEnvironment,
+  personalProjectSettingsFile,
+  projectSettingsKey,
   baseAsProjectPaths,
   conversationWorkflowOf,
   followFileText,
@@ -485,7 +500,6 @@ import {
   parseAppearanceConfig,
   parseUpdates,
   parseEngineConfig,
-  repositoryIdentity,
   parseRemoteProjectKey,
   remoteProjectKey,
   PLACED_EVENT,
@@ -698,6 +712,7 @@ import type {
   FileMutationResult,
   FileSource,
   FileNode,
+  FileRoot,
   FileTree,
   AvailabilitySnapshot,
   JairaOperationNode,
@@ -767,6 +782,7 @@ import type {
   WorkflowBrowser,
   WorkflowLayer,
   WritableLayer,
+  SetLayer,
   WorkflowMutationResult,
   WorkflowSource,
   WorkflowSyncEdit,
@@ -799,6 +815,8 @@ import type {
   ToolChoice,
 } from "@jaira/shared";
 import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
+import { ensureLocalSettingsIgnored, personalProjectSettingsFileOf, readRepositoryIdentity } from "@jaira/persistence";
+import { CONFIG_LAYERS, isProjectLayer } from "@jaira/shared";
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, TAILNET_HEALTH } from "./fleet";
@@ -808,6 +826,8 @@ import { publishedMime, type AddCommentRequest, type ArtifactComment, type Publi
 import type { AnnouncePort } from "./lanPairing";
 import type { TailnetPort } from "./tailnet";
 import { Federation } from "./federation";
+import { WorkspaceMaker } from "./workspaces";
+import { setupToolPort } from "./setupTools";
 import { Replicator } from "./replicator";
 import { SettingsSync, type SettingsSyncPorts, type SyncSecretStore } from "./settingsSync";
 import { nativeAgentLogins, type AgentLoginStore } from "./agentLogins";
@@ -1267,13 +1287,24 @@ function shortRoot(dir: string): string {
  * The same reduction serves the built-in root (decision 0006), which is likewise listed once beside
  * every open project: a shipped state reads as overridden only where every project overrides it.
  */
+/**
+ * The layers a description is synced with its workflows in: the project's and Shared's. The settings'
+ * newer layers (decision 0023, amended 2026-11-18) hold workflows, but a description of one is not
+ * synced yet.
+ */
+const SYNCED_LAYERS: ReadonlySet<WorkflowLayer> = new Set(["project", "base"]);
+const NOT_SYNCED = "a description is synced with its workflows in a project or in Shared — not yet in this machine's or your own layers";
+
 function layerShadows(trees: readonly FileTree[], layer: WorkflowLayer): FileNode[] {
   const bases = trees.map((tree) => tree.roots.find((root) => root.layer === layer)?.nodes ?? []);
   const merge = (lists: FileNode[][]): FileNode[] =>
     (lists[0] ?? []).map((node, index) => {
       const everywhere = node.shadowed === true && lists.every((list) => list[index]?.shadowed === true);
       const out: FileNode = { ...node };
-      if (!everywhere) delete out.shadowed;
+      if (!everywhere) {
+        delete out.shadowed;
+        delete out.shadowedBy;
+      }
       if (node.children !== undefined) out.children = merge(lists.map((list) => list[index]?.children ?? []));
       return out;
     });
@@ -1645,6 +1676,8 @@ export class AppService {
           return undefined;
         }
       },
+      // Where most of this machine's workspaces sit is where a new one goes, until the person says.
+      workspaceDirs: () => this.userSessions().map((open) => open.project.paths.projectDir),
     });
     this.agentLogins =
       options.agentLogins ??
@@ -1670,6 +1703,10 @@ export class AppService {
     });
     // What waits for a workspace is tried again when one may have freed: now and then, and at every run's end.
     this.placementTimer = setInterval(() => void this.tryQueue(), 10_000);
+    // A workspace whose checkout moved (a pull, a merge, a checkout) runs the setup steps that asked to
+    // run again when the files they name change (decision 0027) — looked at now and then.
+    this.headTimer = setInterval(() => void this.checkHeads(), HEAD_LOOK_MS);
+    this.headTimer.unref?.();
     // Finished work leaves the board by itself (`archive` in settings): looked at now and then, as
     // well as at every open and every run's end.
     this.archiveTimer = setInterval(() => this.sweepArchive(), 15 * 60_000);
@@ -1681,9 +1718,42 @@ export class AppService {
     this.syncTimer.unref?.();
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
-      publish: (message) => this.publish(message),
+      publish: (message) => this.publish(message, true),
       log: (level, message) => this.log({ level, source: "machines", message }),
       hasReplica: (machineId, dir) => this.replicator.hasReplica(machineId, dir),
+    });
+    this.workspaces = new WorkspaceMaker({
+      baseDir: this.baseDir,
+      selfId: () => this.fleet.identity().id,
+      machine: () => {
+        const identity = this.fleet.identity();
+        return { label: identity.label, os: identity.os, tags: [...identity.tags], projectsFolder: this.fleet.projectsFolder() };
+      },
+      execEnv: () => this.effectiveConfig().execEnvironment,
+      peer: (machineId) => this.fleet.client(machineId),
+      labelOf: (machineId) => this.fleet.labelOf(machineId),
+      integrations: () => this.effectiveConfig().integrations,
+      secrets: () => this.secretResolver(),
+      ...(options.forgeHttp !== undefined ? { forgeHttp: options.forgeHttp } : {}),
+      workspacesOf: (identity) => {
+        const self = this.fleet.identity().id;
+        const local = this.listProjects()
+          .filter((summary) => summary.identity === identity && (summary.machine === undefined || summary.machine.self === true))
+          .map((summary) => ({ machineId: self, dir: summary.project }));
+        const remote = this.federation.remoteProjects().flatMap((summary) => {
+          const key = parseRemoteProjectKey(summary.project);
+          return summary.identity === identity && key !== undefined ? [{ machineId: key.machineId, dir: key.dir }] : [];
+        });
+        return [...local, ...remote];
+      },
+      identityOf: (dir) => this.repositoryOf(dir),
+      open: (dir) => (this.inspect(dir).project ? this.open(dir) : this.init(dir)),
+      publish: (message) => this.publish(message),
+      // The machine's installer unless a workspace's container is named (decision 0027): the focused
+      // project's container is never the machine's.
+      tools: (env) => setupToolPort(env ?? machineEnvOf(this.effectiveConfig().execEnvironment)),
+      execEnvOf: (dir) => this.sessionOf(dir)?.project.config.execEnvironment,
+      recordEnv: (dir, env) => this.recordWorkspaceEnv(dir, env),
     });
     this.replicator = new Replicator(this.fleet, this.federation, {
       baseDir: this.baseDir,
@@ -2762,6 +2832,9 @@ export class AppService {
    */
   private readonly signInRefusals = new Map<string, string>();
 
+  /** The binary each agent was last checked with — what a refusal's fix names before the next check (`layRefusalOver`). */
+  private readonly probedCommands = new Map<string, string | undefined>();
+
   /**
    * The limits board — how much of each account's allowance is spent, machine-wide
    * (usage-readings contract). Fed by every call made through the session layers; watched by the
@@ -2780,6 +2853,8 @@ export class AppService {
 
   /** Other machines' workspaces, used from here (decision 0013 §4, §7). */
   readonly federation: Federation;
+  /** Making a workspace on this machine: clone or copy, open, bring, set up (decision 0027). */
+  readonly workspaces: WorkspaceMaker;
   /** This machine's copy of the fleet's tasks (decision 0013 §6). */
   readonly replicator: Replicator;
   /** Settings that follow the person across the fleet (decision 0026). */
@@ -2792,6 +2867,11 @@ export class AppService {
   private readonly resources: ResourceSampler;
   readonly placement: Placement;
   private readonly placementTimer: ReturnType<typeof setInterval>;
+  /** Each open workspace's last-seen commit, and the timer that looks again (decision 0027). */
+  private readonly headTimer: ReturnType<typeof setInterval>;
+  private readonly heads = new Map<string, string>();
+  /** Workspaces whose open or again steps are running now: one run at a time each. */
+  private readonly settingUp = new Set<string>();
   private readonly archiveTimer: ReturnType<typeof setInterval>;
   private queueRunning: Promise<void> | undefined;
 
@@ -2807,6 +2887,163 @@ export class AppService {
   }
 
   /** The tags a workflow's root state says it needs (`requires`, decision 0013 §5), from the layer that has it. */
+  // --- a workspace's setup, when it opens and when its checkout moves (decision 0027) ------------------
+
+  /** A workspace just opened here: its commit noted, its setup's open steps run. */
+  private async workspaceOpened(session: ProjectSession): Promise<void> {
+    if (session.kind !== "user") return;
+    const dir = session.project.paths.projectDir;
+    const head = await this.headOf(dir);
+    if (head !== undefined) this.heads.set(dir, head);
+    await this.keepContainerUp(session);
+    await this.runSetupPhase(session, "open");
+  }
+
+  /**
+   * A workspace whose commands run in its container (decision 0027): the container started when it is
+   * stopped — after the machine or Docker restarted — before anything runs in it. One that is gone is
+   * said; making it again is the setup's, which the person approved.
+   */
+  private async keepContainerUp(session: ProjectSession): Promise<void> {
+    const env = session.project.config.execEnvironment;
+    if (typeof env !== "object" || !("container" in env)) return;
+    const kept = await ensureContainer(env, { exec: new NodeExec() }).catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }));
+    if (!kept.ok) this.log({ level: "warn", source: "setup", message: `the workspace's container: ${kept.reason}`, project: session.key });
+    else if (kept.started) this.log({ level: "info", source: "setup", message: `started the workspace's container ${env.container}`, project: session.key });
+  }
+
+  /**
+   * A workspace's setup brought its container up (decision 0027): its commands run there from now on,
+   * said in its own settings on this machine (`.jaira/settings.local.json`) — through `writeConfig`
+   * while it is open, so its open session reads it at once. Unchanged, nothing is written.
+   */
+  private recordWorkspaceEnv(dir: string, env: JairaExecEnvironment): void {
+    const open = this.sessionOf(dir);
+    const file = open?.project.paths.localSettingsFile ?? jairaPaths(dir, this.baseDir).localSettingsFile;
+    const doc = readJsonIfPresent(file);
+    const current: Record<string, JsonValue> = doc !== null && typeof doc === "object" && !Array.isArray(doc) ? doc : {};
+    if (JSON.stringify(current["execEnvironment"] ?? null) === JSON.stringify(env)) return;
+    const next = { ...current, execEnvironment: env as unknown as JsonValue };
+    if (open !== undefined && open.kind === "user") {
+      this.writeConfig({ layer: "projectMachine", project: open.key, config: next });
+      return;
+    }
+    ensureLocalSettingsIgnored(dirname(file));
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  }
+
+  /** Every open workspace's commit, looked at again: one that moved runs its again steps for what changed. */
+  private async checkHeads(): Promise<void> {
+    if (this.closed) return;
+    for (const session of [...this.sessions.values()]) {
+      if (session.kind !== "user") continue;
+      const dir = session.project.paths.projectDir;
+      const was = this.heads.get(dir);
+      const now = await this.headOf(dir);
+      if (now === undefined) continue;
+      this.heads.set(dir, now);
+      if (was === undefined || was === now) continue;
+      const changed = await this.changedBetween(dir, was, now);
+      if (changed.length > 0) await this.runSetupPhase(session, "again", changed);
+    }
+  }
+
+  private async headOf(dir: string): Promise<string | undefined> {
+    const result = await new NodeExec().run("git", ["rev-parse", "HEAD"], { cwd: dir, stdin: "", timeoutMs: 10_000 }).catch(() => undefined);
+    return result !== undefined && result.code === 0 ? result.stdout.trim() : undefined;
+  }
+
+  private async changedBetween(dir: string, from: string, to: string): Promise<string[]> {
+    const result = await new NodeExec().run("git", ["diff", "--name-only", from, to], { cwd: dir, stdin: "", timeoutMs: 20_000 }).catch(() => undefined);
+    return result !== undefined && result.code === 0 ? result.stdout.split(/\r?\n/).filter((line) => line.length > 0) : [];
+  }
+
+  /** Run a workspace's open or again steps, one run at a time, saying in the log how it went. */
+  private async runSetupPhase(session: ProjectSession, phase: "open" | "again", changed?: string[]): Promise<void> {
+    const dir = session.project.paths.projectDir;
+    if (this.settingUp.has(dir)) return;
+    this.settingUp.add(dir);
+    let tail = "";
+    const when = phase === "open" ? "on opening" : `after the checkout moved (${changed?.length ?? 0} file${changed?.length === 1 ? "" : "s"} changed)`;
+    try {
+      const outcome = await this.workspaces.runPhase({
+        dir,
+        phase,
+        ...(changed !== undefined ? { changed } : {}),
+        onOutput: (text) => {
+          tail = (tail + text).slice(-4000);
+        },
+      });
+      if (outcome.outcome === "unapproved")
+        this.log({ level: "warn", source: "setup", message: `${when}: ${outcome.steps ?? 0} setup step${outcome.steps === 1 ? "" : "s"} did not run — the project's setup changed since it was approved on this machine`, project: session.key });
+      else if (outcome.outcome === "ran") {
+        const result = outcome.result!;
+        this.log({
+          level: result.ok ? "info" : "warn",
+          source: "setup",
+          message: result.ok ? `${when}: ran ${outcome.steps ?? 0} setup step${outcome.steps === 1 ? "" : "s"}` : `${when}: the setup stopped — ${result.reason ?? "a step failed"}`,
+          project: session.key,
+          detail: { output: tail },
+        });
+      }
+    } catch (error) {
+      this.log({ level: "warn", source: "setup", message: `${when}: the setup could not run — ${error instanceof Error ? error.message : String(error)}`, project: session.key });
+    } finally {
+      this.settingUp.delete(dir);
+    }
+  }
+
+  /**
+   * The setup target a task's workflow asks for before it starts (decision 0027): its root state's
+   * `setup`, read like `requires`. Undefined: the project's `environment` target, when it has one.
+   */
+  private setupTargetOf(workflow: string, project: string): string | undefined {
+    for (const layer of ["project", "base", "system"] as const) {
+      try {
+        const source = this.readWorkflow({ stateId: workflow, layer, project });
+        if (!source.exists) continue;
+        const setup = (JSON.parse(source.text) as { setup?: unknown }).setup;
+        return typeof setup === "string" && setup.trim() !== "" ? setup : undefined;
+      } catch {
+        // Not readable in this layer: the next.
+      }
+    }
+    return undefined;
+  }
+
+  /** Run a task's setup target in its folder; refuse the start when it fails, leaving the task startable. */
+  private async taskEnvironment(open: ProjectSession, taskId: string, runIn: string): Promise<StartStep | undefined> {
+    const workflow = open.project.tasks.tryRead(taskId)?.workflow;
+    const target = workflow !== undefined ? this.setupTargetOf(workflow, open.key) : undefined;
+    const at = Date.now();
+    let tail = "";
+    let outcome: Awaited<ReturnType<WorkspaceMaker["runEnvironment"]>>;
+    try {
+      outcome = await this.workspaces.runEnvironment({
+        projectDir: open.project.paths.projectDir,
+        runIn,
+        ...(target !== undefined ? { target } : {}),
+        onOutput: (text) => {
+          tail = (tail + text).slice(-4000);
+        },
+      });
+    } catch (error) {
+      throw this.refusal("run", error instanceof Error ? error.message : String(error));
+    }
+    if (outcome.outcome === "none") return undefined;
+    const what = outcome.target ?? target ?? "environment";
+    if (outcome.outcome === "unapproved") {
+      this.log({ level: "warn", source: "setup", message: `the setup target "${what}" was not run: the project's setup changed since it was approved on this machine`, project: open.key, taskId });
+      return { at, kind: "setup", what, tookMs: 0, detail: "waits for approval" };
+    }
+    const result = outcome.result!;
+    this.log({ level: result.ok ? "info" : "warn", source: "setup", message: `setup target "${what}" ${result.ok ? "ran" : "failed"}`, project: open.key, taskId, detail: { output: tail } });
+    if (!result.ok) throw this.refusal("run", `The setup target "${what}" failed: ${result.reason ?? "a step failed"}`);
+    const skipped = result.steps.filter((s) => s.status === "skipped").length;
+    return { at, kind: "setup", what, tookMs: Date.now() - at, detail: `${result.steps.length} step${result.steps.length === 1 ? "" : "s"}${skipped > 0 ? `, ${skipped} already done` : ""}` };
+  }
+
   private requiresOf(workflow: string, project: string): string[] {
     for (const layer of ["project", "base", "system"] as const) {
       try {
@@ -3338,6 +3575,8 @@ export class AppService {
       // Settings that follow the person (decision 0026): what this machine holds newer, and what another changed.
       ...this.settingsSync.handlersFor(caller),
       "fleet:capacity": () => this.capacity(),
+      // A machine making a workspace from a folder here, or bringing files git ignores from one (decision 0027).
+      ...this.workspaces.peerHandlers(),
       // Its half of an environment (`environment:view` on the machine that asks): its room to run, and
       // what its workspaces' checkouts say of themselves.
       "fleet:environment": ((request: { dirs?: string[] }) => this.localEnvironment((request.dirs ?? []).filter((d): d is string => typeof d === "string").slice(0, 64))) as (request: never) => unknown,
@@ -3362,19 +3601,8 @@ export class AppService {
   private repositoryOf(dir: string): string | undefined {
     let identity: string | null | undefined = this.repositories.get(dir);
     if (identity === undefined) {
-      identity = null;
-      for (const remote of ["upstream", "origin"]) {
-        try {
-          const url = execFileSync("git", ["-C", dir, "config", "--get", `remote.${remote}.url`], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim();
-          const found = repositoryIdentity(url);
-          if (found !== undefined) {
-            identity = found;
-            break;
-          }
-        } catch {
-          // No such remote, or no git.
-        }
-      }
+      // The same reading the person's settings for a project are keyed by (`personalProjectSettingsFileOf`).
+      identity = readRepositoryIdentity(dir) ?? null;
       this.repositories.set(dir, identity);
     }
     return identity ?? undefined;
@@ -3391,11 +3619,33 @@ export class AppService {
     if (isSignInRefused(error)) {
       if (this.signInRefusals.get(agent) === error!.reason) return;
       this.signInRefusals.set(agent, error!.reason);
+      this.layRefusalOver(agent);
       this.kickAvailability();
     } else if (error === undefined && this.signInRefusals.delete(agent)) {
       this.kickAvailability();
     }
   };
+
+  /**
+   * Lay a run's refused sign-in over the last check of that agent NOW, without waiting for a new one.
+   *
+   * The refusal is what turns the composer's route red and gives the conversation's error its Sign in
+   * and Check again (`agentDownOf`), and the person is looking at that error the moment the call fails.
+   * The full check that follows (`kickAvailability`) reads the configuration and runs the binary twice:
+   * seconds later at best, and never where the configuration cannot be read — 2026-11-18, a running
+   * build older than the built-in settings on disk refused every read, and the refused sign-in never
+   * reached the screen. This reads nothing: the snapshot it already has, and the refusal.
+   */
+  private layRefusalOver(agent: string): void {
+    const executors = this.availability.executors;
+    const at = executors.findIndex((probe) => probe.name === agent);
+    if (at < 0) return;
+    const laid = withSignInRefusal({ name: agent, command: this.probedCommands.get(agent) }, executors[at]!, this.signInRefusals.get(agent));
+    if (laid === executors[at]) return;
+    this.availability = { ...this.availability, executors: executors.map((probe, i) => (i === at ? laid : probe)) };
+    this.lastProbes.set(agent, laid);
+    this.publish({ type: "store:invalidate", scope: "availability" });
+  }
 
   /**
    * The last availability check: what answered, what did not, and when it was asked.
@@ -3518,6 +3768,9 @@ export class AppService {
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
     if (this.options.probeOnStart === true) this.kickAvailability();
+    // Its setup's open steps (decision 0027), and the commit its again steps are measured from. Not
+    // awaited: a database starting or a dev server is the project's business, not the window's wait.
+    void this.workspaceOpened(session);
     // Last, and only once the open has actually worked: the list is "what this window had open", and
     // remembering a directory the open threw on would be a project that fails to open on every start
     // from now on.
@@ -3726,6 +3979,12 @@ export class AppService {
       }, this.options.watchDebounceMs ?? 150);
       session.watchTimer.unref?.();
     };
+    // The settings' four newer layers (decision 0023, amended 2026-11-18): each layer's whole root — its
+    // workflows, permission sets and prompts — watched from the moment it is on disk, made by hand or
+    // arriving from a paired machine.
+    for (const one of fileLayerRoots(session.project.paths)) {
+      if (one.layer === "projectYou" || one.layer === "you" || one.layer === "projectMachine" || one.layer === "machine") this.watchLayerRoot(session, one.root, notify);
+    }
     for (const dir of [session.project.paths.workflowsDir, session.project.paths.base.workflowsDir]) {
       let watcher: FSWatcher | undefined;
       try {
@@ -3755,6 +4014,59 @@ export class AppService {
       });
       session.watchers.push(watcher);
     }
+  }
+
+  /**
+   * Watch one of the settings' newer layer roots — `~/.jaira/personal/`, `~/.jaira/machine/`,
+   * `~/.jaira/projects/<key>/`, `.jaira/local/` — for changes to its workflows, permission sets and
+   * prompts. While it is not on disk, the nearest folder above it that is is watched instead, a level
+   * deep, and the root is taken up the moment it appears — made by a person, by a Settings write, or by
+   * the settings sync bringing files from a paired machine. A root that goes away is waited for again.
+   * Only the root's watcher says anything changed; the one standing in for it only looks for it.
+   */
+  private watchLayerRoot(session: ProjectSession, root: string, notify: () => void): void {
+    if (this.closed || session.closing) return;
+    const keep = (watcher: FSWatcher, onEnd: () => void): void => {
+      watcher.on("error", () => {
+        drop(watcher);
+        onEnd();
+      });
+      session.watchers.push(watcher);
+    };
+    const drop = (watcher: FSWatcher): void => {
+      watcher.close();
+      session.watchers = session.watchers.filter((w) => w !== watcher);
+    };
+    if (existsSync(root)) {
+      let watcher: FSWatcher;
+      try {
+        watcher = watch(root, { recursive: true }, notify);
+      } catch {
+        try {
+          watcher = watch(root, notify);
+        } catch {
+          return;
+        }
+      }
+      keep(watcher, () => this.watchLayerRoot(session, root, notify));
+      return;
+    }
+    let anchor = dirname(root);
+    while (!existsSync(anchor) && dirname(anchor) !== anchor) anchor = dirname(anchor);
+    // The folder under the anchor on the way to the root: once it is there, the anchor moves down to it.
+    const next = join(anchor, relative(anchor, root).split(sep)[0]!);
+    let watcher: FSWatcher;
+    try {
+      watcher = watch(anchor, () => {
+        if (!existsSync(next)) return;
+        drop(watcher);
+        this.watchLayerRoot(session, root, notify);
+        if (existsSync(root)) notify();
+      });
+    } catch {
+      return;
+    }
+    keep(watcher, () => undefined);
   }
 
   /**
@@ -3817,6 +4129,7 @@ export class AppService {
     // Terminal. Set FIRST, so a read arriving during the drain cannot re-open what is being closed.
     this.closed = true;
     clearInterval(this.placementTimer);
+    clearInterval(this.headTimer);
     clearInterval(this.archiveTimer);
     clearInterval(this.syncTimer);
     this.resources.close();
@@ -4215,14 +4528,20 @@ export class AppService {
     return [...this.sessions.values()].filter((s) => s.kind === "user");
   }
 
-  private publish(message: PushMessage): void {
+  /** `relayed`: another machine's news, published here by `Federation.relay` — nothing on this disk changed. */
+  private publish(message: PushMessage, relayed = false): void {
     this.logGate(message);
     this.options.publish?.(message);
     // A run ended — here or, relayed, on another machine: a workspace may have room for what waits.
     if (message.type === "run:finished" && this.placement !== undefined && this.placement.queue().length > 0) void this.tryQueue();
     if (message.type === "run:finished" && this.archiveTimer !== undefined) queueMicrotask(() => this.sweepArchive());
     // Every workflow write says so here — the one place all of them pass (decision 0010 §4).
-    if (message.type === "store:invalidate" && message.scope === "workflows") this.kickEventsSupervisor();
+    if (message.type === "store:invalidate" && message.scope === "workflows") {
+      this.kickEventsSupervisor();
+      // And a permission set, workflow or prompt of a layer that follows the person may have changed
+      // here: offered to the other machines (decision 0026, amended 2026-11-18).
+      if (!relayed) this.settingsSync?.kick();
+    }
     // Work was done in a checkout somebody is looking at: what it says of itself may have moved.
     if (message.type === "run:finished" || message.type === "chat:turnEnded" || (message.type === "engine:event" && (message.event as { type?: string }).type === "operation.completed")) {
       const about = (message as { project?: string }).project;
@@ -4795,9 +5114,23 @@ export class AppService {
     // to be reached by, and it is where an override starts. Listed ONCE, with its `shadowed` marks
     // reduced across the projects shown, as the shared root's were when it was listed here.
     const shipped = trees[0]?.roots.find((root) => root.layer === "system");
+    // The settings' newer layers (decision 0023, amended 2026-11-18): each project's own two after it —
+    // the project on this machine, you in the project — and Just you and this machine once, their marks
+    // reduced across the projects shown as what ships' are. A replica's are its owner's, not here.
+    const local = trees.filter((_, i) => parseRemoteProjectKey(sessions[i]!.key) === undefined);
+    const once = (layer: WorkflowLayer): FileRoot[] => {
+      const root = local[0]?.roots.find((one) => one.layer === layer);
+      return root === undefined ? [] : [{ ...root, nodes: layerShadows(local, layer) }];
+    };
     return {
       roots: [
-        ...trees.flatMap((tree) => tree.roots.filter((root) => root.layer === "project")),
+        ...trees.flatMap((tree, i) =>
+          (["project", "projectMachine", "projectYou"] as const).flatMap((layer) =>
+            tree.roots.filter((root) => root.layer === layer && (layer === "project" || parseRemoteProjectKey(sessions[i]!.key) === undefined)),
+          ),
+        ),
+        ...once("you"),
+        ...once("machine"),
         ...(shipped !== undefined ? [{ ...shipped, nodes: layerShadows(trees, "system") }] : []),
       ],
     };
@@ -4860,11 +5193,16 @@ export class AppService {
       const hidden = files !== null && typeof files === "object" && !Array.isArray(files) ? files["hidden"] : undefined;
       return Array.isArray(hidden) ? hidden.filter((p): p is string => typeof p === "string") : undefined;
     };
+    // The base the project's own config was layered on — which is the service's, except in a test.
+    const root = user !== undefined ? user.project.paths.base : base;
+    const own = user !== undefined && parseRemoteProjectKey(user.key) === undefined ? user.project.paths : undefined;
     const rules = layeredHiddenRules({
-      // The base the project's own config was layered on — which is the service's, except in a test.
-      base: listOf(user !== undefined ? user.project.paths.base.settingsFile : base.settingsFile),
+      base: listOf(root.settingsFile),
       project: user !== undefined ? listOf(user.project.paths.settingsFile) : undefined,
-      you: listOf(user !== undefined ? user.project.paths.base.personalSettingsFile : base.personalSettingsFile),
+      machine: listOf(root.machineSettingsFile),
+      projectMachine: own !== undefined ? listOf(own.localSettingsFile) : undefined,
+      you: listOf(root.personalSettingsFile),
+      projectYou: own !== undefined ? listOf(personalProjectSettingsFileOf(own)) : undefined,
     });
     return user !== undefined ? { root: user.project.paths.projectDir, rules, layer: "project" } : { root: base.baseDir, rules, layer: "base" };
   }
@@ -5673,6 +6011,12 @@ export class AppService {
     const preparing = Date.now();
     const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
     const prepared = Date.now();
+    // The project's setup target the workflow asks for (decision 0027), on this machine, before the
+    // run: a fresh start a person made, never a resume, a reopen or one of JaiRA's own runs.
+    const setupStep =
+      opts.loaded === undefined && opts.reopen !== true && opts.workspace === undefined && opts.capabilities === undefined && project.tasks.tryRead(taskId)?.system !== EVENTS_TASK
+        ? await this.taskEnvironment(open, taskId, workspace.root)
+        : undefined;
 
     // Child-process tracking (DESIGN §4.2a). The registry is built before the run
     // exists, so the observer forwards to a claim made below — safe because nothing
@@ -5747,6 +6091,8 @@ export class AppService {
         agents: enabledGenericAgents(config.agents),
         // A CLI's key, looked up as each run starts — the chain the probe reads.
         secret: (name) => this.secretResolver(open).lookup(name)?.value,
+        // The bridge a registration with `mcp` is served its tools over — the host's, as codex's is.
+        startBridge: this.startBridge,
       });
       // Our own tools, so an agent's commands go through the policy at all: an agent
       // calling its native shell would be invisible to it (DESIGN §10.1). Each call is a terminal a
@@ -5791,6 +6137,7 @@ export class AppService {
       const steps: StartStep[] = [
         ...(workspace.isWorktree ? [{ at: preparing, kind: "workspace" as const, what: workspace.branch ?? workspace.root, tookMs: prepared - preparing }] : []),
         { at: pinning, kind: "pin" as const, what: started.meta.workflow, tookMs: Date.now() - pinning },
+        ...(setupStep !== undefined ? [setupStep] : []),
       ];
       recordHostRow(project, taskId, { type: PLACED_EVENT, note: { ...opts.placed, steps } });
     }
@@ -9804,7 +10151,7 @@ export class AppService {
     decision: "allow" | "deny",
     scope: ApprovalScope = "once",
     remember?: readonly string[],
-    addTo?: WorkflowLayer,
+    addTo?: SetLayer,
     /** Where the answer holds — one of the asking parts' place widths (decision 0023 §3.8). */
     place?: string,
     /** Which layer of the stack "Add to" writes into (§2.8), by id; absent, the set that asked. */
@@ -9880,11 +10227,11 @@ export class AppService {
     parts: CommandApproval | undefined,
     decision: "allow" | "deny",
     remember: readonly string[] | undefined,
-    addTo: WorkflowLayer,
+    addTo: SetLayer,
     place?: string,
     layer?: string,
   ): string[] {
-    this.writable(addTo);
+    if (!isWritableSetLayer(addTo)) this.writable(addTo);
     if (parts === undefined) throw this.refusal("file", "this request names no part a line could be written for, so there is nothing to add to a permission set");
     // Any layer of the stack the call was judged under (decision 0023 §2.8) — never one it was not.
     if (layer !== undefined && !(parts.stack ?? []).includes(layer)) throw this.refusal("file", `'${layer}' is not a layer of the stack this call was judged under`);
@@ -11159,65 +11506,90 @@ export class AppService {
   // --- configuration ---------------------------------------------------------
 
   /**
-   * Both configuration layers as authored, plus the merged result a run would use.
+   * Every configuration layer as authored, plus the merged result a run would use.
    *
-   * `project` is WHICH project's layer to show. The layer switch became the crumb (SHELL.md §2.2):
-   * at the root there is no project layer to edit and Settings edits `base` only, which is exactly
-   * the rule the no-project case already stated.
+   * `project` is WHICH project's layers to show — its own, this machine's for it and the person's for
+   * it — and {@link SHARED_SESSION} shows none (Settings with no project in its path, read on another
+   * machine, where "the focused project" would be that machine's). Absent, the focused project, as
+   * before.
    */
   readConfig(project?: string): ConfigView {
     const base = jairaBasePaths(this.baseDir);
-    const projectFile = this.sessionOf(project)?.project.paths.settingsFile;
-    const baseDoc = readJsonIfPresent(base.settingsFile);
-    const projectDoc = projectFile !== undefined ? readJsonIfPresent(projectFile) : null;
+    const files = this.layerFiles(project);
     // What ships, under every layer (decision 0006) — read so a screen can tag a built-in value as one.
     const systemDoc = readJsonIfPresent(jairaBuiltInPaths().settingsFile);
-    const youDoc = readJsonIfPresent(base.personalSettingsFile);
+    const docs = Object.fromEntries(CONFIG_LAYERS.map((layer) => [layer, files[layer] !== undefined ? readJsonIfPresent(files[layer]) : null])) as Record<ConfigLayer, JsonValue | null>;
+    let machineId: string | undefined;
+    try {
+      machineId = this.fleet.identity().id;
+    } catch {
+      machineId = undefined;
+    }
     return {
-      base: baseDoc,
-      project: projectDoc,
+      ...docs,
       system: systemDoc,
-      you: youDoc,
       // Parsed, so the UI shows defaults filled in rather than the sparse document — "what will
       // actually happen" is the question this pane exists to answer.
       //
-      // `?? {}` is load-bearing: with NEITHER layer holding a `settings.json` the merge is undefined,
-      // and parsing that threw "config must be a JSON object" — so the one state where a person has
+      // `?? {}` is load-bearing: with NO layer holding a `settings.json` the merge is undefined, and
+      // parsing that threw "config must be a JSON object" — so the one state where a person has
       // configured nothing yet was the state where the settings screen could not be read at all.
       // Absent layers mean the built-in defaults, which is what an empty document parses to.
-      //
-      // The shared root standing as a project has one file for both roles, read once — see
-      // `loadLayeredConfig`.
-      effective: parseConfig(
-        mergeConfigLayers([systemDoc, baseDoc, projectFile === base.settingsFile ? null : projectDoc, youDoc]) ?? {},
-      ) as unknown as JsonValue,
+      effective: parseConfig(mergeConfigLayers([systemDoc, ...CONFIG_LAYERS.map((layer) => docs[layer])]) ?? {}) as unknown as JsonValue,
       baseFile: base.settingsFile,
-      projectFile: projectFile ?? "",
+      projectFile: files.project ?? "",
       youFile: base.personalSettingsFile,
+      machineFile: base.machineSettingsFile,
+      projectMachineFile: files.projectMachine ?? "",
+      projectYouFile: files.projectYou ?? "",
+      ...(machineId !== undefined ? { machineId } : {}),
       baseDir: base.baseDir,
     };
   }
 
   /**
-   * Replace one layer's `settings.json`.
+   * Where each layer of one project's view lives on this machine: the shared root's three always, and
+   * a project's three for a project of this machine's. The shared root standing as a project has none
+   * — its one settings file is Shared, read once (see `loadLayeredConfig`) — and nor does a copy of
+   * another machine's workspace, whose own layers are on that machine.
+   */
+  private layerFiles(project?: string): Record<ConfigLayer, string | undefined> {
+    const base = jairaBasePaths(this.baseDir);
+    const session = this.sessionOf(project);
+    const paths = session !== undefined && session.project.paths.settingsFile !== base.settingsFile ? session.project.paths : undefined;
+    const own = paths !== undefined && parseRemoteProjectKey(session!.key) === undefined ? paths : undefined;
+    return {
+      base: base.settingsFile,
+      project: paths?.settingsFile,
+      machine: base.machineSettingsFile,
+      projectMachine: own?.localSettingsFile,
+      you: base.personalSettingsFile,
+      projectYou: own !== undefined ? personalProjectSettingsFileOf(own) : undefined,
+    };
+  }
+
+  /**
+   * Replace one layer's document.
    *
    * Validated BEFORE writing, and validated as it will actually be read — merged with the other
-   * layers, because a document that is only valid on its own would still break every run. The shared
-   * root and the personal layer lie under or over EVERY project, so a write to either is checked with
-   * each open project laid in as well. Writing an unloadable config would leave the app unable to
-   * open the project it was just configured with, which is the one failure a settings screen must
-   * not cause.
+   * layers, because a document that is only valid on its own would still break every run. Shared, this
+   * machine's and the personal layer lie under or over EVERY project, so a write to one of them is
+   * checked with each open project laid in as well. Writing an unloadable config would leave the app
+   * unable to open the project it was just configured with, which is the one failure a settings screen
+   * must not cause.
    */
   writeConfig(request: WriteConfigRequest): ConfigView {
     this.forges.clear();
     this.checkConfigWrite(request);
     const base = jairaBasePaths(this.baseDir);
-    let file: string;
-    if (request.layer === "project") {
-      file = this.p(request.project).paths.settingsFile;
+    const file = this.layerFiles(request.project)[request.layer];
+    if (file === undefined) throw this.refusal("config", `there is no ${request.layer} layer to write for '${request.project ?? "the focused project"}'`);
+    if (isProjectLayer(request.layer)) {
+      // The project on this machine is this machine's: kept out of the repository before it exists.
+      if (request.layer === "projectMachine") ensureLocalSettingsIgnored(dirname(file));
+      mkdirSync(dirname(file), { recursive: true });
     } else {
       initBase(base.baseDir);
-      file = request.layer === "base" ? base.settingsFile : base.personalSettingsFile;
     }
     writeFileSync(file, `${JSON.stringify(request.config, null, 2)}\n`, "utf8");
     // The open project holds a PARSED copy, and everything downstream of this write reads that copy
@@ -11234,46 +11606,46 @@ export class AppService {
     if (this.options.probeOnStart === true) this.kickAvailability();
     // An event switched on or off, a branch glob, a connection: which remotes are watched for what.
     this.kickRepoWatch();
-    // Shared and Just you follow the person to their other machines (decision 0026).
-    if (request.layer !== "project") this.settingsSync?.kick();
+    // Shared, Just you and the person's for one project follow the person to their other machines
+    // (decision 0026); a machine's own layers stay on it.
+    if (request.layer === "base" || request.layer === "you" || request.layer === "projectYou") this.settingsSync?.kick();
     return this.readConfig(request.project);
   }
 
   /**
    * Refuse, naming the field, a layer write that would not load: merged with every other layer, and —
-   * for the shared root and the personal layer, which lie under or over every project — with each open
-   * project laid in as well. What {@link writeConfig} checks before it writes, and what a change from
-   * another machine is checked with before it is laid in (decision 0026).
+   * for the layers that lie under or over every project (Shared, this machine's, the personal one) —
+   * with each open project's own layers laid in as well. What {@link writeConfig} checks before it
+   * writes, and what a change from another machine is checked with before it is laid in (decision 0026).
    */
   private checkConfigWrite(request: WriteConfigRequest): void {
-    const base = jairaBasePaths(this.baseDir);
     // Before validating, not after: a document reported field by field and THEN refused for having
-    // nowhere to go tells the author to fix the wrong thing. The base layer is always writable —
-    // it is the machine's, and `initBase` creates it — and so is the personal layer beside it, so
-    // only the project layer can fail here.
-    if (request.layer === "project" && this.sessionOf(request.project) === undefined) {
-      throw this.refusal("config", 
-        request.project === undefined
+    // nowhere to go tells the author to fix the wrong thing. The shared root's three are always
+    // writable — they are the machine's, and `initBase` creates the root — so only a project's can
+    // fail here.
+    if (isProjectLayer(request.layer) && this.layerFiles(request.project)[request.layer] === undefined) {
+      throw this.refusal(
+        "config",
+        request.project === undefined || request.project === SHARED_SESSION
           ? "no project was named, so there is no project config to write"
-          : `project '${request.project}' is not open`,
+          : this.sessionOf(request.project) === undefined
+            ? `project '${request.project}' is not open`
+            : `project '${request.project}' has no ${request.layer === "project" ? "settings of its own" : "settings on this machine"} to write`,
       );
     }
     const current = this.readConfig(request.project);
     // Every layer with this one replaced — over the built-in layer too, because a layer is valid only
-    // as it will be read — over a given project document.
-    const layered = (projectDoc: JsonValue | null): unknown =>
-      mergeConfigLayers([
-        current.system,
-        request.layer === "base" ? request.config : current.base,
-        request.layer === "project" ? request.config : projectDoc,
-        request.layer === "you" ? request.config : current.you,
-      ]);
-    parseConfig(layered(current.projectFile === base.settingsFile ? null : current.project) ?? {}); // throws with the offending field named
-    if (request.layer !== "project") {
+    // as it will be read — with a given project's own three.
+    const layered = (own: Partial<Record<ConfigLayer, JsonValue | null>>): unknown =>
+      mergeConfigLayers([current.system, ...CONFIG_LAYERS.map((layer) => (layer === request.layer ? request.config : isProjectLayer(layer) ? (own[layer] ?? null) : current[layer]))]);
+    parseConfig(layered(current) ?? {}); // throws with the offending field named
+    if (!isProjectLayer(request.layer)) {
       // Every project the change reaches, each as a run there would read it.
       for (const open of this.userSessions()) {
+        const files = this.layerFiles(open.key);
+        const own = Object.fromEntries((["project", "projectMachine", "projectYou"] as const).map((layer) => [layer, files[layer] !== undefined ? readJsonIfPresent(files[layer]) : null]));
         try {
-          parseConfig(layered(readJsonIfPresent(open.project.paths.settingsFile)) ?? {});
+          parseConfig(layered(own) ?? {});
         } catch (e) {
           throw new Error(`${(e as Error).message} (with ${open.project.paths.settingsFile} as the project layer)`);
         }
@@ -11492,6 +11864,7 @@ export class AppService {
     // A workflow whose executor just came back to life should stop showing an error, so this is a
     // reason to re-lint the authoring surface.
     for (const result of results) this.lastProbes.set(result.name, result);
+    for (const info of wanted) this.probedCommands.set(info.name, info.command);
     // An agent that worked and now does not — a token that expired — is one of Settings' errors.
     this.health.observe("executor", where, results, (name) => ({
       title: EXECUTOR_TITLES[name] ?? name,
@@ -12211,10 +12584,46 @@ export class AppService {
         return undefined;
       }
     };
+    // The open workspaces of this machine whose person's settings are keyed by `key` — every clone of
+    // one repository shares one.
+    const openWith = (key: string): ProjectSession[] =>
+      this.userSessions().filter((open) => parseRemoteProjectKey(open.key) === undefined && open.project.paths.settingsFile !== jairaBasePaths(this.baseDir).settingsFile && personalProjectSettingsFileOf(open.project.paths) === personalProjectSettingsFile(jairaBasePaths(this.baseDir), key));
     return {
       readLayer: (layer) => readJson(fileOf(layer)),
       checkLayer: (layer, doc) => this.checkConfigWrite({ layer, config: doc }),
       writeLayer: (layer, doc) => void this.writeConfig({ layer, config: doc }),
+      // The person's settings for a project follow only where the project is known by its repository:
+      // a clone with no remote is keyed by where it is on this machine, which names nothing elsewhere.
+      projectKeys: () => {
+        const keys = new Set<string>();
+        for (const open of this.userSessions()) {
+          if (parseRemoteProjectKey(open.key) !== undefined) continue;
+          const identity = readRepositoryIdentity(open.project.paths.projectDir);
+          if (identity !== undefined) keys.add(projectSettingsKey(identity, open.project.paths.projectDir));
+        }
+        return [...keys];
+      },
+      readProjectLayer: (key) => readJson(personalProjectSettingsFile(jairaBasePaths(this.baseDir), key)),
+      checkProjectLayer: (key, doc) => {
+        const open = openWith(key);
+        // Checked as a save is, with each workspace of it open here laid in; with none open, over the
+        // layers every project has.
+        for (const one of open) this.checkConfigWrite({ layer: "projectYou", project: one.key, config: doc });
+        if (open.length > 0) return;
+        const view = this.readConfig(SHARED_SESSION);
+        parseConfig(mergeConfigLayers([view.system, view.base, view.machine, view.you, doc]) ?? {});
+      },
+      writeProjectLayer: (key, doc) => {
+        const open = openWith(key)[0];
+        if (open !== undefined) {
+          this.writeConfig({ layer: "projectYou", project: open.key, config: doc });
+          return;
+        }
+        // Not cloned here (or not open): kept for when it is.
+        const file = personalProjectSettingsFile(jairaBasePaths(this.baseDir), key);
+        mkdirSync(dirname(file), { recursive: true });
+        writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
+      },
       secrets: (): SyncSecretStore => {
         // The keychain where there is one, and the shared root's `.env.local` beside it: the two
         // places JaiRA keeps the person's own keys (`secret:set`'s machine-wide targets).
@@ -12259,6 +12668,8 @@ export class AppService {
           if (this.options.probeOnStart === true) this.kickAvailability();
           this.publish({ type: "store:invalidate", scope: "config" });
         }
+        // Permission sets, workflows or prompts another machine sent: everything that lists them reads again.
+        if (kinds.has("file")) this.publish({ type: "store:invalidate", scope: "workflows" });
         this.fleet.changed();
       },
       log: (level, message) => this.log({ level, source: "machines", message }),
@@ -12307,30 +12718,32 @@ export class AppService {
       return undefined;
     }
     if (!existsSync(shipped)) return undefined;
-    const layers: WorkflowLayer[] = [];
-    if (project !== undefined && project !== SHARED_SESSION && this.sessionOf(project) !== undefined) {
+    // Every layer holding a file at this path under its root, most specific first (decision 0023, amended 2026-11-18).
+    const layers = this.workflowLayersOf(project).filter((one) => {
+      if (one === "system") return true;
       try {
-        if (existsSync(this.treeFile(`.jaira/${path}`, "project", project))) layers.push("project");
+        return existsSync(this.layerFile(path, one, project));
       } catch {
-        /* no project layer to ask */
+        return false;
       }
-    }
-    if (existsSync(this.treeFile(path, "base"))) layers.push("base");
-    layers.push("system");
+    });
     return { layers };
   }
 
   private builtInStanding(stateId: string, project?: string): BuiltInStanding | undefined {
     const shipped = this.workflowFile(stateId, "system");
     if (!existsSync(shipped)) return undefined;
-    const layers: WorkflowLayer[] = [];
-    // A USER project only: the shared root opened as a project is the `base` layer, asked next.
-    const session = project === SHARED_SESSION ? undefined : this.sessionOf(project);
-    if (session !== undefined && existsSync(resolvePath(session.project.paths.workflowsDir, `${stateId}.json`))) {
-      layers.push("project");
-    }
-    if (existsSync(this.workflowFile(stateId, "base"))) layers.push("base");
-    layers.push("system");
+    // Every layer holding a file for it, most specific first — the settings' six, then what ships
+    // (decision 0023, amended 2026-11-18). A USER project's three only where one is named: the shared
+    // root opened as a project is the `base` layer.
+    const layers = this.workflowLayersOf(project).filter((one) => {
+      if (one === "system") return true;
+      try {
+        return existsSync(this.workflowFile(stateId, one, project));
+      } catch {
+        return false;
+      }
+    });
     return { layers };
   }
 
@@ -12343,7 +12756,7 @@ export class AppService {
    * surface already reports what is wrong with it.
    */
   writeWorkflow(request: WriteWorkflowRequest): WorkflowSource {
-    this.writable(request.layer);
+    this.writable(request.layer, request.project);
     try {
       JSON.parse(request.text);
     } catch (e) {
@@ -12370,7 +12783,7 @@ export class AppService {
   moveWorkflow(request: MoveWorkflowRequest): WorkflowMutationResult {
     // The destination always; the source only when it would be REMOVED. Copying out of the built-in
     // layer is the override itself (decision 0006) — the one thing this surface must keep allowing.
-    this.writable(request.toLayer);
+    this.writable(request.toLayer, request.project);
     if (request.copy !== true) this.writable(request.layer);
     const from = this.workflowFile(request.stateId, request.layer, request.project);
     const to = this.workflowFile(request.to, request.toLayer, request.project);
@@ -12423,13 +12836,16 @@ export class AppService {
    * would have changed nothing.
    */
   setWorkflowDisabled(request: SetWorkflowDisabledRequest): WorkflowSource {
-    this.writable(request.layer);
+    this.writable(request.layer, request.project);
     const { stateId, layer, project } = request;
     const file = this.workflowFile(stateId, layer, project);
     const follow = (disabled: boolean): string => {
-      const below = (layer === "project" ? (["base", "system"] as const) : (["system"] as const)).find((l) => existsSync(this.workflowFile(stateId, l, project)));
+      // The nearest layer under this one holding a file it can follow: a layer that is no project's
+      // never follows a project's copy (`layerSees`, decision 0023, amended 2026-11-18).
+      const order = this.workflowLayersOf(project);
+      const below = order.slice(order.indexOf(layer) + 1).find((l) => layerSees(layer, l) && existsSync(this.workflowFile(stateId, l, project)));
       if (below === undefined) throw this.refusal("file", `'${stateId}' has no file in the ${layer} layer or below it to switch`);
-      return followFileText(`$${below === "base" ? "BASE" : "SYSTEM"}/workflows/${stateId}`, disabled);
+      return followFileText(`${LAYER_ROOT_TOKEN[below]}/workflows/${stateId}`, disabled);
     };
     const write = (text: string): void => {
       mkdirSync(dirname(file), { recursive: true });
@@ -12443,10 +12859,12 @@ export class AppService {
         if (followsOnly(rest)) rmSync(file);
         else write(rest);
       }
-      // Seen from this layer: a project's whole path, or what Shared and the built-in layer say.
-      const paths = layer === "project" ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
-      const searchPath = layer === "project" ? this.requireProject(project).config.workflows.path : undefined;
-      if (disabledStatesIn(paths, searchPath).includes(stateId)) {
+      // Seen from this layer: that layer and those under it — a project's path, or what the layers that
+      // are no project's say.
+      const projectLayer = isProjectWorkflowLayer(layer) || (project !== undefined && project !== SHARED_SESSION && this.sessionOf(project)?.kind === "user");
+      const paths = projectLayer ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
+      const searchPath = projectLayer ? this.requireProject(project).config.workflows.path : undefined;
+      if (disabledStatesIn(paths, searchPath, layer).includes(stateId)) {
         write(existsSync(file) ? withDisabledText(readFileSync(file, "utf8"), false) : follow(false));
       }
     }
@@ -12708,10 +13126,7 @@ export class AppService {
    */
   private checkRoot(request: CheckTarget): string {
     if (request.taskId === undefined) {
-      if (request.layer === "system") return jairaBuiltInPaths().dir;
-      return request.layer === "base"
-        ? jairaBasePaths(this.baseDir).baseDir
-        : this.requireProject(request.project).paths.projectDir;
+      return request.layer === "project" ? this.requireProject(request.project).paths.projectDir : this.layerRootOf(request.layer, request.project);
     }
     const worktree = this.requireProject(request.project).runtime.get(request.taskId)?.worktreePath;
     if (worktree === undefined) {
@@ -13360,7 +13775,7 @@ export class AppService {
    * depends on the untrusted half of the boundary choosing correctly is not a check at all.
    */
   writeFile(request: WriteFileRequest): FileSource {
-    this.writable(request.layer);
+    this.writable(request.layer, request.project);
     // How the LAYER spells this file, which is what everything below keys on: the mime that decides
     // whether it is a state, the state id echoed back, and the sync baseline. A file outside the
     // layer keeps its own path — it is none of those things, and `mimeOfPath` reads it by extension.
@@ -13518,7 +13933,7 @@ export class AppService {
    * named can be followed, and that the scope does not hold that id already.
    */
   savePermissionStack(request: SavePermissionStackRequest): PermissionSetTreeSet {
-    this.writable(request.layer);
+    if (!isWritableSetLayer(request.layer)) this.writable(request.layer);
     const problem = permissionSetPlaceProblem(request.bucket, request.name);
     if (problem !== undefined) throw this.refusal("file", problem);
     const { [PERMISSION_SET_LAYERS_KEY]: named, ...lines } = request.permissionSet;
@@ -13534,6 +13949,19 @@ export class AppService {
       throw this.refusal("file", `that stack cannot be read — ${issues.find((issue) => issue.severity === "error")?.message ?? "a layer it names cannot be followed"}`);
     }
     const layered = `permission-sets/${permissionSetIdAt(request.bucket, request.name)}.json`;
+    // Any of the settings' six layers (decision 0023, amended 2026-11-18). The project and Shared are
+    // written as the Files view writes them; the four newer ones straight into their root.
+    const root = fileLayerRoots(paths).find((one) => one.layer === request.layer);
+    if (root === undefined) throw this.refusal("file", `there is no ${request.layer} layer here to keep a set in`);
+    if (request.layer !== "project" && request.layer !== "base") {
+      const file = join(root.root, layered);
+      if (existsSync(file)) throw this.refusal("file", `'${permissionSetIdAt(request.bucket, request.name)}' already exists there — pick another name`);
+      if (request.layer === "projectMachine") ensureLocalLayerIgnored(paths.jairaDir);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+      this.publish({ type: "store:invalidate", scope: "workflows" });
+      return readOwnPermissionSet(paths, `${root.token}/permission-sets/${permissionSetIdAt(request.bucket, request.name)}`).set;
+    }
     const projectPaths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
     const prefix = projectPaths === undefined ? "" : relative(projectPaths.projectDir, projectPaths.jairaDir).split(sep).join("/");
     const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
@@ -13567,6 +13995,11 @@ export class AppService {
     return grants.list();
   }
 
+  /**
+   * Every permission set, layer by layer — the settings' six that hold files and what ships — with which
+   * states name each: what Settings → Permission sets draws. Another machine's own layers are read
+   * there (`machine`, forwarded by `Federation.route`).
+   */
   readPermissionSetSettings(request: { project?: string; usedBy?: boolean } = {}): PermissionSetsView {
     const paths = this.permissionSetPaths(request.project);
     return {
@@ -13607,10 +14040,13 @@ export class AppService {
    * override that keeps following, a file that stops — is `writePermissionSet`'s to decide and to say.
    */
   writePermissionSetSettings(request: WritePermissionSetRequest): WritePermissionSetResult {
-    this.writable(request.layer);
+    if (request.layer === "system") this.writable(request.layer);
+    const paths = this.permissionSetPaths(request.project);
+    // The project on this machine is this machine's: `.jaira/.gitignore` hides `local/` before anything lands there.
+    if (request.layer === "projectMachine" && paths.jairaDir !== paths.base.baseDir) ensureLocalSettingsIgnored(paths.jairaDir);
     let written: { file: string; kind: WritePermissionSetResult["kind"] };
     try {
-      written = writePermissionSet(this.permissionSetPaths(request.project), request.id, request.layer, request.permissionSet);
+      written = writePermissionSet(paths, request.id, request.layer, request.permissionSet);
     } catch (e) {
       throw this.refusal("file", (e as Error).message);
     }
@@ -13620,7 +14056,7 @@ export class AppService {
 
   /** "Put back the built-in": delete a layer's copy of a permission set, and nothing that is not one. */
   resetPermissionSetSettings(request: ResetPermissionSetRequest): { file: string } {
-    this.writable(request.layer);
+    if (request.layer === "system") this.writable(request.layer);
     let removed: { file: string };
     try {
       removed = resetPermissionSet(this.permissionSetPaths(request.project), request.id, request.layer);
@@ -13653,7 +14089,7 @@ export class AppService {
    * file" that quietly emptied an existing one is the worst possible reading of the verb.
    */
   createFile(request: CreateFileRequest): { file: string } {
-    this.writable(request.layer);
+    this.writable(request.layer, request.project);
     const file = this.treeFile(request.path, request.layer, request.project);
     if (existsSync(file)) throw this.refusal("file", `'${request.path}' already exists`);
     if (request.kind === "directory") {
@@ -13746,7 +14182,7 @@ export class AppService {
   syncStatus(request: { layer: WorkflowLayer; path: string; text?: string; project?: string }): WorkflowSyncStatus {
     // A sync AUTHORS in its layer, and nothing is authored into what ships (decision 0006). Said as a
     // `blocked` line rather than thrown, for the reason this method gives about every other obstacle.
-    if (!isWritableLayer(request.layer)) {
+    if (!isWritableLayer(request.layer) || !SYNCED_LAYERS.has(request.layer)) {
       return {
         layer: request.layer,
         path: request.path,
@@ -13756,7 +14192,7 @@ export class AppService {
         statesChanged: false,
         changedStates: [],
         suggested: null,
-        blocked: "what ships with JaiRA is read-only, so there is nothing to sync into it",
+        blocked: isWritableLayer(request.layer) ? NOT_SYNCED : "what ships with JaiRA is read-only, so there is nothing to sync into it",
       };
     }
     const base = {
@@ -13898,6 +14334,7 @@ export class AppService {
 
   async runSync(request: WorkflowSyncRequest): Promise<WorkflowSyncResult> {
     this.writable(request.layer);
+    if (!SYNCED_LAYERS.has(request.layer)) throw this.refusal("sync", NOT_SYNCED);
     const source = this.syncSource(request.layer, request.project);
     const owner = this.syncHolder(request.layer);
     if (owner.syncTask !== undefined) throw this.refusal("sync", "a sync is already running");
@@ -14248,6 +14685,7 @@ export class AppService {
     const changeset = changesetOf(request.changeset);
     if (changeset.changes.length === 0) throw this.refusal("review", "the proposal has no changes to review");
     this.writable(request.layer);
+    if (!SYNCED_LAYERS.has(request.layer)) throw this.refusal("review", NOT_SYNCED);
     const root = request.layer === "base" ? jairaBasePaths(this.baseDir).baseDir : this.requireProject(request.project).paths.jairaDir;
 
     const system = this.sessionOf(SHARED_SESSION);
@@ -14704,8 +15142,7 @@ export class AppService {
    * protect the wrong thing.
    */
   private statesUnder(file: string, layer: WorkflowLayer, project?: string): string[] {
-    const workflowsDir =
-      layer === "base" ? jairaBasePaths(this.baseDir).workflowsDir : this.requireProject(project).paths.workflowsDir;
+    const workflowsDir = this.layerWorkflowsDir(layer, project);
     const idOf = (path: string): string | null => {
       const rel = relative(workflowsDir, path).split(sep).join("/");
       if (rel.length === 0 || rel.startsWith("..")) return null;
@@ -14767,8 +15204,8 @@ export class AppService {
    * it stop being a workflow.
    */
   private layerPathOf(path: string, layer: WorkflowLayer, project?: string): string | undefined {
-    // The shared root and the built-in layer ARE their layer roots, so a path in either is already spelled the layer's way.
-    if (layer === "base" || layer === "system") return path;
+    // Every layer but the project's IS its own root in the tree, so a path in one is already spelled the layer's way.
+    if (layer !== "project") return path;
     const paths = this.requireProject(project).paths;
     const prefix = relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
     if (prefix.length === 0) return path;
@@ -14796,25 +15233,50 @@ export class AppService {
    * containment check is how two of them stay right and the third quietly does not.
    */
   private treeFile(path: string, layer: WorkflowLayer, project?: string): string {
-    // The built-in layer (decision 0006) IS its layer root, as the shared one is, so both address
-    // spaces name the same directory for it.
-    const root =
-      layer === "system"
-        ? jairaBuiltInPaths().dir
-        : layer === "base"
-          ? jairaBasePaths(this.baseDir).baseDir
-          : this.requireProject(project).paths.projectDir;
+    // Every layer but the project's IS its layer root (the built-in one, decision 0006; Shared; the
+    // settings' four newer ones), so both address spaces name the same directory for it.
+    const root = layer === "project" ? this.requireProject(project).paths.projectDir : this.layerRootOf(layer, project);
     return this.contained(root, path, layer);
   }
 
   private layerFile(path: string, layer: WorkflowLayer, project?: string): string {
-    const root =
-      layer === "system"
-        ? jairaBuiltInPaths().dir
-        : layer === "base"
-          ? jairaBasePaths(this.baseDir).baseDir
-          : this.requireProject(project).paths.jairaDir;
-    return this.contained(root, path, layer);
+    return this.contained(this.layerRootOf(layer, project), path, layer);
+  }
+
+  /**
+   * A layer's root (decision 0023, amended 2026-11-18): the project's `.jaira/`, `.jaira/local/`,
+   * `~/.jaira/projects/<key>/`, `~/.jaira/personal/`, `~/.jaira/machine/`, `~/.jaira`, what ships. The
+   * project's three need the project; the others are this machine's, whichever project asks.
+   */
+  private layerRootOf(layer: WorkflowLayer, project?: string): string {
+    if (layer === "system") return jairaBuiltInPaths().dir;
+    const base = jairaBasePaths(this.baseDir).baseDir;
+    if (layer === "base") return base;
+    if (layer === "machine") return join(base, MACHINE_LAYER_DIR_NAME);
+    if (layer === "you") return join(base, PERSONAL_LAYER_DIR_NAME);
+    const paths = this.requireProject(project).paths;
+    if (layer === "project") return paths.jairaDir;
+    const root = fileLayerRoots(paths).find((one) => one.layer === layer);
+    if (root === undefined) throw this.refusal("file", `there is no ${layer} layer here — it belongs to a project, and none is named`);
+    return root.root;
+  }
+
+  /** A layer's `workflows/` — the project's as its paths name it, the others under their root. */
+  private layerWorkflowsDir(layer: WorkflowLayer, project?: string): string {
+    if (layer === "system") return jairaBuiltInPaths().workflowsDir;
+    if (layer === "base") return jairaBasePaths(this.baseDir).workflowsDir;
+    if (layer === "project") return this.requireProject(project).paths.workflowsDir;
+    return join(this.layerRootOf(layer, project), "workflows");
+  }
+
+  /**
+   * The layers a state of `project` is searched along, most specific first: the settings' six and what
+   * ships — or, for the shared root and a request naming no project, the three that are no project's.
+   */
+  private workflowLayersOf(project?: string): WorkflowLayer[] {
+    const session = project === SHARED_SESSION ? undefined : project !== undefined || this.hasProject ? this.sessionOf(project) : undefined;
+    const paths = session !== undefined && session.kind === "user" ? session.project.paths : baseAsProjectPaths(this.baseDir);
+    return workflowLayerDirs(paths).map((one) => one.layer);
   }
 
   /**
@@ -14827,12 +15289,18 @@ export class AppService {
    * existed a `system` layer fell through every `layer === "base" ? … : …` below as `project`, which
    * is not a write into the app but is not what anybody asked for either.
    */
-  private writable(layer: WorkflowLayer): asserts layer is WritableLayer {
+  private writable(layer: WorkflowLayer, project?: string): asserts layer is WritableLayer {
     if (!isWritableLayer(layer)) {
       throw this.refusal(
         "file",
-        "what ships with JaiRA is read-only — copy it into the shared root or into this project to change it",
+        "what ships with JaiRA is read-only — copy it into one of your layers (this project, Shared, this machine, yours) to change it",
       );
+    }
+    // The project on this machine is this machine's: `.jaira/.gitignore` hides `local/` before anything
+    // lands there (decision 0023, amended 2026-11-18).
+    if (layer === "projectMachine" && project !== undefined) {
+      const paths = this.sessionOf(project)?.project.paths;
+      if (paths !== undefined && paths.jairaDir !== paths.base.baseDir) ensureLocalLayerIgnored(paths.jairaDir);
     }
   }
 
@@ -14847,12 +15315,7 @@ export class AppService {
    * relative path from the root, so `relative` hands back the absolute one — no `..` in sight.
    */
   private workflowFile(stateId: string, layer: WorkflowLayer, project?: string): string {
-    const root =
-      layer === "system"
-        ? jairaBuiltInPaths().workflowsDir
-        : layer === "base"
-          ? jairaBasePaths(this.baseDir).workflowsDir
-          : this.requireProject(project).paths.workflowsDir;
+    const root = this.layerWorkflowsDir(layer, project);
     const file = resolvePath(root, `${stateId}.json`);
     const rel = relative(root, file);
     if (rel.startsWith("..") || rel.length === 0 || isAbsolute(rel) || resolvePath(root, rel) !== file) {
@@ -14947,13 +15410,18 @@ export class AppService {
     return compileHidden(hiddenRules(config.files.hidden));
   }
 
-  /** The merged configuration, or the shared root and the personal layer when no project is open. */
+  /** The merged configuration, or the shared root, this machine's and the personal layer when no project is open. */
   private effectiveConfig(): JairaConfigOf {
     const open = this.sessionOf();
     if (open) return open.project.config;
     const base = jairaBasePaths(this.baseDir);
     return parseConfig(
-      mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]) ?? {},
+      mergeConfigLayers([
+        readJsonIfPresent(jairaBuiltInPaths().settingsFile),
+        readJsonIfPresent(base.settingsFile),
+        readJsonIfPresent(base.machineSettingsFile),
+        readJsonIfPresent(base.personalSettingsFile),
+      ]) ?? {},
     );
   }
 
@@ -15130,7 +15598,7 @@ function readJsonIfPresent(file: string): JsonValue | null {
 
 /**
  * The machine's settings — the window's look, the update track, where the engine runs — read from the
- * built-in, base and personal layers, never a project's: they are the same whichever projects are open,
+ * built-in, base, this machine's own and personal layers, never a project's: they are the same whichever projects are open,
  * and the desktop reads them before it knows whether the engine is its own (decision 0012 §5). Each
  * block that does not parse is its defaults: the frame must be painted whatever state the files are in,
  * and Settings says what is wrong.
@@ -15139,7 +15607,12 @@ export function machineSettings(baseDir: string): { appearance: JairaAppearanceC
   const base = jairaBasePaths(baseDir);
   let merged: Record<string, unknown> | undefined;
   try {
-    merged = mergeConfigLayers([readJsonIfPresent(jairaBuiltInPaths().settingsFile), readJsonIfPresent(base.settingsFile), readJsonIfPresent(base.personalSettingsFile)]) as
+    merged = mergeConfigLayers([
+      readJsonIfPresent(jairaBuiltInPaths().settingsFile),
+      readJsonIfPresent(base.settingsFile),
+      readJsonIfPresent(base.machineSettingsFile),
+      readJsonIfPresent(base.personalSettingsFile),
+    ]) as
       | Record<string, unknown>
       | undefined;
   } catch {
@@ -15619,6 +16092,8 @@ const PATH_ADDED = new Set<string>();
 
 /** How long an installer's output is gathered before it is sent to the window (`installOutput`). */
 const INSTALL_OUTPUT_EVERY_MS = 100;
+/** How often an open workspace's commit is looked at, for its setup's again steps (decision 0027). */
+const HEAD_LOOK_MS = 20_000;
 
 /** The installer's output's last line once it exits 0: the check that follows takes a few seconds of its own. */
 const INSTALLED_CHECKING = "\nDone — checking what it installed…\n";

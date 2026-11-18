@@ -1429,6 +1429,17 @@ The person's designs, 2026-09-23, superseding the groups and the switch of §6.7
   here. The built-in presets are editable in place; saving writes the preset into the layer on the
   switch, and "Put back the built-in" deletes that copy.
 
+### 6.9 The layer switch becomes a path (2026-11-17)
+
+The switch at every page's top-right is gone. Whose settings a page edits is a breadcrumb beside the
+word Settings in the settings sheet's head — `Settings › [project] › [machine] › [Just you] › +` — each
+part optional and meaning "all" when left out, always in that order; `+` is a menu of what can be added
+next, and each crumb can be taken out again (`SettingsCrumb.tsx`, `settingsScope.ts`). The path makes
+one layer of seven — built in, Shared, a project, a machine (`machine-settings.json`), a project on a
+machine (`.jaira/settings.local.json`), Just you, you in a project — least to most specific, person
+first, then machine, then project; a machine with Just you makes none. Another machine's layers are read
+and written on it. See `docs/ui/components/settings-header.md` and the settings-json contract.
+
 
 ## 7. Changes to existing code
 

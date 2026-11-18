@@ -1,8 +1,10 @@
 /**
  * The events workflow as a project reads it, and the one task that runs it (decision 0010 §4).
  *
- * `system/events` is resolved like any bare id — the project's copy, else Shared's, else the one JaiRA
- * ships (`$SYSTEM/workflows/system/events`, which has no automations). What the supervisor needs from
+ * `system/events` is resolved along the settings' six layers, most specific first (`fileLayers.ts`,
+ * decision 0023 amended 2026-11-18): you in the project's copy, Just you's, the project on this machine's,
+ * this machine's, the project's, Shared's, else the one JaiRA ships (`$SYSTEM/workflows/system/events`,
+ * which has no automations) — each copy splicing in the lines of the layer under it. What the supervisor needs from
  * it is three facts: does it load, how many automations its root holds, and which version it is (the
  * snapshot hash a task of it would pin — the same comparison the workflow browser's drift check makes).
  *

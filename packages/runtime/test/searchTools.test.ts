@@ -21,7 +21,10 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "jaira-search-"));
   mkdirSync(join(dir, "src", "deep"), { recursive: true });
   mkdirSync(join(dir, "node_modules", "junk"), { recursive: true });
-  mkdirSync(join(dir, ".jaira"), { recursive: true });
+  mkdirSync(join(dir, ".jaira", "system", "logs"), { recursive: true });
+  writeFileSync(join(dir, ".jaira", "setup.json"), "{}\n", "utf8");
+  // JaiRA's bookkeeping: a walk passes it by, and a search that names it finds it.
+  writeFileSync(join(dir, ".jaira", "system", "logs", "run.log"), "needle in a log\n", "utf8");
   writeFileSync(join(dir, "top.ts"), "export const top = 1;\n", "utf8");
   writeFileSync(join(dir, "src", "a.ts"), "const needle = 1;\nconst other = 2;\n", "utf8");
   writeFileSync(join(dir, "src", "b.txt"), "needle in a text file\n", "utf8");
@@ -46,15 +49,18 @@ describe("glob", () => {
     });
   });
 
-  it("never walks into vendored or engine-owned directories", async () => {
+  it("never walks into vendored directories, nor JaiRA's bookkeeping — but walks the rest of .jaira/", async () => {
     // `node_modules` holds more files than the project by two orders of magnitude, so entering one
-    // spends the whole budget somewhere nobody asked about. `.jaira` is the app's own state.
+    // spends the whole budget somewhere nobody asked about; `.jaira/system` (the run database, logs,
+    // snapshots) is the same noise. The rest of `.jaira/` — setup, settings, workflows — is the
+    // project's, and found: whether a call may look there is the permission set's (2026-11-17).
     const result = await call(tool(), { pattern: "**/*" });
     expect((result.paths as string[]).some((p) => p.startsWith("node_modules/"))).toBe(false);
-    expect((result.paths as string[]).some((p) => p.startsWith(".jaira/"))).toBe(false);
+    expect(result.paths as string[]).toContain(".jaira/setup.json");
+    expect((result.paths as string[]).some((p) => p.startsWith(".jaira/system/"))).toBe(false);
   });
 
-  it("scopes to a subdirectory when asked, searches one outside the workspace where it is, and never .jaira", async () => {
+  it("scopes to a subdirectory when asked, searches one outside the workspace where it is, and .jaira/ like any", async () => {
     expect(await call(tool(), { pattern: "*.ts", path: "src" })).toMatchObject({ paths: ["a.ts"] });
     // Whether a place outside may be searched is the permission set's to say, at its places (decision
     // 0023 §3.2) — the gate answered before the tool ran. The tool searches it, relative to it.
@@ -66,12 +72,10 @@ describe("glob", () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
-    expect(await call(tool(), { pattern: "*", path: ".jaira" })).toMatchObject({
-      error: expect.stringMatching(/\.jaira/) as unknown as string,
-    });
-    expect(await call(tool(), { pattern: "*", path: join(tmpdir(), "x", ".jaira") })).toMatchObject({
-      error: expect.stringMatching(/\.jaira/) as unknown as string,
-    });
+    expect(await call(tool(), { pattern: "**/*", path: ".jaira" })).toMatchObject({ paths: ["setup.json"] });
+    // A search that names the bookkeeping itself is walked from there.
+    expect(await call(tool(), { pattern: "**/*", path: ".jaira/system" })).toMatchObject({ paths: ["logs/run.log"] });
+    expect(await call(createGrepTool(), { pattern: "needle", path: ".jaira/system" })).toMatchObject({ count: 1 });
   });
 
   it("says so rather than guessing when there is no workspace", async () => {

@@ -20,7 +20,7 @@ import { canonical } from "./hostCalls";
 export type RefusalRule =
   /** A permission set's line for the tool, or for a part of the line, is `deny`. */
   | "permission set"
-  /** JaiRA's own: the destructive floor, `.jaira/` being engine-owned. */
+  /** JaiRA's own: the destructive floor and the built-in asks. */
   | "built-in rules"
   /** A scope table: the call would act somewhere it may not. */
   | "scopes"

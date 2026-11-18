@@ -84,9 +84,32 @@ export function presetNamesOf(effective: Record<string, unknown>): string[] {
   return presets !== null && typeof presets === "object" && !Array.isArray(presets) ? Object.keys(presets) : [];
 }
 
-/** `execEnvironment` (`"windows" | { wsl }`) as the Where commands run section reads it: the distro, or "". */
-export function execDistroOf(effective: Record<string, unknown>): { value: unknown; distro: string } {
+/**
+ * `execEnvironment` (`"windows" | { wsl } | { container }`) as the Where commands run section reads it:
+ * the distro, or "" — and the workspace's container, when a project's setup made one (decision 0027),
+ * which is neither of the others and is not switched like them.
+ */
+export function execDistroOf(effective: Record<string, unknown>): {
+  value: unknown;
+  distro: string;
+  container?: { name: string; user?: string; from?: "devcontainer" | "docker" };
+} {
   const value = effective["execEnvironment"];
-  const distro = value !== null && typeof value === "object" ? String((value as { wsl?: string }).wsl ?? "") : "";
+  const fields = value !== null && typeof value === "object" ? (value as { wsl?: unknown; container?: unknown; user?: unknown; from?: unknown }) : undefined;
+  if (fields !== undefined && typeof fields.container === "string" && fields.container !== "") {
+    const from = fields.from === "devcontainer" || fields.from === "docker" ? fields.from : undefined;
+    return {
+      value,
+      distro: "",
+      container: { name: fields.container, ...(typeof fields.user === "string" ? { user: fields.user } : {}), ...(from !== undefined ? { from } : {}) },
+    };
+  }
+  const distro = fields !== undefined ? String(fields.wsl ?? "") : "";
   return { value, distro };
+}
+
+/** A workspace's container as one line: "In the container jaira-1a2b3c4d (Dev Container), as node". */
+export function containerLine(container: { name: string; user?: string; from?: "devcontainer" | "docker" }): string {
+  const made = container.from === "devcontainer" ? " (Dev Container)" : container.from === "docker" ? " (Docker)" : "";
+  return `In the container ${container.name}${made}${container.user !== undefined ? `, as ${container.user}` : ""}`;
 }

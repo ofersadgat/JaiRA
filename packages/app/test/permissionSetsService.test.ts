@@ -14,11 +14,13 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
+import { initProject, permissionSetReader, workflowLoadOptions } from "@jaira/persistence";
 import {
   copyDifferences,
   jairaBuiltInPaths,
+  jairaPaths,
   rebasePermissionSetChange,
+  resolvePermissionSetDecl,
   permissionSetsAt,
   permissionSetStanding,
   SHARED_SESSION,
@@ -71,8 +73,8 @@ describe("permissionSets:read", () => {
       "read-only-scratch",
     ]);
     expect(view.records.every((r) => r.files.every((f) => f.layer === "system" && f.decl !== undefined))).toBe(true);
-    // The three segments of the layer picker, nearest first (decision 0006).
-    expect(view.layers).toEqual(["project", "base", "system"]);
+    // Every layer a set can be in, nearest first: the settings' six, then what ships (decision 0023, amended 2026-11-18).
+    expect(view.layers).toEqual(["projectYou", "you", "projectMachine", "machine", "project", "base", "system"]);
     expect(view.tools.map((t) => t.name)).toContain("read_file");
     // A tool named and not served yet still gets a line — a permission set may hold one (0007 step 4).
     expect(view.tools.map((t) => t.name)).toContain("start_task");
@@ -91,8 +93,8 @@ describe("permissionSets:read", () => {
     await service.open(other);
     // Nothing named with two open is the caller's fault, and stays a refusal…
     expect(() => service.readPermissionSetSettings({ usedBy: false })).toThrow(/several projects are open/);
-    // …while `shared` — a window standing at the root — reads the root, which has no project layer.
-    expect(service.readPermissionSetSettings({ project: SHARED_SESSION, usedBy: false }).layers).toEqual(["base", "system"]);
+    // …while `shared` — a window standing at the root — reads the root, which has no project's layers.
+    expect(service.readPermissionSetSettings({ project: SHARED_SESSION, usedBy: false }).layers).toEqual(["you", "machine", "base", "system"]);
   });
 });
 
@@ -206,8 +208,8 @@ describe("copy on first edit", () => {
     expect(permissionSetStanding(after).label).toBe("built in");
   });
 
-  it("from Just you: the change, replayed over the chosen layer's own view, carries none of the nearer layer's lines", () => {
-    // The project has its own copy; the personal layer reads it, and its change goes to Shared.
+  it("from a layer an older engine keeps no sets for: the change, replayed over the chosen layer's own view, carries none of the nearer layer's lines", () => {
+    // The project has its own copy; the page's layer reads it, and its change goes to Shared.
     service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...shipped("ask-first"), web_fetch: "deny" } });
     const shown = readAt("project", "ask-first").source.decl!;
     const onto = readAt("base", "ask-first").source.decl!;
@@ -220,6 +222,74 @@ describe("copy on first edit", () => {
     expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", shell: "allow" });
     // The project's copy still says what it said, and follows nothing new.
     expect(readAt("project", "ask-first").source.decl).toMatchObject({ web_fetch: "deny" });
+  });
+});
+
+/**
+ * The settings' six layers each keep permission sets (decision 0023, amended 2026-11-18): this machine's in
+ * `~/.jaira/machine`, the project on this machine in `.jaira/local` (which git ignores), Just you in
+ * `~/.jaira/personal`, you in the project beside your settings for it — read in the settings' order, the
+ * most specific first, by the Settings pane and by a run's `$/permission-sets/…` alike.
+ */
+describe("a permission set in each of the settings' layers", () => {
+  const view = () => service.readPermissionSetSettings({ project: dir, usedBy: false });
+  const readAt = (layer: Parameters<typeof permissionSetsAt>[1], id: string) => permissionSetsAt(view().records, layer).find((at) => at.id === id)!;
+  /** What a run's `tools: "$/permission-sets/<id>"` reads: the nearest copy, followed. */
+  const inEffect = (id: string): PermissionSetDecl =>
+    resolvePermissionSetDecl(`$/permission-sets/${id}`, permissionSetReader(workflowLoadOptions(jairaPaths(dir, testHome()), { tolerant: true })), "", []) as PermissionSetDecl;
+
+  it("keeps each layer's copy where its settings are kept, and the project on this machine out of git", () => {
+    const base = shipped("ask-first");
+    const machine = service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...base, web_fetch: "deny" } });
+    expect(machine.file).toBe(join(testHome(), "machine", "permission-sets", "ask-first.json"));
+    const local = service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: dir, permissionSet: { ...base, shell: "allow" } });
+    expect(local.file).toBe(join(dir, ".jaira", "local", "permission-sets", "ask-first.json"));
+    expect(readFileSync(join(dir, ".jaira", ".gitignore"), "utf8").split("\n")).toContain("local/");
+    const you = service.writePermissionSetSettings({ id: "ask-first", layer: "you", project: dir, permissionSet: { ...base, read_file: "allow" } });
+    expect(you.file).toBe(join(testHome(), "personal", "permission-sets", "ask-first.json"));
+    const mine = service.writePermissionSetSettings({ id: "ask-first", layer: "projectYou", project: dir, permissionSet: { ...readAt("projectYou", "ask-first").source.decl!, write_file: "deny" } });
+    expect(dirname(dirname(mine.file))).toBe(dirname(service.readConfig(dir).projectYouFile!));
+    // Each is listed in its own layer, the nearer ones shadowing it.
+    expect(readAt("machine", "ask-first")).toMatchObject({ here: true, shadowedBy: "projectYou", source: { file: "~/.jaira/machine/permission-sets/ask-first.json" } });
+    expect(permissionSetStanding(readAt("projectMachine", "ask-first")).label).toBe("this project on this machine · copied from this machine");
+  });
+
+  it("is read by a run as the settings are: you in the project, Just you, the project on this machine, this machine, the project", () => {
+    const base = shipped("ask-first");
+    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...base, web_fetch: "allow" } });
+    expect(inEffect("ask-first").web_fetch).toBe("allow");
+    service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...base, web_fetch: "deny" } });
+    expect(inEffect("ask-first").web_fetch).toBe("deny");
+    service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: dir, permissionSet: { ...readAt("projectMachine", "ask-first").source.decl!, web_fetch: "ask" } });
+    expect(inEffect("ask-first").web_fetch).toBe("ask");
+    service.writePermissionSetSettings({ id: "ask-first", layer: "you", project: dir, permissionSet: { ...base, shell: "allow" } });
+    expect(inEffect("ask-first")).toMatchObject({ shell: "allow" });
+    service.writePermissionSetSettings({ id: "ask-first", layer: "projectYou", project: dir, permissionSet: { ...readAt("projectYou", "ask-first").source.decl!, shell: "deny" } });
+    expect(inEffect("ask-first")).toMatchObject({ shell: "deny" });
+    // The composer offers the nearest copy, and says whose it is.
+    expect(view().records.find((r) => r.id === "ask-first")!.files.map((f) => f.layer)).toEqual(["projectYou", "you", "projectMachine", "machine", "project", "system"]);
+  });
+
+  it("follows no project's copy from a layer that is no project's, which every project reads", () => {
+    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...shipped("ask-first"), web_fetch: "allow" } });
+    // This machine's pane sees what ships under it, not this project's copy…
+    expect(readAt("machine", "ask-first").source.layer).toBe("system");
+    const written = service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...shipped("ask-first"), shell: "allow" } });
+    // …so its copy follows what ships, and means the same in every project on this machine.
+    expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", shell: "allow" });
+    // The project on this machine is the project's, and follows the nearest copy under it, this machine's.
+    const local = service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: dir, permissionSet: { ...readAt("projectMachine", "ask-first").source.decl!, read_file: "ask" } });
+    expect(JSON.parse(readFileSync(local.file, "utf8"))).toMatchObject({ $ref: "$MACHINE/permission-sets/ask-first" });
+    // Reset takes this machine's copy away, and what ships answers there again.
+    service.resetPermissionSetSettings({ id: "ask-first", layer: "machine", project: dir });
+    expect(readAt("machine", "ask-first").source.layer).toBe("system");
+  });
+
+  it("reads the shared root's own three — this machine's, Just you and Shared — with no project named", () => {
+    service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: SHARED_SESSION, permissionSet: { ...shipped("ask-first"), web_fetch: "deny" } });
+    const shared = service.readPermissionSetSettings({ project: SHARED_SESSION, usedBy: false });
+    expect(shared.records.find((r) => r.id === "ask-first")!.files.map((f) => f.layer)).toEqual(["machine", "system"]);
+    expect(() => service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: SHARED_SESSION, permissionSet: shipped("ask-first") })).toThrow(/no projectMachine layer/);
   });
 });
 

@@ -143,7 +143,6 @@ describe("open_app runs nothing the shell should judge", () => {
     [{ action: "open", target: "deploy.ps1" }, /would run as a program/],
     [{ action: "open", target: "setup.exe" }, /would run as a program/],
     [{ action: "open", target: "search-ms:query=x" }, /a link to another program/],
-    [{ action: "open", target: ".jaira/system/x.txt" }, /engine's own/],
   ])("%j", async (input, why) => {
     expect((await run(tools, "open_app", input))["error"]).toMatch(why);
   });
@@ -155,11 +154,14 @@ describe("open_app runs nothing the shell should judge", () => {
     await run(open, "open_app", { action: "open", target: "https://example.com" });
     await run(open, "open_app", { action: "open", target: "ms-settings:display" });
     await run(open, "open_app", { action: "launch", app: "notepad" });
+    // A file in `.jaira/` is a place like any: whether it may be opened is the set's `open_app` line.
+    await run(open, "open_app", { action: "open", target: ".jaira/setup.json" });
     expect(machine.calls.filter(([name]) => name === "openApp").map(([, args]) => args)).toEqual([
       { action: "open", target: expect.stringMatching(/[\\/]work[\\/]report\.pdf$/) },
       { action: "open", target: "https://example.com" },
       { action: "open", target: "ms-settings:display" },
       { action: "launch", app: "notepad" },
+      { action: "open", target: expect.stringMatching(/[\\/]work[\\/]\.jaira[\\/]setup\.json$/) },
     ]);
   });
 

@@ -2,14 +2,17 @@
  * What a configuration layer is CALLED, wherever one is named.
  *
  * Its own module so that a sentence about a layer ("inherited from Shared (all projects)") uses the
- * words the layer picker uses, without importing the picker and everything it draws.
+ * words Settings' path uses (`settingsScope.ts`), without importing what draws it.
  */
-import type { ConfigLayer, ConfigSource, WorkflowLayer } from "@jaira/shared/browser";
+import type { ConfigLayer, ConfigSource } from "@jaira/shared/browser";
 
 export const LAYER_LABELS: Record<ConfigLayer, string> = {
-  you: "Just you",
-  project: "This project",
   base: "Shared (all projects)",
+  project: "This project",
+  machine: "This machine",
+  projectMachine: "This project on this machine",
+  you: "Just you",
+  projectYou: "You in this project",
 };
 
 /** The read-only layer under the others — what ships (decision 0006). Not a `ConfigLayer`: its `settings.json` is never written, and editing a value it holds writes that value into the layer being edited. */
@@ -20,27 +23,32 @@ export const BUILT_IN_LABEL = "Built in";
  * where it reads as a phrase rather than a name: "this project", "built in".
  */
 export const SOURCE_WORDS: Record<ConfigSource, string> = {
-  you: "you",
-  project: "this project",
   base: "Shared",
+  project: "this project",
+  machine: "this machine",
+  projectMachine: "this project on this machine",
+  you: "you",
+  projectYou: "you in this project",
   "built in": "built in",
 };
 
-/** What each of the layer switch's segments says on hover. */
-export const LAYER_TITLES: Record<WorkflowLayer | ConfigLayer, string> = {
-  you: "only you — personal-settings.json, on this machine and your paired ones, never in a checkout, and read after every other layer",
-  project: "this project only",
-  base: "the shared root — changes here affect every project that has not overridden them",
-  system: "what ships with JaiRA — read-only; it is changed by overriding it in one of the other two",
-};
-
 /**
- * A segment of the layer switch (`LayerPicker`): its words — the project's own name on its segment
- * when there is one, so the switch says WHOSE settings a write changes — and its tooltip.
+ * {@link SOURCE_WORDS} with the path's own names where it has them — "atlas", "build-01", "atlas on
+ * build-01", "you in atlas" — since "this machine" read on another machine's settings would name the
+ * wrong one.
  */
-export function layerSegmentOf(layer: WorkflowLayer | ConfigLayer, projectName?: string): { label: string; title: string } {
-  return {
-    label: layer === "system" ? BUILT_IN_LABEL : layer === "project" && projectName !== undefined ? projectName : LAYER_LABELS[layer as ConfigLayer],
-    title: layer === "project" && projectName !== undefined ? `${projectName} only` : LAYER_TITLES[layer],
-  };
+export function sourceWordsOf(from: ConfigSource, names: { project?: string | undefined; machine?: string | undefined } = {}): string {
+  const { project, machine } = names;
+  switch (from) {
+    case "project":
+      return project ?? SOURCE_WORDS.project;
+    case "machine":
+      return machine ?? SOURCE_WORDS.machine;
+    case "projectMachine":
+      return project !== undefined && machine !== undefined ? `${project} on ${machine}` : SOURCE_WORDS.projectMachine;
+    case "projectYou":
+      return project !== undefined ? `you in ${project}` : SOURCE_WORDS.projectYou;
+    default:
+      return SOURCE_WORDS[from];
+  }
 }

@@ -20,7 +20,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hostFunction, type CapabilityRegistry, type FunctionInputs, type JsonValue } from "@declarative-ai/exec";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
-import type { Project } from "@jaira/persistence";
+import { layerFilesOf, type Project } from "@jaira/persistence";
 import {
   Git,
   INTERACTIVE,
@@ -87,7 +87,7 @@ function grantProject(project: Project, log: (message: string) => void): void {
     }
     const functions = (doc["functions"] ??= {}) as Record<string, unknown>;
     functions["review_artifacts"] = { ...((functions["review_artifacts"] ?? {}) as object), publish: "allow" };
-    // Validated as it will be read — the base under it, the person's own layer over it — before
+    // Validated as it will be read — every other layer laid around it (`loadLayeredConfig`'s) — before
     // anything is written.
     const layer = (at: string): unknown => {
       try {
@@ -96,7 +96,7 @@ function grantProject(project: Project, log: (message: string) => void): void {
         return undefined;
       }
     };
-    parseConfig(mergeConfigLayers([layer(project.paths.builtIn.settingsFile), layer(project.paths.base.settingsFile), doc, layer(project.paths.base.personalSettingsFile)]) ?? {});
+    parseConfig(mergeConfigLayers([...new Set(layerFilesOf(project.paths))].map((at) => (at === file ? doc : layer(at)))) ?? {});
     writeFileSync(file, `${JSON.stringify(doc, null, 2)}\n`, "utf8");
   } catch (e) {
     log(`could not record the publish grant: ${(e as Error).message}`);

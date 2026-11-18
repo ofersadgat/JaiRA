@@ -25,8 +25,9 @@
  *
  * A function answers `"allow"` or `"deny"` and nothing else. One that returns anything else, throws,
  * or cannot be loaded has not decided: the part asks the person, and the reason says why. Nothing a
- * function says lifts the destructive floor, `.jaira/`, a rule's deny or a line the parser could not
- * read — those are decided before any function is asked (`judgePart`).
+ * function says lifts the destructive floor, a rule's deny (the shipped sets' `.jaira/` lines among
+ * them) or a line the parser could not read — those are decided before any function is asked
+ * (`judgePart`).
  */
 import {
   hostFunction,

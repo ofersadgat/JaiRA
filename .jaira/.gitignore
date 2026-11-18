@@ -22,3 +22,16 @@ system/machine.key
 # This workspace's id in the shared database (decision 0013 §4). Committed, every clone of the
 # repository would claim the same tasks — which this repository did until 2026-10-06.
 system/workspace.id
+
+# The project's setup for this machine alone (decision 0027).
+setup.local.json
+setup.local.yaml
+setup.local.yml
+
+# This project's settings on this machine (Settings › this project › this machine): a workspace
+# is one folder on one machine, so a clone elsewhere must not take them.
+settings.local.json
+
+# This project's files on this machine — its permission sets under local/ (Settings › this project ›
+# this machine, 2026-11-18): a clone elsewhere must not take them.
+local/

@@ -2,7 +2,7 @@
 id: engineering/units/project-sessions
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-11-18
 implements: [product/all-projects-in-one-place, product/pick-up-where-it-left-off, product/share-processes-across-projects, product/catch-process-mistakes-before-running, ui/components/project-row]
 layer: service
 owns_contracts: []
@@ -46,7 +46,7 @@ An open runs in this order:
 1. Return the existing session, with `recovered: []`, when the key is already open.
 2. `openProject(dir, {baseDir})`, then `await prepareUserModules(paths, {searchPath})`.
 3. Build the session with `hubsFor(key)`, add it to the map, and log `opened <dir>` under source `project`, with the recovered task ids in `detail`.
-4. Watch the project's and the base root's `workflows/` directories, unless `watchWorkflows` is `false`.
+4. Watch the project's and the base root's `workflows/` directories, and the whole root of each of the settings' four newer layers (`~/.jaira/projects/<key>`, `~/.jaira/personal`, `.jaira/local`, `~/.jaira/machine`) — one not on disk yet from the nearest folder above it, until it appears — unless `watchWorkflows` is `false`.
 5. When recovery found interrupted tasks, push `store:invalidate` with scope `tasks` and start `recoverNativeSessions` without awaiting it.
 6. Start `resumeSuspended` and keep its promise as `session.resuming`.
 7. Start an availability refresh when `probeOnStart` is set, then `remember` the directory.
@@ -68,7 +68,7 @@ A close runs in this order:
 | A session's hubs, `requestTask`, `subjectProject`, `interactive` | created at open, settled at close | process memory | [interaction-gateway](interaction-gateway.md) |
 | `projects` in `user-settings.json` | read by `restore`; appended by `remember`; rewritten by `restore` when it forgets | the file | [user-settings](user-settings.md) |
 | Each project's database handle | opened through `openProject` or `openSharedProject`, closed last in `ProjectSession.close` | the database | [project-store](project-store.md) |
-| `watchers` and `watchTimer` | created at open for the project's and the base root's `workflows/`, closed at close | process memory | none |
+| `watchers` and `watchTimer` | created at open for the project's and the base root's `workflows/` and each newer layer's root (or, until it appears, the nearest folder above it), closed at close | process memory | none |
 | `suspendedAtClose` and `resuming` | filled at the top of a close; set at open | process memory | the run-end handler in [task-lifecycle](task-lifecycle.md) reads `suspendedAtClose` to write `SUSPENDED_WAITING` |
 | `roleError.shared` and `closed` | each set once | process memory | none |
 
@@ -90,6 +90,7 @@ A close runs in this order:
 | 12 | `inspect` creates and opens nothing | `settings.test.ts` "reports what a directory is without opening or creating anything" |
 | 13 | `chooseProject` answers null with no dialog to show, and passes the wording of the action it serves | `settings.test.ts` "answers null from the directory picker when there is no dialog to show", "passes the picker wording that matches what is about to happen" |
 | 14 | A state file written while the project is open is in the next browse, whether or not a watcher could run | `maintenance.test.ts` "pushes a workflows invalidation when a state file changes on disk" |
+| 14a | A newer layer's root made after the project opened — by a person, a Settings write or the settings sync — is watched from then on, and a state file landing in it is in the next browse | `settingsLayerFiles.test.ts` "is watched from the moment it appears, and what lands in it is read" |
 | 15 | A task that was waiting on a person when the app closed is recorded as suspended, and the next open runs it again and parks the same question | `gateDurability.test.ts` "records WHY the close ended the run, so the open knows to resume it", "is being asked again when the app opens, by a run that is running again" |
 | 16 | Opening a project is logged with its directory | `service.test.ts` "records opening a project, which is where a recovery would be reported" |
 | 17 | A close closes no database while a run of that session has not settled | unasserted |

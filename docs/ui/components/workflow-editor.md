@@ -2,7 +2,7 @@
 id: ui/components/workflow-editor
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-18
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/inherited-unless-set-here]
 serves: [product/author-processes-without-memorising-the-format, product/see-how-a-process-flows, product/share-processes-across-projects, product/complete-record-of-every-run, product/work-runs-the-process-it-started-with]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
@@ -27,7 +27,7 @@ One state file's editing surface: a quiet top line with the file's path cut from
 
 - **Path.** `.app-secondary` in `--dim`, one line, ending in ` · new file` while the file is not on disk. A long path loses its start, so the file name stays in view; the whole path is its tooltip.
 - **Shared copy.** A pill chip with a 1px `--warn` border and `--warn` text at ×0.80, shown when the file is the copy every project shares. Its tooltip says what editing it does.
-- **Layer.** Where JaiRA ships a state of this id, the chip says which side of that the file is on and link buttons in `--accent` data type follow it. A shipped file: a hairline `built in · read-only` chip, then `Override for all projects` and `Override here`, and its path reads `$SYSTEM/workflows/{id}.json` with the real path as the tooltip. A file that overrides one: `overrides built in`, hairline in a project and `--warn` in the shared root, then `Compare with what ships`. The chip and links never shrink or wrap.
+- **Layer.** Where JaiRA ships a state of this id, the chip says which side of that the file is on and link buttons in `--accent` data type follow it. A shipped file: a hairline `built in · read-only` chip, then `Edit a copy in Shared` and `Override here`, then `Elsewhere…`, a menu titled `Edit a copy` of the settings' four newer layers (decision 0023, amended 2026-11-18) — `for you in this project`, `for just you`, `in this project on this machine`, `on this machine`, no folder beside them (the menu is as wide as its labels) — disabled where that layer has its copy or, for a project's, with none open; and its path reads `$SYSTEM/workflows/{id}.json` with the real path as the tooltip. A file that overrides one: `overrides built in`, hairline in a project and `--warn` in the shared root, then `Compare with what ships`. The chip and links never shrink or wrap.
 - **Switch.** Three joined buttons at ×0.88 of the app size, 2px by 11px padding. The chosen one is filled `--fill-accent` with `--on-accent` text at weight 600; the others are ghost buttons. The path grows to fill the line; the chip and the switch never shrink.
 - **Body.** Form draws the [state-form](state-form.md), which scrolls on its own. JSON draws the [schema-json-editor](schema-json-editor.md) with `Workflow state` chosen as its schema and no Save row of its own. Graph draws the [state-graph](state-graph.md) filling the body.
 - **Foot.** The [editor-chrome](editor-chrome.md) row, pinned under the body on every tab.
@@ -72,6 +72,7 @@ There are no keys for switching tabs or saving.
 | Chip | `shared copy` · tooltip `Editing the shared copy. Every project that has not overridden this state will see the change.` |
 | Built-in chip | `built in · read-only` · tooltip `This file ships with JaiRA and cannot be edited. Override it to change what runs.` |
 | Override links | `Override for all projects` · `Override here`; tooltips `Copy this file into the shared root (~/.jaira) and open the copy` · `Copy this file into this project's .jaira/ and open the copy` · `The shared root already has a copy of this state, and it is the one that loads` · `This project already has a copy of this state, and it is the one that loads` · `Open a project to override this state for it alone` |
+| Elsewhere… | the link, titled `Edit a copy in one of your other layers — for you in this project, for just you, in this project on this machine, on this machine`; its menu `Edit a copy`: `for you in this project` · `for just you` · `in this project on this machine` · `on this machine`, each disabled where that layer already has a copy of this state or, for a project's two, no project is open |
 | Override chip | `overrides built in`; tooltips `The shared copy of a state JaiRA ships. Every project that has not overridden it runs this file.` · `This project's copy of a state JaiRA ships. It runs here instead of the built-in one.` |
 | Compare | `Compare with what ships` · `Back to the file`; while reading `reading what ships…`; `The built-in file could not be read.` |
 | Form, unreadable | `This file is not valid JSON ({message}) — fix it on the JSON tab to use the form.` |

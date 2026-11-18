@@ -225,6 +225,15 @@ describe("system/ is committed now", () => {
       // clone of the repository would claim the same tasks.
       "system/workspace.id",
       ".env.local",
+      // Settings of one machine (2026-11-17): this project on it — its settings and its permission sets
+      // (2026-11-18) — and in the shared root the machine's own.
+      "settings.local.json",
+      "local/",
+      "machine-settings.json",
+      // The project's setup for this machine alone (decision 0027).
+      "setup.local.json",
+      "setup.local.yaml",
+      "setup.local.yml",
     ]);
     expect(existsSync(join(dir, "repo", ".jaira", ".gitignore"))).toBe(true);
   });

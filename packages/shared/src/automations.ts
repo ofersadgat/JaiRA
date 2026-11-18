@@ -30,12 +30,41 @@
  * the old shape writes it too.
  */
 import type { JsonValue } from "@declarative-ai/json";
+import type { WritableSetLayer } from "./view";
 
 /** The events workflow's id, in every layer. */
 export const EVENTS_STATE_ID = "system/events";
 
 /** An automation's state id: the default `./<key>` of the events root's child `<name>`. */
 export const automationStateIdOf = (name: string): string => `${EVENTS_STATE_ID}/${name}`;
+
+/** The events workflow, or a state under it — what the settings' six layers hold besides permission sets. */
+export const isAutomationStateId = (id: string): boolean => id === EVENTS_STATE_ID || id.startsWith(`${EVENTS_STATE_ID}/`);
+
+/**
+ * The layers that hold automations, least specific first — the settings' order (decision 0023, amended
+ * 2026-11-18): Shared, the project, this machine, the project on this machine, Just you, you in the
+ * project. Most specific wins, and what ships is under them all.
+ */
+export const AUTOMATION_LAYERS: readonly WritableSetLayer[] = ["base", "project", "machine", "projectMachine", "you", "projectYou"];
+
+/**
+ * The root each layer's copy of the events workflow follows: the layer directly under it in
+ * {@link AUTOMATION_LAYERS}, by the name a reference uses. A copy splices in that layer's lines — and
+ * where that layer has no copy, the loader reads one that only passes the layer under IT through
+ * (`fileLayers.ts`), so every copy can name its neighbour whatever the layers between hold.
+ */
+export const EVENTS_FOLLOWS: Readonly<Record<WritableSetLayer, string>> = {
+  base: "$SYSTEM",
+  project: "$BASE",
+  machine: "$JAIRA",
+  projectMachine: "$MACHINE",
+  you: "$PROJECTMACHINE",
+  projectYou: "$YOU",
+};
+
+/** `$MACHINE/workflows/system/events` — a layer's events workflow as a reference names it. */
+export const eventsRefOf = (root: string): string => `${root}/workflows/${EVENTS_STATE_ID}`;
 
 /**
  * Where a start's input comes from: typed, or picked from the event — by its path under the delivered

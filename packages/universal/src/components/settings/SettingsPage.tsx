@@ -234,7 +234,9 @@ function SectionLead({ children, italic = false }: { children: ReactNode; italic
 
 /**
  * One section: a heading over one card of rows — and a place the sidebar's accordion lists and scrolls
- * to (`parts.ts`). `plain` drops the card, `wide` lets it take the page's full width.
+ * to (`parts.ts`). `plain` drops the card, `wide` lets it take the page's full width. `holds`: the page's
+ * layer keeps files of its own here (permission sets, automations — decision 0023, amended 2026-11-18),
+ * so a personal view's What you changed draws it as it does a section with a setting stated.
  */
 export function SettingsSection({
   id,
@@ -245,6 +247,7 @@ export function SettingsSection({
   plain = false,
   wide = false,
   layer,
+  holds = false,
   children,
 }: {
   id: string;
@@ -255,6 +258,7 @@ export function SettingsSection({
   plain?: boolean;
   wide?: boolean;
   layer?: RowLayer | undefined;
+  holds?: boolean;
   children: ReactNode;
 }): JSX.Element | null {
   const layered = useLayerRow(layer?.paths, layer?.stated, layer?.format);
@@ -263,8 +267,8 @@ export function SettingsSection({
   const { count, mark } = useMarks();
   const section = useMemo(() => ({ mark }), [mark]);
   // A stated section counts as drawn on its own; otherwise it is drawn while one of its rows is.
-  useDrawnRow(layer?.stated === true && !layered.hidden);
-  const hidden = at?.onlyStated === true && layer?.stated !== true && count === 0;
+  useDrawnRow((layer?.stated === true && !layered.hidden) || holds);
+  const hidden = at?.onlyStated === true && layer?.stated !== true && !holds && count === 0;
   const view = useRef<RNView | null>(null);
   const gone = hidden || (layer !== undefined && layered.hidden);
   useEffect(() => {

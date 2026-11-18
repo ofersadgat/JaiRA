@@ -162,6 +162,13 @@ export const CODEX_WRITE_SWITCH = "workspace-write";
  */
 export const GENERIC_CLI_TOOLS: AgentToolDeclaration = { channel: "none", natives: {} };
 
+/**
+ * A generic CLI whose registration turns its own tools off and points it at the bridge
+ * (`mcp.builtinsOff`). It declares no built-ins, so every tool the permission set holds is OURS, served
+ * over the bridge and gated there per call — codex with its sandbox shut, and no switch to open it.
+ */
+export const GENERIC_BRIDGED_TOOLS: AgentToolDeclaration = { channel: "switches", natives: {}, switches: {} };
+
 /** Every declaration, for the one question asked without knowing the route: what is this native? */
 const ALL_DECLARATIONS: readonly AgentToolDeclaration[] = [CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS];
 
@@ -750,7 +757,7 @@ function translatedGate(
 /**
  * A native's input, with the PLACE it names under the argument the standard tool calls it.
  *
- * A scope table and the `.jaira/` rule read `path`; Claude's `Read` says `file_path`. Without this a
+ * A scope table and a line's places read `path`; Claude's `Read` says `file_path`. Without this a
  * kept native would be asked about under the right name and judged at no place at all.
  */
 function standardInput<T>(standard: string, input: T): T {

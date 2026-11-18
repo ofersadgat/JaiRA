@@ -29,6 +29,9 @@ export * from "./eventsWorkflow";
 export * from "./digest";
 export * from "./workflowRefs";
 export * from "./permissionSets";
+// The settings' six layers as permission set roots (decision 0023, amended 2026-11-18).
+export * from "./fileLayers";
+export * from "./repositoryIdentity";
 // The one-shot move of the `policy` block into `functions` and the permission sets (decision 0007, amended 2026-09-23).
 // The list-and-block form rewritten as permission sets, each rewrite held to a measurement (decision 0007 step 7).
 // js/ts function modules: the approval store, the process-wide symbol index, and the freeze

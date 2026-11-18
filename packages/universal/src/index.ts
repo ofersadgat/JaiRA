@@ -23,6 +23,8 @@ export { Select } from "./components/logs/Select";
 export { Stage as GalleryStage } from "./components/gallery/GalleryPane";
 export { ApprovalDialog, ModuleApprovalDialog } from "./components/floats/Dialogs";
 export { FolderBrowser } from "./components/floats/FolderBrowser";
+export { AddWorkspacePop } from "./components/floats/AddWorkspace";
+export { OpenProject } from "./components/floats/OpenProject";
 export { UpdateRow } from "./components/floats/UpdateRow";
 // The transcript, for its specimens (`transcriptSpecimens.tsx`).
 export { Transcript } from "./components/panel/SessionTranscript";

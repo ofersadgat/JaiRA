@@ -33,7 +33,7 @@ export { createMcpBridgeHost, type McpBridgeHost, type McpBridgeHostOptions, typ
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
-import { isWslEnv, type ExecEnv } from "./paths";
+import { isWslEnv, onMachine, type ExecEnv } from "./paths";
 import { primaryNativeOf, TOOL_SPEC_BY_NAME, type AgentToolDeclaration } from "@jaira/shared";
 import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction, permissionSetViewOf } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
@@ -160,7 +160,10 @@ export function spawnWithKey(spawn: SpawnProcess, key: AgentKey | undefined): Sp
   };
 }
 
-export function agentSpawn(options: { execEnv?: ExecEnv; observer?: ExecObserver } = {}): SpawnProcess {
+export function agentSpawn(given: { execEnv?: ExecEnv; observer?: ExecObserver } = {}): SpawnProcess {
+  // An agent runs where the machine's programs do: a workspace's container (decision 0027) holds the
+  // commands JaiRA runs, not the agent — which reaches them through JaiRA's shell tool.
+  const options = onMachine(given);
   return (argv, opts) => {
     const [agentCommand, ...agentArgs] = argv;
     const { file: command, argv: args, cwd, env: needs } = resolveInvocation(agentCommand!, agentArgs, {

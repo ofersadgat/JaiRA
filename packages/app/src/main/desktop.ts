@@ -425,6 +425,15 @@ const updates = (() => {
 /** The quit attempt being asked about began as the window's close (`createWindow`). */
 let closedByWindow = false;
 
+/**
+ * Whether closing the window quits the app. It does everywhere but macOS, where an app outlives its
+ * window in the Dock — except a development build, which quits there too (the person, 2026-11-18): a
+ * dev app whose window was closed stayed running on the code it was built from, and went on reading
+ * the files a later build wrote over it (`dist/builtin/settings.json`), refusing settings its old
+ * parser did not know.
+ */
+const CLOSING_QUITS = process.platform !== "darwin" || !app.isPackaged;
+
 /** Tell the window alone — not the engine's pipe, whose phones and windows are not quitting. */
 function tellWindow(message: PushMessage): void {
   try {
@@ -717,6 +726,13 @@ async function dispatch(channel: IpcChannel, request: unknown): Promise<unknown>
     if (link === undefined) throw new Error("the engine is not reachable yet — JaiRA is finding or starting it");
     return await link.invoke(channel, request);
   } catch (e) {
+    // Quitting (`before-quit`): the engine drains and closes its databases while the window still
+    // stands and still asks, since closing them moves what it watches — and what it asks is refused
+    // ("project '~/.jaira' is not open", "no project is open"), each printed by Electron and logged
+    // as a failure, about an app that is going. Every request is still TRIED, so a layout or a draft
+    // kept in the drain's first moments lands; one that fails is held rather than rejected. Once
+    // `closing` is set the quit always ends the process, so nothing is left waiting on it.
+    if (closing) return await new Promise<never>(() => undefined);
     // RECORDED, then RETHROWN. The renderer's contract is unchanged — it still gets the rejection
     // and still shows the message — but the failure is no longer invisible to everyone else. Every
     // handler failure in the app becomes one line naming the channel, for six lines here.
@@ -888,12 +904,12 @@ async function createWindow(): Promise<BrowserWindow> {
     rendererAlive = true;
   });
   /**
-   * Closing the window is quitting, everywhere but macOS (`window-all-closed`), so it is asked about
-   * the way a quit is (`quitGuard`) — and asked while the window still stands to draw the question.
-   * Held, and `app.quit()` is what goes on once the guard lets it; a quit under way passes.
+   * Closing the window is quitting wherever {@link CLOSING_QUITS} says so (`window-all-closed`), so it
+   * is asked about the way a quit is (`quitGuard`) — and asked while the window still stands to draw
+   * the question. Held, and `app.quit()` is what goes on once the guard lets it; a quit under way passes.
    */
   win.on("close", (event) => {
-    if (process.platform === "darwin" || closing || quitGuard.allows()) return;
+    if (!CLOSING_QUITS || closing || quitGuard.allows()) return;
     event.preventDefault();
     closedByWindow = true;
     void quitGuard.request();
@@ -1433,7 +1449,7 @@ void app.whenReady().then(async () => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  if (CLOSING_QUITS) app.quit();
 });
 
 /**

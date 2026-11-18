@@ -38,6 +38,7 @@ import { loadWorkflowBundle } from "./permissionSets";
 import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 import { disabledAmong } from "./disabled";
+import { workflowLayerDirs } from "./fileLayers";
 
 // The view models live in `@jaira/shared` so the renderer can name them without
 // reaching into this Node-only package.
@@ -188,17 +189,17 @@ function withBuiltIn(
   return own.some((entry) => entry.dir === dir) ? [...own] : [...own, { dir, layer: "system" }];
 }
 
-/** The three layers a project searches, and the project layer as the one it writes. */
+/** The layers a project searches — the settings' six, most specific first — and the project layer as the one it writes. */
 export function projectSource(project: Project): LayerSource {
-  // The base root is browsed too, or the states a project inherits would be invisible in exactly
-  // the surface meant to show what it can run — and a lint error in a shared workflow would only
-  // ever surface as a load failure in whichever project first used it.
+  // Every layer is browsed, or the states a project inherits would be invisible in exactly the surface
+  // meant to show what it can run — and a lint error in a shared workflow would only ever surface as a
+  // load failure in whichever project first used it. Most specific first (decision 0023, amended
+  // 2026-11-18): the person's and this machine's copies stand in front of the project's.
   return {
     layers: withBuiltIn(
-      [
-        { dir: project.paths.workflowsDir, layer: "project" },
-        { dir: project.paths.base.workflowsDir, layer: "base" },
-      ],
+      workflowLayerDirs(project.paths)
+        .filter((one) => one.layer !== "system")
+        .map((one) => ({ dir: one.dir, layer: one.layer })),
       project.paths,
     ),
     layer: "project",
@@ -225,8 +226,14 @@ export function baseSource(baseDir: string, project?: Project): LayerSource {
   // anything at all about what has happened in it — which tasks are here, which are pinned to a
   // stale snapshot. Without it every shared state reads as one nothing has ever run, and the Files
   // view says so, wrongly.
+  // Above Shared, the person's and this machine's own (decision 0023, amended 2026-11-18).
   return {
-    layers: withBuiltIn([{ dir: paths.workflowsDir, layer: "base" }], paths),
+    layers: withBuiltIn(
+      workflowLayerDirs(paths)
+        .filter((one) => one.layer !== "system")
+        .map((one) => ({ dir: one.dir, layer: one.layer })),
+      paths,
+    ),
     layer: "base",
     paths,
     tasks: project === undefined ? EMPTY_TASKS : tasksOf(project),
@@ -522,16 +529,17 @@ function lintLayers(
       const file = scripts.get(key) ?? key;
       const label = labelOf(raw);
       // First layer wins, exactly as reference resolution does — the later copy is kept in the list
-      // and flagged, because "your base workflow is being overridden here" is worth seeing.
-      const shadowed = byStateId.has(stateId);
-      if (!shadowed) byStateId.set(stateId, { file, raw, layer, root: dir });
+      // and flagged with the layer whose copy is read, because "your base workflow is being overridden
+      // here" — and by whom — is worth seeing.
+      const winner = byStateId.get(stateId);
+      if (winner === undefined) byStateId.set(stateId, { file, raw, layer, root: dir });
       fileEntries.push({
         stateId,
         file,
         ...(label !== undefined ? { label } : {}),
         layer,
         root: dir,
-        ...(shadowed ? { shadowed: true } : {}),
+        ...(winner !== undefined ? { shadowed: true, shadowedBy: winner.layer } : {}),
       });
     }
   }

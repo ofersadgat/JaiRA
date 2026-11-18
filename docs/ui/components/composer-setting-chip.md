@@ -2,7 +2,7 @@
 id: ui/components/composer-setting-chip
 type: ui-component
 status: shipped
-updated: 2026-11-02
+updated: 2026-11-18
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists]
 serves: [product/chat-with-agents, product/steer-agents-mid-task, product/risky-actions-wait-for-approval, product/agents-act-only-where-allowed, product/bring-your-own-models-and-agents]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
@@ -116,7 +116,7 @@ What the chips and the stack say is the conversation's: kept on it as they chang
 | The browser | `what ships` · `~/.jaira` · `.jaira` · `{n} lines` · `in the stack` · `pick a permission set` · `Pick a set on the left to see what it writes.` · `open in Settings` · `Cancel` · `Use as this layer` · `Lay it on top` |
 | `runtime` | `runtime` `this run` `clear` · `answers you gave in this task — emptied when a run opens` · `No answers yet — what you allow or refuse for this run is kept here.` · `in {place}` · `anywhere` |
 | `⋯ {n}` | `Folded — oldest first` · `{scope} · pinned · {n} lines` · `Press one to adjust it, as its own segment would.` |
-| Tools switch | `This conversation` · `Everything` · `save this stack as a set` · `saved as {bucket}/{name}` · form `Keep this stack — its layers, and this conversation's lines — as a permission set in {bucket}` · `name` · `where` `in this project` `for all projects` · `Save` |
+| Tools switch | `This conversation` · `Everything` · `save this stack as a set` · `saved as {bucket}/{name}` · form `Keep this stack — its layers, and this conversation's lines — as a permission set in {bucket}` · `name` · `where` `in this project` `for all projects` `for you in this project` `for just you` `in this project on this machine` `on this machine` (with no project open: `for all projects` `for just you` `on this machine`; it starts on the first) · `Save` |
 | Everything sentence | `What the whole stack comes to, each line with the layer that decided it. Change a line under This conversation, or in the layer that says it.` |
 | Sections | `File permissions` reading, searching and changing files in the workspace · `Execution` running commands on this machine · `Web` reaching the network · `Tasks & workflows` starting, moving and answering tasks · `MCP` tools served by connected MCP servers · `Other` anything not listed above — an agent's own tools with no equal here included · `nothing here` |
 | Execution | `shell` the shell — and the mode for any command not named below · `{program}` over `{n} subcommands named; any other {program} asks` `is allowed` `is refused` `goes to the approver` when open, and its subcommands joined by ` · ` when shut · `script` running a file — ./x.sh, npm run, python x.py, make · `add a {program} subcommand` · `add a command` · `Cancel` · `Add` |

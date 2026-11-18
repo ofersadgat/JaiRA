@@ -21,7 +21,7 @@ import {
   subjectKindOf,
   type PermissionSetMode,
   type PermissionSetsView,
-  type WorkflowLayer,
+  type SetLayer,
 } from "@jaira/shared/browser";
 import type { Writer } from "./configWriter";
 import { modeMeta } from "./permissionSetWords";
@@ -49,7 +49,7 @@ export const WORKFLOW_FUNCTION_WHAT: Record<string, string> = {
 };
 
 /** The permission sets this layer can see, in rail order. */
-export function columnsOf(data: PermissionSetsView | null, layer: WorkflowLayer): SetColumn[] {
+export function columnsOf(data: PermissionSetsView | null, layer: SetLayer): SetColumn[] {
   if (data === null) return [];
   return (
     permissionSetsAt(data.records, layer)

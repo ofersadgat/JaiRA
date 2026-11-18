@@ -480,6 +480,65 @@ describe("configuration with a project", () => {
   });
 });
 
+describe("a machine's own layers, and the person's for one project (2026-11-17)", () => {
+  beforeEach(async () => {
+    await service.open(dir);
+  });
+
+  it("keeps this machine's own in machine-settings.json, over the project and under you", () => {
+    service.writeConfig({ layer: "project", config: { artifacts: { dir: "project", inlineMaxBytes: 10 } } });
+    const view = service.writeConfig({ layer: "machine", config: { artifacts: { dir: "machine" }, memo: { enabled: true } } });
+    expect(view.machineFile).toBe(join(baseDir, "machine-settings.json"));
+    expect(JSON.parse(readFileSync(join(baseDir, "machine-settings.json"), "utf8"))).toEqual({ artifacts: { dir: "machine" }, memo: { enabled: true } });
+    expect(view.effective).toMatchObject({ artifacts: { dir: "machine", inlineMaxBytes: 10 }, memo: { enabled: true } });
+    service.writeConfig({ layer: "you", config: { artifacts: { dir: "mine" } } });
+    expect(service.readConfig().effective).toMatchObject({ artifacts: { dir: "mine" } });
+  });
+
+  it("keeps the project on this machine in .jaira/settings.local.json, which git ignores, over this machine's", () => {
+    service.writeConfig({ layer: "machine", config: { artifacts: { dir: "machine" } } });
+    const view = service.writeConfig({ layer: "projectMachine", project: dir, config: { artifacts: { dir: "here" } } });
+    expect(view.projectMachine).toEqual({ artifacts: { dir: "here" } });
+    expect(view.projectMachineFile).toBe(join(dir, ".jaira", "settings.local.json"));
+    expect(view.effective).toMatchObject({ artifacts: { dir: "here" } });
+    expect(readFileSync(join(dir, ".jaira", ".gitignore"), "utf8").split("\n")).toContain("settings.local.json");
+    // A run reads it too: the open project's own configuration was laid again.
+    service.writeConfig({ layer: "projectMachine", project: dir, config: { agents: { claudeCli: { enabled: false } } } });
+    expect(service.listExecutors().find((e) => e.name === "claude-cli")?.enabled).toBe(false);
+  });
+
+  it("keeps the person's settings for one project in the shared root, read after every other layer", () => {
+    service.writeConfig({ layer: "you", config: { artifacts: { dir: "mine" } } });
+    const view = service.writeConfig({ layer: "projectYou", project: dir, config: { artifacts: { dir: "mine here" } } });
+    expect(view.projectYouFile?.startsWith(join(baseDir, "projects"))).toBe(true);
+    expect(view.projectYouFile?.endsWith("personal-settings.json")).toBe(true);
+    expect(existsSync(view.projectYouFile!)).toBe(true);
+    expect(view.effective).toMatchObject({ artifacts: { dir: "mine here" } });
+  });
+
+  it("refuses a project's layers with no project named, and reads none for the no-project marker", () => {
+    expect(() => service.writeConfig({ layer: "projectMachine", project: "shared", config: {} })).toThrow(/no project was named/);
+    service.writeConfig({ layer: "projectMachine", project: dir, config: { artifacts: { dir: "here" } } });
+    const none = service.readConfig("shared");
+    expect(none.project).toBeNull();
+    expect(none.projectMachine).toBeNull();
+    expect(none.projectYou).toBeNull();
+    expect(none.projectFile).toBe("");
+  });
+
+  it("checks a machine's write with every open project's own layers laid in", () => {
+    service.writeConfig({ layer: "projectMachine", project: dir, config: { executors: { default: { prompt: { kind: "agent", agent: "claude-cli" } } } } });
+    expect(() => service.writeConfig({ layer: "machine", config: { executors: { default: { prompt: { routes: { local: {} } } } } } })).toThrow(/prompt.routes is not a setting/);
+    expect(existsSync(join(baseDir, "machine-settings.json"))).toBe(false);
+  });
+
+  it("reads the update track and the engine's hosting from this machine's layer, and Just you's still", () => {
+    service.writeConfig({ layer: "you", config: { engine: { keepServerRunning: true } } });
+    service.writeConfig({ layer: "machine", config: { updates: { channel: "nightly" } } });
+    expect(service.updateSettings()).toEqual({ channel: "nightly" });
+  });
+});
+
 describe("executors", () => {
   beforeEach(async () => {
     await service.open(dir);

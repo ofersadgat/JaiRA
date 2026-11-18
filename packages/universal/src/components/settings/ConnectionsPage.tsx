@@ -30,13 +30,14 @@ import { SettingsSection } from "./SettingsPage";
 export function ConnectionsPage(): JSX.Element {
   const { state, actions } = useShell();
   const { forgeOAuth } = useSettingsShell();
-  const mcp = useMcpData(true, state.config);
-  const local = useLocalModels(true, state.availability.checkedAt, state.config);
+  const mcp = useMcpData(true, state.settingsConfig);
+  const local = useLocalModels(true, state.availability.checkedAt, state.settingsConfig);
   const layer = state.configLayer;
-  const editable = layer !== "project" || state.at !== null;
+  // Settings' path reads its own layers, which exist once they are read.
+  const editable = state.settingsConfig !== null;
   const groups = providerGroups(state.executors);
   const rows: ProvidersPaneProps = {
-    config: state.config,
+    config: state.settingsConfig,
     executors: state.executors,
     routeProbes: state.modelProbes,
     executorProbes: state.probes,
@@ -59,6 +60,8 @@ export function ConnectionsPage(): JSX.Element {
     onCancelInstall: (name) => void actions.cancelInstall(name),
     onHideInstallLog: (name) => actions.hideInstallLog({ kind: "agent", name }),
     onUseCommand: (name, path) => void actions.useAgentCommand(name, path),
+    onRecheck: () => void actions.recheckAvailability(),
+    rechecking: state.rechecking,
     localServers: local.localServers,
     // The ports now, and the local route's own check — which is what turns its row from "not
     // reachable" to ready, and refreshes the catalog's local models.
@@ -100,7 +103,7 @@ export function ConnectionsPage(): JSX.Element {
         // The card is McpServerRows' own, with the shelf of servers other tools run under it.
         plain
       >
-        <McpServerRows config={state.config} layer={layer} busy={state.busy} editable={editable} secrets={state.secrets} mcp={mcp} onSave={actions.saveConfig} />
+        <McpServerRows config={state.settingsConfig} layer={layer} busy={state.busy} editable={editable} secrets={state.secrets} mcp={mcp} onSave={actions.saveConfig} />
       </SettingsSection>
       <SettingsSection
         id="git"
@@ -127,7 +130,7 @@ export function ConnectionsPage(): JSX.Element {
         plain
       >
         <ForgeRows
-          config={state.config}
+          config={state.settingsConfig}
           layer={layer}
           busy={state.busy}
           editable={editable}

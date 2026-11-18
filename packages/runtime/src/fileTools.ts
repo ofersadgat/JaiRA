@@ -39,7 +39,6 @@ import {
   type DestinationVars,
 } from "./artifactPath";
 import { callAgentOf } from "./callAgent";
-import { isDeniedPath } from "./policy";
 import { createShowArtifactTool } from "./showArtifact";
 
 export const WRITE_FILE = "write_file";
@@ -160,15 +159,15 @@ function logicalKey(path: string, root?: string): string {
 const rootOf = (options: FileToolOptions, ctx?: ExecServices): string => ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree;
 
 /**
- * Reject a path before it is resolved.
+ * Reject a path before it is resolved: one that names nothing.
  *
- * Deliberately checked on the LOGICAL path: that is what the author wrote policy
- * against and what an approval dialog would show. Checking only the physical path
- * would let a destination template quietly launder a denied location.
+ * Where a call may read or write is not this tool's to say: it is the permission set's, at its places
+ * (decision 0023 §3.2), and the gate said so before the tool ran — judged on the path as the call wrote
+ * it, which is what an approval dialog shows, so a destination template cannot launder a refused place.
+ * `.jaira/` is no exception: the sets JaiRA ships refuse writing there with lines of their own.
  */
 function refusePath(logical: string): string | undefined {
   if (logical.trim().length === 0) return "no path given";
-  if (isDeniedPath(logical)) return `'${logical}' is inside .jaira/, which agents may not write`;
   return undefined;
 }
 

@@ -1,14 +1,14 @@
 import { useContext, useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { ProbeResult } from "@jaira/shared/browser";
-import { agentActionOf, agentChipOf, agentLineOf, agentPlaceOf, installPanelOf, providerSayState, settingsGistOf, updateOf, useProviderRow, type AgentAction } from "@jaira/ui/connectionsModel";
+import { agentActionOf, agentChecksAgain, agentChipOf, agentLineOf, agentPlaceOf, installPanelOf, providerSayState, settingsGistOf, updateOf, useProviderRow, type AgentAction } from "@jaira/ui/connectionsModel";
 import type { ProviderSpec } from "@jaira/ui/providerSpecs";
 import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { Hint, Stack } from "../bits";
 import { Switch } from "../controls";
 import { SettingsLayerContext } from "../layers";
 import { SettingsGroup } from "../SettingsPage";
-import { ActionSlot, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
+import { ActionSlot, CheckAgain, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { InstallLogBox } from "./InstallLog";
 import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
@@ -23,9 +23,11 @@ import { AnotherTile, InstallTile, Shelf, ShelfCard } from "./Shelf";
  *   the card             the section's card (`SettingsGroup`) of `ConnRow`s; not drawn with no row
  *   a closed row         its head (`RowHead`), its line (`RowLine`), and in the boxes' place the one
  *                        button that would make it work (`ActionSlot`) or the chip of who it runs as
- *                        (`RunsAs`); then the switch and the chevron
+ *                        (`RunsAs`) — signed out or not working, a ghost Check again before it
+ *                        (`CheckAgain`, `agentChecksAgain`); then the switch and the chevron
  *   an opened row        the chip and the button go; the head's sentence whole, with its fix (none when
- *                        an install panel is the fix) and the version line with Update; then across it,
+ *                        an install panel is the fix), the version line with Update, and Check again
+ *                        under them while it is signed out or not working; then across it,
  *                        8 apart: the install panel; "Runs as" and the login and key boxes
  *                        (`LabelledBoxes`); the key's entry; the folded Settings holding the provider's
  *                        form (`SettingsFold`)
@@ -72,7 +74,7 @@ type RowProps = ProvidersPaneProps & { spec: ProviderSpec; probe: ProbeResult | 
 
 /** One agent on this machine: a line, one button or chip, the switch and the chevron — and, opened, the rest. */
 function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
-  const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, installing, installLogs, onInstall, onCancelInstall, onHideInstallLog, onUseCommand } = props;
+  const { first, spec, probe, busy, layer, secrets, config, onRemove, onSaveCredential, signingIn, onSignIn, onCancelSignIn, onSignOut, installing, installLogs, onInstall, onCancelInstall, onHideInstallLog, onUseCommand, onRecheck, rechecking } = props;
   const running = installing.has(spec.id);
   const log = installLogs[spec.id];
   // Opened by an install — one pressed on the shelf's tile mounts it so — for its output to be seen.
@@ -126,16 +128,17 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
 
   // Closed, the one thing beside the switch: what would make it work, or who it runs as. Opened, the
   // row's body has each of them whole.
+  const waiting = action === undefined ? undefined : action.kind === "install" && running ? { words: "installing…", onCancel: () => onCancelInstall(spec.id) } : action.kind === "sign-in" && signing ? { words: "finish in your browser", onCancel: () => onCancelSignIn(spec.id) } : undefined;
   const slot = open ? null : action !== undefined ? (
-    <ActionSlot
-      action={action}
-      waiting={action.kind === "install" && running ? { words: "installing…", onCancel: () => onCancelInstall(spec.id) } : action.kind === "sign-in" && signing ? { words: "finish in your browser", onCancel: () => onCancelSignIn(spec.id) } : undefined}
-      disabled={action.kind === "install" ? (action.path !== undefined ? locked : busy || running) : action.kind === "sign-in" ? busy : locked}
-      onPress={() => act(action)}
-    />
+    <ActionSlot key="action" action={action} waiting={waiting} disabled={action.kind === "install" ? (action.path !== undefined ? locked : busy || running) : action.kind === "sign-in" ? busy : locked} onPress={() => act(action)} />
   ) : chip !== undefined ? (
-    <RunsAs chip={chip} />
+    <RunsAs key="chip" chip={chip} />
   ) : null;
+  // Signed out or not working: Check again, before the fix — and not while the fix is waiting on something.
+  const checkAgain =
+    onRecheck !== undefined && agentChecksAgain(probe, state) && waiting === undefined && !running && !signing ? (
+      <CheckAgain key="check" checking={rechecking === true} disabled={busy} onPress={onRecheck} />
+    ) : null;
 
   const wide = open
     ? [
@@ -189,6 +192,12 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
                 // The output's head says it is updating, with Cancel: here, Update waits.
                 <Version after={update !== undefined ? <UpdateAfter via={update.via} title={update.title} running={false} disabled={busy || running} onUpdate={() => onInstall(spec.id)} onCancel={() => onCancelInstall(spec.id)} /> : undefined}>{probe.version}</Version>
               ) : null}
+              {/* Opened, the fix is in the boxes across the row (a login's Sign in again, the + box's Sign in); Check again stays under the sentence. */}
+              {checkAgain !== null ? (
+                <View flexDirection="row" marginLeft={30} marginTop={4}>
+                  {checkAgain}
+                </View>
+              ) : null}
             </>
           ) : (
             <RowLine state={state} word={line.word} rest={line.rest} />
@@ -197,7 +206,7 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
       }
       // An empty slot where there is nothing: ConnRow pulls the controls 14 in without one, and an agent
       // row's switch keeps one column down the card, open or closed.
-      boxes={[slot ?? <View key="none" />]}
+      boxes={open ? [<View key="none" />] : checkAgain !== null ? [checkAgain, slot ?? <View key="none" />] : [slot ?? <View key="none" />]}
       controls={
         <>
           <Switch

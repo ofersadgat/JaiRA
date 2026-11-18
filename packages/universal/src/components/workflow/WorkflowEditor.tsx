@@ -1,5 +1,5 @@
-import { Children, type JSX, type ReactNode } from "react";
-import { ScrollView, Text as RNText } from "react-native";
+import { Children, useRef, useState, type JSX, type ReactNode } from "react";
+import { ScrollView, Text as RNText, View as RNView } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import {
   WORKFLOW_JSON,
@@ -45,6 +45,7 @@ import {
 } from "@jaira/ui/stateEditorModel";
 import { emptyBindingRow, emptyChildRow, type BindingRow, type ChildRow, type TransitionRow } from "@jaira/ui/stateForm";
 import { Island } from "../../islands";
+import { ContextMenu, type MenuAt } from "../Menu";
 import { PLAIN_SCROLLER, Press, Txt, edge, font, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { CodeArea, IslandBand, useEditorAppearance } from "../files/CodeEdit";
@@ -373,19 +374,51 @@ export function Chip({ tone = "plain", title, children }: { tone?: "plain" | "wa
   );
 }
 
-/** Which layer supplied the file — a chip — and the buttons that act on that. */
+/**
+ * Which layer supplied the file — a chip — and the buttons that act on that: its links, then — for what
+ * ships — `Elsewhere…`, a menu titled `Edit a copy` of the settings' four newer layers (decision 0023,
+ * amended 2026-11-18), disabled where it cannot be had.
+ */
 function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel | null; busy: boolean; comparing: boolean; onAction: (id: LayerBarAction["id"]) => void }): JSX.Element | null {
+  const box = useRef<RNView | null>(null);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
   if (model === null) return null;
+  const more = model.actions.filter((action) => action.more === true);
+  const open = (): void =>
+    box.current?.measureInWindow((x, y, _w, h) =>
+      setMenu({
+        x,
+        y: y + h + 4,
+        title: "Edit a copy",
+        // Under that title, each says only where, in the words the Files view's roots use: `for just
+        // you`, `on this machine`. No folder note beside it: the menu's width is the label's.
+        items: more.map((action) => ({
+          label: action.label.replace(/^Edit a copy /, ""),
+          ...(busy || action.disabled === true ? { disabled: true } : {}),
+          onSelect: () => onAction(action.id),
+        })),
+      }),
+    );
   return (
     <>
       <Chip tone={model.chip.tone} title={model.chip.title}>
         {model.chip.text}
       </Chip>
-      {model.actions.map((action) => (
-        <LinkButton key={action.id} title={action.title} disabled={busy || action.disabled === true} onPress={() => onAction(action.id)}>
-          {layerActionLabel(action, comparing)}
-        </LinkButton>
-      ))}
+      {model.actions
+        .filter((action) => action.more !== true)
+        .map((action) => (
+          <LinkButton key={action.id} title={action.title} disabled={busy || action.disabled === true} onPress={() => onAction(action.id)}>
+            {layerActionLabel(action, comparing)}
+          </LinkButton>
+        ))}
+      {more.length > 0 ? (
+        <RNView ref={box} collapsable={false}>
+          <LinkButton title="Edit a copy in one of your other layers — for you in this project, for just you, in this project on this machine, on this machine" disabled={busy} onPress={open}>
+            Elsewhere…
+          </LinkButton>
+        </RNView>
+      ) : null}
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </>
   );
 }

@@ -388,6 +388,46 @@ describe("the rows, answered one by one", () => {
     expect(panel.line).toBe('"one build": { "packages/client": … }');
   });
 
+  it("offers each of the settings' six layers' files, and still starts on the project's (decision 0023, amended 2026-11-18)", () => {
+    const six: PendingApproval = {
+      ...PENDING,
+      defaultLayer: "ask-first",
+      layers: [
+        LAYERS[0]!,
+        {
+          id: "ask-first",
+          scope: "built in",
+          everyone: true,
+          targets: [
+            { layer: "projectYou", file: "~/.jaira/projects/atlas-1a2b/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+            { layer: "you", file: "~/.jaira/personal/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+            { layer: "projectMachine", file: ".jaira/local/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+            { layer: "machine", file: "~/.jaira/machine/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+            { layer: "project", file: ".jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+            { layer: "base", file: "~/.jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+          ],
+        },
+      ],
+    };
+    const panel = rowPanel(six, 2, { reach: "add" });
+    expect(panel.layers.map((o) => o.name)).toEqual([
+      "ask-first, for you in this project",
+      "ask-first, for just you",
+      "ask-first, in this project on this machine",
+      "ask-first, on this machine",
+      "ask-first, in this project",
+      "ask-first, for all projects",
+    ]);
+    expect(panel.chosenLayer!.addTo).toBe("project");
+    // Chosen, Just you's is written and said so.
+    const mine = rowPanel(six, 2, { reach: "add", layer: "ask-first|you" });
+    expect(rowAnswerOf(six, 2, { reach: "add", layer: "ask-first|you" }, "allow")).toMatchObject({ reach: "add", layer: "ask-first", addTo: "you" });
+    expect(mine.reach[2]!.hint[0]).toBe("creates ~/.jaira/personal/permission-sets/ask-first.json with ");
+    // With no project's file to start on, Shared's.
+    const shared: PendingApproval = { ...six, layers: [{ ...six.layers![1]!, targets: six.layers![1]!.targets.filter((t) => t.layer !== "project") }] };
+    expect(rowPanel(shared, 2, { reach: "add" }).chosenLayer!.addTo).toBe("base");
+  });
+
   it("shows the line at the place and in the layer chosen, and says when the layer is a shipped preset", () => {
     const panel = rowPanel(PENDING, 2, { place: "packages", reach: "add" });
     expect(panel.chosenReach).toBe("add");

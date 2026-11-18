@@ -57,7 +57,7 @@ import {
   newPermissionSetProblem,
   permissionSetLayersOf,
   permissionSetRailRows,
-  PERSONAL,
+  NO_SETS_HERE,
   type PermissionSetRailRow,
 } from "../src/renderer/permissionSetsHost";
 
@@ -179,13 +179,18 @@ describe("the rail", () => {
 });
 
 describe("which files a layer of the page reads, and where its changes go", () => {
-  it("reads and writes a layer that holds files; reads the nearest one from any other, and writes nowhere", () => {
+  it("reads and writes every layer the engine keeps sets in — the settings' six", () => {
+    const all = ["projectYou", "you", "projectMachine", "machine", "project", "base", "system"] as const;
+    for (const layer of ["base", "project", "machine", "projectMachine", "you", "projectYou"] as const) expect(permissionSetLayersOf(layer, all)).toEqual({ reads: layer, writesTo: layer });
+    // The shared root has no project's three.
+    expect(permissionSetLayersOf("machine", ["you", "machine", "base", "system"])).toEqual({ reads: "machine", writesTo: "machine" });
+  });
+
+  it("on an engine that keeps them only in a project and Shared, reads the nearest of those and writes nowhere until asked", () => {
     expect(permissionSetLayersOf("project", ["project", "base", "system"])).toEqual({ reads: "project", writesTo: "project" });
     expect(permissionSetLayersOf("base", ["project", "base", "system"])).toEqual({ reads: "base", writesTo: "base" });
-    // The personal layer — any layer that is not one of the two — is spelled here without naming it,
-    // so this holds on a branch whose ConfigLayer does not have it yet.
     expect(permissionSetLayersOf("you", ["project", "base", "system"])).toEqual({ reads: "project", writesTo: undefined });
-    expect(permissionSetLayersOf("you", ["base", "system"])).toEqual({ reads: "base", writesTo: undefined });
+    expect(permissionSetLayersOf("machine", ["base", "system"])).toEqual({ reads: "base", writesTo: undefined });
   });
 });
 
@@ -393,9 +398,9 @@ describe("what the pane says of the open permission set, and the field of the on
     expect(LOWER_NAME[copiedFrom(readOnly)!]).toBe("what ships");
   });
 
-  it("names the personal layer, and the two a change made there can be copied to", () => {
-    expect(PERSONAL).toBe("Just you");
-    expect(INTO_NAME).toEqual({ base: "Shared", project: "this project" });
+  it("names each layer a set can be copied to, and says why an older engine asks where", () => {
+    expect(INTO_NAME).toEqual({ base: "Shared", project: "this project", machine: "this machine", projectMachine: "this project on this machine", you: "Just you", projectYou: "you in this project" });
+    expect(NO_SETS_HERE).toBe("That machine's JaiRA is older and keeps permission sets only in a project and in Shared");
   });
 
   it("keeps why a file it cannot read is not a permission set", () => {

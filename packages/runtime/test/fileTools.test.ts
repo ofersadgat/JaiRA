@@ -201,21 +201,31 @@ describe("a read outside the workspace (decision 0023 §3.2: where is the permis
     }
   });
 
-  it("never reads a .jaira folder, the project's or another's", async () => {
+  it("reads a .jaira folder where it is, as any file — whether it may is the permission set's", async () => {
+    // The sets JaiRA ships let `.jaira/` be read and refuse only the machine key, at the gate, before
+    // the tool runs (`permissionPresets.test.ts`); the tool itself knows nothing of `.jaira/`.
     const { read } = tools("$DEFAULT");
-    expect(await call(read, { path: join(tmpdir(), "home", ".jaira", "system", "machine.key") })).toMatchObject({ error: expect.stringContaining(".jaira") });
+    const home = mkdtempSync(join(tmpdir(), "jaira-home-"));
+    try {
+      mkdirSync(join(home, ".jaira", "system"), { recursive: true });
+      const file = join(home, ".jaira", "settings.json");
+      writeFileSync(file, "{}", "utf8");
+      expect(await call(read, { path: file })).toMatchObject({ path: file, content: "{}" });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
 describe("refusals", () => {
-  it("refuses .jaira/ on the LOGICAL path, before any destination is applied", async () => {
-    // Checked on what the agent asked for, because that is what the author wrote
-    // policy against and what an approval dialog would show.
-    const { write, read } = tools("$CENTRAL");
-    expect(await call(write, { path: ".jaira/settings.json", content: "{}" })).toMatchObject({
-      error: expect.stringContaining("may not write"),
-    });
-    expect(await call(read, { path: ".jaira/jaira.db" })).toMatchObject({ error: expect.stringContaining(".jaira") });
+  it("leaves .jaira/ to the permission set: the tool writes and reads it as any path of the workspace", async () => {
+    // Where an agent may write is the set's to say, at its places, judged on the path the call wrote
+    // before the tool runs — the sets JaiRA ships refuse `$PROJECT/.jaira` (`permissionPresets.test.ts`,
+    // `policy.test.ts`). What the tool still refuses on its own is a path that names nothing.
+    const { write, read } = tools("$DEFAULT");
+    expect(await call(write, { path: ".jaira/notes.md", content: "kept" })).toMatchObject({ path: ".jaira/notes.md" });
+    expect(await call(read, { path: ".jaira/notes.md" })).toMatchObject({ content: "kept" });
+    expect(await call(write, { path: "", content: "x" })).toMatchObject({ error: "no path given" });
   });
 
   it("refuses a path that escapes the destination root", async () => {

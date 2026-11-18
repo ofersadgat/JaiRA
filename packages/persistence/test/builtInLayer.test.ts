@@ -28,6 +28,7 @@ import {
   initProject,
   isBuiltInModule,
   loadSnapshot,
+  nearerWorkflowDirs,
   openProject,
   openSharedProject,
   prepareUserModules,
@@ -196,7 +197,8 @@ describe("three-layer resolution", () => {
     const p = open();
     // `workflows.path` REPLACES the generated list — and what ships is not the project's to drop.
     const options = workflowLoadOptions(p.paths, { path: ["$JAIRA/workflows"] });
-    expect(options.defaultRoot).toEqual([p.paths.workflowsDir, p.paths.builtIn.workflowsDir, p.paths.builtIn.functionsDir]);
+    // The settings' four newer layers lead (decision 0023, amended 2026-11-18); then the project's own.
+    expect(options.defaultRoot).toEqual([...nearerWorkflowDirs(p.paths), p.paths.workflowsDir, p.paths.builtIn.workflowsDir, p.paths.builtIn.functionsDir]);
     expect(promptOf(p, "chat/hello", ["$JAIRA/workflows"])).toBe("shipped");
   });
 
@@ -206,6 +208,7 @@ describe("three-layer resolution", () => {
     write(p.paths.base.workflowsDir, "chat/hello.json", promptState("shared"));
     const path = ["$SYSTEM/workflows", "$JAIRA/workflows", "$BASE/workflows"];
     expect(workflowLoadOptions(p.paths, { path }).defaultRoot).toEqual([
+      ...nearerWorkflowDirs(p.paths),
       p.paths.workflowsDir,
       p.paths.base.workflowsDir,
       p.paths.builtIn.workflowsDir,
@@ -252,10 +255,10 @@ describe("what enumerates layers sees three", () => {
     expect(browseBaseWorkflows(testHome()).files.map((f) => [f.stateId, f.layer])).toEqual([["chat/hello", "system"]]);
   });
 
-  it("answers three workflow roots, and finds a shipped state's slots through them", () => {
+  it("answers every layer's workflow root, what ships last, and finds a shipped state's slots through them", () => {
     write(builtIn, "workflows/chat/hello.json", { ...promptState("shipped"), inputs: { topic: { schema: { type: "string" } } } });
     const p = open();
-    expect(workflowRoots(p)).toEqual([p.paths.workflowsDir, p.paths.base.workflowsDir, p.paths.builtIn.workflowsDir]);
+    expect(workflowRoots(p)).toEqual([...nearerWorkflowDirs(p.paths), p.paths.workflowsDir, p.paths.base.workflowsDir, p.paths.builtIn.workflowsDir]);
     expect(stateSlots(workflowRoots(p), ["chat/hello"])["chat/hello"]?.inputs.map((s) => s.name)).toEqual(["topic"]);
   });
 
@@ -273,9 +276,9 @@ describe("what enumerates layers sees three", () => {
     const file = write(builtIn, "workflows/chat/hello.json", promptState("shipped"));
     const p = open();
     const roots = fileTree(p, browseWorkflows(p)).roots;
-    expect(roots.map((r) => r.layer)).toEqual(["project", "base", "system"]);
-    expect(roots[2]).toMatchObject({ label: "Built in", dir: builtIn, prefix: "", exists: true });
-    const hello = roots[2]!.nodes[0]?.children?.[0]?.children?.[0];
+    expect(roots.map((r) => r.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "base", "system"]);
+    expect(roots[6]).toMatchObject({ label: "Built in", dir: builtIn, prefix: "", exists: true });
+    const hello = roots[6]!.nodes[0]?.children?.[0]?.children?.[0];
     expect(hello).toMatchObject({ stateId: "chat/hello", layer: "system", path: "workflows/chat/hello.json" });
     expect(hello?.shadowed).toBeUndefined();
     expect(file.endsWith("hello.json")).toBe(true);
@@ -286,9 +289,9 @@ describe("what enumerates layers sees three", () => {
     write(testHome(), "workflows/chat/hello.json", promptState("mine"));
     const p = open();
     const roots = fileTree(p, browseWorkflows(p)).roots;
-    const at = (index: number): unknown => roots[index]!.nodes.find((n) => n.name === "workflows")?.children?.[0]?.children?.[0];
-    expect(at(1)).toMatchObject({ layer: "base", overridesBuiltIn: true });
-    expect(at(2)).toMatchObject({ layer: "system", shadowed: true });
+    const at = (layer: string): unknown => roots.find((r) => r.layer === layer)!.nodes.find((n) => n.name === "workflows")?.children?.[0]?.children?.[0];
+    expect(at("base")).toMatchObject({ layer: "base", overridesBuiltIn: true });
+    expect(at("system")).toMatchObject({ layer: "system", shadowed: true, shadowedBy: "base" });
   });
 });
 

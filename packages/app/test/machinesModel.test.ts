@@ -128,7 +128,7 @@ describe("Settings on every machine (decision 0026)", () => {
       { on: true, at: now - 5 * 60_000, counts, logins: [{ agent: "claude-cli", synced: true }, { agent: "codex-cli", synced: false, why: "the keychain did not let JaiRA read it" }] },
       now,
     );
-    expect(words.keep).toMatch(/^Your Shared and Just you settings, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you/);
+    expect(words.keep).toMatch(/^Your Shared and Just you settings with their permission sets and workflows, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you/);
     expect(words.keep).toMatch(/Last in step 5 minutes ago\.$/);
     expect(words.logins).toBe("Claude Code follows: signed in or out on one machine, signed in or out on all. Codex does not here: the keychain did not let JaiRA read it.");
     // Kept inside a WSL distro: said where.
@@ -136,6 +136,9 @@ describe("Settings on every machine (decision 0026)", () => {
       "Claude Code and Codex follow, kept inside Ubuntu (WSL): signed in or out on one machine, signed in or out on all.",
     );
     expect(words.stays).toMatch(/^Where commands and agents run \(WSL\), .*; MCP servers started as a command, or reached at a loopback address; .*\.$/);
+    // A machine's own layers keep their files; functions, skills and anything over the cap stay too.
+    expect(words.stays).toContain("this machine's own settings, and a project's on this machine, with their permission sets and workflows");
+    expect(words.stays).toContain("functions and skills, and a permission set, workflow or prompt file over 1 MB");
   });
 
   it("says a machine that is off keeps its own, and lists what was not taken", () => {

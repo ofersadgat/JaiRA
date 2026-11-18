@@ -27,13 +27,18 @@ import { fixHealthItem, openHealthPage, useForgeOAuth } from "@jaira/ui/settings
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { FileTreePanel, type FileTreePanelProps } from "../components/files/FileTreePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../components/Menu";
-import { Sidebar } from "../components/Sidebar";
+import { SELF_ADD, Sidebar } from "../components/Sidebar";
 import { SettingsSections } from "../components/settings/SettingsSections";
+import { SettingsCrumb } from "../components/settings/SettingsCrumb";
 import { ChatListPanel, type ChatArrange } from "../components/chat/ChatListPanel";
 import { useChatSurface } from "../components/chat/surface";
 import { anchorRectOf } from "../components/floats/anchor";
 import { HealthPop } from "../components/floats/HealthCard";
 import { FolderBrowser } from "../components/floats/FolderBrowser";
+import { AddWorkspacePop } from "../components/floats/AddWorkspace";
+import { OpenProject } from "../components/floats/OpenProject";
+import { pointRect } from "../components/floats/Float";
+import { sourceForProject } from "@jaira/ui/openProjectModel";
 import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
@@ -79,6 +84,8 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
   const [machinesView] = useMachines();
   const [browsing, setBrowsing] = useState<{ machineId: string; mode: "open" | "init" } | null>(null);
   const [healthAt, setHealthAt] = useState<{ at: FloatRect | null } | null>(null);
+  // Add's card (decision 0027): another workspace of the open project on the machine whose Add was pressed.
+  const [adding, setAdding] = useState<{ at: FloatRect; name: string; source: NonNullable<ReturnType<typeof sourceForProject>>; machine: string } | null>(null);
   const openHealthCard = (from: unknown): void => setHealthAt((was) => (was !== null ? null : { at: anchorRectOf(from, "What needs attention") }));
   // Emptied — dismissed or cleared by itself — the card has nothing to be placed against: its pills are gone.
   useEffect(() => {
@@ -263,6 +270,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
     counts: healthCounts(health),
     onSeen: openHealthCard,
     seenTitle: "What needs attention",
+    crumb: <SettingsCrumb label="Settings" />,
     panel: (
       <SettingsSections
         section={state.section}
@@ -316,6 +324,20 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
       onChooseProject={(mode) => void actions.chooseProject(mode)}
       machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
+      onOpenProject={() => actions.openProjectDialog({ mode: "open" })}
+      onAddWorkspace={(machineId, at) => {
+        // Another workspace of the open project (decision 0027): its remote, cloned — or, with none, a
+        // copy of one of its workspaces — on the machine whose Add was pressed (Add's card, where the
+        // menu stood), or on one chosen in the full form.
+        const g = groupOf(groups, state.at);
+        if (g === undefined) return;
+        const selfId = machinesView?.self.id;
+        const source = sourceForProject(g.members, g.identity !== undefined ? `https://${g.identity}.git` : undefined, selfId);
+        if (source === undefined) return;
+        const machine = machineId === SELF_ADD ? selfId : machineId;
+        if (machine !== undefined && at !== undefined) setAdding({ at: pointRect(at.x, at.y), name: g.label, source, machine });
+        else actions.openProjectDialog({ mode: "add", name: g.label, source, ...(machine !== undefined ? { machine, step: "how" as const } : { step: "where" as const }) });
+      }}
       // The Update row above Settings (`UpdateRow`). It opens About, where a failure or a download is
       // said in full — with the release notes open, from its menu (`aboutNotes`).
       // In the rail (`collapsed`) the Update row; at the panel's foot, a phone's machines.
@@ -347,6 +369,34 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
           setBrowsing(null);
           void actions.openOnMachine(machine.id, dir, browsing.mode);
         }}
+      />
+    ) : null}
+    {adding !== null ? (
+      <AddWorkspacePop
+        anchor={adding.at}
+        source={adding.source}
+        name={adding.name}
+        machine={adding.machine}
+        machines={machinesView}
+        jobs={state.workspaceJobs}
+        onCreate={actions.createWorkspace}
+        onCancelJob={actions.cancelWorkspace}
+        onFull={(step, job) => {
+          setAdding(null);
+          actions.openProjectDialog({ mode: "add", name: adding.name, source: adding.source, machine: adding.machine, step, ...(job !== undefined ? { job } : {}) });
+        }}
+        onClose={() => setAdding(null)}
+      />
+    ) : null}
+    {state.opening !== null ? (
+      <OpenProject
+        start={state.opening}
+        machines={machinesView}
+        jobs={state.workspaceJobs}
+        onClose={actions.closeOpenDialog}
+        onCreate={actions.createWorkspace}
+        onCancelJob={actions.cancelWorkspace}
+        onOpenThere={(machine, dir) => void actions.openOnMachine(machine, dir, "open")}
       />
     ) : null}
     {healthAt !== null ? (

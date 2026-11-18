@@ -49,6 +49,7 @@ import {
 import { applyEdits, modify, parse as parseJsonc, type ParseError } from "jsonc-parser";
 import { parseDocument } from "yaml";
 import { DEFAULT_MEDIA_TYPE, TYPE_NAMES } from "./slotTypes";
+import { setupSchema } from "./setup";
 import composeSchema from "./vendor/schemas/compose-spec.schema.json";
 import githubWorkflowSchema from "./vendor/schemas/github-workflow.schema.json";
 import gitlabCiSchema from "./vendor/schemas/gitlab-ci.schema.json";
@@ -576,6 +577,16 @@ export function stateSchema(kind?: "prompt" | "function"): SchemaDoc {
         properties: { max_iterations: { type: "number" }, timeout: { type: "number" } },
         description: "max_iterations (guard value) and timeout (seconds)",
       }),
+      requires: leaf({
+        type: "array",
+        items: { type: "string" },
+        description: "a root state's: the machine tags a task needs (decision 0013) — only a machine with all of them runs it",
+      }),
+      setup: {
+        type: "string",
+        description:
+          "a root state's: the target of the project's .jaira/setup.json to run on the machine before a task starts (decision 0027); absent ⇒ the file's `environment` target, when it has one",
+      },
     },
     required: [],
     additionalProperties: false,
@@ -746,6 +757,16 @@ registerSchema({
   formats: ["yaml"],
   // By PATH, not name: `ci.yml` is only a workflow because of the directory it sits in.
   files: [".github/workflows/*.yml", ".github/workflows/*.yaml"],
+});
+
+registerSchema({
+  id: "setup",
+  label: "Project setup",
+  hint: "a project's .jaira/setup.json — targets of steps run when a workspace is made (decision 0027)",
+  document: setupSchema() as SchemaDoc,
+  expected: ["version"],
+  placeholders: { version: 1 },
+  files: [".jaira/setup.json", ".jaira/setup.yaml", ".jaira/setup.yml", ".jaira/setup.local.json", ".jaira/setup.local.yaml", ".jaira/setup.local.yml"],
 });
 
 // --- what the schema can do for an editor -----------------------------------

@@ -680,6 +680,21 @@ export interface ForgeBranch {
   head: string;
 }
 
+/** A repository the signed-in account can clone, as Open lists it. */
+export interface ForgeRepository {
+  /** `owner/name` on GitHub, `group/sub/name` on GitLab — what the provider's other calls take. */
+  project: string;
+  name: string;
+  description?: string;
+  defaultBranch: string;
+  /** The HTTPS URL `git clone` takes. */
+  cloneUrl: string;
+  private: boolean;
+  /** When it last changed, as the forge says (ISO). */
+  updatedAt: string;
+  webUrl: string;
+}
+
 /**
  * One comment on a merge request, FLAT — what arrived, where it sits, and who wrote it.
  *
@@ -750,6 +765,10 @@ export interface ForgeProvider {
   mergeRequest(project: string, number: number): Promise<MergeRequestSummary>;
   /** Every branch and its head. */
   branches(project: string): Promise<ForgeBranch[]>;
+  /** The repositories the signed-in account can reach, most recently changed first (Open's project list). */
+  repositories?(query?: { search?: string; limit?: number }): Promise<ForgeRepository[]>;
+  /** One file's text at a ref, or undefined when it is not there (a setup file read before cloning). */
+  fileText?(project: string, path: string, ref?: string): Promise<string | undefined>;
   /** The comments on one merge request, flat and in order — only those written after `since`, when given. */
   comments(handle: RemoteHandle, options?: { since?: string }): Promise<ForgeNote[]>;
   /**

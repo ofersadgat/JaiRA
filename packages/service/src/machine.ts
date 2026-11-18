@@ -30,6 +30,11 @@ export interface MachineIdentity {
    * only the person's `false` turns it off.
    */
   syncSettings?: false;
+  /**
+   * The folder new workspaces go in (`MachineView.projectsFolder`) — the person's choice; absent while
+   * they have not made one, and the guess stands.
+   */
+  projectsFolder?: string;
   createdAt: number;
 }
 
@@ -105,6 +110,7 @@ export function machineIdentity(baseDir: string): MachineIdentity {
         createdAt: typeof raw.createdAt === "number" ? raw.createdAt : Date.now(),
         ...(copyOf(raw.copy) !== undefined ? { copy: copyOf(raw.copy)! } : {}),
         ...(raw.syncSettings === false ? { syncSettings: false as const } : {}),
+        ...(typeof raw.projectsFolder === "string" && raw.projectsFolder.trim() !== "" ? { projectsFolder: raw.projectsFolder } : {}),
       };
       // An identity made before the field existed: the guess is kept, so it is made once.
       if (!known) write(baseDir, identity);
@@ -118,8 +124,14 @@ export function machineIdentity(baseDir: string): MachineIdentity {
   return identity;
 }
 
-/** Rename this machine, say what it is, or change its tags. A tag is lower-case letters, digits and dashes. */
-export function updateMachineIdentity(baseDir: string, patch: { label?: string; tags?: string[]; copy?: CopyChoice; form?: MachineForm; syncSettings?: boolean }): MachineIdentity {
+/**
+ * Rename this machine, say what it is, or change its tags. A tag is lower-case letters, digits and
+ * dashes. `projectsFolder` sets where new workspaces go, and `null` takes the choice back.
+ */
+export function updateMachineIdentity(
+  baseDir: string,
+  patch: { label?: string; tags?: string[]; copy?: CopyChoice; form?: MachineForm; syncSettings?: boolean; projectsFolder?: string | null },
+): MachineIdentity {
   const current = machineIdentity(baseDir);
   const label = patch.label !== undefined ? patch.label.trim() : current.label;
   if (label === "") throw new Error("a machine needs a name");
@@ -129,6 +141,8 @@ export function updateMachineIdentity(baseDir: string, patch: { label?: string; 
   const next: MachineIdentity = { ...current, label, tags: tags.filter((t) => t !== current.os), ...(patch.copy !== undefined ? { copy: patch.copy } : {}), ...(patch.form !== undefined ? { form: patch.form } : {}) };
   if (patch.syncSettings === true) delete next.syncSettings;
   else if (patch.syncSettings === false) next.syncSettings = false;
+  if (patch.projectsFolder === null) delete next.projectsFolder;
+  else if (patch.projectsFolder !== undefined) next.projectsFolder = patch.projectsFolder;
   write(baseDir, next);
   return next;
 }

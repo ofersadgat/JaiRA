@@ -21,6 +21,7 @@ import {
   permissionSetStanding,
   rebasePermissionSetChange,
   usedByLine,
+  layerSees,
   type PermissionSetRecord,
 } from "../src/index";
 
@@ -256,5 +257,34 @@ describe("the text edits, with places, functions by name and a file's layers (de
       { subject: "read_file", theirs: "allow", ours: "** deny, src allow" },
       { subject: "web_fetch", theirs: "ask", ours: "unavailable" },
     ]);
+  });
+});
+
+describe("a set in each of the settings' layers (decision 0023, amended 2026-11-18)", () => {
+  const file = (layer: PermissionSetRecord["files"][number]["layer"], label: string) => ({ layer, file: `${label}/permission-sets/ask-first.json`, format: "json" as const, decl: { other: "ask" } });
+  const record: PermissionSetRecord = {
+    id: "ask-first",
+    bucket: "",
+    name: "ask-first",
+    files: [file("projectYou", "~/.jaira/projects/x"), file("machine", "~/.jaira/machine"), file("project", ".jaira"), file("system", "built in")],
+  };
+
+  it("reads each layer's own and what it sees under it, the most specific shadowing it", () => {
+    const at = (layer: Parameters<typeof permissionSetsAt>[1]) => permissionSetsAt([record], layer)[0]!;
+    expect(at("projectYou")).toMatchObject({ here: true, lower: { layer: "machine" } });
+    expect(at("machine")).toMatchObject({ here: true, shadowedBy: "projectYou" });
+    expect(permissionSetStanding(at("machine"))).toEqual({ here: true, label: "this machine · copied from built in", shadowed: "overridden by you in this project" });
+    // Just you holds none: it reads this machine's, under it.
+    expect(at("you")).toMatchObject({ here: false, source: { layer: "machine" } });
+    expect(permissionSetFileLabel("projectMachine", "ask-first")).toBe(".jaira/local/permission-sets/ask-first.json");
+  });
+
+  it("sees no project's copy from a layer that is no project's", () => {
+    expect(layerSees("machine", "project")).toBe(false);
+    expect(layerSees("you", "projectMachine")).toBe(false);
+    expect(layerSees("machine", "base")).toBe(true);
+    expect(layerSees("projectMachine", "machine")).toBe(true);
+    expect(layerSees("projectYou", "project")).toBe(true);
+    expect(layerSees("project", "machine")).toBe(false);
   });
 });

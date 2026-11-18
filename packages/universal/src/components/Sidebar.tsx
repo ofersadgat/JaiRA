@@ -7,6 +7,7 @@ import { crumbFit, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
+import type { MenuItem } from "@jaira/ui/crumbModel";
 import { usePhone } from "../app/phone";
 import { Pills } from "./Pills";
 import { Icon } from "./panel/Icon";
@@ -76,6 +77,10 @@ export type SidebarProps = {
   /** Paired machines a project can be opened or made on (decision 0013 §8). */
   machines?: ReadonlyArray<{ id: string; label: string; online: boolean }>;
   onBrowse?: (machineId: string, mode: "open" | "init") => void;
+  /** Open: a project from a forge or a folder on any machine, taken to any machine (decision 0027). */
+  onOpenProject?: () => void;
+  /** Add a workspace of the open project — on the machine named, or chosen in the full form. */
+  onAddWorkspace?: (machineId?: string, at?: { x: number; y: number }) => void;
   /** `--sidebar`: the panel's width while it is open (the rail is beside it). On a phone, the whole drawer's. */
   width: number;
   /**
@@ -153,6 +158,8 @@ function Column({
   update,
   machines = [],
   onBrowse,
+  onOpenProject,
+  onAddWorkspace,
   width,
   scope,
 }: SidebarProps): JSX.Element {
@@ -183,18 +190,18 @@ function Column({
       x: box !== undefined ? box.right + 4 : (touch?.pageX ?? 0),
       y: box?.top ?? touch?.pageY ?? 0,
       items: [
-        { label: "Open project…", onSelect: () => onChooseProject("open") },
+        // A forge's repository or a folder on any machine, taken to any machine: the Open dialog's places.
+        ...(onOpenProject !== undefined
+          ? [{ label: "Open project…", note: "forge or machine", onSelect: onOpenProject }, { label: "Open a folder here…", onSelect: () => onChooseProject("open") }]
+          : [{ label: "Open project…", onSelect: () => onChooseProject("open") }]),
         { label: "New project…", onSelect: () => onChooseProject("init") },
-        ...machines.flatMap((m, i) => [
-          {
-            label: `Open project on ${m.label}…`,
-            ...(i === 0 ? { separator: true } : {}),
-            disabled: !m.online,
-            ...(m.online ? {} : { note: "offline" }),
-            onSelect: () => onBrowse?.(m.id, "open" as const),
-          },
-          { label: `New project on ${m.label}…`, disabled: !m.online, onSelect: () => onBrowse?.(m.id, "init" as const) },
-        ]),
+        ...machines.map((m, i) => ({
+          label: `New project on ${m.label}…`,
+          ...(i === 0 ? { separator: true } : {}),
+          disabled: !m.online,
+          ...(m.online ? {} : { note: "offline" }),
+          onSelect: () => onBrowse?.(m.id, "init" as const),
+        })),
       ],
     });
   };
@@ -215,7 +222,17 @@ function Column({
   const panel = settingsOpen ? (
     <SettingsPane settings={settings} footer={footer} view={view} onView={onView} onLeave={onLeaveSettings} themeRow={themeRow} />
   ) : project !== null && (room === undefined || room.keepsProject !== true) ? (
-    <ProjectPane project={project} views={views} view={view} onView={onView} onSettings={() => onProjectSettings(project)} scope={scope} width={panelWidth} />
+    <ProjectPane
+      project={project}
+      views={views}
+      view={view}
+      onView={onView}
+      onSettings={() => onProjectSettings(project)}
+      scope={scope}
+      width={panelWidth}
+      paired={machines}
+      {...(onAddWorkspace !== undefined ? { onAddWorkspace } : {})}
+    />
   ) : (
     <RootPane room={room ?? roots.find((v) => v.id === view) ?? roots[0]} />
   );
@@ -541,7 +558,11 @@ function ProjectPane({
   onSettings,
   scope,
   width,
+  paired,
+  onAddWorkspace,
 }: {
+  paired: NonNullable<SidebarProps["machines"]>;
+  onAddWorkspace?: (machineId?: string, at?: { x: number; y: number }) => void;
   project: SidebarProject;
   views: readonly SidebarView[];
   view: string;
@@ -557,7 +578,7 @@ function ProjectPane({
   return (
     <>
       <PaneHead acts={[settingsAct]}>
-        <Crumb project={project} scope={scope} width={width - 12 - 8 - ACT_WIDTH - 8} />
+        <Crumb project={project} scope={scope} width={width - 12 - 8 - ACT_WIDTH - 8} paired={paired} {...(onAddWorkspace !== undefined ? { onAddWorkspace } : {})} />
       </PaneHead>
       <View {...(isWeb ? { role: "tablist" } : {})} flexDirection="row" gap={2} padding={2} marginHorizontal={8} marginBottom={6} borderRadius={8} flexShrink={0} backgroundColor={t.v("panel-3") as never}>
         {views.map((v) => {
@@ -690,14 +711,69 @@ function RoomBar({ acts, room }: { acts: readonly SidebarAct[]; room: string }):
  * of one pill, each its own menu; a workspace is on one machine, so choosing it chooses that machine.
  * The ✕ lets the narrowing go; so does pressing the project.
  */
-function Crumb({ project, scope, width }: { project: SidebarProject; scope: SidebarProps["scope"]; width: number }): JSX.Element {
+/** "This machine", as {@link Crumb} names it to whoever adds a workspace: the region knows its id. */
+export const SELF_ADD = "@self";
+
+function Crumb({
+  project,
+  scope,
+  width,
+  paired = [],
+  onAddWorkspace,
+}: {
+  project: SidebarProject;
+  scope: SidebarProps["scope"];
+  width: number;
+  paired?: NonNullable<SidebarProps["machines"]>;
+  onAddWorkspace?: (machineId?: string, at?: { x: number; y: number }) => void;
+}): JSX.Element {
   const t = useTokens();
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  // Another workspace of the project (decision 0027): every machine's row has Add under the pointer —
+  // one that has a workspace already takes a second — and the last item opens the full form.
+  const adding = (have: ReadonlySet<string>, at: { x: number; y: number }): MenuItem[] =>
+    onAddWorkspace === undefined
+      ? []
+      : [
+          ...paired
+            .filter((m) => !have.has(m.id))
+            .map((m, i) => ({
+              label: m.label,
+              ...(i === 0 ? { separator: true } : {}),
+              note: m.online ? "no workspace" : "offline",
+              disabled: !m.online,
+              onSelect: () => onAddWorkspace(m.id, at),
+              ...(m.online ? { action: { label: "Add", onSelect: () => onAddWorkspace(m.id, at) } } : {}),
+            })),
+          { label: "Add a workspace…", separator: true, onSelect: () => onAddWorkspace() },
+        ];
   if (scope === undefined) {
-    return (
+    const title = (
       <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
         {project.label}
       </Txt>
+    );
+    if (onAddWorkspace === undefined) return title;
+    const lone = (e: unknown): void => {
+      const box = isWeb ? (e as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
+      const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
+      const at = { x: box?.left ?? touch?.pageX ?? 0, y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0) };
+      setMenu({
+        ...at,
+        title: "Workspaces",
+        items: [
+          { label: "This machine", checked: true, note: "this workspace", onSelect: () => undefined, action: { label: "Add", onSelect: () => onAddWorkspace(SELF_ADD, at) } },
+          ...adding(new Set(), at),
+        ],
+      });
+    };
+    return (
+      <>
+        <Press onPress={lone} label={`${project.label} — workspaces`} title="Workspaces" flexShrink={1} minWidth={0} fill={false} borderRadius={6} paddingHorizontal={4} marginHorizontal={-4} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+          {title}
+        </Press>
+        {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+      </>
     );
   }
   const { machines, scope: now, onScope } = scope;
@@ -711,9 +787,10 @@ function Crumb({ project, scope, width }: { project: SidebarProject; scope: Side
     const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
     return { x: box?.left ?? touch?.pageX ?? 0, y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0) };
   };
-  const machineMenu = (e: unknown): void =>
+  const machineMenu = (e: unknown): void => {
+    const at = anchor(e);
     setMenu({
-      ...anchor(e),
+      ...at,
       items: [
         { label: "All machines", checked: !narrowed, onSelect: () => onScope({}) },
         ...machines.map((m, i) => ({
@@ -722,9 +799,12 @@ function Crumb({ project, scope, width }: { project: SidebarProject; scope: Side
           ...(i === 0 ? { separator: true } : {}),
           note: [m.self ? "this machine" : m.state === "online" ? undefined : m.state, `${m.workspaces.length} workspace${m.workspaces.length === 1 ? "" : "s"}`].filter((x) => x !== undefined).join(" · "),
           onSelect: () => onScope(m.workspaces.some((w) => w.project === now.workspace) ? now : { machine: m.id }),
+          ...(onAddWorkspace !== undefined && m.state === "online" ? { action: { label: "Add", onSelect: () => onAddWorkspace(m.self ? SELF_ADD : m.id, at) } } : {}),
         })),
+        ...adding(new Set(machines.map((m) => m.id)), at),
       ],
     });
+  };
   const workspaceMenu = (e: unknown): void => {
     const shown = machine === undefined ? machines : [machine];
     setMenu({
@@ -867,7 +947,7 @@ function SettingsPane({
   const t = useTokens();
   return (
     <>
-      <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} height={40} paddingHorizontal={8} style={DRAG_REGION as never}>
+      <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} minHeight={40} paddingVertical={settings.crumb !== undefined ? 6 : 0} paddingHorizontal={8} style={DRAG_REGION as never}>
         <Press
           onPress={onLeave}
           label="Back"
@@ -882,9 +962,12 @@ function SettingsPane({
         >
           {({ hovered }) => <Glyph scale={16 / 12.5} color={hovered ? "text" : "dim"}>‹</Glyph>}
         </Press>
-        <Txt register="app-title" ellip flex={1} minWidth={0}>
-          {settings.label}
-        </Txt>
+        {/* Settings' path beside its name, when the region gives one (`SettingsCrumb`). */}
+        {settings.crumb ?? (
+          <Txt register="app-title" ellip flex={1} minWidth={0}>
+            {settings.label}
+          </Txt>
+        )}
         {settings.counts !== undefined ? (
           <View style={NO_DRAG as never}>
             <Pills counts={settings.counts} budget={90} onClear={settings.onSeen === undefined ? undefined : (from) => settings.onSeen!(from as never)} {...(settings.seenTitle !== undefined ? { clearTitle: settings.seenTitle } : {})} />

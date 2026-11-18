@@ -2,7 +2,7 @@
 id: engineering/contracts/jaira-layout
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-11-18
 visibility: public
 kind: format
 owned_by: [engineering/units/project-layout, engineering/units/project-store]
@@ -23,7 +23,7 @@ The JaiRA layout is where a project's `.jaira/` and the shared root keep what a 
 
 ## The shape is two roots of one shape, a line drawn by system/, and worktrees outside both
 
-### The roots are the project's .jaira and the shared root, searched in that order
+### The roots are the project's .jaira and the shared root, searched in that order — after the settings' four newer layers
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -31,7 +31,8 @@ The JaiRA layout is where a project's `.jaira/` and the shared root keep what a 
 | shared root | directory | yes | `--home <dir>`, then `JAIRA_HOME`, then `baseDir` in the shared root's `user-settings.json` as the app reads it, then `~/.jaira`; the CLI does not read the saved `baseDir` |
 | built-in layer | directory | no | what JaiRA ships, `$SYSTEM` in a reference: `workflows/`, `prompts/`, `functions/` and `permission-sets/`, read-only, with no `system/` and no settings. Found by `defaultBuiltInDir`: [project-layout](../units/project-layout.md). Absent reads as empty |
 | layer roots | ordered list | yes | `[<project>/.jaira, <shared root>, <built-in layer>]`, deduplicated; the shared root opened as a project has itself and then the built-in layer |
-| state search path | ordered list | yes | `<root>/workflows` then `<root>/functions` for each layer root in order; `workflows.path` replaces every entry but the built-in layer's two, which stay last |
+| settings layer roots | ordered list | no | the settings' four newer layers, most specific first, ahead of the layer roots: `<shared root>/projects/<key>/` (you in the project), `<shared root>/personal/` (Just you), `<project>/.jaira/local/` (the project on this machine), `<shared root>/machine/` (this machine) — the shared root opened as a project has only Just you's and this machine's. Each holds `workflows/`, `permission-sets/` and `prompts/` of its own: [decision 0023](../decisions/0023-overlays-and-scopes.md), amended 2026-11-18; `fileLayers.ts` |
+| state search path | ordered list | yes | the settings layer roots' `workflows/`, most specific first, then `<root>/workflows` and `<root>/functions` for each layer root in order; `workflows.path` replaces every layer root's entries but the built-in layer's two, which stay last — never the settings layers', which stay first. A bare state id is read from the first that has a file for it, and its id is its path under that `workflows/` |
 
 The shared root has no `.jaira/` inside it, and the built-in layer is not a root a person owns: nothing below is ever written into it. Every path below is relative to a layer root, so `system/` is `<project>/.jaira/system/` in a project and `<shared root>/system/` in the shared root.
 
@@ -40,14 +41,22 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `settings.json` | JSON file | no | how runs execute, layered project over shared: [settings-json](settings-json.md); `init` writes the project's |
-| `workflows/**/*.json`, `*.yaml`, `*.yml` | state files | no | state documents; the path under `workflows/` without its suffix is the state id |
+| `setup.json` (or `setup.yaml`) | JSON or YAML file | no | how a workspace of the project is set up on a machine: named targets of steps (`install`, `target`, `use`, `run`, `bring`, `first`), `default` run when a workspace is made, a workflow's `setup` target (or `environment`) before a task starts — [0027](../decisions/0027-open-anywhere-and-project-setup.md); committed; both forms present is an error |
+| `setup.local.json` (or `.yaml`) | JSON or YAML file | no | this machine's own setup targets, each replacing the committed target of its name; ignored by the `.gitignore` template |
+| `workflows/**/*.json`, `*.yaml`, `*.yml` | state files | no | state documents; the path under `workflows/` without its suffix is the state id — in every layer root and every settings layer root, the most specific copy of an id being the one read |
 | `workflows/**/*.md` | markdown | no | descriptions: `workflows/<root>.md` describes a root and `workflows/workflow.md` the whole layer: [description-sync](../units/description-sync.md) |
 | `functions/` | directory | no | operation documents and JavaScript or TypeScript modules; searched after `workflows/`; created only in the shared root |
 | `prompts/` | directory | no | prompt fragments referenced as `$/prompts/<name>.md`; never created |
 | `skills/` | directory | no | skills; created in both roots |
 | `.env`, `.env.local` | dotenv files | no | links of the secret chain: [secret-sources](secret-sources.md) |
 | `user-settings.json` | JSON file | no | the window's own state (panes, folds, read marks, the log policy), in the shared root only: [user-settings-json](user-settings-json.md) |
-| `personal-settings.json` | JSON file | no | the fourth settings layer, "Just you": `settings.json`'s schema, read after the project's, in the shared root only: [settings-json](settings-json.md) |
+| `settings.local.json` | JSON file | no | in a project only: the project on this machine, `settings.json`'s schema read over the machine's own; ignored by the `.gitignore` template: [settings-json](settings-json.md) |
+| `machine-settings.json` | JSON file | no | in the shared root only: this machine's own settings layer, `settings.json`'s schema, read over the projects' and under the person's; never synced: [settings-json](settings-json.md) |
+| `personal-settings.json` | JSON file | no | the "Just you" settings layer: `settings.json`'s schema, read after the machine's, in the shared root only: [settings-json](settings-json.md) |
+| `projects/<key>/personal-settings.json` | JSON file | no | in the shared root only: the person's settings for one project, keyed by its repository identity (`projectSettingsKey`), read after every other layer, and synced to every clone of it on the paired machines unless its key is a no-remote clone's: [settings-json](settings-json.md) |
+| `permission-sets/` | directory | no | permission set files, `<bucket>/<name>.json`, in the project's `.jaira/`, the shared root and what ships — and in the four settings layers that are no workflow root: `machine/permission-sets/` and `personal/permission-sets/` in the shared root (this machine's; Just you's), `local/permission-sets/` in a project's `.jaira/` (the project on this machine; ignored by the `.gitignore` template) and `projects/<key>/permission-sets/` in the shared root (you in the project). A `$/permission-sets/…` reference searches them in the settings' order, most specific first: [decision 0023](../decisions/0023-overlays-and-scopes.md), amended 2026-11-18; `fileLayers.ts` |
+| `permission-sets/`, `workflows/`, `prompts/` in the shared root, `personal/` and `projects/<key>/` | directories | no | the files of the three layers that follow the person (Shared, Just you, you in the project), kept in step with the paired machines file by file: the newest change to each file wins, and a removal travels. Every file at any depth, except a hidden one (`.env`, `.DS_Store`), an editor's backup (`~`), a link (never followed, inside the folder or on the way to it), one whose name a machine might not hold (`<>:"\|?*`, a trailing dot or space, `CON`, `NUL`, …), one more than twelve folders deep, and one over 1 MB, which stays and is logged. A project's are written under its key whether or not it is cloned there. Nothing else in the shared root is read to be sent: not `system/`, `machine/`, `functions/`, `skills/`, `.env*`, `user-settings.json` or `machine-settings.json`: [decision 0026](../decisions/0026-settings-follow-the-person.md), amended 2026-11-18; `SYNCED_FILE_FOLDERS` |
+| `system/setup-approvals.json` | JSON file | no | in the shared root: each workspace's setup as the person approved it on this machine (a hash per folder) — what lets its open and task steps run without asking again ([0027](../decisions/0027-open-anywhere-and-project-setup.md)) |
 | `.gitignore` | text file | yes | written when absent, by `initProject` in a project and by `initBase` at every open in the shared root; patterns below |
 
 ### Inside system/ is what JaiRA generates
@@ -64,9 +73,10 @@ The shared root has no `.jaira/` inside it, and the built-in layer is not a root
 | `system/sync.json` | JSON file | no | the last agreed state of each description: [sync-record](sync-record.md) |
 | `system/limits.json` | JSON file | shared root only | `{version: 1, accounts: {<account>: LimitState}, spend?, credit?, refused?}`: what the limits board last knew about each account's allowance, so a restart starts from it — and, for an API key, what each call cost in the last seven days (`[at ms, usd]`), the last credit read, and when a call was last refused for an empty balance ([usage-readings](usage-readings.md)) |
 | `system/waiting.json` | JSON file | shared root only | `{version: 1, items: WaitingItem[]}`: messages and runs waiting for an account's allowance, re-armed at start |
-| `system/settings-sync.json` | JSON file | shared root only | `{clock, looked?, at?, pieces: {<key>: {at, by, hash?}}, passed?, refused?}`: each setting, key, forge sign-in and agent sign-in kept in step with the paired machines — when and by which machine it last changed, and a hash of what it held (never a value): [decision 0026](../decisions/0026-settings-follow-the-person.md) |
+| `system/settings-sync.json` | JSON file | shared root only | `{clock, looked?, lookedFiles?, at?, pieces: {<key>: {at, by, hash?}}, passed?, refused?}`: each setting, key, forge sign-in, agent sign-in and permission set, workflow or prompt file kept in step with the paired machines — when and by which machine it last changed, and a hash of what it held (never a value): [decision 0026](../decisions/0026-settings-follow-the-person.md) |
 | `system/logs/jaira-<utc date>.log` | JSONL | no | the app's diagnostics, one entry per line and one file per UTC day, written under the shared root only |
 | `system/machine.key` | text file | shared root, once approvals are used | the approval HMAC key as `dpapi:<base64>` or `plain:<hex>`, written with mode `0600` |
+| `system/machine.json` | JSON file | shared root only | `{id, label, os, form, tags, copy?, syncSettings?, projectsFolder?, createdAt}`: this machine as the fleet knows it ([decision 0013](../decisions/0013-machines.md) §1), made on first read — its durable id, its name, what it is, the person's tags, what of the fleet's work it keeps a copy of, whether its settings follow the person, and the folder new workspaces go in (absent: the folder most of its open workspaces sit in, else `Code` in the home folder) |
 
 ### A task's worktree sits beside the project, never inside it
 
@@ -84,22 +94,30 @@ system/jaira.db-wal
 system/jaira.db-shm
 system/logs/
 system/machine.key
+system/workspace.id
 .env.local
+settings.local.json
+local/
+machine-settings.json
+setup.local.json
+setup.local.yaml
+setup.local.yml
 ```
 
 ### The Files tree hides JaiRA's own state, configuration, secrets and build output by default
 
-`DEFAULT_HIDDEN_PATHS` always applies first; each layer's `files.hidden` is appended after it, weakest first — Shared, this project, then the personal layer's — the last match winning, so `!pattern` in a later list puts a default back. Patterns are globs relative to the tree's root and a bare name matches only at that root. The groups are the Files tree section's folds ([settings-json](settings-json.md)).
+`DEFAULT_HIDDEN_PATHS` always applies first; each layer's `files.hidden` is appended after it, weakest first — Shared, the project, the machine, the project on the machine, Just you, you in the project — the last match winning, so `!pattern` in a later list puts a default back. Patterns are globs relative to the tree's root and a bare name matches only at that root. The groups are the Files tree section's folds ([settings-json](settings-json.md)).
 
 ```
 system
 .jaira/system
 settings.json
 .jaira/settings.json
+.jaira/settings.local.json
 user-settings.json
-personal-settings.json
 sync.json
 personal-settings.json
+machine-settings.json
 **/.env
 **/.env.*
 .git
@@ -125,7 +143,7 @@ personal-settings.json
 ## Moving any path strands the history at the old one, and no path has a deprecation path
 
 - No code moves files between layouts. The move of generated files under `system/` on 2026-08-24 left a root with `jaira.db`, `tasks/` or `snapshots/` at its top opening with no history.
-- Renaming `.jaira`, `system` or a file name breaks the `.gitignore` of every existing root, which is written only when absent. The one line back-filled into an existing file is `system/machine.key`.
+- Renaming `.jaira`, `system` or a file name breaks the `.gitignore` of every existing root, which is written only when absent. The lines back-filled into an existing file are `system/machine.key`, `system/workspace.id` and, before a project's `settings.local.json` or a permission set under its `local/` is first written, `settings.local.json` and `local/`.
 - Renaming `.jaira-worktrees` leaves existing worktrees in place, because each task's recorded `worktree_path` is used.
 
 ## Committable is not the same as listed, and several paths are computed and never used

@@ -12,9 +12,20 @@
  */
 import { posix, win32 } from "node:path";
 import type { AgentInstallMethod, AgentInstallOutcome, GitCliName, ProbeResult } from "@jaira/shared";
-import { GIT_CLI_PACKAGES, agentInstallOf, gatherInstallFacts, runInstall, type InstallFacts, type InstallLookup, type InstallRunOptions } from "./agentInstall";
-import type { Exec } from "./exec";
-import { isWslEnv } from "./paths";
+import { agentInstallOf } from "./agentInstall";
+import {
+  GIT_CLI_PACKAGES,
+  gatherInstallFacts,
+  runInstall,
+  versionLineOf,
+  waitForAppleInstall,
+  withoutApplePlaceholder,
+  type AppleWait,
+  type InstallFacts,
+  type InstallLookup,
+  type InstallRunOptions,
+} from "./install";
+import { isWslEnv, onMachine } from "./paths";
 
 /** What a check of the git programs needs, beside the lookups. */
 export interface GitCliCheckOptions extends InstallLookup {
@@ -32,7 +43,9 @@ const VERSION_TIMEOUT_MS = 10_000;
 const SPOKEN: Record<GitCliName, string> = { git: "git", gh: "gh (GitHub CLI)", glab: "glab (GitLab CLI)" };
 
 /** Check one git program: where it is, how it got there, what installs or updates it, and its version. */
-export async function probeGitCli(name: GitCliName, options: GitCliCheckOptions): Promise<ProbeResult> {
+export async function probeGitCli(name: GitCliName, given: GitCliCheckOptions): Promise<ProbeResult> {
+  // git is the machine's: a workspace's container (decision 0027) is not where it is looked for.
+  const options = onMachine(given);
   const pkg = GIT_CLI_PACKAGES[name];
   const native = options.execEnv === undefined || !isWslEnv(options.execEnv);
   const looked = await gitCliFacts(name, options);
@@ -95,38 +108,12 @@ async function gitCliFacts(name: GitCliName, lookup: InstallLookup): Promise<{ f
   const pkg = GIT_CLI_PACKAGES[name];
   const facts = await gatherInstallFacts(pkg.binary, pkg, lookup);
   if (facts === undefined) return undefined;
-  const native = lookup.execEnv === undefined || !isWslEnv(lookup.execEnv);
-  const found = facts.found;
-  if (pkg.xcode !== true || facts.platform !== "darwin" || !native || found === undefined || found.real !== `/usr/bin/${pkg.binary}`) return { facts, placeholder: false };
-  const tools = await appleTools(pkg.binary, lookup.exec, facts);
-  // The git /usr/bin/git hands over to is the one installed — the Command Line Tools', or Xcode's.
-  if (tools !== undefined) return { facts: { ...facts, found: { ...found, real: tools } }, placeholder: false };
-  const { found: _placeholder, ...rest } = facts;
-  return { facts: rest, placeholder: true };
+  return withoutApplePlaceholder(pkg, pkg.binary, facts, lookup);
 }
 
 /** `git version 2.39.5 (Apple Git-154)` → `2.39.5 (Apple Git-154)`; `glab 1.48.0 (b9d6e9a5)` → `1.48.0 (b9d6e9a5)`. */
 export function gitCliVersionOf(binary: string, stdout: string): string | undefined {
-  const first = stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
-  if (first === undefined) return undefined;
-  return first.replace(new RegExp(`^${binary}(\\.exe)?(\\s+version)?\\s+`, "i"), "");
-}
-
-/**
- * Where Apple's Command Line Tools (or an Xcode chosen with `xcode-select`) hold the program, when they
- * are here: `xcode-select -p` names their folder, and exits non-zero when there is none. It never opens
- * the installer, which running /usr/bin/git would.
- */
-async function appleTools(binary: string, exec: Exec, facts: InstallFacts): Promise<string | undefined> {
-  try {
-    const result = await exec.run(facts.tools["xcode-select"] ?? "/usr/bin/xcode-select", ["-p"], { timeoutMs: VERSION_TIMEOUT_MS });
-    const dir = result.stdout.trim();
-    if (result.code !== 0 || dir.length === 0) return undefined;
-    const program = posix.join(dir, "usr", "bin", binary);
-    return (facts.has?.(program) ?? true) ? program : undefined;
-  } catch {
-    return undefined;
-  }
+  return versionLineOf(binary, stdout);
 }
 
 /** What to do about a program that is not here, when no way here installs it — or a word on which to pick. */
@@ -140,50 +127,16 @@ function missingFix(name: GitCliName, facts: InstallFacts, installable: boolean)
   return "install Homebrew (brew.sh) — then it installs from here";
 }
 
-/** How long Apple's installer is waited on: it downloads a few hundred megabytes. */
-const APPLE_TOOLS_WAIT_MS = 60 * 60_000;
-const APPLE_TOOLS_POLL_MS = 3_000;
-
 /**
  * Install a git program the way named, or update it the way it was installed. Apple's Command Line
  * Tools install in a window of their own — `xcode-select --install` only asks for it — so that way
  * answers once git is there, on Cancel, or after an hour.
  */
-export async function installGitCli(name: GitCliName, method: AgentInstallMethod | undefined, options: InstallRunOptions & { wait?: { pollMs?: number; maxMs?: number } }): Promise<AgentInstallOutcome> {
+export async function installGitCli(name: GitCliName, method: AgentInstallMethod | undefined, given: InstallRunOptions & { wait?: AppleWait }): Promise<AgentInstallOutcome> {
+  const options = onMachine(given);
   const pkg = GIT_CLI_PACKAGES[name];
   return runInstall(pkg, pkg.binary, method, options, {
     facts: async () => (await gitCliFacts(name, options))?.facts,
-    afterRun: async (chosen) => {
-      if (chosen.method !== "command-line-tools") return undefined;
-      // Nothing more is printed while Apple's window works: say what is being waited on.
-      try {
-        options.onOutput?.("Apple's installer runs in a window of its own — waiting until git is there…\n");
-      } catch {
-        // Somebody watching; the wait goes on without them.
-      }
-      const facts = await gatherInstallFacts(pkg.binary, pkg, options);
-      if (facts === undefined) return undefined;
-      const deadline = Date.now() + (options.wait?.maxMs ?? APPLE_TOOLS_WAIT_MS);
-      while ((await appleTools(pkg.binary, options.exec, facts)) === undefined) {
-        if (options.abortSignal?.aborted === true) return { ok: false, reason: "the install was cancelled" };
-        if (Date.now() > deadline) return { ok: false, reason: "Apple's installer did not finish within an hour — press Re-check once it has" };
-        await pause(options.wait?.pollMs ?? APPLE_TOOLS_POLL_MS, options.abortSignal);
-      }
-      return { ok: true, path: `/usr/bin/${pkg.binary}`, onPath: true };
-    },
-  });
-}
-
-function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        resolve();
-      },
-      { once: true },
-    );
+    afterRun: async (chosen) => (chosen.method === "command-line-tools" ? waitForAppleInstall(pkg, pkg.binary, options, options.wait) : undefined),
   });
 }

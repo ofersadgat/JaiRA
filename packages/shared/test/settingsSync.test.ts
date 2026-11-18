@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { canonicalJson, isLoopbackUrl, isMachinePiece, layPiece, settingsPieces, valueAt } from "../src/settingsSync";
+import { projectSettingsKey } from "../src/paths";
+import { canonicalJson, isLoopbackUrl, isMachinePiece, isProjectSettingsKey, isSyncedFilePath, layPiece, settingsPieces, SYNCED_FILE_FOLDERS, valueAt } from "../src/settingsSync";
 
 const keys = (doc: unknown): string[] => settingsPieces(doc as never).map((p) => p.path.join("."));
 
@@ -104,5 +105,48 @@ describe("another machine's piece laid into this one's layer", () => {
   it("reads one value one way, whatever order its keys were written in", () => {
     expect(canonicalJson({ b: 1, a: { d: [1, { z: 1, y: 2 }], c: null } })).toBe(canonicalJson({ a: { c: null, d: [1, { y: 2, z: 1 }] }, b: 1 }));
     expect(isMachinePiece(["appearance", "mode"], "dark")).toBe(false);
+  });
+
+  it("takes a project's settings key from another machine only when it names one folder under projects/", () => {
+    expect(isProjectSettingsKey(projectSettingsKey("github.com/me/atlas", "/x/atlas"))).toBe(true);
+    expect(isProjectSettingsKey(projectSettingsKey("gitlab.work.example/group/sub/.hidden", "/x"))).toBe(true);
+    for (const bad of ["", ".", "..", "../etc", "a/b", "a\\b", ".git", "x".repeat(201)]) expect(isProjectSettingsKey(bad)).toBe(false);
+  });
+
+  it("takes a file's path from another machine only when it is one file inside a folder that follows", () => {
+    for (const good of [
+      ["permission-sets", "careful.json"],
+      ["permission-sets", "feature", "implementation", "mine.yaml"],
+      ["workflows", "triage", "start.json"],
+      ["workflows", "workflow.md"],
+      ["prompts", "review.md"],
+    ]) {
+      expect(isSyncedFilePath(good)).toBe(true);
+    }
+    for (const bad of [
+      ["permission-sets"],
+      ["system", "jaira.db"],
+      ["machine", "permission-sets", "x.json"],
+      ["functions", "op.json"],
+      ["skills", "SKILL.md"],
+      ["personal-settings.json"],
+      ["permission-sets", "..", "..", "escape.json"],
+      ["permission-sets", ".", "x.json"],
+      ["permission-sets", "/etc/passwd"],
+      ["permission-sets", "a\\b.json"],
+      ["permission-sets", "C:x.json"],
+      ["permission-sets", ".env"],
+      ["permission-sets", ".DS_Store"],
+      ["permission-sets", "x.json~"],
+      ["permission-sets", "x.json."],
+      ["permission-sets", "NUL.json"],
+      ["permission-sets", "node_modules", "x.json"],
+      ["permission-sets", "a\u0000b.json"],
+      ["permission-sets", ""],
+      ["permission-sets", ...Array.from({ length: 13 }, () => "deep"), "x.json"],
+    ]) {
+      expect(isSyncedFilePath(bad)).toBe(false);
+    }
+    expect(SYNCED_FILE_FOLDERS).toEqual(["permission-sets", "workflows", "prompts"]);
   });
 });

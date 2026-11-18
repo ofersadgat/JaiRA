@@ -28,7 +28,6 @@ import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { TOOL_IMAGES } from "@declarative-ai/json";
 import { EMBEDDERS, SCRIPT_INTERPRETERS, isSystemProgram, openerTool, programName } from "@jaira/shared";
 import type { CiArtifactSink } from "./ciArtifacts";
-import { isDeniedPath } from "./policy";
 import {
   INSTALL_ACTIONS,
   LOG_LEVELS,
@@ -257,12 +256,10 @@ function pidOf(value: unknown): number {
   return value;
 }
 
-/** A place a call names, absolute — relative to the workspace — and never JaiRA's own folder. */
+/** A place a call names, absolute — relative to the workspace. */
 function placeOf(value: string, ctx: ExecServices | undefined, cwd: string | undefined): string {
   const root = ctx?.workspace?.root ?? cwd ?? process.cwd();
-  const place = isAbsolute(value) ? value : resolvePath(root, value);
-  if (isDeniedPath(place)) throw new SystemToolRefusal(`'${value}' is in .jaira/, which is the engine's own`);
-  return place;
+  return isAbsolute(value) ? value : resolvePath(root, value);
 }
 
 /** Cut a list to a limit, saying how many there were. */

@@ -76,7 +76,14 @@ export * from "./eventHub";
 export * from "./eventsTask";
 export * from "./repoWatch";
 export * from "./executors";
+// Installing tools — agents, git programs, and what a project's setup asks for — the way the machine
+// already installs them; `agentInstall` is the agents' part of it.
+export * from "./install";
 export * from "./agentInstall";
+export * from "./workspaceMake";
+export * from "./setupRun";
+// A workspace's container (decision 0027): made, kept up, and where its commands go.
+export * from "./container";
 export * from "./gitClis";
 export * from "./agentOutcome";
 export * from "./executorStack";

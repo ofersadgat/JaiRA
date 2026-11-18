@@ -115,6 +115,18 @@ describe("the fleet", () => {
     expect(a.fleet.view().machines[0]).toMatchObject({ canReachHere: true, version: "0.2.0" });
   });
 
+  it("tells the machines it is paired with where its new workspaces go", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    await pair(a, b);
+    await online(b, "desk");
+    const folder = join(tmpdir(), "projects-here");
+    expect(a.fleet.setProjectsFolder(folder).self.projectsFolder).toBe(folder);
+    await expect.poll(() => b.fleet.view().machines.find((m) => m.label === "desk")?.projectsFolder, { timeout: 5000 }).toBe(folder);
+    // A folder named from where the engine happened to start is no folder.
+    expect(() => a.fleet.setProjectsFolder("projects")).toThrow(/not a whole path/);
+  });
+
   it("says nothing runs JaiRA where it does not, and will not pair with it", async () => {
     const a = await machine("desk");
     await expect.poll(() => a.fleet.view().tailnetDevices.find((d) => d.id === "nothing")?.noJaira, { timeout: 5000 }).toBe(true);
@@ -229,6 +241,18 @@ async function signedInFleet(
   await fleet.attach(host, 47_399);
   return { fleet, port, host, base };
 }
+
+describe("a machine's projects folder", () => {
+  it("is guessed from where its workspaces sit until the person chooses one, and the guess comes back", async () => {
+    const dirs = ["/home/me/src/atlas", "/home/me/src/tools", "/tmp/scratch"];
+    const { fleet } = await signedInFleet({ workspaceDirs: () => dirs });
+    expect(fleet.view().self.projectsFolder).toBe("/home/me/src");
+    expect(fleet.setProjectsFolder("/srv/work").self.projectsFolder).toBe("/srv/work");
+    expect(fleet.selfPeer().projectsFolder).toBe("/srv/work");
+    expect(fleet.setProjectsFolder(undefined).self.projectsFolder).toBe("/home/me/src");
+    fleet.close();
+  });
+});
 
 describe("the Tailscale sign-in", () => {
   it("signs in, on a page the person opens, and says who and what this machine is", async () => {

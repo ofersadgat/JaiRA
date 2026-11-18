@@ -15,6 +15,7 @@ import {
   treeRowOf,
   type FileSelection,
   type TreeDraft,
+  LAYER_LABEL,
 } from "@jaira/ui/filesModel";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -146,7 +147,10 @@ export function FileTreePanel({
     return at.under === key ? <DraftRow key="draft" draft={draft} depth={at.depth} missing={at.missing} onCommit={commitDraft} onCancel={() => onDraft(null)} /> : null;
   };
   const openNew = (root: FileRoot, dir: string, x: number, y: number): void => setMenu({ x, y, items: newItems(root, dir, startDraft) });
-  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, ...(onAsk !== undefined ? { onAsk } : {}), copy: copyText, setAsk, startDraft, onSetDisabled });
+  // Where the last row's menu opened: a second menu (`Copy elsewhere…`) opens in its place.
+  const menuAt = useRef({ x: 0, y: 0 });
+  const more = (menu: { title: string; items: MenuAt["items"] }): void => setMenu({ ...menuAt.current, ...menu });
+  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, ...(onAsk !== undefined ? { onAsk } : {}), copy: copyText, setAsk, startDraft, onSetDisabled, more });
 
   return (
     <View flexDirection="column" flex={1} minHeight={0} gap={8} paddingTop={2} paddingBottom={4}>
@@ -198,6 +202,7 @@ export function FileTreePanel({
                     // Right-click selects too, so the menu always acts on the row that is highlighted.
                     onMenu={(node, x, y) => {
                       if (node.kind !== "directory") onSelect(node);
+                      menuAt.current = { x, y };
                       setMenu({ x, y, items: itemsFor(node, root) });
                     }}
                     draftUnder={(key) => draftIn(root, key)}
@@ -391,7 +396,11 @@ function TreeNode({
             {node.error !== undefined ? <Chip tone="bad" spec={{ weight }}>!</Chip> : null}
             {node.error === undefined && lint !== undefined && lint.errors > 0 ? <Chip tone="bad" spec={{ weight }}>{lint.errors}</Chip> : null}
             {node.error === undefined && lint !== undefined && lint.errors === 0 && lint.warnings > 0 ? <Chip tone="warn" spec={{ weight }}>{lint.warnings}</Chip> : null}
-            {node.shadowed === true ? <Chip spec={{ weight }}>{node.layer === "system" ? "overridden" : "shadowed"}</Chip> : null}
+            {node.shadowed === true ? (
+              <Chip spec={{ weight }} {...(node.shadowedBy !== undefined ? { title: `Not read here: ${LAYER_LABEL[node.shadowedBy]}'s copy of this state is the one that runs` } : {})}>
+                {`${node.layer === "system" ? "overridden" : "shadowed"}${node.shadowedBy !== undefined ? ` · ${LAYER_LABEL[node.shadowedBy]}` : ""}`}
+              </Chip>
+            ) : null}
             {node.overridesBuiltIn === true ? (
               <Chip spec={{ weight }} title="Overrides built in: JaiRA ships a state with this id, and this file runs instead of it">
                 override

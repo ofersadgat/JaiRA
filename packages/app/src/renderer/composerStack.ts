@@ -36,6 +36,7 @@ import {
   type PermissionStackViewLayer,
   type SavePermissionStackRequest,
   type WritableLayer,
+  type WritableSetLayer,
 } from "@jaira/shared/browser";
 import type { ChipStep, ChipWidths } from "./composerModel";
 
@@ -248,6 +249,11 @@ function scopeOfReference(reference: string): PermissionSetScope | undefined {
   if (reference.startsWith("$SYSTEM/")) return "built in";
   if (reference.startsWith("$BASE/")) return "global";
   if (reference.startsWith("$JAIRA/") || reference.startsWith("$PROJECT/")) return "project";
+  // The settings' four newer layers (decision 0023, amended 2026-11-18).
+  if (reference.startsWith("$MACHINE/")) return "machine";
+  if (reference.startsWith("$PROJECTMACHINE/")) return "project on machine";
+  if (reference.startsWith("$YOU/")) return "you";
+  if (reference.startsWith("$PROJECTYOU/")) return "you in project";
   return undefined;
 }
 
@@ -380,6 +386,10 @@ export const SCOPE_WORDS: Readonly<Record<string, { name: string; hint: string; 
   "built in": { name: "Built in", hint: "what ships", icon: "system" },
   global: { name: "Global", hint: "~/.jaira", icon: "web" },
   project: { name: "Project", hint: ".jaira", icon: "folder" },
+  machine: { name: "This machine", hint: "~/.jaira/machine", icon: "terminal" },
+  "project on machine": { name: "Project on this machine", hint: ".jaira/local", icon: "folder" },
+  you: { name: "Just you", hint: "~/.jaira/personal", icon: "lock" },
+  "you in project": { name: "You in this project", hint: "~/.jaira/projects/…", icon: "lock" },
   runtime: { name: "Runtime", hint: "this task", icon: "clock" },
 };
 
@@ -796,7 +806,7 @@ export function standingOf(effective: unknown, bucket: string): string[] {
 }
 
 /** "Save this stack as a set" (§7.4): the stack's own layers and its tools layer's lines, as a file of `bucket`. */
-export function saveStackRequestOf(form: StackForm, name: string, layer: WritableLayer, bucket = stackBucketOf(form)): Omit<SavePermissionStackRequest, "project"> {
+export function saveStackRequestOf(form: StackForm, name: string, layer: WritableSetLayer, bucket = stackBucketOf(form)): Omit<SavePermissionStackRequest, "project"> {
   return { layer, bucket, name: name.trim(), permissionSet: stackSettingsOf(form) };
 }
 

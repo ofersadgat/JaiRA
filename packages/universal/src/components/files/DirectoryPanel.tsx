@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FileTree, WorkflowLayer } from "@jaira/shared/browser";
-import { KIND_GLYPH, entriesUnder } from "@jaira/ui/filesModel";
+import { KIND_GLYPH, LAYER_LABEL, entriesUnder } from "@jaira/ui/filesModel";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "./Chip";
@@ -80,7 +80,7 @@ export function DirectoryPanel({
             {row.node?.error !== undefined ? <Chip tone="bad">!</Chip> : null}
             {row.node !== null && row.node.error === undefined && (row.node.lint?.errors ?? 0) > 0 ? <Chip tone="bad">{row.node.lint!.errors}</Chip> : null}
             {row.node !== null && row.node.error === undefined && (row.node.lint?.errors ?? 0) === 0 && (row.node.lint?.warnings ?? 0) > 0 ? <Chip tone="warn">{row.node.lint!.warnings}</Chip> : null}
-            {row.node?.shadowed === true ? <Chip>shadowed</Chip> : null}
+            {row.node?.shadowed === true ? <Chip>{`shadowed${row.node.shadowedBy !== undefined ? ` · ${LAYER_LABEL[row.node.shadowedBy]}` : ""}`}</Chip> : null}
           </Press>
         ))}
         {entries.length === 0 ? (

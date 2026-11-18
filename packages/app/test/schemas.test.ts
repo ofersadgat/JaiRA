@@ -49,12 +49,13 @@ describe("the registry", () => {
       "compose",
       "gitlab-ci",
       "github-workflow",
+      "setup",
     ]);
   });
 
   it("offers each syntax the schemas its documents can be written in", () => {
     // A state is a state in either syntax; npm and tsc read JSON, the three CI and Compose files YAML.
-    expect(listSchemas("json").map((s) => s.id)).toEqual(["state", "state-prompt", "prompt-operation", "package-json", "tsconfig"]);
+    expect(listSchemas("json").map((s) => s.id)).toEqual(["state", "state-prompt", "prompt-operation", "package-json", "tsconfig", "setup"]);
     expect(listSchemas("yaml").map((s) => s.id)).toEqual([
       "state",
       "state-prompt",
@@ -62,6 +63,7 @@ describe("the registry", () => {
       "compose",
       "gitlab-ci",
       "github-workflow",
+      "setup",
     ]);
   });
 
@@ -277,6 +279,8 @@ describe("what the schema offers the editor", () => {
       "sequence",
       "transitions",
       "limits",
+      "requires",
+      "setup",
     ]);
   });
 

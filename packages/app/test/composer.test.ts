@@ -27,7 +27,7 @@ import {
   type PermissionSetChoice,
   type PermissionSetDecl,
 } from "@jaira/shared/browser";
-import { KEEP_WHERE, originWordsOf, permissionsHintOf } from "../src/renderer/composerCards";
+import { KEEP_WHERE, keepLayersOf, originWordsOf, permissionsHintOf } from "../src/renderer/composerCards";
 import { canSendOf, chipValuesOf, composerFactsOf, routeDownOf, sendTitleOf, type ComposerFacts } from "../src/renderer/composerModel";
 import {
   commandGroupsOf,
@@ -132,7 +132,17 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
   it("words where a kept permission set goes, one word per layer", () => {
     // The form offers these as its `where`, and reads the layer back from the word that was picked —
     // so with no project open there is one place to keep it, and two words must never be the same.
-    expect(KEEP_WHERE).toEqual({ project: "in this project", base: "for all projects" });
+    expect(KEEP_WHERE).toEqual({
+      project: "in this project",
+      base: "for all projects",
+      projectYou: "for you in this project",
+      you: "for just you",
+      projectMachine: "in this project on this machine",
+      machine: "on this machine",
+    });
+    // This project's first, as before the settings' six; with no project, Shared's and the two that are no project's.
+    expect(keepLayersOf(true)[0]).toBe("project");
+    expect(keepLayersOf(false)).toEqual(["base", "you", "machine"]);
   });
 
   it("opens on the plan's bucket, whose rows are ITS versions of the same names", () => {

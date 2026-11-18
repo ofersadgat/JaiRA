@@ -477,13 +477,16 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         },
         implementations: {},
         other: "deny",
-        subjects: { shell: "deny", ...commandLinesOf(SHIPPED_READ_ONLY) },
+        // A line written as a place map (the `.jaira/` lines, 2026-11-17) lowers to its own mode here
+        // and its map under `places`.
+        subjects: { shell: "deny", ...commandLinesOf(SHIPPED_READ_ONLY), script: "deny", "runner:*": "allow" },
         // Beside `subjects`: the file they came from, which is what an approval names.
         source: "$/permission-sets/read-only",
         functions: {},
         // Where it reads freely — `$PROJECT` and `$WORKTREE` — and the credentials that ask (decision
         // 0023 §7.1): the gate was handed each line's loosest, `allow`, and the narrowing reads these.
-        places: { read_file: SHIPPED_READ_ONLY["read_file"], glob: SHIPPED_READ_ONLY["glob"], grep: SHIPPED_READ_ONLY["grep"] },
+        // And every writer's `.jaira/` lines, and the machine key's (2026-11-17).
+        places: Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "shell", "runner:*", "script"].map((line) => [line, SHIPPED_READ_ONLY[line]])),
       },
     });
     // `control` holds the workflow tools and NOTHING of the project: the engine resolves those
@@ -515,7 +518,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     ]);
     // The override is offered as the map it RESOLVES to — what picking its row would write.
     const overridden = read.find((t) => t.id === "read-only")!.decl;
-    expect(overridden).toMatchObject({ read_file: { "**": "ask", $PROJECT: "allow" }, edit: "deny", shell: "ask", other: "deny" });
+    expect(overridden).toMatchObject({ read_file: { "**": "ask", $PROJECT: "allow" }, edit: { "**": "deny", "$PROJECT/.jaira": "deny" }, shell: "ask", other: "deny" });
     expect(overridden).not.toHaveProperty("$ref");
     // A permission set nobody could read is left out rather than offered as half of itself.
     expect(read.some((t) => t.id === "chat/broken")).toBe(false);

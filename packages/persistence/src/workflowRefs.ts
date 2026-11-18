@@ -10,6 +10,14 @@
  * of them: the workflow browser, the pre-run gate, the snapshotter and the CLI must agree on which
  * file a reference names, or a workflow would lint against one state and execute another.
  *
+ * A bare id is found along the settings' six layers, most specific first (decision 0023, amended
+ * 2026-11-18): you in the project, Just you, the project on this machine, this machine, the project,
+ * Shared, then what ships — the four newer layers' `workflows/` at the head of the search path, and
+ * their states laid over the project's own files when a bundle loads (`nearerStates`,
+ * `loadWorkflowBundle`). A child, a `./` reference and a `children[].state` are bare ids once resolved
+ * against the referring state's id, so each is found the same way — nearest copy first — wherever its
+ * parent came from.
+ *
  * An out-of-tree reference reads a file outside the project. That is deliberate — it is how a shared
  * library of states is mounted — and it is a decision the AUTHOR makes in a file they control, the
  * same trust boundary an absolute artifact destination sits on. Nothing an agent produces reaches
@@ -25,6 +33,7 @@ import { hostCalleeSignatures } from "@jaira/runtime";
 import { userModules, type UnapprovedWatch } from "./userModules";
 import { scriptStateFor } from "./workflowScripts";
 import { nodeVfs } from "./vfs";
+import { automationsVfs, nearerStates, nearerWorkflowDirs, referenceRootPath, settingsLayerRootNames } from "./fileLayers";
 
 /**
  * The callees JaiRA ships — a bare name every workflow can call without authoring a file.
@@ -44,6 +53,16 @@ const HOST_FUNCTIONS = hostCalleeSignatures();
 // `nodeVfs` moved to ./vfs so `userModules` can share it without a cycle; re-exported
 // because it is part of this module's published surface.
 export { nodeVfs } from "./vfs";
+
+/** What JaiRA's loads carry beside the engine's options — `loadWorkflowBundle` reads it. */
+export interface JairaLoadOptions extends LoadBundleOptions {
+  /**
+   * The states the settings' four newer layers hold, by id, the nearest layer's copy of each
+   * (`nearerStates`): laid over the project's own files before a bundle loads, so a copy in one of them
+   * stands in front of the project's. Read when a bundle is loaded, not when the options are made.
+   */
+  nearerStates?: () => Record<string, unknown>;
+}
 
 export interface WorkflowRefOptions {
   /** Where bare references hang off. Defaults to the project's `.jaira/workflows`. */
@@ -89,22 +108,36 @@ export interface WorkflowRefOptions {
  * spelling is a root's generated `system/` directory (`artifactPath.ts`). Two vocabularies that never
  * meet — a destination template is not a reference — but worth knowing before grepping for one.
  */
-export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptions = {}): LoadBundleOptions {
+export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptions = {}): JairaLoadOptions {
   const workflowsDir = options.workflowsDir ?? paths.workflowsDir;
   const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir, SYSTEM: paths.builtIn.dir };
-  const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots), paths.builtIn.dir);
+  // The settings' six layers, most specific first (decision 0023, amended 2026-11-18): the four newer
+  // layers' `workflows/` lead, ahead of the project's own.
+  const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots), paths.builtIn.dir, nearerWorkflowDirs(paths));
+  const tolerant = options.tolerant === true;
+  let nearer: Record<string, unknown> | undefined;
   return {
     defaultRoot: searchPath,
-    roots,
+    // The four settings-only layers are named too (`$MACHINE/permission-sets/…`, `$YOU/workflows/…`,
+    // `fileLayers.ts`), for a reference that means exactly that layer's copy — and a layer's copy of the
+    // events workflow follows the layer under it by name.
+    roots: { ...settingsLayerRootNames(paths), ...roots },
+    // Read once per set of options — a browse loads every root through the same one, and a load is a
+    // reading of the files as they stand when it starts.
+    nearerStates: () => (nearer ??= nearerStates(paths, tolerant)),
     // The LAYER roots, which a bare `$` is searched along. This is what makes the fragments a state
     // is assembled from — prompts, types, guards, operation documents — layer exactly as whole
-    // states do; `$JAIRA` and `$BASE` still name one root each, for an author who means one.
-    rootPath: paths.roots,
-    vfs: options.vfs ?? nodeVfs(),
+    // states do; `$JAIRA` and `$BASE` still name one root each, for an author who means one. The
+    // settings' four newer layers lead (decision 0023, amended 2026-11-18): a permission set the person,
+    // this machine or this workspace keeps is found before the project's and Shared's.
+    rootPath: referenceRootPath(paths),
+    // A layer above Shared with no copy of the events workflow reads as one passing the layer under it
+    // through, so every copy can name its neighbour (`fileLayers.ts`).
+    vfs: automationsVfs(options.vfs ?? nodeVfs(), paths),
     // Searched along the WHOLE path, not just the workflows directory: a bare id may be supplied by
     // any layer, and reading only the first would make a base-root state unloadable at exactly the
     // moment it is needed — when nothing in the project defines it.
-    loadState: (id) => readStateFile(id, searchPath, options.tolerant === true),
+    loadState: (id) => readStateFile(id, searchPath, tolerant),
     // Shadowing is this project's override mechanism, so it is not news. Without this the lint
     // surface would carry one warning per overridden state, which is how a warning stops being read.
     shadowing: "override",
@@ -143,9 +176,13 @@ function userModuleOptions(watch?: UnapprovedWatch): Pick<LoadBundleOptions, "sy
 /**
  * The ordered roots a bare reference is searched along, with `$JAIRA`/`$PROJECT`/`$BASE` expanded.
  *
- * `workflowsDir` is forced FIRST, whatever the config lists — it is the root this project's own
- * states are authored under, and a layer that configuration could push behind another would stop
- * being an override. What configuration decides is what comes AFTER, which is where `$BASE` sits.
+ * The settings' four newer layers' `workflows/` come FIRST, most specific first — you in the project,
+ * Just you, the project on this machine, this machine (decision 0023, amended 2026-11-18) — then
+ * `workflowsDir`, whatever the config lists: it is the root this project's own states are authored
+ * under, and a layer that configuration could push behind another would stop being an override. What
+ * configuration decides is what comes AFTER, which is where `$BASE` sits. A state's id is its path under
+ * whichever of these it is found in — the longest root that holds it, not the first — so the order
+ * changes which copy is read and never what an id is.
  *
  * An entry naming a directory that does not exist is harmless: the vfs lists it as empty, and the
  * search moves on. That is what makes `$BASE/workflows` a safe default on a machine with no shared
@@ -162,9 +199,11 @@ function searchPathFor(
   roots: Readonly<Record<string, string>>,
   configured: readonly string[] | undefined,
   builtInDir: string,
+  /** The settings' four newer layers' `workflows/`, nearest first — forced in front of the project's own. */
+  nearer: readonly string[] = [],
 ): string[] {
   const last = workflowSearchPath([builtInDir]);
-  const out = [workflowsDir];
+  const out = [...nearer.filter((dir) => dir !== workflowsDir), workflowsDir];
   for (const entry of configured ?? []) {
     const match = /^\$([A-Z_][A-Z0-9_]*)?(?:\/(.*))?$/.exec(entry);
     const expanded = match ? join(roots[match[1] ?? "JAIRA"] ?? "", match[2] ?? "") : entry;

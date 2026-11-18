@@ -142,8 +142,8 @@ export function linkTargets(tree: FileTree | null): string[] {
  *
  * The inverse of {@link linkTargets}, and it is the same rule read backwards: a node's path becomes
  * a reference through `refForPath`, so a reference is that node's when the two spellings agree. The
- * PROJECT layer is tried first because a bare `$/…` is searched along the layer path and a project
- * copy overrides the shared one — the same order the loader would resolve it in.
+ * layers are tried most specific first because a bare `$/…` is searched along the layer path and a
+ * nearer copy overrides the others — the same order the loader would resolve it in.
  *
  * Everything after the file name is a property path into the document (§2.2), so the name is given
  * back one dotted component at a time, longest first — `$/lib/review.operation` is `review.json`
@@ -167,7 +167,9 @@ export function resolveRef(tree: FileTree | null, ref: string): { layer: Workflo
       if (!found.has(spelling)) found.set(spelling, { layer, path: node.path });
     }
   };
-  const roots = [...tree.roots].sort((a, b) => (a.layer === b.layer ? 0 : a.layer === "project" ? -1 : 1));
+  // In the order the loader searches: the settings' six, most specific first, then what ships (decision 0023, amended 2026-11-18).
+  const order: readonly WorkflowLayer[] = ["projectYou", "you", "projectMachine", "machine", "project", "base", "system"];
+  const roots = [...tree.roots].sort((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer));
   for (const root of roots) walk(root.layer, root.nodes);
   for (let take = parts.length; take >= 1; take--) {
     const at = found.get(`${dir}${parts.slice(0, take).join(".")}`);

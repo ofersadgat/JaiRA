@@ -31,6 +31,7 @@ import { loadWorkflowBundle } from "./permissionSets";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";
+import { workflowLayerDirs } from "./fileLayers";
 import { workflowLoadOptions } from "./workflowRefs";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -166,8 +167,15 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
     options.roots === undefined ? browser.workflows : browser.workflows.filter((w) => options.roots!.includes(w.rootId));
 
   const { files } = readWorkflowsTolerantly(source.paths.workflowsDir);
+  // The file each state is read from — the copy no nearer layer shadows, in whichever layer it is: a
+  // project's, Shared's, the settings' newer layers' (decision 0023, amended 2026-11-18) or what ships.
+  // Named as before — its path under `workflows/` — in the layer this source authors in, and with its
+  // layer's root in front (`~/.jaira/personal/workflows/…`) in any other.
+  const layerWord = new Map(workflowLayerDirs(source.paths).map((one) => [one.layer, one.label] as const));
   const fileOf = new Map(
-    browser.files.filter((f) => f.error === undefined).map((f) => [f.stateId, f.file] as const),
+    browser.files
+      .filter((f) => f.error === undefined && f.shadowed !== true)
+      .map((f) => [f.stateId, { path: join(f.root, ...f.file.split("/")), shown: f.layer === source.layer ? f.file : `${layerWord.get(f.layer) ?? f.layer}/workflows/${f.file}` }] as const),
   );
   // The AUTHORED layer only, and keyed by state id: which FILE a state resolved from decides what
   // the baseline covers, and a state an inherited layer supplied has no file here to hash. For a
@@ -249,16 +257,17 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
         bounded.add(id);
         continue;
       }
-      const file = fileOf.get(id) ?? browser.files.find((f) => f.stateId === id)?.file;
+      const found = browser.files.find((f) => f.stateId === id);
+      const file = fileOf.get(id) ?? (found !== undefined ? { path: join(found.root, ...found.file.split("/")), shown: found.file } : undefined);
       const broken = browser.files.find((f) => f.stateId === id && f.error !== undefined)?.error;
-      const authored = authoredText(source.paths.workflowsDir, file, undefined);
+      const authored = authoredText(file?.path, undefined);
       const clipped = authored.text.length > maxChars;
       if (clipped) truncated.push(id);
       lines.push(
         `### State \`${id}\``,
         "",
         ...(broken !== undefined ? [`this file does not parse: ${broken}`, ""] : []),
-        `authored${file !== undefined ? ` (${file})` : ""}:`,
+        `authored${file !== undefined ? ` (${file.shown})` : ""}:`,
         "",
         "```" + authored.language,
         clipped ? `${authored.text.slice(0, maxChars)}\n… clipped: this state is longer than the digest shows` : authored.text,
@@ -305,7 +314,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
         continue;
       }
       const file = fileOf.get(id);
-      const authored = authoredText(source.paths.workflowsDir, file, bundle.source?.[id]);
+      const authored = authoredText(file?.path, bundle.source?.[id]);
       const clipped = authored.text.length > maxChars;
       if (clipped) truncated.push(id);
       lines.push(
@@ -313,7 +322,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
         "",
         `resolved: ${resolvedLine(state)}`,
         "",
-        `authored${file !== undefined ? ` (${file})` : " (resolved from outside the project)"}:`,
+        `authored${file !== undefined ? ` (${file.shown})` : " (resolved from outside the project)"}:`,
         "",
         "```" + authored.language,
         clipped ? `${authored.text.slice(0, maxChars)}\n… clipped: this state is longer than the digest shows` : authored.text,
@@ -452,16 +461,12 @@ function resolvedLine(state: LoadedState): string {
  * The file as written, or the authored state re-serialized when there is no file
  * to read (an out-of-tree reference, or one the browser could not map back).
  */
-function authoredText(
-  workflowsDir: string,
-  file: string | undefined,
-  source: unknown,
-): { text: string; language: string } {
+function authoredText(file: string | undefined, source: unknown): { text: string; language: string } {
   if (file !== undefined) {
     try {
       return {
-        text: readFileSync(join(workflowsDir, ...file.split("/")), "utf8").trimEnd(),
-        language: /\.ya?ml$/i.test(file) ? "yaml" : "json",
+        text: readFileSync(file, "utf8").trimEnd(),
+        language: /\.ya?ml$/i.test(file) ? "yaml" : /\.[cm]?[jt]sx?$/i.test(file) ? "ts" : "json",
       };
     } catch {
       // Deleted between the browse and now — fall through to the loaded copy.

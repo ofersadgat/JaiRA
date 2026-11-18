@@ -118,7 +118,7 @@ export const EXECUTOR_TITLES: Readonly<Record<string, string>> = {
  */
 export const BUILTIN_GENERIC_AGENTS: Readonly<Record<string, { hint: string; credential?: string }>> = {
   "gemini-cli": {
-    hint: "Google's `gemini` binary, now for Gemini Code Assist and paid API keys — individual plans moved to Antigravity CLI. Run headless (`gemini -p`) with edits approved and shell commands not. Signs itself in, or reads GEMINI_API_KEY. A generic CLI: it enforces none of JaiRA's permissions.",
+    hint: "Google's `gemini` binary, now for Gemini Code Assist and paid API keys — individual plans moved to Antigravity CLI. Run headless (`gemini -p`) with edits approved and shell commands not. Signs itself in, or reads GEMINI_API_KEY. Under a permission set its own tools are off and it works through JaiRA's, each checked.",
     credential: "GEMINI_API_KEY",
   },
   "antigravity-cli": {
@@ -130,7 +130,7 @@ export const BUILTIN_GENERIC_AGENTS: Readonly<Record<string, { hint: string; cre
     credential: "META_API_KEY",
   },
   opencode: {
-    hint: "The `opencode` binary, run headless (`opencode run`) with whatever provider it is signed in to (`opencode auth login`). A generic CLI: it enforces none of JaiRA's permissions.",
+    hint: "The `opencode` binary, run headless (`opencode run`) with whatever provider it is signed in to (`opencode auth login`). Under a permission set its own tools are off and it works through JaiRA's, each checked.",
   },
 };
 
@@ -236,6 +236,15 @@ export interface ProbeResult {
  * Command Line Tools, which is how a Mac gets git.
  */
 export type AgentInstallMethod = "native" | "homebrew" | "npm" | "bun" | "pnpm" | "winget" | "chocolatey" | "scoop" | "command-line-tools";
+
+/**
+ * Every way a tool is installed: an agent's ({@link AgentInstallMethod}), and the ones a project's
+ * setup adds — the Linux system package managers (`apt`, `dnf`, which run as root through sudo) and
+ * the version managers a machine may already keep a language with: nvm, fnm, Volta, mise and asdf
+ * for Node; pyenv, uv, mise and asdf for Python; rbenv for Ruby; rustup for Rust; Corepack for pnpm
+ * and yarn. A superset, so an agent's way is a tool's way; the agents' rows keep the narrower type.
+ */
+export type InstallMethod = AgentInstallMethod | "apt" | "dnf" | "nvm" | "fnm" | "volta" | "mise" | "asdf" | "pyenv" | "uv" | "rbenv" | "rustup" | "corepack";
 
 /**
  * The git programs Settings → Connections → Git checks: git itself, which JaiRA runs for worktrees,

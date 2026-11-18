@@ -81,19 +81,20 @@ describe("a page", () => {
     expect(await call({ file_path: resolve(sep, "jaira-not-there", "x.html") })).toMatchObject({ error: expect.stringMatching(/could not be read/) as unknown as string });
   });
 
-  it("reads a file outside the workspace where it is — the gate judged it as a read — but nothing under .jaira/ save this task's own artifact folder", async () => {
-    // The agent's own folder, say: no fixed list of folders decides; `read_file`'s line did, before the call ran.
+  it("reads a file where it is — the gate judged it as a read — `.jaira/` like any other", async () => {
+    // The agent's own folder, say: no fixed list of folders decides; `read_file`'s line did, before the
+    // call ran — and the sets JaiRA ships read `.jaira/` as any of the project, but for the machine key.
     const elsewhere = mkdtempSync(join(tmpdir(), "jaira-elsewhere-"));
     try {
       writeFileSync(join(elsewhere, "mock.html"), "<title>From scratch</title>", "utf8");
       expect((await call({ file_path: join(elsewhere, "mock.html") }))["artifact"]).toMatchObject({ title: "From scratch" });
       mkdirSync(join(elsewhere, ".jaira"), { recursive: true });
-      writeFileSync(join(elsewhere, ".jaira", "x.html"), "x", "utf8");
-      expect(await call({ file_path: join(elsewhere, ".jaira", "x.html") })).toMatchObject({ error: expect.stringMatching(/inside \.jaira\//) as unknown as string });
+      writeFileSync(join(elsewhere, ".jaira", "x.html"), "<title>Theirs</title>", "utf8");
+      expect((await call({ file_path: join(elsewhere, ".jaira", "x.html") }))["artifact"]).toMatchObject({ title: "Theirs" });
     } finally {
       rmSync(elsewhere, { recursive: true, force: true });
     }
-    expect(await call({ file_path: write(".jaira/settings.html", "x") })).toMatchObject({ error: expect.stringMatching(/inside \.jaira\//) as unknown as string });
+    expect((await call({ file_path: write(".jaira/settings.html", "<title>Settings</title>") }))["artifact"]).toMatchObject({ title: "Settings" });
     // What this task's tools wrote into its own artifact folder (a screenshot, a page) is its own to show.
     expect((await call({ file_path: write(".jaira/system/artifacts/t-1/system/shot.html", "<title>Shot</title>") }))["artifact"]).toMatchObject({ title: "Shot" });
   });
@@ -188,8 +189,10 @@ describe("a design canvas, as the Design type's instructions make one", () => {
     expect(Object.keys(filesAt(store, "t-1", "a-1"))).toEqual(["project/canvas.json"]);
     expect(await call({ action: "publish", url, root, file_path: write("c/other/x.html", "x") })).toMatchObject({ error: expect.stringMatching(/under `project\/`/) as unknown as string });
     expect(await call({ action: "publish", url, root, file_path: write("c/project/../project/x y.html", "x") })).toMatchObject({ error: expect.stringMatching(/under `project\/`/) as unknown as string });
-    // Every file named is read where it is — the gate judged each at `read_file`'s line — but none under .jaira/.
-    expect(await call({ action: "publish", url, root, file_path: join(root, "project/canvas.json"), files: { "project/Leak.dc.html": write(".jaira/settings.json", "{}") } })).toMatchObject({ error: expect.stringMatching(/inside \.jaira\//) as unknown as string });
+    // Every file named is read where it is — the gate judged each at `read_file`'s line, `.jaira/` too.
+    const kept = await call({ action: "publish", url, root, file_path: join(root, "project/canvas.json"), files: { "project/Kept.dc.html": write(".jaira/kept.dc.html", "<x-dc>K</x-dc>") } });
+    expect(kept["error"]).toBeUndefined();
+    expect(Object.keys(filesAt(store, "t-1", "a-1"))).toContain("project/Kept.dc.html");
   });
 
   it("takes each file's text in the call — no file written, no `root` — and a later publish keeps what it did not send", async () => {

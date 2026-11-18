@@ -6,18 +6,29 @@
  * fork of the codebase: `execEnv: "windows"` spawns natively, and
  * `{ wsl: "Ubuntu" }` wraps the same command as
  * `wsl.exe -d Ubuntu --cd <linuxCwd> -- <cmd …>`, translating the working
- * directory through the one {@link toWslPath} mapper.
+ * directory through the one {@link toWslPath} mapper. A workspace's container
+ * (`{ container: "jaira-…" }`, decision 0027) wraps it as
+ * `docker exec -i -w <cwd> <container> <cmd …>` — the same path, mounted the same.
  *
  * Arguments are passed as an argv array and never concatenated into a shell
  * string: no shell means no quoting rules to get wrong, and nothing in a task
  * title or branch name can turn into shell syntax.
  */
 import { spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
 import { hostNode, resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
-import { isWslEnv, toWslPath, type ExecEnv } from "./paths";
+import { createLogger } from "@declarative-ai/log";
+import { refusal } from "@jaira/shared";
+import { containerRefusal, isContainerEnv, isWslEnv, toWslPath, type ContainerExecEnv, type ExecEnv } from "./paths";
 import { detachedForTree, killTree, type KillTreeOptions } from "./killTree";
+
+/** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
+const log = createLogger("jaira.runtime.exec");
+
+/** After a person's signal ended an interactive command's shell, how long what it started has to finish before it is killed. */
+const INTERRUPT_GRACE_MS = 500;
 
 export interface ExecOptions {
   cwd?: string;
@@ -136,13 +147,26 @@ function programDeps(overrides: Partial<ProgramDeps> = {}): ProgramDeps {
   };
 }
 
+/**
+ * How a command is actually invoked. `stop`, for a command that runs somewhere killing its client does
+ * not reach (a container), is what ends it there: run once, on a timeout or an abort.
+ */
+export interface Invocation {
+  file: string;
+  argv: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+  stop?: { file: string; argv: string[] };
+}
+
 /** How a command is actually invoked for an environment (also what tests assert). */
 export function resolveInvocation(
   command: string,
   args: readonly string[],
   options: ExecOptions = {},
-): { file: string; argv: string[]; cwd?: string; env?: Record<string, string> } {
+): Invocation {
   const execEnv: ExecEnv = options.execEnv ?? "windows";
+  if (isContainerEnv(execEnv)) return containerInvocation(execEnv, command, args, options);
   if (!isWslEnv(execEnv)) {
     // A WSL command is a LINUX command; only a native one goes through Windows program resolution.
     const { file, prefix, env } = resolveProgram(command, programDeps(options.program));
@@ -159,6 +183,60 @@ export function resolveInvocation(
   return { file: "wsl.exe", argv };
 }
 
+/**
+ * What runs inside the container around a command: its own process group, its id written to a file
+ * named for this run, its exit code handed back. The command is started under `setsid`, so it and
+ * everything it starts are one group the stop can signal; an image without `setsid` runs it as it is,
+ * and the stop signals the command alone. Without job control a backgrounded command's stdin is
+ * /dev/null, so stdin is carried on fd 3 and given back to it.
+ */
+export const CONTAINER_RUN =
+  'f=$1; shift; exec 3<&0; if command -v setsid >/dev/null 2>&1; then setsid "$@" <&3 3<&- & else "$@" <&3 3<&- & fi; ' +
+  'p=$!; exec 3<&-; echo "$p" > "$f"; wait "$p"; c=$?; rm -f "$f"; exit "$c"';
+
+/**
+ * The stop: TERM to the run's group (or to the command, where it has none), KILL two seconds later to
+ * what is left. Nothing to do once the run has ended and taken its file with it.
+ */
+export const CONTAINER_STOP =
+  'f=$1; [ -f "$f" ] || exit 0; p=$(cat "$f"); kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null; ' +
+  'sleep 2; kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null; rm -f "$f"; exit 0';
+
+/**
+ * A command run inside a workspace's container (decision 0027):
+ * `docker exec -i [-u <user>] [-w <cwd>] [-e NAME …] <container> sh -c <run> jaira <pid file> <command> <args…>`.
+ *
+ * Ending `docker exec` does not end what it started: Docker keeps the process running in the container.
+ * So the command runs in a group of its own whose id is kept in `/tmp/.jaira-exec-<token>.pid`, and the
+ * invocation's `stop` — `docker exec <container> sh -c <stop> …`, as the same user — signals that group.
+ *
+ * The cwd is handed over as it is — the workspace is mounted at the same path inside as outside.
+ * Each variable is passed by NAME only: `docker exec -e NAME` takes the value from docker's own
+ * environment, which is this process's with the command's laid over it (`NodeExec` spawns docker with
+ * it), so a credential is never on a command line — where every process listing, and the jobs table
+ * that records each child's argv, would show it. `-i` keeps stdin, so a command handed text gets it
+ * and its end.
+ */
+export function containerInvocation(
+  execEnv: ContainerExecEnv,
+  command: string,
+  args: readonly string[],
+  options: Pick<ExecOptions, "cwd" | "env"> = {},
+  platform: string = process.platform,
+  token: string = randomBytes(6).toString("hex"),
+): Invocation & { stop: { file: string; argv: string[] } } {
+  const refused = containerRefusal(platform);
+  if (refused !== undefined) throw refusal(log, refused);
+  const pidFile = `/tmp/.jaira-exec-${token}.pid`;
+  const user = execEnv.user !== undefined ? ["-u", execEnv.user] : [];
+  const argv = ["exec", "-i", ...user];
+  if (options.cwd !== undefined) argv.push("-w", options.cwd);
+  for (const name of Object.keys(options.env ?? {})) argv.push("-e", name);
+  argv.push(execEnv.container, "sh", "-c", CONTAINER_RUN, "jaira", pidFile, command, ...args);
+  // docker itself runs here, with no cwd of its own: the container's is `-w`.
+  return { file: "docker", argv, stop: { file: "docker", argv: ["exec", ...user, execEnv.container, "sh", "-c", CONTAINER_STOP, "jaira", pidFile] } };
+}
+
 export class NodeExec implements Exec {
   constructor(
     private readonly defaults: {
@@ -170,6 +248,22 @@ export class NodeExec implements Exec {
       killTree?: KillTreeOptions;
     } = {},
   ) {}
+
+  /**
+   * Run a command's stop, not waited for: the command it ends settles its own promise. A stop that
+   * cannot run (Docker gone, the container gone) is logged — the command's client is killed regardless.
+   */
+  private stopInside(stop: { file: string; argv: string[] }, env: Record<string, string> | undefined): void {
+    try {
+      const child = spawn(stop.file, stop.argv, { env: env !== undefined ? { ...process.env, ...env } : process.env, windowsHide: true, shell: false, stdio: "ignore" });
+      child.on("error", (error) => log.warn("could not stop a command in its container", { error: error.message }));
+      child.on("exit", (code) => {
+        if (code !== 0) log.warn("stopping a command in its container failed", { code });
+      });
+    } catch (error) {
+      log.warn("could not stop a command in its container", { error: error instanceof Error ? error.message : String(error) });
+    }
+  }
 
   /** Report a failure in the observer itself — never rethrow, because it is not the command's fault. */
   private reportObserverError(error: unknown, phase: "spawn" | "exit" | "output"): void {
@@ -189,7 +283,7 @@ export class NodeExec implements Exec {
         ? { env: { ...this.defaults.env, ...options.env } }
         : {}),
     };
-    const { file, argv, cwd, env: needs } = resolveInvocation(command, args, merged);
+    const { file, argv, cwd, env: needs, stop } = resolveInvocation(command, args, merged);
     const printable = [file, ...argv].join(" ");
 
     return new Promise<ExecResult>((resolve, reject) => {
@@ -251,7 +345,15 @@ export class NodeExec implements Exec {
       //
       // The children here are not spawned detached (short-lived commands should still die with the
       // shell that started them), so on POSIX this is the single-process kill it always was.
+      //
+      // A command in a container is not reached that way — Docker keeps it running when its `docker
+      // exec` ends — so its stop runs first (once): it signals the command's group in the container.
+      let stopped = false;
       const kill = (): void => {
+        if (stop !== undefined && !stopped) {
+          stopped = true;
+          this.stopInside(stop, merged.env);
+        }
         if (!child.killed) killTree(child, "SIGTERM", this.defaults.killTree);
       };
       const timer =
@@ -306,11 +408,26 @@ export class NodeExec implements Exec {
       if (merged.interactive !== undefined && merged.stdin === undefined) {
         // As below: a program that exits without reading its stdin closes the pipe under a write.
         child.stdin?.on("error", () => undefined);
+        // A signal that ended the shell but not all it started: a group member that missed it (measured
+        // 2026-11-18: SIGINT landing as `sh` forks `sleep` kills the shell, and `sleep` lives on, holding
+        // the output open, so the command never closes) is ended once the shell has gone — after a
+        // moment, for what is still finishing its last write.
+        let signalled = false;
+        child.on("exit", () => {
+          if (!signalled) return;
+          setTimeout(() => {
+            if (!settled) killTree(child, "SIGKILL", this.defaults.killTree);
+          }, INTERRUPT_GRACE_MS).unref?.();
+        });
         try {
           merged.interactive({
             write: (text) => (child.stdin !== null && child.stdin.writable ? child.stdin.write(text) : false),
             signal: (signal) => {
-              if (child.exitCode === null && child.signalCode === null) killTree(child, signal, this.defaults.killTree);
+              if (child.exitCode !== null || child.signalCode !== null) return;
+              signalled = true;
+              // A command in a container is reached only by its stop (above): Ctrl-C ends it there.
+              if (stop !== undefined) kill();
+              else killTree(child, signal, this.defaults.killTree);
             },
             ...(child.pid !== undefined ? { pid: child.pid } : {}),
           });

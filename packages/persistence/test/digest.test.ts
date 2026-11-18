@@ -6,7 +6,7 @@
  * the authored file arriving verbatim, the inherited operation being visible
  * even though no file says it, and nothing being dropped quietly.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -194,3 +194,17 @@ describe("boundaries — a subtree another description owns", () => {
     expect(digest.markdown).not.toContain("What `workflows/feature/plan/critique.md` says it does:");
   });
 });
+
+describe("a state from one of the settings' newer layers (decision 0023, amended 2026-11-18)", () => {
+  it("is shown as the file it is read from — Just you's — named with its layer's root", () => {
+    const personal = join(testHome(), "personal", "workflows", "feature", "plan");
+    mkdirSync(personal, { recursive: true });
+    writeFileSync(join(personal, "goals.json"), JSON.stringify({ ...(specPlanningFiles()["feature/plan/goals.json"] as object), description: "just mine" }, null, 2), "utf8");
+    const digest = workflowDigest(project);
+    expect(digest.markdown).toContain("authored (~/.jaira/personal/workflows/feature/plan/goals.json):");
+    expect(digest.markdown).toContain('"description": "just mine"');
+    // The project's own still named as it always was.
+    expect(digest.markdown).toContain("authored (feature/plan/context.json):");
+  });
+});
+

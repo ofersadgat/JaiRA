@@ -50,6 +50,7 @@ The whole desktop window, drawn edge to edge with no frame or menu bar of the op
 - A sidebar row changes the room, the project or both. The title bar's address moves through levels inside the room, as in [drill-in-and-back-out](../../ux/patterns/drill-in-and-back-out.md). An inbox strip entry switches to Tasks and selects the task that asks.
 - Settings, Logs, Debug and Components are left through the sidebar's settings sheet, which returns to the room the person came from.
 - Nothing inside the page closes the window. The window's three buttons are the operating system's own: over the rail's head at the top left on macOS, at the top right on Windows and Linux.
+- Closing the window quits the app on Windows and Linux, after the same question a quit asks while work is running. On macOS the installed app keeps running in the Dock, where clicking its icon opens the window again. A development build quits there too, so a closed dev app is never left running on code an earlier build compiled.
 
 ## The sidebar and the context panel keep their widths, and unsaved edits go when the window does
 

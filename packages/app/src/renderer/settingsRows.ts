@@ -4,7 +4,7 @@
  * a row's hint.
  */
 import { inheritedValue, pathKeys, statesPath, type ConfigLayer, type ConfigPath, type ConfigView } from "@jaira/shared/browser";
-import { SOURCE_WORDS } from "./layerLabels";
+import { sourceWordsOf } from "./layerLabels";
 
 /**
  * The layer a Settings page is editing, as every row on it needs to know it — see
@@ -16,6 +16,13 @@ export interface SettingsLayerView {
   view: ConfigView | null;
   /** Draw only the rows this layer states. */
   onlyStated: boolean;
+  /** The path's own names, for "instead of … from atlas" (`settingsScope.ts`'s `pathNamesOf`). */
+  names?: { project?: string; machine?: string } | undefined;
+}
+
+/** The person's own layers: the ones whose page can show only what they change, each row saying what it is instead of. */
+export function isPersonalLayer(layer: ConfigLayer): boolean {
+  return layer === "you" || layer === "projectYou";
 }
 
 /**
@@ -37,9 +44,9 @@ export function shortValue(value: unknown, path = ""): string {
 }
 
 /**
- * What a row on a layered page does in the Just you view — whether it is drawn, and the line it
- * carries — for the config `paths` it writes, on the layer `at` (null outside a Settings page). See
- * `useLayerRow`.
+ * What a row on a layered page does in a personal view (Just you, or you in a project) — whether it is
+ * drawn, and the line it carries — for the config `paths` it writes, on the layer `at` (null outside a
+ * Settings page). See `useLayerRow`.
  */
 export function layerRowOf(
   at: SettingsLayerView | null,
@@ -52,14 +59,14 @@ export function layerRowOf(
   const own = paths?.filter((path) => statesPath(doc, path)) ?? [];
   const here = stated ?? own.length > 0;
   let instead: string | undefined;
-  if (here && at.layer === "you" && at.view !== null && own.length > 0) {
+  if (here && isPersonalLayer(at.layer) && at.view !== null && own.length > 0) {
     const path = own[0]!;
-    const { value, from } = inheritedValue(at.view, path, "you");
+    const { value, from } = inheritedValue(at.view, path, at.layer);
     const dotted = pathKeys(path).join(".");
     instead =
       value === undefined && from === "built in"
         ? "set nowhere else"
-        : `instead of ${format !== undefined ? format(value, dotted) : shortValue(value, dotted)} from ${SOURCE_WORDS[from]}`;
+        : `instead of ${format !== undefined ? format(value, dotted) : shortValue(value, dotted)} from ${sourceWordsOf(from, at.names)}`;
   }
   return { hidden: at.onlyStated && !here, instead };
 }
@@ -71,7 +78,7 @@ export function inheritLabelOf(at: SettingsLayerView | null, paths: readonly Con
   const { value, from } = inheritedValue(at.view, path, at.layer);
   const dotted = pathKeys(path).join(".");
   const words = value === undefined ? "not set" : format !== undefined ? format(value, dotted) : shortValue(value, dotted);
-  return `Back to ${words}, from ${SOURCE_WORDS[from]}`;
+  return `Back to ${words}, from ${sourceWordsOf(from, at.names)}`;
 }
 
 /** The first sentence of a hint, and the rest — the split a settings row draws. */

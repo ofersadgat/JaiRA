@@ -3,6 +3,7 @@ import { Linking } from "react-native";
 import { View } from "@tamagui/core";
 import type { CopyChoice, MachinesView, OutboxView, ProjectSummary } from "@jaira/shared/browser";
 import { machinesMoved } from "@jaira/ui/machinesModel";
+import { addOptionsOf, withoutPart } from "@jaira/ui/settingsScope";
 import type { AskSpec } from "@jaira/ui/menuTypes";
 import {
   CODE_SCHEMA,
@@ -15,6 +16,7 @@ import {
   diskWords,
   errorOf,
   groupedWords,
+  isOlderEngine,
   machineRowsOf,
   nearbyLogLines,
   pairCodeWords,
@@ -37,6 +39,7 @@ import { copyText } from "../../clipboard";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { AskDialog } from "../files/AskDialog";
+import { FolderBrowser } from "../floats/FolderBrowser";
 import { MachineChip } from "../MachineChip";
 import { MachineIcon } from "../MachineIcon";
 import { NeedsAttention } from "./NeedsAttention";
@@ -69,6 +72,9 @@ export function MachinesPage(): JSX.Element {
   const { state, actions } = useShell();
   const grouped = state.settings.ui.groupWorkspaces !== false;
   const [view, setView] = useMachines();
+  // A paired machine in Settings' path: its own section, read and changed there.
+  const named = state.settingsPath.machine;
+  const peer = named !== undefined && named.self !== true && view?.machines.some((m) => m.id === named.id) === true ? named.id : undefined;
   return (
     <SettingsLayerContext.Provider value={null}>
       {view === undefined ? (
@@ -76,7 +82,7 @@ export function MachinesPage(): JSX.Element {
       ) : (
         <>
           <NeedsAttention page="machines" />
-          <ThisMachine view={view} onView={setView} />
+          {peer !== undefined ? <AnotherMachine key={peer} id={peer} fleet={view} /> : <ThisMachine view={view} onView={setView} />}
           <YourMachines view={view} onView={setView} />
           <Outbox />
           <SettingsEverywhere view={view} onView={setView} />
@@ -113,39 +119,123 @@ function ErrorWords({ error }: { error: string }): JSX.Element {
 }
 
 function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
-  const t = useTokens();
-  const [label, setLabel] = useState(view.self.label);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  useEffect(() => setLabel(view.self.label), [view.self.label]);
-  const act = (work: Promise<MachinesView>): void => {
-    setBusy(true);
-    setError(undefined);
-    work.then(onView, (e: unknown) => setError(errorOf(e))).finally(() => setBusy(false));
-  };
-  const rename = (): void => {
-    if (label.trim() !== "" && label.trim() !== view.self.label) act(invoke("machines:rename", { label: label.trim() }));
-  };
   return (
     <SettingsSection id="this" title={W.this.title} info={W.this.info}>
+      <MachineRows view={view} onView={onView} />
+      <TailnetRow view={view} onView={onView} />
+    </SettingsSection>
+  );
+}
+
+/**
+ * A paired machine's own section, when Settings' path names it: what it says of itself, read from it
+ * (`machines:view` with its id — the fleet's cached view is this machine's), and changed there.
+ */
+function AnotherMachine({ id, fleet }: { id: string; fleet: MachinesView }): JSX.Element {
+  const [view, setView] = useState<MachinesView | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const label = fleet.machines.find((m) => m.id === id)?.label ?? "That machine";
+  useEffect(() => {
+    let live = true;
+    invoke("machines:view", { machine: id }).then(
+      (v) => live && setView(v),
+      (e: unknown) => live && setError(errorOf(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [id]);
+  return (
+    <SettingsSection id="this" title={view?.self.label ?? label} info={W.another.info}>
+      {view !== undefined ? (
+        <MachineRows view={view} onView={setView} machine={id} />
+      ) : (
+        <SettingsRow name={label} description={error !== undefined ? <ErrorWords error={error} /> : W.reading.replace("this machine", label)} />
+      )}
+    </SettingsSection>
+  );
+}
+
+/**
+ * A machine's name, tags, what it is and its projects folder — this machine's, or (`machine`) a paired
+ * one's, every change sent to it.
+ */
+function MachineRows({ view, onView, machine }: { view: MachinesView; onView: (v: MachinesView) => void; machine?: string }): JSX.Element {
+  const [label, setLabel] = useState(view.self.label);
+  const [folder, setFolder] = useState(view.self.projectsFolder ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [folderError, setFolderError] = useState<string | undefined>(undefined);
+  const [browsing, setBrowsing] = useState(false);
+  useEffect(() => setLabel(view.self.label), [view.self.label]);
+  useEffect(() => setFolder(view.self.projectsFolder ?? ""), [view.self.projectsFolder]);
+  const there = machine !== undefined ? { machine } : {};
+  const act = (work: Promise<MachinesView>, onError: (message: string) => void = setError): void => {
+    setBusy(true);
+    setError(undefined);
+    setFolderError(undefined);
+    work
+      .then((next) => {
+        onView(next);
+        // The fleet's own view names the machines; a paired machine's new name reaches it by its announcement.
+        if (machine !== undefined) machinesMoved();
+      }, (e: unknown) => onError(isOlderEngine(e) ? `${view.self.label} ${W.projectsFolder.older}` : errorOf(e)))
+      .finally(() => setBusy(false));
+  };
+  const rename = (): void => {
+    if (label.trim() !== "" && label.trim() !== view.self.label) act(invoke("machines:rename", { label: label.trim(), ...there }));
+  };
+  const chooseFolder = (next: string): void => {
+    const chosen = next.trim();
+    if (chosen === (view.self.projectsFolder ?? "")) return;
+    act(invoke("machines:projectsFolder", { ...(chosen !== "" ? { folder: chosen } : {}), ...there }), setFolderError);
+  };
+  const browseMachine = { id: machine ?? view.self.id, label: view.self.label };
+  return (
+    <>
       <SettingsRow
         name={W.name.name}
         description={error !== undefined ? <ErrorWords error={error} /> : W.name.description}
         control={<TextField value={label} label="Machine name" disabled={busy} onChange={setLabel} onBlur={rename} onSubmit={rename} />}
       />
-      <SettingsRow name={W.tags.name} description={W.tags.description} control={<Tags os={view.self.os} tags={view.self.tags} disabled={busy} onChange={(tags) => act(invoke("machines:tags", { tags }))} />} />
+      <SettingsRow name={W.tags.name} description={W.tags.description} control={<Tags os={view.self.os} tags={view.self.tags} disabled={busy} onChange={(tags) => act(invoke("machines:tags", { tags, ...there }))} />} />
       <SettingsRow
         name={W.form.name}
         description={W.form.description}
         control={
           <>
             <MachineIcon face={{ shape: view.self.form, mark: view.self.os }} size={20} />
-            <Segmented value={view.self.form} options={FORM_CHOICES} label={W.form.name} disabled={busy} onChange={(form) => act(invoke("machines:form", { form }))} />
+            <Segmented value={view.self.form} options={FORM_CHOICES} label={W.form.name} disabled={busy} onChange={(form) => act(invoke("machines:form", { form, ...there }))} />
           </>
         }
       />
-      <TailnetRow view={view} onView={onView} />
-    </SettingsSection>
+      <SettingsRow
+        name={W.projectsFolder.name}
+        description={folderError !== undefined ? <Words parts={[W.projectsFolder.description, " ", { error: sentence(folderError) }]} /> : `${W.projectsFolder.description} ${W.projectsFolder.empty}`}
+        control={
+          <>
+            <TextField value={folder} label="Projects folder" mono placeholder={view.self.projectsFolder ?? "~/Code"} disabled={busy} width={220} onChange={setFolder} onBlur={() => chooseFolder(folder)} onSubmit={() => chooseFolder(folder)} />
+            <Button kind="ghost" disabled={busy} onPress={() => setBrowsing(true)}>
+              {W.projectsFolder.change}
+            </Button>
+          </>
+        }
+      />
+      {browsing ? (
+        <FolderBrowser
+          machines={[browseMachine]}
+          initial={browseMachine.id}
+          mode="folder"
+          startDir={view.self.projectsFolder}
+          onClose={() => setBrowsing(false)}
+          onChosen={(_, dir) => {
+            setBrowsing(false);
+            setFolder(dir);
+            chooseFolder(dir);
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -273,7 +363,20 @@ function TailnetRow({ view, onView }: { view: MachinesView; onView: (v: Machines
 
 /** Every device on the tailnet (decision 0022 §4), with Pair or Unpair; Refresh asks them all again. */
 function YourMachines({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
+  const { state, actions } = useShell();
   const [busy, setBusy] = useState(false);
+  // Pressing a machine puts it in Settings' path (Just you goes: a machine with it makes no layer), and
+  // this page shows its own section. This machine's row puts this machine there.
+  const named = state.settingsPath.machine;
+  const pick = (row: MachineRow): void => {
+    if (row.machine === undefined) return;
+    const path = withoutPart(withoutPart(state.settingsPath, "you"), "machine");
+    // A project in the path stays only where it has a workspace on that machine.
+    const ctx = { projects: state.projects, grouped: state.settings.ui.groupWorkspaces !== false, self: { id: view.self.id, label: view.self.label }, machines: view.machines.map((m) => ({ id: m.id, label: m.label })) };
+    const there = addOptionsOf(path, ctx).some((option) => option.kind === "machine" && option.id === row.machine);
+    const machine = { id: row.machine, ...(row.self === true ? { self: true as const } : {}) };
+    actions.setSettingsPath(there ? { ...path, machine } : { machine });
+  };
   const signedIn = view.self.tailnet.state === "on" || view.self.tailnet.state === "removing";
   const rows = machineRowsOf(view);
   const refresh = (): void => {
@@ -298,7 +401,11 @@ function YourMachines({ view, onView }: { view: MachinesView; onView: (v: Machin
         ) : undefined
       }
     >
-      {!signedIn && rows.length === 1 ? <SettingsRow {...W.notSignedIn} /> : rows.map((row) => <DeviceRow key={row.key} row={row} onView={onView} />)}
+      {!signedIn && rows.length === 1 ? (
+        <SettingsRow {...W.notSignedIn} />
+      ) : (
+        rows.map((row) => <DeviceRow key={row.key} row={row} onView={onView} picked={row.machine !== undefined && named?.id === row.machine} onPick={row.machine !== undefined ? () => pick(row) : undefined} />)
+      )}
       <PairPhone view={view} onView={onView} />
     </SettingsSection>
   );
@@ -384,8 +491,12 @@ function PairPhone({ view, onView }: { view: MachinesView; onView: (v: MachinesV
 
 const TONES: Record<NonNullable<MachineRow["state"]>["tone"], "ok" | "warn" | "bad" | "dim"> = { ok: "ok", warn: "warn", bad: "bad", dim: "dim" };
 
-/** One device: its icon, name and what it is; its state; Pair, Unpair, or its admin console page; and the code field while asked. */
-function DeviceRow({ row, onView }: { row: MachineRow; onView: (v: MachinesView) => void }): JSX.Element {
+/**
+ * One device: its icon, name and what it is; its state; Pair, Unpair, or its admin console page; and the
+ * code field while asked. A machine's name is pressable (`onPick`): it goes into Settings' path, and the
+ * row is tinted while it is there.
+ */
+function DeviceRow({ row, onView, picked = false, onPick }: { row: MachineRow; onView: (v: MachinesView) => void; picked?: boolean; onPick?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -426,19 +537,38 @@ function DeviceRow({ row, onView }: { row: MachineRow; onView: (v: MachinesView)
       </Button>
     );
   const sub = open && row.asking !== undefined ? askingWords(row.name, row.asking) : row.sub;
+  const name = (
+    <View flexDirection="row" alignItems="center" gap={11} minWidth={0} flexShrink={1}>
+      <MachineIcon face={row.face} size={20} {...(row.grey ? { color: String(t.v("dim")) } : {})} />
+      <Txt spec={{ voice: "app", scale: 1.1, weight: 600, lineHeight: 1.3, color: row.grey ? "dim" : "text" }} numberOfLines={1} flexShrink={0}>
+        {row.name}
+      </Txt>
+      <Txt spec={{ ...small, color: "dim" }} ellip minWidth={0} flexShrink={1}>
+        {row.kind}
+      </Txt>
+    </View>
+  );
   return (
-    <>
+    <View {...(picked ? { backgroundColor: t.v("tint-accent") as never } : {})}>
       <SettingsRow
         name={
-          <View flexDirection="row" alignItems="center" gap={11} minWidth={0} flexShrink={1}>
-            <MachineIcon face={row.face} size={20} {...(row.grey ? { color: String(t.v("dim")) } : {})} />
-            <Txt spec={{ voice: "app", scale: 1.1, weight: 600, lineHeight: 1.3, color: row.grey ? "dim" : "text" }} numberOfLines={1} flexShrink={0}>
-              {row.name}
-            </Txt>
-            <Txt spec={{ ...small, color: "dim" }} ellip minWidth={0} flexShrink={1}>
-              {row.kind}
-            </Txt>
-          </View>
+          onPick !== undefined ? (
+            <Press
+              onPress={onPick}
+              label={`${row.name}: its settings`}
+              title={row.self === true ? "This machine's own settings" : `${row.name}'s own settings, read and changed there`}
+              minWidth={0}
+              flexShrink={1}
+              borderRadius={6}
+              marginHorizontal={-4}
+              paddingHorizontal={4}
+              box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+            >
+              {name}
+            </Press>
+          ) : (
+            name
+          )
         }
         {...(sub !== undefined || error !== undefined ? { description: <Words parts={[...(sub !== undefined ? [sub] : []), ...(error !== undefined ? [" ", { error: sentence(error) }] : [])]} /> } : {})}
         control={
@@ -465,7 +595,7 @@ function DeviceRow({ row, onView }: { row: MachineRow; onView: (v: MachinesView)
         ) : null}
       </SettingsRow>
       {asking !== undefined ? <AskDialog spec={asking} onCancel={() => setAsking(undefined)} /> : null}
-    </>
+    </View>
   );
 }
 

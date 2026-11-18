@@ -63,6 +63,13 @@ describe("a publish, judged at read_file's line", () => {
     expect(publish({ action: "read", url, path: "project/canvas.json" }).mode).toBeUndefined();
   });
 
+  it("publishes from .jaira/ as read_file reads there, and never the machine key (2026-11-17)", () => {
+    // No code keeps a publish out of `.jaira/` any more: the shipped sets' read line does, at the one file.
+    expect(publish({ file_path: `${ROOT}/.jaira/system/artifacts/t-1/shot.html` }).mode).toBeUndefined();
+    expect(publish({ file_path: `${ROOT}/.jaira/settings.json` }).mode).toBeUndefined();
+    expect(publish({ file_path: `${namedPlacesOf(ROOT)["~"]}/.jaira/system/machine.key` }).mode).toBe("deny");
+  });
+
   it("refuses where read_file refuses", () => {
     const strict = publisher(parsePermissionSet({ read_file: { "**": "deny", $PROJECT: "allow" }, show_artifact: "allow", other: "deny" }).permissionSet, "$/permission-sets/strict");
     expect(strict({ file_path: `${ROOT}/out/page.html` }).mode).toBeUndefined();

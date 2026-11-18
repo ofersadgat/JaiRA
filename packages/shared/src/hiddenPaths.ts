@@ -44,7 +44,7 @@
 import { globToRegExp, normalizePath } from "./scopes";
 // `./settings` imports nothing, so this is a leaf-ward edge and not a cycle — and naming the files
 // by their constants is what keeps the default from going stale the way the last list did.
-import { PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
+import { LOCAL_SETTINGS_FILE_NAME, MACHINE_SETTINGS_FILE_NAME, PERSONAL_SETTINGS_FILE_NAME, SETTINGS_FILE_NAME, USER_SETTINGS_FILE_NAME } from "./settings";
 
 /**
  * The one subdirectory of a root that a person does not own.
@@ -114,9 +114,11 @@ export const HIDDEN_PATH_GROUPS: readonly HiddenPathGroup[] = [
       `${JAIRA_DIR_NAME}/${SYSTEM_DIR_NAME}`,
       SETTINGS_FILE_NAME,
       `${JAIRA_DIR_NAME}/${SETTINGS_FILE_NAME}`,
+      `${JAIRA_DIR_NAME}/${LOCAL_SETTINGS_FILE_NAME}`,
       USER_SETTINGS_FILE_NAME,
       "sync.json",
       PERSONAL_SETTINGS_FILE_NAME,
+      MACHINE_SETTINGS_FILE_NAME,
     ],
   },
   { id: "secrets", name: "Secrets", patterns: ["**/.env", "**/.env.*"] },
@@ -144,7 +146,7 @@ export function hiddenGroupOf(pattern: string): HiddenPathGroup | undefined {
  * Its own vocabulary rather than `ConfigLayer`, because a default is not a layer anybody writes —
  * and the person's own layer is named `you` here whatever its file is called.
  */
-export type HiddenRuleLayer = "built in" | "base" | "project" | "you";
+export type HiddenRuleLayer = "built in" | (typeof HIDDEN_RULE_LAYERS)[number];
 
 /** One rule of the effective list, and the layer that states it. */
 export interface HiddenRule {
@@ -152,8 +154,8 @@ export interface HiddenRule {
   layer: HiddenRuleLayer;
 }
 
-/** The layers that add rules, weakest first — the order their lists are appended in. */
-export const HIDDEN_RULE_LAYERS = ["base", "project", "you"] as const;
+/** The layers that add rules, weakest first — the order their lists are appended in (`CONFIG_LAYERS`'). */
+export const HIDDEN_RULE_LAYERS = ["base", "project", "machine", "projectMachine", "you", "projectYou"] as const;
 
 /** A list as written, cleaned: trimmed, and without blanks or a bare `!`, which would read as a rule. */
 function cleanPatterns(patterns: readonly string[] | undefined): string[] {

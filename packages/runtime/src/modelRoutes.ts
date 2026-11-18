@@ -43,6 +43,7 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import {
   MODEL_ROUTE_KEYS,
   type JairaAgentConfig,
+  type JairaGenericCliAgent,
   type JairaExecutorDefinition,
   type JairaModelConfig,
   type EmbeddedWeightsReport,
@@ -54,9 +55,9 @@ import {
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CODEX_KEY_VARIABLES, agentSpawn, spawnWithKey, type AgentKey } from "./agents";
 import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
-import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
-import { AGENT_GENERIC_CLI, createGenericCliQuery, GENERIC_CLI_CAPS } from "./genericAgent";
+import { AGENT_GENERIC_CLI, bridgesOnly, createGenericCliQuery, genericCliCapsOf, genericCliToolsOf, unbridged } from "./genericAgent";
 import { defaultResolve, enabledAdapters, enabledGenericAgents } from "./executors";
 import { activePluginStore, resolvePluginRoot } from "./plugins";
 import type { Exec } from "./exec";
@@ -317,27 +318,38 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
     // the route believed a restricted state could run here enforced. `GENERIC_CLI_CAPS` is the same
     // honest record the function-path registration has always declared, and `approvalCallback: false`
     // is its runtime half: there is no channel to route an approver through, so one must not be built.
-    bind(
-      spec.name ?? AGENT_GENERIC_CLI,
-      // It declares no tools and no channel, so a permission set that refuses anything is refused here —
-      // what the engine's own rule did for a narrowing profile, now that there is no profile.
-      withAgentPermissionSet(
-        GENERIC_CLI_TOOLS,
-        new AgentCliExecutor({
-          label: spec.name ?? AGENT_GENERIC_CLI,
-          capabilities: GENERIC_CLI_CAPS,
-          approvalCallback: false,
-          query:
-            query ??
-            createGenericCliQuery(spec, {
-              ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-              ...(options.exec !== undefined ? { exec: options.exec } : {}),
-              ...(options.secret !== undefined ? { secret: options.secret } : {}),
-            }),
-        }),
-        { label: spec.name ?? AGENT_GENERIC_CLI },
-      ),
-    );
+    //
+    // A registration that turns the binary's own tools off and points it at the bridge (`mcp`,
+    // `builtinsOff`) is codex's case instead: what the state holds is served there and gated per call,
+    // so it declares `config`, and a read-only profile has no built-ins of claude's to deny up front. A
+    // call no permission set holds runs the binary as it always ran, with its own tools (`unbridged`).
+    const label = spec.name ?? AGENT_GENERIC_CLI;
+    const executorOf = (registration: JairaGenericCliAgent) =>
+      new AgentCliExecutor({
+        label,
+        capabilities: genericCliCapsOf(registration),
+        approvalCallback: false,
+        ...(bridgesOnly(registration) ? { mutatingNativeTools: [] } : {}),
+        query:
+          query ??
+          createGenericCliQuery(registration, {
+            ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+            ...(options.exec !== undefined ? { exec: options.exec } : {}),
+            ...(options.secret !== undefined ? { secret: options.secret } : {}),
+            ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
+          }),
+      });
+    if (!bridgesOnly(spec)) {
+      // With no channel declared, a permission set that refuses anything is refused here — what the
+      // engine's own rule did for a narrowing profile, now that there is no profile.
+      bind(label, withAgentPermissionSet(genericCliToolsOf(spec), executorOf(spec), { label }));
+      continue;
+    }
+    const bridged = executorOf(spec);
+    // The wrapper answers an unheld call with the executor it wraps, and a held one with `switched`'s.
+    // Its record is the held call's — `config` — which is the one a restricted state is checked against.
+    const wrapped = withAgentPermissionSet(genericCliToolsOf(spec), executorOf(unbridged(spec)), { label, switched: () => bridged });
+    bind(label, { ...(wrapped as unknown as Record<string, unknown>), capabilities: bridged.capabilities } as unknown as typeof wrapped);
   }
   return routes;
 }

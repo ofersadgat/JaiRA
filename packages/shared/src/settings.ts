@@ -47,6 +47,35 @@ export const USER_SETTINGS_FILE_NAME = "user-settings.json";
  */
 export const PERSONAL_SETTINGS_FILE_NAME = "personal-settings.json";
 
+/**
+ * One machine's own layer — "this machine" in Settings' path — in the shared root beside the other two.
+ * The same schema, read after the project's and before the person's; never synced, never in a checkout.
+ */
+export const MACHINE_SETTINGS_FILE_NAME = "machine-settings.json";
+
+/**
+ * A project on one machine — `.jaira/settings.local.json` beside the project's `settings.json`. A
+ * workspace is one folder on one machine, so its local file is that machine's: `.jaira/.gitignore`
+ * keeps it out of the repository.
+ */
+export const LOCAL_SETTINGS_FILE_NAME = "settings.local.json";
+
+/**
+ * The folder in the shared root that holds the person's settings for one project
+ * (`projects/<key>/personal-settings.json`), keyed by the project's repository identity.
+ */
+export const PROJECT_SETTINGS_DIR_NAME = "projects";
+
+/**
+ * The folders that hold a layer's FILES — its permission sets — for the settings layers that are not a
+ * workflow root of their own (`SetLayer`): this machine's (`<base>/machine/`), the person's
+ * (`<base>/personal/`), and a project's on one machine (`.jaira/local/`, which `.jaira/.gitignore`
+ * ignores). The person's for one project is `projects/<key>/` itself, beside its `personal-settings.json`.
+ */
+export const MACHINE_LAYER_DIR_NAME = "machine";
+export const PERSONAL_LAYER_DIR_NAME = "personal";
+export const LOCAL_LAYER_DIR_NAME = "local";
+
 /** Which palette the renderer paints — light or dark, once `system` has been resolved. */
 export type JairaTheme = "light" | "dark";
 

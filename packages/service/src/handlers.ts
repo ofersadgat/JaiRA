@@ -342,6 +342,12 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       service.setPlacementRules(request.project, request.order, request.caps)) as Handler,
     "placement:queue": (() => service.queuedPlacements()) as Handler,
     "files:browse": ((request: { dir?: string } | undefined) => service.browseDirectory(request?.dir)) as Handler,
+    "forge:repositories": ((request: { search?: string } | undefined) => service.workspaces.repositories(request ?? {})) as Handler,
+    "forge:branches": ((request: { host: string; project: string }) => service.workspaces.branches(request)) as Handler,
+    "workspace:inspect": ((request: { dir: string }) => service.workspaces.inspect(request)) as Handler,
+    "workspace:plan": ((request: Parameters<typeof service.workspaces.plan>[0]) => service.workspaces.plan(request)) as Handler,
+    "workspace:create": ((request: Parameters<typeof service.workspaces.create>[0]) => service.workspaces.create(request)) as Handler,
+    "workspace:cancel": ((request: { jobId: string }) => service.workspaces.cancel(request)) as Handler,
     "machines:outbox": (() => service.federation.outboxView()) as Handler,
     "machines:withdraw": ((request: { id: string }) => {
       service.federation.withdraw(request.id);
@@ -351,6 +357,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "placement:change": ((request: Parameters<typeof service.changeQueued>[0]) => service.changeQueued(request)) as Handler,
     "environment:view": ((request: { workspace: string }) => service.environmentView(request.workspace)) as Handler,
     "machines:form": ((request: { form: MachineForm }) => service.fleet.setForm(request.form)) as Handler,
+    "machines:projectsFolder": ((request: { folder?: string } | undefined) => service.fleet.setProjectsFolder(typeof request?.folder === "string" ? request.folder : undefined)) as Handler,
     "health:dismissAll": (() => {
       service.health.dismissAll();
       return service.health.list();

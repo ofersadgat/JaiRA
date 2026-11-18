@@ -45,7 +45,7 @@ import {
   type PendingApproval,
   type TextSpan,
   type PermissionSetAddition,
-  type WritableLayer,
+  type WritableSetLayer,
 } from "@jaira/shared/browser";
 
 /** The four hue tokens a part can take, in the order they are handed out. */
@@ -323,7 +323,7 @@ export interface WhatChoice {
 /** A hint is words, with the text that will be WRITTEN set apart so the surface can set it in the data face. */
 export type HintPiece = string | { code: string };
 
-export type Reach = "once" | "run" | `add:${WritableLayer}`;
+export type Reach = "once" | "run" | `add:${WritableSetLayer}`;
 
 export interface ReachItem {
   reach: Reach;
@@ -402,14 +402,44 @@ export function middleOut(text: string, max = 44): string {
   return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - (keep - head)).join("")}`;
 }
 
-const LAYER_WORDS: Record<WritableLayer, string> = { project: "in this project", base: "for all projects" };
+/** Where an "Add to" writes, as its menu says it — the settings' six layers (decision 0023, amended 2026-11-18). */
+const LAYER_WORDS: Record<WritableSetLayer, string> = {
+  project: "in this project",
+  base: "for all projects",
+  machine: "on this machine",
+  projectMachine: "in this project on this machine",
+  you: "for just you",
+  projectYou: "for you in this project",
+};
+
+/** The file an override follows, in words: `the built-in permission set`, `this machine's`. */
+function followedWords(follows: string): string {
+  const root = follows.slice(0, follows.indexOf("/"));
+  const words: Record<string, string> = {
+    $SYSTEM: "the built-in permission set",
+    $BASE: "the shared permission set",
+    $JAIRA: "this project's",
+    $MACHINE: "this machine's",
+    $PROJECTMACHINE: "this project on this machine's",
+    $YOU: "yours",
+  };
+  return words[root] ?? follows;
+}
+
+/**
+ * The file "Add to" starts on among one layer's files: the project's, else Shared's — what it was before
+ * the other four could be written — else the nearest.
+ */
+function preferredOf<T extends { addTo: WritableSetLayer }>(options: readonly T[]): T | undefined {
+  return options.find((o) => o.addTo === "project") ?? options.find((o) => o.addTo === "base") ?? options[0];
+}
 
 function addHint(target: ApprovalPermissionSetTarget, written: string): HintPiece[] {
   const hint: HintPiece[] =
     target.follows !== undefined
-      ? [`creates ${shortFile(target.file)} with `, { code: written }, `, following ${target.follows.startsWith("$SYSTEM/") ? "the built-in permission set" : "the shared permission set"}`]
+      ? [`creates ${shortFile(target.file)} with `, { code: written }, `, following ${followedWords(target.follows)}`]
       : ["writes ", { code: written }, ` to ${shortFile(target.file)}`];
-  if (target.shadowed === true) hint.push(" — this project's own copy still wins here");
+  if (target.shadowed === true) hint.push(" — a nearer copy of it still wins here");
   return hint;
 }
 
@@ -444,7 +474,7 @@ export function answerMenu(pending: PendingApproval, decision: "allow" | "deny",
 export interface ApprovalAnswer {
   scope: ApprovalScope;
   remember?: string[];
-  addTo?: WritableLayer;
+  addTo?: WritableSetLayer;
 }
 
 export function approvalAnswerOf(pending: PendingApproval, reach: Reach, chosen: ChosenWidths = {}): ApprovalAnswer {
@@ -453,7 +483,7 @@ export function approvalAnswerOf(pending: PendingApproval, reach: Reach, chosen:
   // `workflow-run` rides along for the request the hub cannot remember by part (no parts, or no
   // task): it is what "for this run" meant before parts, and the hub drops it when it remembers.
   if (reach === "run" || widths.length === 0) return { scope: "workflow-run", ...(widths.length > 0 ? { remember: widths } : {}) };
-  return { scope: "workflow-run", remember: widths, addTo: reach.slice("add:".length) as WritableLayer };
+  return { scope: "workflow-run", remember: widths, addTo: reach.slice("add:".length) as WritableSetLayer };
 }
 
 // --- who decided a row (decision 0023 §2.7) ------------------------------------------
@@ -531,7 +561,7 @@ export interface LayerOption {
   key: string;
   /** The layer's id, as `approval:submit` names it; absent for the set that asked when the call came with no stack. */
   layer?: string;
-  addTo: WritableLayer;
+  addTo: WritableSetLayer;
   /** `build-safe`, then `, for all projects` where the layer has two files and this is the farther. */
   name: string;
   /** The layer's full id: `project/build-safe`. */
@@ -636,7 +666,8 @@ export function rowPanel(pending: PendingApproval, index: number, choice: RowCho
   const width = what?.chosen;
   const place = where !== undefined ? options.find((o) => o.key === where.chosen)!.place : undefined;
   const layers = layerOptionsOf(pending);
-  const fallback = layers.find((o) => o.id === pending.defaultLayer) ?? layers[0];
+  // The layer it starts on, and of that layer's files the project's or Shared's — as before the settings' six.
+  const fallback = preferredOf(layers.filter((o) => o.id === pending.defaultLayer)) ?? preferredOf(layers.filter((o) => o.id === layers[0]?.id));
   const chosenLayer = layers.find((o) => o.key === choice.layer) ?? fallback;
   const notes: string[] = [];
   const unreadable = width === undefined;
@@ -645,9 +676,9 @@ export function rowPanel(pending: PendingApproval, index: number, choice: RowCho
   const addHint: HintPiece[] = [];
   if (chosenLayer !== undefined && line !== undefined) {
     const { target } = chosenLayer;
-    if (target.follows !== undefined) addHint.push(`creates ${shortFile(target.file)} with `, { code: line }, `, following ${target.follows.startsWith("$SYSTEM/") ? "the built-in permission set" : "the shared permission set"}, when you continue`);
+    if (target.follows !== undefined) addHint.push(`creates ${shortFile(target.file)} with `, { code: line }, `, following ${followedWords(target.follows)}, when you continue`);
     else addHint.push("writes ", { code: line }, ` to ${shortFile(target.file)} when you continue`);
-    if (target.shadowed === true) addHint.push(" — this project's own copy still wins here");
+    if (target.shadowed === true) addHint.push(" — a nearer copy of it still wins here");
     if (chosenLayer.everyone) addHint.push(" — changes that set for everyone who uses it");
   }
   const reach: RowReachItem[] = [
@@ -761,7 +792,7 @@ export function continueAnswerOf(pending: PendingApproval, answers: RowAnswers, 
     const width = part.widths.find((w) => widths.includes(w)) ?? part.widths[0];
     if (reach === "once" || width === undefined) out.push({ part: index, decision: "allow", reach: "once" });
     else if (reach === "run") out.push({ part: index, decision: "allow", reach: "run", width });
-    else out.push({ part: index, decision: "allow", reach: "add", width, addTo: reach.slice("add:".length) as WritableLayer });
+    else out.push({ part: index, decision: "allow", reach: "add", width, addTo: reach.slice("add:".length) as WritableSetLayer });
   });
   return { decision: partAnswersDecision(approval, out), scope: out.some((a) => a.reach !== "once") ? "workflow-run" : "once", answers: out };
 }

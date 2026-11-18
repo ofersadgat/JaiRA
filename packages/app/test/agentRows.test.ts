@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentInstall, ExecutorInfo, ProbeResult } from "@jaira/shared";
-import { agentActionOf, agentChipOf, agentLineOf, agentPlaceOf, settingsGistOf, shelfTileOf } from "../src/renderer/connectionsModel";
+import { agentActionOf, agentChecksAgain, agentChipOf, agentLineOf, agentPlaceOf, settingsGistOf, shelfTileOf } from "../src/renderer/connectionsModel";
 import { agentProviders } from "../src/renderer/providerSpecs";
 
 const NATIVE = { method: "native", via: "the native installer", display: "curl -fsSL https://claude.ai/install.sh | bash" } as const;
@@ -98,6 +98,21 @@ describe("a closed row's button", () => {
     expect(agentActionOf(CLI, probe({ accounts: [{ label: "me@example.com", active: true }] }), "available", undefined, {})).toBeUndefined();
     expect(agentActionOf(CLI, probe({ status: "disabled" }), "off", undefined, {})).toBeUndefined();
     expect(agentActionOf(CLI, undefined, "unchecked", undefined, {})).toBeUndefined();
+  });
+});
+
+describe("a row's Check again", () => {
+  it("is offered while an agent is signed out, its sign-in was refused, or it does not work", () => {
+    expect(agentChecksAgain(probe({ status: "needs-sign-in", accounts: [] }), "needs-sign-in")).toBe(true);
+    expect(agentChecksAgain(probe({ status: "needs-sign-in", accounts: [{ label: "me@example.com", active: true, refused: "OAuth session expired" }] }), "needs-sign-in")).toBe(true);
+    expect(agentChecksAgain(probe({ status: "failed", detail: "its sign-in was refused when a run last used it: 401" }), "unavailable")).toBe(true);
+  });
+
+  it("is not offered for a row that works, is off, needs only a key, or was not checked", () => {
+    expect(agentChecksAgain(probe({ accounts: [{ label: "me@example.com", active: true }] }), "available")).toBe(false);
+    expect(agentChecksAgain(probe({ status: "disabled" }), "off")).toBe(false);
+    expect(agentChecksAgain(probe({ status: "failed", detail: "no API key is configured" }), "unconfigured")).toBe(false);
+    expect(agentChecksAgain(undefined, "unchecked")).toBe(false);
   });
 });
 

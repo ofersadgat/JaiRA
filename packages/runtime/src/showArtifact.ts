@@ -27,14 +27,13 @@
  */
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { basename, extname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { defaultBuiltInDir, extensionForMime, isTextMime, mediaKindOf, mimeOfPath } from "@jaira/shared";
 import { filesAt, MemoryArtifactStore, type ArtifactKind, type ArtifactStore, type ArtifactVersion } from "./artifacts";
-import { parseDestination, resolveDestination, withinWorkspace } from "./artifactPath";
+import { withinWorkspace } from "./artifactPath";
 import type { FileToolOptions } from "./fileTools";
-import { isDeniedPath } from "./policy";
 
 /** The Design type's address, as its instructions name it — accepted as `type_url` and answered as JaiRA's own type. */
 export const DESIGN_TYPE_URL = "https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd";
@@ -288,15 +287,6 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     }
   };
 
-  /**
-   * The task's own artifact folder (`$CENTRAL`), the one place under `.jaira/` a publish may read: what
-   * this task's tools wrote there (a screenshot) is the task's own to show.
-   */
-  const ownArtifactFolder = (): string | undefined => {
-    const central = resolveDestination(parseDestination("$CENTRAL"), { ...options.vars, relPath: "x" }, "x");
-    return central.path !== undefined ? resolvePath(dirname(central.path)) : undefined;
-  };
-
   const workspaceRoot = (ctx?: ExecServices): string => resolvePath(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree);
 
   /**
@@ -314,17 +304,10 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
    * Bytes from outside the workspace, read where they are. Whether this conversation may read them is
    * the permission set's to say, and the gate said so before the tool ran: it judges every file a
    * publish reads at `read_file`'s line ({@link publishedReadsOf}), so a publish shows exactly what a
-   * read could. `.jaira/` is refused as `read_file` refuses it, but for this task's own artifact folder.
+   * read could — `.jaira/` included, where the shipped sets refuse only the machine key.
    */
-  const refuseJaira = (full: string, name: string): void => {
-    const own = ownArtifactFolder();
-    const inOwn = own !== undefined && ((rel) => rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel))(relative(own, full));
-    if (isDeniedPath(full) && !inOwn) throw new Refusal(`Not published: ${name} is inside .jaira/, which agents may not read.`);
-  };
-
   const readOutside = (absolute: string, name: string): Buffer => {
     const full = resolvePath(absolute);
-    refuseJaira(full, name);
     try {
       if (!statSync(full).isFile()) throw new Refusal(`Not published: ${name} is not a file.`);
       return readFileSync(full);
@@ -350,7 +333,6 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     if (record?.content !== undefined) return inlineText(record.content, name);
     const target = record?.physicalPath ?? withinWorkspace(workspaceRoot(ctx), key);
     if (target === undefined) throw new Refusal(`Not published: ${name} is outside the workspace.`);
-    if (record === undefined) refuseJaira(resolvePath(target), name);
     let bytes: Buffer;
     try {
       bytes = readFileSync(target);
@@ -366,7 +348,6 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     if (isAbsolute(key)) return readOutside(key, name);
     const kept = store.get(options.vars.taskId, key)?.physicalPath;
     const target = kept ?? join(workspaceRoot(ctx), key);
-    if (kept === undefined) refuseJaira(resolvePath(target), name);
     try {
       return readFileSync(target);
     } catch (e) {
@@ -657,7 +638,6 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     if (record?.physicalPath === undefined && record?.content !== undefined) return Buffer.from(record.content, "utf8");
     const target = record?.physicalPath ?? withinWorkspace(workspaceRoot(ctx), key);
     if (target === undefined) throw new Refusal(`Not shown: ${name} is outside the workspace.`);
-    if (record === undefined) refuseJaira(resolvePath(target), name);
     try {
       if (!statSync(target).isFile()) throw new Refusal(`Not shown: ${name} is not a file.`);
       return readFileSync(target);

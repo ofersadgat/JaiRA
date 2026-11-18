@@ -9,7 +9,7 @@
  * engine answers.
  */
 import { useMemo, useRef } from "react";
-import type { ChatSettings, PermissionSet, PermissionSetTreeRequest, PermissionStackView, WritableLayer } from "@jaira/shared/browser";
+import type { ChatSettings, PermissionSet, PermissionSetTreeRequest, PermissionStackView, WritableSetLayer } from "@jaira/shared/browser";
 import {
   belowRequestOf,
   belowSetOf,
@@ -58,7 +58,7 @@ export interface ComposerStack {
   /** Pin a layer to this project's standing layers of the stack's bucket, or take it off. */
   pin: (segment: LayerSegment, pin: boolean) => Promise<void>;
   /** Save the stack as a set file. */
-  saveStack: (name: string, layer: WritableLayer) => Promise<void>;
+  saveStack: (name: string, layer: WritableSetLayer) => Promise<void>;
 }
 
 /** The value a view last had, kept while a newer request loads — so an edit does not blank what is drawn. */

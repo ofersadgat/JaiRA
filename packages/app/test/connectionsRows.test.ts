@@ -93,7 +93,7 @@ describe("the servers other tools run, a tile each", () => {
 });
 
 describe("a forge, closed", () => {
-  const empty: ConfigView = { base: {} as never, project: null, system: null, you: null, effective: parseConfig({}) as never, baseFile: "~/.jaira/settings.json", projectFile: "", youFile: "~/.jaira/personal-settings.json", baseDir: "~/.jaira" };
+  const empty: ConfigView = { base: {} as never, project: null, machine: null, projectMachine: null, system: null, you: null, projectYou: null, effective: parseConfig({}) as never, baseFile: "~/.jaira/settings.json", projectFile: "", youFile: "~/.jaira/personal-settings.json", baseDir: "~/.jaira" };
   const forges = forgesOf(empty);
   const checks: Record<string, ForgeCheck> = {
     github: { name: "github", provider: "github", host: "github.com", status: "ok", detail: "signed in as @sam", identity: { login: "samstudio", scopes: ["repo", "workflow"] }, credential: { source: "keychain" }, via: "oauth" },

@@ -2,7 +2,7 @@
 id: engineering/decisions/0007-permissionSets
 type: decision
 status: built
-updated: 2026-09-23
+updated: 2026-11-17
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engineering/units/agent-executors, engineering/units/executor-tree, engineering/units/chat-turns, engineering/contracts/host-tool-vocabulary, engineering/contracts/settings-json]
 ---
 
@@ -794,7 +794,8 @@ permission set, and each function's defaults live in one place, a layered `funct
 - **The permission set is the only authority over a line, besides the built-in floor.** `policy.rules`,
   `policy.default`, `policy.tools` and `policy.toolDefault` are gone, and with them the composition
   that put an authored rule ahead of the floor and let a permission set only tighten it. A part is judged by
-  `.jaira/`, then the floor and the built-in asks, then the permission set, as §4 has it; with no permission set
+  `.jaira/` (until 2026-11-17, when it became the shipped sets' lines — decision 0023 §2.4), then the
+  floor and the built-in asks, then the permission set, as §4 has it; with no permission set
   judging the line, what the built-ins do not name is allowed. `JairaPolicy` is `{ builtins?: boolean }`,
   read off `functions.bash.builtins`, and it is the one thing a project says above every permission set.
 - **`functions`** holds `smart` (`model`, `prompt` — the top-level `smart` block, moved),
@@ -955,3 +956,18 @@ The person, 2026-11-05: "can we move the chat/* permission sets out of chat and 
 - **Migrated, not aliased** (no-back-compat rule; `permissionSetsMove.ts`). At each open, a layer root's own `permission-sets/chat/*` move up and `chat_control/*` into `control/` (a file whose new place is taken stays, and is logged), and the old references in its set files, workflows and settings are renamed, with the bucket keys `chat` → `""` and `chat_control` → `control`. A workspace's task files are renamed too, and a CONVERSATION that never picked a stack is given the renamed set its pinned snapshot names: a snapshot is frozen — its hash is its content — and the composer reads a conversation's bottom layer from it (`stackFormOf`'s `source`), so that conversation would otherwise name a file that is gone. Migration 32 renames the composer settings filed beside each turn's request, which a rewind or a fork takes back. History is left as it was: snapshots, the journal, tool output, the layer an old approval names.
 
 Tests: `permissionSetsMove` (the moves and a taken place, workflows and settings with their bucket keys, a conversation's own stack and one given its snapshot's, a workflow task left alone, migration 32), `permissionSetBuckets` (the top level's row, the reserved names), and every listing of the shipped sets.
+
+### Amended 2026-11-17: a generic CLI can be served its tools over the bridge, as codex is
+
+The person, 2026-11-17, after the shipped sets began refusing writes to `.jaira/` and so refusing every generic CLI: "cant we do the MCP trick for the generic agents that we do with claude code?", and on the answer, "Yes, build it". A generic CLI declared channel `none` (§3), so a permission set that refused anything refused it; and every shipped set refuses something.
+
+- **The registration says how, because JaiRA knows nothing of the binary.** `agents.genericCli[i].mcp` (`JairaGenericCliMcp`): `args`, `env` and a `config` file, filled per run with `{mcpUrl}`, the bridge's URL, and `{mcpConfig}`, the file's path; and `builtinsOff`, the person's statement that, started so, the binary has none of its own tools. JaiRA cannot check that statement; it is the person's, as `command` is.
+- **Its own tools off, it is held as codex is.** A call held to a permission set runs bridged under `GENERIC_BRIDGED_TOOLS` — channel `switches`, no natives, no switches — so every tool the set holds is ours, served over the bridge, each call put to the gate there; its record says `policyEnforcement: "config"`. A call no permission set holds runs the binary as it always ran, with its own tools: such a state said nothing about tools, and the engine hands it only `show_artifact`, so bridging it would leave the agent unable to read a file. As a function, such a call is refused where the gate would not answer `allow` for `shell` — §8.2's start check, which now passes the `config` record, made where the call is known to be unheld.
+- **Its own tools kept, it is still `none`.** The tools a state holds are served and a pre-approval of them travels; a set that refuses anything is refused as before.
+- **A tool every state is granted is left out, not refused,** for a binary that cannot be served it: the engine grants `show_artifact` to every state, so refusing over it refused every generic run.
+- **What ships.** `gemini-cli` and `opencode` are bridged, read from each version's own code (gemini-cli 0.68.0's bundle, opencode 1.19.6's binary), not run: neither binary was started, and neither is signed in here.
+  - gemini-cli: our settings are its system file (`GEMINI_CLI_SYSTEM_SETTINGS_PATH`), which it merges after the person's and the workspace's; `tools.core: ["mcp_dai_*"]` registers none of its built-ins and lets our server's tools past the deny-everything rule a core list adds (which outranks a trusted server's allow); `--allowed-mcp-server-names dai` starts no other server, the person's or an extension's. It replaces the machine's real system settings file for the run.
+  - opencode: `OPENCODE_CONFIG` names our file, `OPENCODE_DISABLE_PROJECT_CONFIG=1` keeps a repository's own `opencode.json` and `.opencode/` from re-allowing a tool, `--agent jaira` runs an agent of ours whose rules deny all but `dai_*`, and `OPENCODE_PERMISSION` applies the same rules after every file. A project's own opencode settings are not read for the run.
+  - `antigravity-cli` and `muse-code` are not: it is not known whether either can be pointed at an MCP server with its own tools off.
+
+Tests: `genericAgent` (the query's bridge, the refusal rule, held and unheld calls), `agentPermissionSet` (the route held to a set), `genericBridge.e2e` (a real process reading the file and calling the production bridge, an `allow` run, an `ask` put to the approver), `builtinAgents` (the shipped blocks), `shared` (the block's parse).

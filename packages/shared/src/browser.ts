@@ -94,3 +94,7 @@ export * from "./thirdPartyLicenses";
 export * from "./sync";
 export * from "./lazy";
 export * from "./artifactPolicy";
+export * from "./setup";
+export * from "./setupDelegates";
+export * from "./setupInfer";
+export * from "./workspaces";

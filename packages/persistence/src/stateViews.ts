@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
-import { compileHidden, disabledBy, hiddenRules, isHiddenPath, jairaBuiltInPaths, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
+import { baseAsProjectPaths, compileHidden, disabledBy, hiddenRules, isHiddenPath, isProjectWorkflowLayer, jairaBuiltInPaths, LOCAL_LAYER_DIR_NAME, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
   BoardCard,
   BoardView,
@@ -42,6 +42,7 @@ import type {
   WorkflowLayer,
 } from "@jaira/shared";
 import type { Project } from "./project";
+import { workflowLayerDirs } from "./fileLayers";
 import { boardPathOf, breadcrumbOf, endedAtOf, headingOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
 import { workflowShape } from "./shape";
@@ -140,6 +141,11 @@ export interface IgnoredPaths {
 /** How far a walk goes: past what git ignores (`ignored`), or one level only (`shallow`). */
 interface Reach {
   ignored?: IgnoredPaths | undefined;
+  /**
+   * Folders left out of the walk: `.jaira/local/` in a checkout — the project on this machine, a layer
+   * of its own with a root of its own in the tree (decision 0023, amended 2026-11-18).
+   */
+  skip?: ReadonlySet<string>;
   /** Everything under the walk is ignored: it is inside an ignored folder. */
   inIgnored?: boolean;
   /** One level: every folder comes back unlisted. */
@@ -170,7 +176,7 @@ function walkDir(
     // showed only `.jaira/` — nothing in there starts with one except the `.gitignore` the layout
     // writes. A tree rooted at the CHECKOUT has to draw `.jaira/` itself, so the rule cannot be
     // "skip dot-entries"; it is the hidden list, which names `.git` and the rest and can be read.
-    if (isHiddenPath(rel, hidden)) continue;
+    if (isHiddenPath(rel, hidden) || reach.skip?.has(rel) === true) continue;
     if (entry.isDirectory()) {
       const ignored = reach.inIgnored === true || reach.ignored?.dirs.has(rel) === true;
       nodes.push({
@@ -217,96 +223,151 @@ function walkDir(
   return nodes;
 }
 
+/** What a root is called, by its layer: the project's name, `Just you`, `~/.jaira`, `Built in`. */
+function rootLabelOf(layer: WorkflowLayer, name: string): string {
+  switch (layer) {
+    case "project":
+      return name;
+    case "projectMachine":
+      return `${name} on this machine`;
+    case "projectYou":
+      return `You in ${name}`;
+    case "you":
+      return "Just you";
+    case "machine":
+      return "This machine";
+    case "base":
+      return "~/.jaira";
+    case "system":
+      return BUILT_IN_LABEL;
+  }
+}
+
+/** The browser's word on each file, by `layer:stateId`, that the roots are marked from. */
+function marksOf(browser: WorkflowBrowser | undefined): {
+  shadowed: Map<string, WorkflowLayer | undefined>;
+  errors: Map<string, string>;
+  disabled: Set<string>;
+  shipped: Set<string>;
+  lint: ReturnType<typeof lintByStateId>;
+} {
+  return {
+    shadowed: new Map((browser?.files ?? []).filter((f) => f.shadowed === true).map((f) => [`${f.layer}:${f.stateId}`, f.shadowedBy])),
+    errors: new Map((browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [`${f.layer}:${f.stateId}`, f.error!])),
+    disabled: disabledFilesOf(browser),
+    shipped: shippedIds(browser),
+    lint: lintByStateId(browser),
+  };
+}
+
 /**
- * Both layer roots as trees, in search-path order.
+ * One layer's root, walked and marked: each state shadowed by a nearer layer's copy (and by which), switched
+ * off, overriding what ships, failing to parse, and — where it is the copy read — what lint says of it.
+ * `overrideDirs` are where a person's copy of a shipped FILE would be, for the built-in root's rows.
+ */
+function layerRoot(
+  at: { dir: string; layer: WorkflowLayer; prefix: string; label: string; project?: string | undefined },
+  marks: ReturnType<typeof marksOf>,
+  rules: HiddenRules,
+  reach: Reach = {},
+  overrideDirs: readonly string[] = [],
+): FileRoot {
+  const { dir, layer, prefix, project } = at;
+  const nodes = walkDir(dir, dir, layer, rules, prefix, project, reach);
+  const mark = (list: FileNode[]): void => {
+    for (const node of list) {
+      if (layer === "system" && shadowedFile(node, overrideDirs)) node.shadowed = true;
+      if (node.stateId !== undefined) {
+        const key = `${layer}:${node.stateId}`;
+        if (marks.shadowed.has(key)) {
+          node.shadowed = true;
+          const by = marks.shadowed.get(key);
+          if (by !== undefined) node.shadowedBy = by;
+        }
+        if (marks.disabled.has(key)) node.disabled = true;
+        if (layer !== "system" && marks.shipped.has(node.stateId)) node.overridesBuiltIn = true;
+        const error = marks.errors.get(key);
+        if (error !== undefined) node.error = error;
+        // A shadowed copy is INERT here — the loader never reads it, so the issues reported against that
+        // state id belong to the file that overrode it, not to this one. Marking it would put a red row
+        // beside a file that has nothing to do with the failure.
+        if (!node.shadowed) {
+          const found = marks.lint?.get(node.stateId);
+          if (found !== undefined) node.lint = found;
+        }
+      }
+      if (node.children) mark(node.children);
+    }
+  };
+  mark(nodes);
+  rollUpLint(nodes);
+  return {
+    layer,
+    // Stamped on a project's own layers (the project, the project on this machine, you in the project):
+    // a file in one is addressed with its project. The others belong to none — see `FileTree`.
+    ...(project !== undefined ? { project } : {}),
+    label: at.label,
+    dir,
+    // Measured on the way in and carried out — see `FileRoot.prefix`. The renderer asks a path three
+    // questions and all three are about where the layer sits inside this root.
+    prefix,
+    exists: existsSync(dir),
+    nodes,
+  };
+}
+
+/**
+ * Every layer root as a tree — the settings' six and what ships (decision 0023, amended 2026-11-18): the
+ * project (rooted at its CHECKOUT) first, then the layers over it — the project on this machine
+ * (`.jaira/local/`), you in the project, Just you, this machine — then Shared and what ships.
  *
- * A base file the project overrides is marked `shadowed` wherever it appears, which is what lets the
- * tree replace the layer picker: which copy you are about to edit is its position on screen.
+ * A file a nearer layer overrides is marked `shadowed`, with the layer that wins, wherever it appears,
+ * which is what lets the tree replace the layer picker: which copy you are about to edit is its
+ * position on screen.
  *
  * Every root is listed even when its directory is absent — see {@link FileTree}. `walkDir` already
  * treats an unreadable directory as empty rather than an error, so an absent root costs one
  * `existsSync` and yields an empty, still-usable branch: writing a state into it creates the
  * directory chain on the way.
  *
- * `ignored` is what git ignores in the CHECKOUT (the project root alone: the shared and built-in
- * roots are no checkout of the person's): named, not walked — see {@link IgnoredPaths}.
+ * `ignored` is what git ignores in the CHECKOUT (the project root alone: the other roots are no
+ * checkout of the person's): named, not walked — see {@link IgnoredPaths}. `.jaira/local/` is left out
+ * of the checkout's walk: it is its own root.
  */
 export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: HiddenRules, ignored?: IgnoredPaths): FileTree {
-  const shadowed = new Set(
-    (browser?.files ?? []).filter((f) => f.shadowed === true).map((f) => `${f.layer}:${f.stateId}`),
-  );
-  const errors = new Map(
-    (browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [`${f.layer}:${f.stateId}`, f.error!]),
-  );
-  const lint = lintByStateId(browser);
-  const disabled = disabledFilesOf(browser);
+  const marks = marksOf(browser);
   const rules = hidden ?? defaultRules();
-  // The project layer is rooted at the CHECKOUT, not at `.jaira/`. A person's project is their
-  // files, and `.jaira/` is one directory in it — the tree said otherwise, and for a project that
-  // keeps its workflows in the shared root it therefore had nothing at all to draw. `paths.roots` is
-  // NOT what this iterates any more: that list is the workflow SEARCH PATH, and `<checkout>/workflows`
-  // is not where a state lives.
-  // `roots` is still what says whether there IS a layer behind this one — it is deduplicated when the
-  // base and the project resolve to the same directory — but its FIRST entry is `.jaira/`, and the
-  // tree wants the checkout that contains it. So the head is replaced and the tail is kept.
-  const layerRoots: Array<{ dir: string; layer: WorkflowLayer; prefix: string }> = [
-    {
-      dir: project.paths.projectDir,
-      layer: "project",
-      // Measured, not assumed: `.jaira` for an ordinary checkout, and empty for a root whose layer
-      // sits directly under it.
-      prefix: prefixOf(project.paths.projectDir, project.paths.roots[0] ?? project.paths.projectDir),
-    },
-    // The built-in layer (decision 0006) is the last of `roots`, and it is drawn as what it is: a
-    // `system` root, which every menu on it reads as read-only. Labelling it `base` — which is what
-    // this line did to every root after the first — would have offered to save into the installed app.
-    ...project.paths.roots
-      .slice(1)
-      .map((dir) => ({ dir, layer: (dir === project.paths.builtIn.dir ? "system" : "base") as WorkflowLayer, prefix: "" })),
-  ];
-  const shipped = shippedIds(browser);
+  const paths = project.paths;
+  const name = basename(paths.projectDir);
+  const layers = workflowLayerDirs(paths);
   // Where a person's copy of a shipped FILE would be, nearest first — see `shadowedFile`.
-  const overrideDirs = [project.paths.roots[0], ...layerRoots.filter((root) => root.layer === "base").map((root) => root.dir)].filter(
-    (dir): dir is string => dir !== undefined && dir !== project.paths.builtIn.dir,
-  );
-  const roots = layerRoots.map(({ dir, layer, prefix }) => {
-    const nodes = layer === "project" ? walkDir(dir, dir, layer, rules, prefix, project.paths.projectDir, { ignored }) : walkDir(dir, dir, layer, rules, prefix);
-    const mark = (list: FileNode[]): void => {
-      for (const node of list) {
-        if (layer === "system" && shadowedFile(node, overrideDirs)) node.shadowed = true;
-        if (node.stateId !== undefined) {
-          const key = `${layer}:${node.stateId}`;
-          if (shadowed.has(key)) node.shadowed = true;
-          if (disabled.has(key)) node.disabled = true;
-          if (layer !== "system" && shipped.has(node.stateId)) node.overridesBuiltIn = true;
-          const error = errors.get(key);
-          if (error !== undefined) node.error = error;
-          // A shadowed base copy is INERT in this project — the loader never reads it, so the issues
-          // reported against that state id belong to the file that overrode it, not to this one.
-          // Marking it would put a red row beside a file that has nothing to do with the failure.
-          if (!node.shadowed) {
-            const found = lint?.get(node.stateId);
-            if (found !== undefined) node.lint = found;
-          }
-        }
-        if (node.children) mark(node.children);
-      }
-    };
-    mark(nodes);
-    rollUpLint(nodes);
-    return {
-      layer,
-      // Stamped on the PROJECT root only. The shared root belongs to no project — see `FileTree`,
-      // where the window's several projects are the top level and `~/.jaira` is their sibling.
-      ...(layer === "project" ? { project: project.paths.projectDir } : {}),
-      label: layer === "project" ? basename(project.paths.projectDir) : layer === "system" ? BUILT_IN_LABEL : "~/.jaira",
-      dir,
-      // Measured on the way in and carried out — see `FileRoot.prefix`. The renderer asks a path
-      // three questions and all three are about where the layer sits inside this root.
-      prefix,
-      exists: existsSync(dir),
-      nodes,
-    };
+  const overrideDirs = layers.filter((one) => one.layer !== "system").map((one) => one.root);
+  const local = relative(paths.projectDir, join(paths.jairaDir, LOCAL_LAYER_DIR_NAME)).split(sep).join("/");
+  // The checkout first — it is the project — then the layers over it, its own two first, then Shared and
+  // what ships: the order the tree draws them in.
+  const drawn: readonly WorkflowLayer[] = ["project", "projectMachine", "projectYou", "you", "machine", "base", "system"];
+  const ordered = [...layers].sort((a, b) => drawn.indexOf(a.layer) - drawn.indexOf(b.layer));
+  const roots = ordered.map(({ layer, root }) => {
+    // The project layer is rooted at the CHECKOUT, not at `.jaira/`. A person's project is their files,
+    // and `.jaira/` is one directory in it. Measured, not assumed: `.jaira` for an ordinary checkout,
+    // and empty for a root whose layer sits directly under it.
+    if (layer === "project") {
+      return layerRoot(
+        { dir: paths.projectDir, layer, prefix: prefixOf(paths.projectDir, root), label: name, project: paths.projectDir },
+        marks,
+        rules,
+        { ignored, skip: new Set([local]) },
+      );
+    }
+    // The built-in layer (decision 0006) is drawn as what it is: a `system` root, which every menu on it
+    // reads as read-only.
+    return layerRoot(
+      { dir: root, layer, prefix: "", label: rootLabelOf(layer, name), ...(isProjectWorkflowLayer(layer) ? { project: paths.projectDir } : {}) },
+      marks,
+      rules,
+      {},
+      layer === "system" ? overrideDirs : [],
+    );
   });
   return { roots };
 }
@@ -533,41 +594,25 @@ function switchOf(browser: WorkflowBrowser | undefined, stateId: string): { disa
  * needs the browser.
  */
 export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?: HiddenRules): FileTree {
-  // A base root IS its layer root, so nothing is prefixed.
-  const nodes = walkDir(baseDir, baseDir, "base", hidden ?? defaultRules(), "");
   // Linted exactly as a project's tree is. Skipping it here was the whole of "validation is not
   // working": the shared root is browsable with nothing open, and that was the one surface in JaiRA
   // that listed state files and never said a word about them.
-  const lint = lintByStateId(browser);
-  // This layer's files only: the browser lists the built-in layer's too now (decision 0006), and a
-  // shipped file that failed to parse is not a fault in the shared file of the same id that shadows it.
-  const errors = new Map(
-    (browser?.files ?? []).filter((f) => f.error !== undefined && f.layer === "base").map((f) => [f.stateId, f.error!]),
-  );
-  const shipped = shippedIds(browser);
-  const disabled = disabledFilesOf(browser);
-  const mark = (list: FileNode[]): void => {
-    for (const node of list) {
-      if (node.stateId !== undefined) {
-        const error = errors.get(node.stateId);
-        if (error !== undefined) node.error = error;
-        if (disabled.has(`base:${node.stateId}`)) node.disabled = true;
-        if (shipped.has(node.stateId)) node.overridesBuiltIn = true;
-        const found = lint?.get(node.stateId);
-        if (found !== undefined) node.lint = found;
-      }
-      if (node.children) mark(node.children);
-    }
-  };
-  mark(nodes);
-  rollUpLint(nodes);
-  // The shared root IS its own layer, so `workflows/` is at the top of it and the prefix is empty.
-  return {
-    roots: [
-      { layer: "base", label: "~/.jaira", dir: baseDir, prefix: "", exists: existsSync(baseDir), nodes },
-      builtInRoot(browser, hidden, baseDir),
-    ],
-  };
+  const marks = marksOf(browser);
+  const rules = hidden ?? defaultRules();
+  const layers = workflowLayerDirs(baseAsProjectPaths(baseDir));
+  // Above Shared, the person's and this machine's own (decision 0023, amended 2026-11-18): roots of their
+  // own, so their folders are left out of Shared's walk.
+  const own = new Set(layers.filter((one) => one.layer !== "base" && one.layer !== "system").map((one) => relative(baseDir, one.root).split(sep).join("/")));
+  // Shared first — it is where this stands — then the person's and this machine's over it.
+  const drawn: readonly WorkflowLayer[] = ["base", "you", "machine"];
+  const roots = [...layers]
+    .filter((one) => one.layer !== "system")
+    .sort((a, b) => drawn.indexOf(a.layer) - drawn.indexOf(b.layer))
+    .map(({ layer, root }) =>
+      // A base root IS its layer root, so nothing is prefixed.
+      layerRoot({ dir: root, layer, prefix: "", label: rootLabelOf(layer, "") }, marks, rules, layer === "base" ? { skip: own } : {}),
+    );
+  return { roots: [...roots, builtInRoot(browser, hidden, baseDir)] };
 }
 
 /**
@@ -711,9 +756,9 @@ export function stateSlots(roots: readonly string[], stateIds: readonly string[]
 
 /** The workflows directory of every layer, in search order — what {@link stateInputs} resolves against. */
 export function workflowRoots(project: Project): string[] {
-  // Three, with what ships last (decision 0006) — and each directory once, since the shared root
-  // opened as a project is its own base.
-  return [...new Set([project.paths.workflowsDir, project.paths.base.workflowsDir, project.paths.builtIn.workflowsDir])];
+  // The settings' six, most specific first, with what ships last (decision 0023, amended 2026-11-18;
+  // decision 0006) — each directory once, since the shared root opened as a project is its own base.
+  return [...new Set(workflowLayerDirs(project.paths).map((one) => one.dir))];
 }
 
 // --- boards ------------------------------------------------------------------
@@ -1075,12 +1120,7 @@ export function stateView(
   const entry = browser.files.find((f) => f.stateId === stateId && f.shadowed !== true)
     ?? browser.files.find((f) => f.stateId === stateId);
   const layer: WorkflowLayer = entry?.layer ?? "project";
-  const root =
-    layer === "system"
-      ? project.paths.builtIn.workflowsDir
-      : layer === "base"
-        ? project.paths.base.workflowsDir
-        : project.paths.workflowsDir;
+  const root = workflowLayerDirs(project.paths).find((one) => one.layer === layer)?.dir ?? project.paths.workflowsDir;
   const file = entry !== undefined ? join(entry.root, entry.file) : `${stateFilePath(stateId, root)}.json`;
 
   const owning = rootContaining(browser, stateId);

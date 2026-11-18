@@ -32,7 +32,8 @@ A project is the root unit of configuration and execution. It contains:
 
 For the MVP, a JaiRA project maps to one local project directory. Workflow
 state files live in a reserved, engine-owned directory (`.jaira/workflows/`)
-inside the project. Agents have no read or write access to `.jaira/`.
+inside the project. Agents may not write `.jaira/` unless a permission layer
+says so (§11.1).
 
 ### 2.2 Task
 
@@ -1043,8 +1044,11 @@ Tasks may run concurrently. Isolation is Git-based:
 
 Agents are limited to their task's worktree of the project directory.
 
-Agents have no read or write access to the engine-owned `.jaira/` directory,
-including workflow state files and run records.
+Agents may not write the engine-owned `.jaira/` directory, including workflow
+state files and run records, unless a permission layer grants it: every
+permission set JaiRA ships refuses writing there, and a person who wants an
+agent to change those files says so in a layer of their own. Agents may read
+it as any project path, except the key that signs this machine's approvals.
 
 Agents cannot bypass human approval gates.
 
@@ -1215,4 +1219,5 @@ The original questions, kept for the record:
 15. Operations run in fixed priority order: UI, agent, skill, children.
 16. Entering a state creates a fresh instance; results never leak across
     instances.
-17. Workflow definitions are engine-owned; agents cannot read or modify them.
+17. Workflow definitions are engine-owned; agents cannot modify them unless a
+    permission layer grants it (§11.1).

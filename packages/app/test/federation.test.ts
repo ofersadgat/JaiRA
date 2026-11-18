@@ -112,6 +112,55 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
     await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
   });
 
+  it("reads and writes another machine's own settings there, and its projects folder", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    await pairMachines(a.service.fleet, b.service.fleet);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
+    const bId = b.service.fleet.identity().id;
+    // Settings › mac-mini: its machine-settings.json, read and written on it, for no project.
+    const read = (await a.call("config:read", { project: "shared", machine: bId })) as { machineFile?: string; machineId?: string };
+    expect(read.machineFile).toBe(join(b.base, "machine-settings.json"));
+    expect(read.machineId).toBe(bId);
+    await a.call("config:write", { layer: "machine", project: "shared", machine: bId, config: { memo: { enabled: true } } });
+    expect(existsSync(join(b.base, "machine-settings.json"))).toBe(true);
+    expect(existsSync(join(a.base, "machine-settings.json"))).toBe(false);
+    // Its own view of itself, and its projects folder set from here.
+    const view = (await a.call("machines:view", { machine: bId })) as { self: { id: string } };
+    expect(view.self.id).toBe(bId);
+    const folder = join(tmpdir(), "mini-projects");
+    const after = (await a.call("machines:projectsFolder", { folder, machine: bId })) as { self: { projectsFolder?: string } };
+    expect(after.self.projectsFolder).toBe(folder);
+    expect(b.service.fleet.view().self.projectsFolder).toBe(folder);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.projectsFolder, { timeout: 5000 }).toBe(folder);
+  });
+
+  it("reads another machine's events status, and reads and writes its workflows, there (Settings › that machine)", async () => {
+    const a = await machine("desk");
+    const b = await machine("mac-mini");
+    await pairMachines(a.service.fleet, b.service.fleet);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
+    const bId = b.service.fleet.identity().id;
+    // B's shared root is a repository with a remote; A's is none.
+    execFileSync("git", ["init", "-q"], { cwd: b.base });
+    execFileSync("git", ["remote", "add", "origin", "git@github.com:ofersadgat/jaira.git"], { cwd: b.base });
+    const here = (await a.call("events:status", { project: "shared" })) as { remotes: Array<{ name: string }> };
+    const there = (await a.call("events:status", { project: "shared", machine: bId })) as { remotes: Array<{ name: string }> };
+    expect(here.remotes).toEqual([]);
+    expect(there.remotes.map((remote) => remote.name)).toEqual(["origin"]);
+    // Its workflows — an automation, and any other — in its own layers: this machine's, written on it and
+    // nowhere else, through the ordinary workflow channels.
+    await a.call("workflow:write", { stateId: "system/events", layer: "machine", project: "shared", machine: bId, text: "{}" });
+    expect(existsSync(join(b.base, "machine", "workflows", "system", "events.json"))).toBe(true);
+    expect(existsSync(join(a.base, "machine", "workflows", "system", "events.json"))).toBe(false);
+    expect(await a.call("workflow:read", { stateId: "system/events", layer: "machine", project: "shared", machine: bId })).toMatchObject({ exists: true, file: join(b.base, "machine", "workflows", "system", "events.json") });
+    await a.call("workflow:write", { stateId: "review/quick", layer: "machine", project: "shared", machine: bId, text: JSON.stringify({ label: "the mini's" }) });
+    expect(await a.call("workflow:read", { stateId: "review/quick", layer: "machine", project: "shared", machine: bId })).toMatchObject({ exists: true, layer: "machine" });
+    expect(existsSync(join(a.base, "machine", "workflows", "review", "quick.json"))).toBe(false);
+    await a.call("workflow:delete", { stateId: "review/quick", layer: "machine", project: "shared", machine: bId, force: true });
+    expect(existsSync(join(b.base, "machine", "workflows", "review", "quick.json"))).toBe(false);
+  });
+
   it("keeps a copy of another machine's tasks, and reads it while that machine is away", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");

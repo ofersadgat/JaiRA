@@ -52,7 +52,7 @@ export function settingsSyncWords(sync: SettingsSyncView | undefined, now = Date
           return minutes < 1 ? "Last in step just now." : minutes < 60 ? `Last in step ${minutes} minute${minutes === 1 ? "" : "s"} ago.` : `Last in step ${new Date(sync.at).toLocaleString()}.`;
         })();
   const keep = sync.on
-    ? `Your Shared and Just you settings, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you to every paired machine; the latest change to each wins. ${when}`
+    ? `Your Shared and Just you settings with their permission sets and workflows, the keys in JaiRA's keychain, your forge sign-ins and your agents' sign-ins follow you to every paired machine; the latest change to each wins. ${when}`
     : "This machine keeps its own settings: it neither sends its changes nor takes the other machines'.";
   const following = sync.logins.filter((l) => l.synced);
   const followed = following.map((l) => AGENT_NAMES[l.agent] ?? l.agent);
@@ -101,6 +101,9 @@ export function offlinePeerOf(view: MachinesView | undefined, project: string | 
 }
 
 export const errorOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** Whether an error is a machine refusing a channel it does not know: it runs an older JaiRA. */
+export const isOlderEngine = (e: unknown): boolean => /does not answer '/.test(errorOf(e));
 
 export function ago(at: number | undefined): string {
   if (at === undefined) return "never seen";
@@ -215,6 +218,13 @@ export interface MachineRow {
   action?: { kind: "pair"; device: string } | { kind: "unpair"; id: string; label: string } | { kind: "console"; href: string };
   /** Pair was pressed for it: the code field is open, until then. */
   asking?: number;
+  /**
+   * The machine's id, on this machine's row and a paired machine's: pressing the row puts it in
+   * Settings' path, and the page shows its own section. Absent for a phone, or a device not paired.
+   */
+  machine?: string;
+  /** This machine's own row. */
+  self?: true;
 }
 
 function day(at: number | undefined): string {
@@ -240,7 +250,15 @@ const RANK = (row: MachineRow): number =>
  * and paired ones that are not on the tailnet now.
  */
 export function machineRowsOf(view: MachinesView): MachineRow[] {
-  const self: MachineRow = { key: "self", name: "this machine", kind: machineKindOf(view.self), face: { shape: view.self.form, mark: view.self.os, dot: view.self.tailnet.state === "on" ? "on" : "off" }, grey: false };
+  const self: MachineRow = {
+    key: "self",
+    name: "this machine",
+    kind: machineKindOf(view.self),
+    face: { shape: view.self.form, mark: view.self.os, dot: view.self.tailnet.state === "on" ? "on" : "off" },
+    grey: false,
+    machine: view.self.id,
+    self: true,
+  };
   const usedMachines = new Set<string>();
   const usedPhones = new Set<string>();
   const rows: MachineRow[] = [];
@@ -264,6 +282,7 @@ export function machineRowsOf(view: MachinesView): MachineRow[] {
         ...(paired.state === "offline" ? { sub: ago(paired.lastSeenAt).replace(/^l/, "L") + "." } : {}),
         grey: false,
         action: { kind: "unpair", id: paired.id, label: paired.label },
+        machine: paired.id,
       });
       continue;
     }
@@ -330,6 +349,7 @@ export function machineRowsOf(view: MachinesView): MachineRow[] {
       ...(m.state === "offline" ? { sub: `${ago(m.lastSeenAt).replace(/^l/, "L")}. Not on your tailnet now.` } : {}),
       grey: false,
       action: { kind: "unpair", id: m.id, label: m.label },
+      machine: m.id,
     });
   }
   for (const p of view.devices) {
@@ -440,6 +460,18 @@ export const MACHINES_WORDS = {
   name: { name: "Name", description: "How other machines and the task chips call this one." },
   tags: { name: "Tags", description: "What a workflow can ask for. The operating system is added by itself." },
   form: { name: "What it is", description: "The shape of this machine's icon, wherever it is named. Guessed once; yours to correct." },
+  projectsFolder: {
+    name: "Projects folder",
+    description:
+      "New workspaces go here, each in a folder named after its project: atlas, or atlas-1, atlas-2… when that's taken. Any other folder can be picked in Open → Where it goes.",
+    empty: "Empty, it goes back to where most of this machine's projects already are.",
+    change: "Change…",
+    older: "runs an older JaiRA, which keeps no projects folder of its own: update it to choose one from here.",
+  },
+  another: {
+    info: "Another of your machines, read and changed there. Pressing a machine in Your machines shows it here; take it out of Settings' path to see this machine again.",
+    offline: "is offline, so what it says of itself cannot be read now.",
+  },
   tailnet: {
     name: "Tailscale",
     info: "Signed in, JaiRA is on your tailnet, through the Tailscale app or the Tailscale helper it ships with, and your paired machines and phones can reach this one. Nothing is opened to the internet (Funnel is never used), and only what you paired gets in.",
@@ -461,7 +493,7 @@ export const MACHINES_WORDS = {
   disk: { name: "On disk" },
   settings: {
     title: "Settings on every machine",
-    info: "What you set up once is set up everywhere: connections, models, tools, how JaiRA looks, and the keys and sign-ins they use. What belongs to one machine stays on it.",
+    info: "What you set up once is set up everywhere: connections, models, tools, permission sets and workflows, how JaiRA looks, and the keys and sign-ins they use. What belongs to one machine stays on it.",
   },
   syncSettings: { name: "Keep in step" },
   stays: { name: "Kept on each machine" },

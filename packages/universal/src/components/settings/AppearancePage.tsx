@@ -44,6 +44,7 @@ import { FamilyStack } from "./FamilyStack";
 import { FilesTreeSection } from "./FilesTree";
 import { SelectInput, SizeStep } from "./fields";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
+import { useSettingsAt } from "./layers";
 import { ThemeMini } from "./ThemeMini";
 
 /**
@@ -75,10 +76,12 @@ import { ThemeMini } from "./ThemeMini";
  */
 export function AppearancePage(): JSX.Element {
   const { state, actions } = useShell();
-  const look = lookOf(state.config);
+  // The look as Settings' path reads it: the window keeps painting its own.
+  const look = lookOf(state.settingsConfig);
   const layer = state.configLayer;
-  const busy = settingsLocked(state.busy, layer, state.at);
-  const layered = appearanceLayeringOf(state.config, layer, busy, (writes, into) => void actions.writeLook(writes, into));
+  const at = useSettingsAt();
+  const busy = settingsLocked(state.busy, layer, at) || state.settingsConfig === null;
+  const layered = appearanceLayeringOf(state.settingsConfig, layer, busy, (writes, into) => void actions.writeLook(writes, into));
   const rowLayer = (...fields: string[]) => appearanceRowLayer(layered, ...fields);
   const onChange = (patch: Partial<Appearance>): void => void actions.setAppearance(patch, layer);
   const onTheme = (mode: ThemeMode): void => void actions.setTheme(mode, layer);
@@ -258,12 +261,12 @@ export function AppearancePage(): JSX.Element {
         />
       </SettingsSection>
       {/* The look of the tree: what it leaves out (`FilesTree.tsx`, over `filesTreeModel.ts`). */}
-      {state.config !== null ? (
+      {state.settingsConfig !== null ? (
         <FilesTreeSection
-          view={state.config}
+          view={state.settingsConfig}
           layer={layer}
-          project={state.at}
-          busy={state.busy || !(layer !== "project" || state.at !== null)}
+          project={at}
+          busy={busy}
           onWrite={(into, doc) => void actions.saveTreeLayer(into, doc)}
         />
       ) : null}

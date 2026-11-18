@@ -2,13 +2,13 @@
 id: ui/components/file-tree
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-18
 realizes: [ux/patterns/filter-in-place, ux/patterns/name-it-where-it-will-live, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/the-window-remembers-its-arrangement, ux/patterns/verbs-on-the-thing-itself, ux/patterns/absence-is-stated, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/share-processes-across-projects, product/all-projects-in-one-place]
 surfaces: [ui/surfaces/sidebar, ui/surfaces/files-view]
 reuses: [ui/components/context-menu]
 implemented_by: [packages/universal/src/components/files/FileTreePanel.tsx, packages/universal/src/app/SidebarRegion.tsx, packages/app/src/renderer/filesModel.ts, packages/app/src/renderer/builtInModel.ts]
-verified_by: [packages/app/test/fileTreePanel.test.ts, packages/app/test/builtInStates.test.ts, packages/app/shots/parityWorld.mts#files, packages/app/shots/parityWorld.mts#files-find, packages/app/shots/parityWorld.mts#files-new, packages/app/shots/parityWorld.mts#files-menu]
+verified_by: [packages/app/test/fileTreePanel.test.ts, packages/app/test/builtInStates.test.ts, packages/app/test/settingsLayerFiles.test.ts, packages/app/shots/settings-layers.mts#8c-tree-menu, packages/app/shots/settings-layers.mts#8d-tree-copy-menu, packages/app/shots/parityWorld.mts#files, packages/app/shots/parityWorld.mts#files-find, packages/app/shots/parityWorld.mts#files-new, packages/app/shots/parityWorld.mts#files-menu]
 mockups: [ui/assets/file-tree/empty.html, ui/assets/file-tree/success.html, ui/assets/file-tree/marked.html, ui/assets/file-tree/filtering.html, ui/assets/file-tree/naming.html, ui/assets/file-tree/built-in.html]
 siblings: [ui/components/folder-view, ui/components/sidebar-row, ui/components/project-row, ui/components/state-rail]
 ---
@@ -40,7 +40,7 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 | partial | Cannot occur: an open folder lists all of its entries. | |
 | error | Cannot occur as a look of its own: a file that cannot be read or parsed is one of the marks below. | |
 | success | Guides, glyphs and names; the open file on `--fill-ghost-selected` at weight 600, matched by project, root and path, so a state of the same id elsewhere stays plain. A file that is not text is `--dim` with a plain cursor and still opens. | [success.html](../assets/file-tree/success.html) |
-| marked | Unsaved edits: an `--accent` dot on the file and on every folder above it. Errors: name in `--bad`, a `--bad` dot and a chip with the count. Warnings only: the same in `--warn`. A file that cannot be read or parsed: a `!` chip, its tooltip the error. A state no workflow root reaches: name italic at 60%. A shared file this project overrides: row at 55%, name struck through, a `shadowed` chip. A folder carries the totals below it, so a fault shows with the branch shut. | [marked.html](../assets/file-tree/marked.html) |
+| marked | Unsaved edits: an `--accent` dot on the file and on every folder above it. Errors: name in `--bad`, a `--bad` dot and a chip with the count. Warnings only: the same in `--warn`. A file that cannot be read or parsed: a `!` chip, its tooltip the error. A state no workflow root reaches: name italic at 60%. A file a nearer layer overrides — a shared file this project overrides, a project file Just you overrides: row at 55%, name struck through, a `shadowed · {layer}` chip naming the layer whose copy runs (`shadowed · just you`), its title saying so. A folder carries the totals below it, so a fault shows with the branch shut. | [marked.html](../assets/file-tree/marked.html) |
 | built in | The last root. A shipped state that a project or shared file overrides: row at 55%, name struck through, an `overridden` chip. The file that overrides it, in its own root: an `override` chip after the name. A shipped state nothing overrides carries neither. | [built-in.html](../assets/file-tree/built-in.html) |
 | filtering | The find field over the list takes focus. Typing flattens every root to the files whose path contains the text, ignoring case: no folders, no guides, root headings kept. | [filtering.html](../assets/file-tree/filtering.html) |
 | naming | A row typed into where the new thing will be, with the glyph it will have, any folders still to be made as a dim mono lead such as `workflows/`, and a field with only an `--accent` underline. | [naming.html](../assets/file-tree/naming.html) |
@@ -54,8 +54,9 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 | Click a file | Opens it in the Files view | Row selected; address bar, middle column and context panel follow |
 | Right-click a row | Selects a file, then opens its menu in a [context-menu](context-menu.md) | Menu at the pointer |
 | Right-click a root heading or the space under a root | Opens the root's menu | Menu at the pointer |
-| Right-click a row under `Built in` | Opens the read-only menu: Open, the two overrides, and the copy and reveal items; a folder or a file that is not a state gets only the last two | Menu at the pointer |
-| Override for all projects, Override here | Copies the shipped state into `~/.jaira` or the project's `.jaira/` under the same id and opens the copy; refused when that layer already has one | The copy selected in its root; the shipped row gains `overridden`. A refusal shows in the error notice |
+| Right-click a row under `Built in` | Opens the read-only menu: Open, the two overrides, `Edit a copy elsewhere…`, and the copy and reveal items; a folder or a file that is not a state gets only the last two | Menu at the pointer |
+| `Edit a copy elsewhere…` or `Copy elsewhere…` in a state's menu | Opens a second menu in the first one's place, titled `Edit a copy` or `Copy`, of the settings' other layers, each saying only where (decision 0023, amended 2026-11-18) — six lines of verb, place and folder do not read whole at a menu's 232px | Menu at the same point |
+| Override for all projects, Override here, and the four newer layers | Copies the shipped state into `~/.jaira`, the project's `.jaira/`, or — decision 0023, amended 2026-11-18 — `~/.jaira/projects/<key>`, `~/.jaira/personal`, `.jaira/local` or `~/.jaira/machine` under the same id and opens the copy; refused when that layer already has one | The copy selected in its root; the shipped row gains `overridden · {layer}`. A refusal shows in the error notice |
 | `+` on a folder or root, or `+` on the `FILES` row | Offers New file…, New folder…, and New state… or New workflow… where one belongs | Menu under the button |
 | Pick a New item | Opens the folders on the way and starts a row to name it in, under the deepest one that exists | Field focused |
 | Enter, or leaving the field | Creates the file, folder or state from the trimmed name; an empty name creates nothing | The typed row is replaced by the new entry; a new state opens |
@@ -86,7 +87,10 @@ A state's name drops a typed `.json`, `.jsonc`, `.yaml` or `.yml` and any leadin
 | Folder or file menu | the New items for its folder, then `Rename…` · `Delete` · `Copy path` · `Reveal in file explorer` |
 | State menu | `Open` · `New child state…`, note `{id}/` · `Duplicate…` · `Rename…` · `Override in this project` or `Copy to shared root`, disabled when shadowed or with no project open · `Copy state id` · `Copy path` · `Reveal in file explorer` · `Delete` |
 | Root menu | the New items, then `Copy path` · `Reveal in file explorer`, disabled when the root is not on disk; under `Built in` the last two only |
-| Built in state menu | `Open`, note `read-only` · `Override for all projects`, note `~/.jaira` · `Override here`, note `.jaira`, disabled with no project open · `Copy state id` · `Copy path` · `Reveal in file explorer` |
+| Built in state menu | `Open`, note `read-only` · `Edit a copy in Shared`, note `~/.jaira` · `Override here`, note `.jaira`, disabled with no project open · `Edit a copy elsewhere…` · `Copy state id` · `Copy path` · `Reveal in file explorer` |
+| `Edit a copy elsewhere…` menu | title `Edit a copy`; `for you in this project` · `for just you` · `in this project on this machine` · `on this machine`, no folder beside them, a project's disabled with none open — the words of the workflow editor's `Elsewhere…` |
+| A state's copy items | `Override in this project` (a shared state), note `.jaira`, or `Copy to shared root` (any other), note `~/.jaira`, then `Copy elsewhere…` |
+| `Copy elsewhere…` menu | title `Copy`; `for you in this project` · `for just you` · `in this project on this machine` · `on this machine` · `in this project` · `in Shared`, less the row's own layer and the first item's, no folder beside them, a project's disabled with none open |
 | Rename a path | title `Rename '{name}'`; field `Path`, filled with its path; note `Relative to ~/.jaira/` or `Relative to .jaira/`; confirm `Rename` |
 | Delete a path | title `Delete this folder?` or `Delete this file?`; note `{absolute path} — and everything inside it.` or `{absolute path}`; confirm `Delete` |
 | Path refused | title `{verb} '{path}' anyway?`; note `{states} declares it as a child. They will name a state that no longer exists.`, or `They will fail to load without it.` after a delete, with `{n} states inside it` for a folder; confirm `{verb} anyway` |

@@ -19,8 +19,11 @@ import { permissionSetLayersOf } from "../src/renderer/permissionSetsHost";
 const config = (doc: Record<string, unknown>): ConfigView => ({
   base: doc as never,
   project: null,
+  machine: null,
+  projectMachine: null,
   system: null,
   you: null,
+  projectYou: null,
   effective: parseConfig(doc) as never,
   baseFile: "~/.jaira/settings.json",
   projectFile: "",

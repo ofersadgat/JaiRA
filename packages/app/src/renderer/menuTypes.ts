@@ -33,6 +33,11 @@ export interface MenuItem {
    * nothing from a column of pictures, and the module's own rule is that a glyph alone is a guess.
    */
   icon?: keyof typeof PATHS;
+  /**
+   * A second thing this row does, as a button at its right that appears while the pointer is on the
+   * row (always, on a touch screen) — `Add` on a machine in a project's machine menu, beside choosing it.
+   */
+  action?: { label: string; onSelect: () => void };
 }
 
 export interface AskSpec {
