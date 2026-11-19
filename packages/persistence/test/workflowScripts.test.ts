@@ -15,6 +15,7 @@ import type { ExecResult, JsonValue, ResolvedValue } from "@declarative-ai/exec"
 import { moduleHash, validateBundle } from "@declarative-ai/hw";
 import { buildPromptExecutor, executeWorkflow, newRegistry, statusOfResult, withPresetModels } from "@jaira/runtime";
 import { shippedLayer, testHome } from "@jaira/testing";
+import { ApprovalRequired } from "@jaira/shared";
 import {
   browseWorkflows,
   canonicalModulePath,
@@ -25,7 +26,10 @@ import {
   prepareUserModules,
   readWorkflowFiles,
   resetUserModules,
+  scriptApprovalsFor,
+  scriptFilesOf,
   scriptModuleOptions,
+  snapshotWithModules,
   userModules,
   workflowLoadOptions,
   type Project,
@@ -123,6 +127,26 @@ describe("a workflow script in a project", { timeout: 30_000 }, () => {
     const ran = await run();
     expect(statusOfResult(ran)).toBe("completed");
     expect((ran as { value?: unknown }).value).toEqual({ line: "hello, ADA" });
+  });
+
+  it("asks before the script's OWN code runs, by its content — and asks again once it changes (decision 0029 §1)", async () => {
+    const p = await open();
+    const scriptFile = canonicalModulePath(join(p.paths.workflowsDir, "greet.ts"));
+    const bundle = loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir), "greet", workflowLoadOptions(p.paths));
+    expect(scriptFilesOf(bundle)).toEqual([scriptFile]);
+    // Its import is agreed to; the script itself is not, so the run is a question, with the source shown.
+    userModules()!.approvals.approve(canonicalModulePath(libFile), moduleHash(LIB));
+    const refused = await snapshotWithModules(p, bundle).catch((e: unknown) => e);
+    expect(refused).toBeInstanceOf(ApprovalRequired);
+    expect((refused as ApprovalRequired).pending).toEqual([{ file: scriptFile, hash: moduleHash(SCRIPT), source: SCRIPT }]);
+
+    userModules()!.approvals.approve(scriptFile, moduleHash(SCRIPT));
+    await expect(snapshotWithModules(p, bundle)).resolves.toMatchObject({ hash: expect.any(String) });
+
+    // An edit — by a person, or by an improver — is a new question, and says what was agreed before.
+    const edited = SCRIPT.replace("Say hello to", "Greet");
+    writeFileSync(join(p.paths.workflowsDir, "greet.ts"), edited, "utf8");
+    expect(scriptApprovalsFor(userModules()!, [scriptFile])).toEqual([{ file: scriptFile, hash: moduleHash(edited), source: edited, previousHash: moduleHash(SCRIPT) }]);
   });
 
   it("runs agent() under the built-in agent preset — the first coding agent this machine has", async () => {

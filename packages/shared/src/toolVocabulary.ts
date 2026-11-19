@@ -329,6 +329,9 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   { name: "hold_task", label: "hold_task", title: "Hold task", icon: "workflow", category: "tasks", hint: "hold a task where it stands" },
   { name: "release_task", label: "release_task", title: "Release task", icon: "workflow", category: "tasks", hint: "release a held task" },
   { name: "stop_task", label: "stop_task", title: "Stop task", icon: "workflow", category: "tasks", hint: "stop a task" },
+  // The skills (decision 0029 §10, `runtime/skills.ts`): read-only, from every layer the project reads.
+  { name: "list_skills", label: "list_skills", title: "List skills", icon: "workflow", category: "tasks", hint: "the skills this project has, and what each is for" },
+  { name: "load_skill", label: "load_skill", title: "Load skill", icon: "workflow", category: "tasks", hint: "read a skill's instructions, to follow for the work it describes" },
 ];
 
 /**

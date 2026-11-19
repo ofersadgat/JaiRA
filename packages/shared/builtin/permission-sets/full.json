@@ -39,6 +39,8 @@
   "download_pipeline_artifact": "allow",
   "wait_for_event": "allow",
   "list_workflows": "allow",
+  "list_skills": "allow",
+  "load_skill": "allow",
   "start_task": "allow",
   "move_task": "allow",
   "list_tasks": "allow",

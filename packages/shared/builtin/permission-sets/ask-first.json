@@ -39,6 +39,8 @@
   "download_pipeline_artifact": "ask",
   "wait_for_event": "ask",
   "list_workflows": "ask",
+  "list_skills": "ask",
+  "load_skill": "ask",
   "start_task": "ask",
   "move_task": "ask",
   "list_tasks": "ask",

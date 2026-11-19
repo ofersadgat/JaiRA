@@ -78,6 +78,8 @@ export * from "./remoteReview";
 export * from "./remoteEvents";
 export * from "./eventHub";
 export * from "./eventsTask";
+export * from "./improveFunctions";
+export * from "./skills";
 export * from "./repoWatch";
 export * from "./executors";
 // Installing tools — agents, git programs, and what a project's setup asks for — the way the machine

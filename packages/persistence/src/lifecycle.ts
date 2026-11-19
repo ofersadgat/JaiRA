@@ -12,7 +12,7 @@ import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } 
 import { newTaskId, isStartableStatus, type ChatSettings, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStartedBy, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
-import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
+import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, scriptApprovalsFor, scriptFilesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
 import { refuseIfDisabled } from "./disabled";
@@ -376,6 +376,10 @@ export async function snapshotWithModules(
   // modules it reaches are found by loading it the way a run will, and are held to the same approval
   // and the same freeze as a module a state calls (decision 0007, amended 2026-09-22).
   const entries = [...new Set([...moduleEntriesOf(bundle), ...permissionFunctionModulesOf(project, bundle)])].sort();
+  // A workflow script's own code runs in this process, so it is approved by content like a module
+  // (decision 0029 §1): a script nobody agreed to — edited by a person, or written by an improver —
+  // is a question before the run, never code that ran because it was in a workflow.
+  await refuseIfScriptsUnapproved(scriptFilesOf(bundle));
   if (entries.length === 0) {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     return { hash: snap.hash, dir: snap.dir, bundle };
@@ -432,6 +436,15 @@ function permissionFunctionModulesOf(project: Project, bundle: WorkflowBundle): 
  * It stays a `Refusal`, so a host with nobody attached prints the message and stops exactly as
  * before. A host with a human narrows to {@link ApprovalRequired} and asks.
  */
+async function refuseIfScriptsUnapproved(files: readonly string[]): Promise<void> {
+  if (files.length === 0) return;
+  const modules = userModules();
+  if (modules === undefined) return;
+  const pending = scriptApprovalsFor(modules, files);
+  if (pending.length === 0) return;
+  throw new ApprovalRequired(approvalRefusalMessage(pending), pending);
+}
+
 async function refuseIfUnapproved(withheld: readonly WithheldSymbol[], entries: readonly string[] = []): Promise<void> {
   if (withheld.length === 0 && entries.length === 0) return;
   const modules = userModules();

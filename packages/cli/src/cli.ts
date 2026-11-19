@@ -111,6 +111,7 @@ import {
   registerSearchTools,
   registerWebTools,
   registerWorkflowTools,
+  registerSkillTools,
   noWorkflowHost,
   registerGitTools,
   workspaceGitHost,
@@ -635,6 +636,8 @@ function buildRunEnvironment(
   // The workflow tools need the app (it holds the conversation and the hubs): here they RESOLVE, so a
   // state that holds them loads and runs, and every call answers that the CLI does not serve them.
   registerWorkflowTools(registry, noWorkflowHost("by the CLI"));
+  // The skills (decision 0029 §10), from the project's layers when there is a project, else the base's.
+  registerSkillTools(registry, projectDir !== undefined ? [join(projectDir, ".jaira"), jairaBasePaths().baseDir] : [jairaBasePaths().baseDir]);
   // The secret chain: the provider routes' keys, the SDK agent's key, the MCP servers' secrets.
   const secrets = new SecretResolver({
     ...(projectDir !== undefined ? { projectDir } : {}),

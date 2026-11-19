@@ -74,6 +74,9 @@ export function conversationTitleOperation(opening: string): PromptOp<InlineFami
     config: {
       model: CONVERSATION_TITLE_MODEL,
       toolChoice: "none",
+      // A title is about the message, not the project: the layers' instructions and skills stay out
+      // (decision 0029 §9) — `withInstructions` takes this key off before any provider sees it.
+      instructions: false,
       providerOptions: {
         claudeCode: { systemPrompt: TITLE_SYSTEM, settingSources: [], extraArgs: { "no-session-persistence": null } },
       },

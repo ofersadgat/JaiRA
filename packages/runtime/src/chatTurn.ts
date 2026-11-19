@@ -125,6 +125,11 @@ export interface ChatTurnRequest {
 }
 
 export interface ChatTurnResult {
+  /**
+   * The message went to a PROGRAM's `input()` (decision 0029 §2): no turn ran on its own — the run's
+   * next call is the reply, and it streams and lands as the run's calls do.
+   */
+  program?: true;
   /** What came back, when it did. */
   value?: ResolvedValue;
   /** Where the conversation now ends — the caller's next `position`. */

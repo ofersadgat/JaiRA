@@ -13,7 +13,7 @@
  *    `FunctionOp` resolved through `registry.functions`.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal } from "@jaira/shared";
+import { isComponentName, refusal } from "@jaira/shared";
 import {
   newCapabilityRegistry,
   type CapabilityRegistry,
@@ -69,6 +69,7 @@ import {
 } from "@jaira/shared";
 import { ScriptedFakeExecutor, type FakeRule } from "./fakeExecutor";
 import { buildPromptTree, withSecurityFloor } from "./executorTree";
+import { withInstructions } from "./skills";
 import { withPresetModels, type PresetModelOptions } from "./presetModels";
 import { agentPromptRouteNames, agentRouteVendors, usableRouteKeys } from "./modelRoutes";
 import type { StackedExecutor } from "./executorStack";
@@ -160,6 +161,21 @@ export function functionNamesOf(bundle: WorkflowBundle): string[] {
   return [...names].sort();
 }
 
+/**
+ * The gate COMPONENTS a workflow script calls by name (`import { choose_option } from "$REGISTRY"`,
+ * decision 0029 §5): a script's call is code (`$rt.call("choose_option", …)`), never a state's named
+ * function, so {@link functionNamesOf} cannot see it. Only component names — a script's other registry
+ * calls are the host's own functions, registered elsewhere, and must not be mistaken for gates.
+ */
+export function scriptComponentNamesOf(bundle: WorkflowBundle): string[] {
+  const names = new Set<string>();
+  for (const op of callsOf(bundle)) {
+    const text = JSON.stringify(op);
+    for (const m of text.matchAll(/\$rt\.call\(\\"([A-Za-z_][\w]*)\\"/g)) if (isComponentName(m[1]!)) names.add(m[1]!);
+  }
+  return [...names].sort();
+}
+
 /** Every call a bundle's states make — each state's one operation, or every call of a list (hw SPEC §7.1d). */
 function callsOf(bundle: WorkflowBundle): Operation<InlineFamily>[] {
   return Object.values(bundle.states).flatMap((def) => operationsOf(def));
@@ -171,6 +187,11 @@ export const DEFAULT_REPAIR_TURNS = 2;
 export interface PromptExecutorOptions {
   /** Scripted rules ⇒ a fake prompt executor instead of a real provider. */
   fakeRules?: FakeRule[];
+  /**
+   * What every call is told beyond its own system prompt — the layers' `instructions.md` and the skill
+   * catalog (`standingContextOf`, decision 0029 §9). A call opts out with `instructions: false`.
+   */
+  instructions?: string;
   /**
    * Call config every prompt is bounded with — see `withSecurityFloor`.
    *
@@ -250,8 +271,11 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
   // fake run exercises the same wiring rather than a quieter version of it. Over rather than under
   // the state's config: a floor a state could replace is a default with a misleading name. See
   // `withSecurityFloor`.
-  const bounded =
+  const floored =
     options.securityFloor === undefined ? (fake ?? presetted) : withSecurityFloor(options.securityFloor, fake ?? presetted);
+  // The instructions and the skill catalog (decision 0029 §9–§10), in every call's system text — a
+  // scripted run's too, so a fake run exercises the same wiring.
+  const bounded = options.instructions === undefined ? floored : withInstructions(options.instructions, floored);
   const base = repairing(
     bounded,
     options.repairTurns ?? DEFAULT_REPAIR_TURNS,

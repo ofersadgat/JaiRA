@@ -29,8 +29,10 @@ import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { createImproveHost } from "./improveHost";
 import {
   DirectedTransitions,
+  INPUT_FUNCTION,
   InMemoryPersistence,
   loadBundle,
   moduleHash as moduleHashOf,
@@ -430,6 +432,10 @@ import {
   type QuestionRequest,
   type SyncEdit,
   registerEventsTaskFunctions,
+  registerImproveFunctions,
+  registerSkillTools,
+  standingContextOf,
+  scriptComponentNamesOf,
   START_TASK,
   NOTIFY,
   ON_EVENT,
@@ -1456,6 +1462,12 @@ function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: Ja
 }
 
 /**
+ * What a message delivered to a program's `input()` answers the composer (decision 0029 §2): no turn
+ * ran here — the run's own next call is the reply, streamed as a run's call is.
+ */
+const PROGRAM_ANSWERED = { program: true } as const;
+
+/**
  * Stamp a gate with its parsed contract — the one step a live park and a recovered row share.
  *
  * Parsed here, once, so the renderer receives a normalized contract instead of re-deriving it, and
@@ -2421,6 +2433,34 @@ export class AppService {
         startTask: (request, caller) => this.startFromEvents(open, taskId, request, caller),
         notify: (notice, caller) => this.postNotice(open, taskId, notice, caller),
       });
+  }
+
+  /**
+   * `start_task` from a workflow that is not the events task — a program starting its improver
+   * (decision 0029 §6): a task of its own, saying which task started it, started at once. Answered as
+   * soon as its run has started, so the caller never waits for what it started.
+   */
+  private async startFromProgram(open: ProjectSession, fromTask: string, request: EventsTaskStart): Promise<{ task_id: string; error?: string }> {
+    const project = open.project;
+    const inputs = request.inputs ?? {};
+    const from = project.tasks.tryRead(fromTask);
+    const meta = createTask(project, {
+      title: request.title ?? request.workflow,
+      workflow: request.workflow,
+      ...(Object.keys(inputs).length > 0
+        ? { inputs, inputProvenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])) }
+        : {}),
+      startedBy: { by: "events" as const, fromTask, event: "", summary: `started by ${from?.title ?? fromTask}` },
+    });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    try {
+      await this.startTask({ taskId: meta.id, project: this.refOfSession(open) });
+      this.log({ level: "info", source: "run", message: `started ${request.workflow} (${meta.id}) from ${fromTask}`, project: open.key, taskId: fromTask });
+      return { task_id: meta.id };
+    } catch (e) {
+      return { task_id: meta.id, error: (e as Error).message };
+    }
   }
 
   /**
@@ -5890,6 +5930,9 @@ export class AppService {
     // a workflow that lives in the shared root wants.
     const open = this.session(request.project);
     const bundle = this.overriddenBundle(open, request.taskId, request.overrides);
+    // A PROGRAM's root has no one prompt to write them into (decision 0029 §2): the first message's
+    // settings are an input it takes, as every later message's are part of what `input()` answers.
+    if (bundle === undefined) this.settingsAsProgramInput(open, request.taskId, request.overrides);
     // A conversation started with settings picked keeps them as its own — what its composer opens with.
     if (request.overrides !== undefined && Object.keys(request.overrides).length > 0) this.keepChatSettings(open, request.taskId, request.overrides);
     try {
@@ -5938,6 +5981,17 @@ export class AppService {
     const settings: ChatSettings = stack !== undefined ? { ...overrides, permissionSet: stack.decl as PermissionSetDecl } : overrides;
     const state = stateWithChatSettings(root, settings, stack?.stack);
     return state === undefined ? undefined : { ...bundle, states: { ...bundle.states, [bundle.rootId]: state } };
+  }
+
+  /** Hand a program its first message's settings, as its `settings` input, when it declares one. */
+  private settingsAsProgramInput(open: ProjectSession, taskId: string, overrides?: ChatSettings): void {
+    if (overrides === undefined || Object.keys(overrides).length === 0) return;
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta === undefined) return;
+    const root = bundleFor(open.project, meta.workflow)?.states;
+    const declared = root?.[meta.workflow]?.inputs;
+    if (declared === undefined || !("settings" in declared)) return;
+    open.project.tasks.write({ ...meta, inputs: { ...(meta.inputs ?? {}), settings: overrides as unknown as JsonValue } });
   }
 
   /**
@@ -6199,6 +6253,8 @@ export class AppService {
     // The workflow tools (decision 0005 §3), over this task's own conversation: a dynamic workflow's
     // root runs its conversation AS a run, so the opening turn of a session reaches them here.
     registerWorkflowTools(registry, this.workflowHostFor(open, taskId));
+    // The skills (decision 0029 §10), from every layer this project reads, nearest first.
+    registerSkillTools(registry, project.paths.roots);
     // The Git tools (decision 0010 §1), over this task's workspace and the forge its remote picks. Their
     // publish question is the remote primitives' own (registered below), so a task asked once by
     // either is asked once.
@@ -6278,7 +6334,7 @@ export class AppService {
     // is routed to the renderer.
     // Not for the events task: it runs unattended, so a component its workflow names is refused at the
     // call (nothing registered) rather than parked on a person nobody asked to watch it.
-    for (const name of eventsTask ? [] : functionNamesOf(started.bundle)) {
+    for (const name of eventsTask ? [] : [...new Set([...functionNamesOf(started.bundle), ...scriptComponentNamesOf(started.bundle)])]) {
       open.interactive.add(name);
       // The task is named at REGISTRATION, so every request this run parks carries it. The service
       // used to label a request with whichever run came first in its live map — right only while
@@ -6293,6 +6349,27 @@ export class AppService {
     // Registering it unconditionally costs a map entry and is what makes a guard that calls it work
     // in any workflow rather than in the ones a walker happened to recognise.
     open.userEvents.register(registry, taskId);
+    // A program's `input()` (decision 0029 §2): the conversation's next message, for every interactive
+    // run, for the same reason — a script's call reaches it from code, never as a state's named
+    // function. The events task asks nobody, so it has none and its `input()` fails plainly.
+    if (!eventsTask && !registry.functions.has(INPUT_FUNCTION)) {
+      open.interactive.add(INPUT_FUNCTION);
+      open.hub.register(registry, INPUT_FUNCTION, taskId);
+      scripted?.registerWildcard(registry, INPUT_FUNCTION);
+    }
+    // What a workflow that LEARNS calls (decision 0029 §3–§6): the conversation it read, the files of
+    // the workflow it improves, the lessons on record, and the one write — JaiRA's, never a model's —
+    // plus `start_task`, so a program starts its improver without waiting for it. Every interactive run
+    // has them, as a state's code reaches them by name from `$REGISTRY`.
+    if (!eventsTask) {
+      registerImproveFunctions(registry, createImproveHost(project), taskId);
+      if (!registry.functions.has(START_TASK)) {
+        registerEventsTaskFunctions(registry, {
+          startTask: (request) => this.startFromProgram(open, taskId, request),
+          notify: (notice, caller) => this.postNotice(open, taskId, notice, caller),
+        });
+      }
+    }
     // Its sibling on the forge, for every run for the same reason: it is called from a guard.
     open.remoteEvents.register(registry, taskId, project.remotes);
     // And `on_event` (decision 0010 §3), for every run for the same reason.
@@ -6371,9 +6448,12 @@ export class AppService {
     // — the agent's built-ins ran under its default posture.
     // One recipe with the CLI's (`securityFloorOf`), so a run is bounded the same whichever host starts it.
     const securityFloor = securityFloorOf(config, workspace.root);
+    // The layers' instructions and skill catalog (decision 0029 §9), read once as the run starts.
+    const instructions = standingContextOf(project.paths.roots);
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
       ...(securityFloor !== undefined ? { securityFloor } : {}),
+      ...(instructions !== undefined ? { instructions } : {}),
       ...this.promptWiring(config, {
         fake: fakeRules !== undefined,
         secrets: opts.secrets,
@@ -7224,6 +7304,12 @@ export class AppService {
     if (kept !== undefined) request = { ...request, overrides: { ...kept, ...(request.overrides ?? {}) } };
     // The person writing again is what lets a task they stopped use the mouse and keyboard again.
     if (origin.by !== "host") this.drivingStopped.delete(`${this.refOfSession(open)}/${request.taskId}`);
+    // A PROGRAM's conversation (decision 0029 §2): the message is the answer to its `input()`, and the
+    // run takes it from there — its next call is a state of the run, streamed and recorded as one.
+    if (request.branchAt === undefined && origin.continuing === undefined) {
+      const answered = await this.answerProgramInput(open, request);
+      if (answered !== undefined) return answered;
+    }
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
     const settledAhead = open.chatDone.get(request.taskId);
     let finished = (): void => undefined;
@@ -7236,6 +7322,75 @@ export class AppService {
     } finally {
       if (open.chatDone.get(request.taskId) === done) open.chatDone.delete(request.taskId);
       finished();
+    }
+  }
+
+  /**
+   * A message to a conversation that is a PROGRAM — a run looping over `input()` (decision 0029 §2) —
+   * delivered as that `input()`'s answer: `{ text, settings }`, the settings being what the composer
+   * chose for this message, for the program to use or not.
+   *
+   * - Waiting at `input()` now: answered — the live park, or the stored row of one the app closed on,
+   *   which starts the run again with the answer in hand.
+   * - Not waiting (a call in flight): steered into the call when its transport can take it, else
+   *   SEEDED, so the program's next `input()` is answered at once rather than asked.
+   *
+   * `undefined` when the task's run is not a program, and the message goes the ordinary way.
+   */
+  private async answerProgramInput(
+    open: ProjectSession,
+    request: typeof AppService.chatSend,
+  ): Promise<(ChatTurnResult & { instanceId: string; index: number; steered?: boolean }) | undefined> {
+    const taskId = request.taskId;
+    const answer: JsonValue = {
+      text: request.message,
+      ...(request.overrides !== undefined && Object.keys(request.overrides).length > 0 ? { settings: request.overrides as unknown as JsonValue } : {}),
+    };
+    const live = open.hub.list().find((r) => r.component === INPUT_FUNCTION && (r.taskId ?? open.requestTask.get(r.requestId)) === taskId);
+    const stored = live === undefined ? open.project.interactions.forTask(taskId).find((row) => row.component === INPUT_FUNCTION) : undefined;
+    if (live === undefined && stored === undefined && !this.isProgramConversation(open, taskId)) return undefined;
+    const at = { instanceId: request.instanceId ?? "", index: 0 };
+    if (live !== undefined) {
+      open.hub.submit(live.requestId, answer);
+      return { ...at, ...PROGRAM_ANSWERED };
+    }
+    if (stored !== undefined) {
+      await this.submitInteraction(stored.requestId, answer);
+      return { ...at, ...PROGRAM_ANSWERED };
+    }
+    // A call is in flight: join it if its transport can, else the next `input()` takes this.
+    const steer = (() => {
+      try {
+        return this.steerOf(open, this.chatContextOf(taskId, request.instanceId, request.project).position);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (steer !== undefined) {
+      try {
+        const sentAt = Date.now();
+        await steer.send(request.message);
+        const joined = joinedMessageEntries(request.message, sentAt);
+        this.hostCall(open, taskId, joined.live, joined.record, sentAt);
+        return { ...at, ...PROGRAM_ANSWERED, steered: true };
+      } catch {
+        // Too late to join: it waits for the next `input()` instead.
+      }
+    }
+    open.hub.seed(taskId, INPUT_FUNCTION, answer);
+    return { ...at, ...PROGRAM_ANSWERED };
+  }
+
+  /** Whether a task runs a program — a pinned bundle whose code calls `input()` (decision 0029 §2). */
+  private isProgramConversation(open: ProjectSession, taskId: string): boolean {
+    const task = open.project.runtime.get(taskId);
+    const pinned = task !== undefined ? currentPin(open.project, task)?.snapshotHash : undefined;
+    if (pinned === undefined) return false;
+    try {
+      const bundle = bundleFor(open.project, pinned, pinned);
+      return Object.values(bundle?.states ?? {}).some((state) => JSON.stringify(state.operation ?? null).includes("$rt.input("));
+    } catch {
+      return false;
     }
   }
 
@@ -7358,8 +7513,11 @@ export class AppService {
     // with hand-copied options and a memo cache each, so the two had to be kept in step by eye and
     // neither could reuse the other's memo. The summarizer takes the BARE executor and the turn takes
     // it under the session layers, which is the only difference between the two uses.
+    // The layers' instructions and skill catalog (decision 0029 §9), read as this turn starts.
+    const instructions = standingContextOf(project.paths.roots);
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
+      ...(instructions !== undefined ? { instructions } : {}),
       // No observer: a chat turn is not a run, so it holds no job claim for a child to hang off (see
       // `cancelChatTurn`). Stated rather than left out, because an observer omitted by accident is
       // exactly how the run path came to spawn unrecorded agents. An agent started from a
@@ -7500,6 +7658,7 @@ export class AppService {
     // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
     // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
     registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
+    registerSkillTools(registry, project.paths.roots);
     // The Git tools (decision 0010 §1), over the workspace this turn reads. A turn has no remote
     // primitives, so the publish question is asked here — once per task, remembered on the session
     // and by any row the task's review already pushed.
@@ -9059,10 +9218,10 @@ export class AppService {
   /** Whether a task has something open put to the person: a gate, an agent's question, an approval. */
   private asksPerson(open: ProjectSession, taskId: string): boolean {
     return (
-      open.hub.list().some((request) => (request.taskId ?? open.requestTask.get(request.requestId)) === taskId) ||
+      open.hub.list().some((request) => request.component !== INPUT_FUNCTION && (request.taskId ?? open.requestTask.get(request.requestId)) === taskId) ||
       open.questions.list().some((question) => question.taskId === taskId) ||
       open.approvals.list().some((approval) => approval.taskId === taskId) ||
-      open.project.interactions.forTask(taskId).some((stored) => !isMoveQuestion(stored.requestId))
+      open.project.interactions.forTask(taskId).some((stored) => !isMoveQuestion(stored.requestId) && stored.component !== INPUT_FUNCTION)
     );
   }
 
@@ -10530,10 +10689,12 @@ export class AppService {
    * gate, before the row is deleted.
    */
   pendingInteractions(): PendingInteraction[] {
-    const live = [...this.sessions.values()].flatMap((s) => s.hub.list().map((request) => this.pendingOf(request)));
+    // A conversation waiting for its next message is idle, not asking anything (decision 0029 §2): its
+    // `input()` is answered from the composer, never from the list of what waits on the person.
+    const live = [...this.sessions.values()].flatMap((s) => s.hub.list().filter((request) => request.component !== INPUT_FUNCTION).map((request) => this.pendingOf(request)));
     const seen = new Set(live.map((p) => p.requestId));
     const stored = [...this.sessions.entries()].flatMap(([key, s]) =>
-      this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId)),
+      this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId) && row.component !== INPUT_FUNCTION),
     );
     return [...[...live, ...stored], ...(this.federation.pendingOf("interaction") as unknown as PendingInteraction[]), ...this.offlineInteractions()];
   }

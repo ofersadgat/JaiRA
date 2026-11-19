@@ -69,10 +69,11 @@ Surfaces DESIGN describes that no phase claimed. They are not regressions — no
 update says they landed — but §14 is complete, so nothing is scheduled to pick them up
 either.
 
-- [ ] **Skills (§7.4, §15 Q11) — DEFERRED, not scheduled. The spec is obsolete and the
-      research is done; this entry records what was found so the next attempt starts
-      from it. Recommended path when picked up: the tool pair, then projection; treat
-      `container.skills` as an Anthropic-only optimization.**
+- [ ] **Skills (§7.4, §15 Q11) — the tool pair is BUILT (decision 0029 §10, 2026-11-18):
+      `skills/<name>/SKILL.md` along every layer, `list_skills` / `load_skill` in
+      `runtime/skills.ts`, the catalog in every call's system text beside `instructions.md`.
+      Native projection for Claude Code and `container.skills` below are still open.
+      The research this entry recorded follows.**
       `jaira init` creates `.jaira/skills/` and nothing reads it. But §7.4's mechanism
       is *gone upstream*, not unbuilt: `prompt.skill` and `registry.skills` were
       deleted and replaced by a file REFERENCE resolved at load time
@@ -114,8 +115,8 @@ either.
         so enabling skills enables code execution the policy engine cannot gate.
         The AI SDK is REFERENCE-ONLY: `skillId` is the sole handle, there is no content
         field and no `skills.create`, so publishing never meets inference.
-  - [ ] **Every other provider — a tool pair. Build this FIRST; it is the only portable
-        mechanism.** `list_skills` / `load_skill` registered in `registry.tools`,
+  - [x] **Every other provider — a tool pair. Build this FIRST; it is the only portable
+        mechanism.** Built 2026-11-18 (decision 0029 §10). `list_skills` / `load_skill` registered in `registry.tools`,
         returning the body as tool output. Provider-neutral, policy-gated like any other
         tool, reads local files, no upload step.
         `@openrouter/ai-sdk-provider` has NO `skill` or `container` field at all — skills

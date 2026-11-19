@@ -71,6 +71,7 @@ import { publishedFetchesOf, publishedReadsOf } from "./showArtifact";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
 import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
+import { registerSkillTools } from "./skills";
 import { registerGitTools, type GitToolHost } from "./gitTools";
 import { registerSystemTools, type SystemToolOptions } from "./systemTools";
 import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate, WithPermissionOptions } from "@declarative-ai/permissions";
@@ -536,9 +537,12 @@ export function registerAllTools(
     git?: GitToolHost;
     /** The System tools' (decision 0019): this machine, by default. */
     system?: SystemToolOptions;
+    /** The layer roots skills are read from (decision 0029 §10), nearest first. Absent ⇒ none. */
+    skillRoots?: readonly string[];
   },
 ): void {
   registerTools(registry, options);
+  registerSkillTools(registry, options.skillRoots ?? []);
   registerFileTools(registry, options.files);
   registerSearchTools(registry, { ...(options.cwd !== undefined ? { cwd: options.cwd } : {}) });
   registerWebTools(registry, options.web ?? {});

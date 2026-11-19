@@ -492,6 +492,42 @@ export function moduleEntriesOf(bundle: WorkflowBundle): string[] {
   return [...files].sort();
 }
 
+/**
+ * The workflow SCRIPTS a bundle's states were compiled from (decision 0029 §1), each once, sorted.
+ *
+ * A script's own code is carried in its documents and so is inside the snapshot hash — but it RUNS, in
+ * this process, like a function module does. A file whose content nobody approved (one a person just
+ * edited, or one an improver wrote) is therefore asked about before it runs, by the same content-hash
+ * approval a module gets ({@link scriptApprovalsFor}). The built-in layer's scripts are exempt, as its
+ * modules are (decision 0006).
+ */
+export function scriptFilesOf(bundle: WorkflowBundle): string[] {
+  const files = new Set<string>();
+  for (const state of Object.values(bundle.states)) {
+    const from = (state as { generated?: { from?: unknown } }).generated?.from;
+    if (typeof from === "string" && from.length > 0) files.add(canonicalModulePath(from));
+  }
+  return [...files].sort();
+}
+
+/**
+ * The scripts among `files` whose current content is not the approved one — as the approvals a prompt
+ * shows: the file, its hash and its whole source, and the hash approved before, when there was one.
+ * The script's own text only: what it IMPORTS is a module, gated by {@link moduleApprovalsFor}.
+ */
+export function scriptApprovalsFor(modules: UserModules, files: readonly string[]): ModuleApproval[] {
+  const out: ModuleApproval[] = [];
+  for (const file of files) {
+    const source = modules.vfs.read(file);
+    if (source === undefined) continue;
+    const hash = moduleHash(source);
+    const approved = modules.approvals.approved(file);
+    if (approved === hash) continue;
+    out.push({ file, hash, source, ...(approved !== undefined ? { previousHash: approved } : {}) });
+  }
+  return out;
+}
+
 /** One `user:` reference a bundle makes, split back into the file and the symbol inside it. */
 export interface UserFunctionRef {
   /** The registry key exactly as the lowered operation spells it — `user:<file>#<a.b>`. */

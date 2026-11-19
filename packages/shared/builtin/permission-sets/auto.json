@@ -48,6 +48,8 @@
   "download_pipeline_artifact": "allow",
   "wait_for_event": "allow",
   "list_workflows": "smart",
+  "list_skills": "allow",
+  "load_skill": "allow",
   "start_task": "smart",
   "move_task": "smart",
   "list_tasks": "smart",

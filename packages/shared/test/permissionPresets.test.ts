@@ -91,6 +91,12 @@ const EVENT_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
   wait_for_event: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
 };
 
+/** The skill tools (decision 0029 §10): readers, so allowed wherever a set lets anything look. */
+const SKILL_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
+  list_skills: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
+  load_skill: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
+};
+
 /**
  * The System tools (decision 0019 §5, as ruled 2026-10-20): "system should default to ask" — every one
  * asks, except that read-only lets the looks go ahead (the clipboard and the screen too: they only
@@ -104,7 +110,7 @@ const SYSTEM_TOOLS: Record<string, Record<string, PermissionSetMode>> = Object.f
 ]);
 
 /** The tools with a table of their own here rather than a frozen preset's mode. */
-const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS, ...SYSTEM_TOOLS };
+const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS, ...SYSTEM_TOOLS, ...SKILL_TOOLS };
 
 /** Every tool a conversation can be HANDED today — the nine the presets knew, the eight since, and the Git tools. */
 const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map((spec) => spec.name);
