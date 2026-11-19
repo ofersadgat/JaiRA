@@ -118,6 +118,7 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
           signingIn: signing,
           busy,
           warn: state === "needs-sign-in",
+          lapsed: state === "needs-sign-in" && probe!.lapsed === true,
           onSignIn: () => onSignIn(spec.id),
           onCancel: () => onCancelSignIn(spec.id),
           onSignOut: () => onSignOut(spec.id),

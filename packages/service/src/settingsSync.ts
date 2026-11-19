@@ -31,6 +31,12 @@
  *   or an agent's sign-in is removed everywhere only when it is removed through JaiRA — a key cleared,
  *   a forge or an agent signed out — never because it could not be read here, so a keychain that will
  *   not open cannot sign every machine out.
+ * - **Agents' sign-ins** (amended 2026-11-19). Only a sign-in that could work is sent or taken: not one
+ *   the agent wiped after a refused refresh (Claude Code empties both tokens and keeps the account), not
+ *   one expired, not one this machine's check or a run found not working (`loginStateOf`, `loginWorks`).
+ *   A machine whose own sign-in works keeps it and passes over another's, since two machines refreshing
+ *   one copy spend each other's refresh token; once its own stops working, it asks every machine for
+ *   theirs and takes the newest different one that could work (`recoverLogin`).
  * - **What another machine sends is checked** as a settings save is: laid into the layer it belongs
  *   to, the layer must still load with every open project. One that would not is left out, and said.
  * - **Files** (amended 2026-11-18). The permission sets, workflows and prompts of Shared, Just you and
@@ -61,7 +67,7 @@ import {
   type SyncedFileLayer,
   type SyncedLayer,
 } from "@jaira/shared";
-import type { AgentLoginStore } from "./agentLogins";
+import { loginStateOf, type AgentLoginStore } from "./agentLogins";
 import type { Fleet } from "./fleet";
 
 /** When and by which machine a piece was last changed. */
@@ -118,6 +124,13 @@ export interface SettingsSyncPorts {
   writeMarks(marks: Record<string, JsonValue>): void;
   logins(): AgentLoginStore[];
   /**
+   * Whether this machine's own sign-in for an agent works, as far as this machine has seen: `false` when
+   * its check found it signed out or a run's call on it was refused, `true` when it was seen to work,
+   * undefined when nothing has said. A sign-in that does not work is neither sent nor kept over one
+   * another machine sends. Absent: never known.
+   */
+  loginWorks?(agent: string): boolean | undefined;
+  /**
    * The settings keys of this machine's projects whose person's settings follow: those keyed by a
    * repository identity (`projectSettingsKey`), never a clone with no remote. Absent: none follow.
    */
@@ -127,8 +140,11 @@ export interface SettingsSyncPorts {
   /** Throw, naming the field, when the person's settings for this project written this way would not load. */
   checkProjectLayer?(key: string, doc: JsonValue): void;
   writeProjectLayer?(key: string, doc: JsonValue): void;
-  /** Something another machine sent was laid in here: what kinds, for the engine to re-read. */
-  changed(kinds: ReadonlySet<PieceKind>): void;
+  /**
+   * Something another machine sent was laid in here: what kinds, for the engine to re-read, and which
+   * agents' sign-ins were written.
+   */
+  changed(kinds: ReadonlySet<PieceKind>, logins?: ReadonlySet<string>): void;
   log(level: "info" | "warn", message: string): void;
 }
 
@@ -390,7 +406,11 @@ export class SettingsSync {
     for (const store of ports.logins()) {
       if (store.unavailable() !== undefined) continue;
       const login = store.read();
-      if (login !== undefined) here.set(pieceKey("login", store.agent), { value: login.value, hash: hashOf(login.value), age: login.at });
+      // Only a sign-in that could work is offered: not one the agent wiped after a refused refresh, not
+      // one expired, not one this machine's check or a run found not working. Not being here is not a
+      // removal (`scan`), so the last good one's stamp stays and nothing is sent until it works again.
+      if (login === undefined || !loginStateOf(store.agent, login.value).usable || ports.loginWorks?.(store.agent) === false) continue;
+      here.set(pieceKey("login", store.agent), { value: login.value, hash: hashOf(login.value), age: login.at });
     }
     return { here, read, kept };
   }
@@ -673,12 +693,13 @@ export class SettingsSync {
     return out;
   }
 
-  /** What this machine holds that is newer than `theirs`: the answer to `settings:pull`. */
-  answer(theirs: Record<string, SyncStamp>): SyncedPiece[] {
+  /** What this machine holds that is newer than `theirs`: the answer to `settings:pull` — only `only`'s keys, when named. */
+  answer(theirs: Record<string, SyncStamp>, only?: readonly string[]): SyncedPiece[] {
     if (!this.on()) return [];
     this.scan();
     const file = this.read();
-    const keys = new Set(Object.entries(file.pieces).filter(([key, held]) => newer(held, theirs[key])).map(([key]) => key));
+    const asked = only !== undefined ? new Set(only) : undefined;
+    const keys = new Set(Object.entries(file.pieces).filter(([key, held]) => (asked === undefined || asked.has(key)) && newer(held, theirs[key])).map(([key]) => key));
     return this.piecesOf(keys);
   }
 
@@ -877,12 +898,26 @@ export class SettingsSync {
     }
 
     const stores = new Map(ports.logins().map((store) => [store.agent, store]));
+    const wroteLogins = new Set<string>();
     for (const piece of wanted.filter((p) => kindOf(p.key) === "login")) {
-      const store = stores.get(idOf(piece.key));
+      const agent = idOf(piece.key);
+      const store = stores.get(agent);
       // Not followed here (agents in WSL, a keychain that refused): asked for again at the next pull.
       if (store === undefined || store.unavailable() !== undefined) continue;
       if (piece.value !== undefined && typeof piece.value !== "string") {
         pass(piece, "not a sign-in");
+        continue;
+      }
+      // A sign-in that could not work is never laid over anything (an older JaiRA still sends them).
+      if (piece.value !== undefined && !loginStateOf(agent, piece.value).usable) {
+        pass(piece, "it is signed out or expired");
+        continue;
+      }
+      // A sign-in that works here is kept: two machines refreshing one copy spend each other's refresh
+      // token, so each keeps its own while it works, and takes another's only when its own stops
+      // (`recoverLogin`). Passed without a word: nothing went wrong.
+      if (piece.value !== undefined && this.loginWorksHere(store)) {
+        pass(piece);
         continue;
       }
       try {
@@ -890,6 +925,7 @@ export class SettingsSync {
         else store.write(piece.value);
         hold(piece, piece.value === undefined ? undefined : hashOf(store.read()?.value ?? piece.value));
         taken.add("login");
+        wroteLogins.add(agent);
       } catch (e) {
         pass(piece, (e as Error).message);
       }
@@ -927,9 +963,83 @@ export class SettingsSync {
     this.write(file);
     if (taken.size > 0) {
       ports.log("info", `took ${count} setting${count === 1 ? "" : "s"} from ${from}`);
-      ports.changed(taken);
+      ports.changed(taken, wroteLogins);
     }
     return count;
+  }
+
+  /** Whether this machine's own sign-in for this agent is there, could work, and is not known not to. */
+  private loginWorksHere(store: AgentLoginStore): boolean {
+    let mine: { value: string } | undefined;
+    try {
+      mine = store.read();
+    } catch {
+      return false;
+    }
+    return mine !== undefined && loginStateOf(store.agent, mine.value).usable && this.options.ports.loginWorks?.(store.agent) !== false;
+  }
+
+  /**
+   * This machine's sign-in for an agent stopped working: ask every machine online for the one it holds,
+   * and lay in the newest that could work and is not the one here — even one passed over earlier while
+   * this machine's own still worked. Returns the label of the machine it came from, or undefined when
+   * no machine had a different one to give (so a sign-in that fails everywhere is not taken back and
+   * forth).
+   */
+  async recoverLogin(agent: string): Promise<string | undefined> {
+    if (!this.on() || this.closed) return undefined;
+    const store = this.options.ports.logins().find((one) => one.agent === agent);
+    if (store === undefined || store.unavailable() !== undefined) return undefined;
+    const key = pieceKey("login", agent);
+    let mine: string | undefined;
+    try {
+      mine = store.read()?.value;
+    } catch {
+      mine = undefined;
+    }
+    const mineHash = mine !== undefined ? hashOf(mine) : undefined;
+    // Every stamp but this one's, so a machine answers with its sign-in however old; `keys` keeps a
+    // newer JaiRA's answer to it alone, and an older one's answer is filtered here.
+    const stamps = this.stamps();
+    delete stamps[key];
+    let best: { piece: SyncedPiece & { value: string }; from: string } | undefined;
+    for (const peer of this.options.fleet.peers()) {
+      const client = this.options.fleet.client(peer.id);
+      if (client === undefined || peer.state !== "online") continue;
+      let pieces: unknown;
+      try {
+        pieces = ((await client.invoke("settings:pull", { stamps, keys: [key] })) as { pieces?: unknown } | null)?.pieces;
+      } catch {
+        continue;
+      }
+      for (const piece of Array.isArray(pieces) ? (pieces as SyncedPiece[]) : []) {
+        if (piece?.key !== key || typeof piece.value !== "string" || typeof piece.at !== "number" || typeof piece.by !== "string") continue;
+        if (!loginStateOf(agent, piece.value).usable || hashOf(piece.value) === mineHash) continue;
+        if (best === undefined || newer(piece, best.piece)) best = { piece: piece as SyncedPiece & { value: string }, from: this.options.fleet.labelOf(peer.id) };
+      }
+    }
+    if (best === undefined) return undefined;
+    try {
+      store.write(best.piece.value);
+    } catch (e) {
+      this.options.ports.log("warn", `${agent}'s sign-in from ${best.from} could not be written here: ${(e as Error).message}`);
+      return undefined;
+    }
+    const file = this.read();
+    file.clock = Math.max(file.clock, best.piece.at);
+    let back: string | undefined;
+    try {
+      back = store.read()?.value;
+    } catch {
+      back = undefined;
+    }
+    file.pieces[key] = { at: best.piece.at, by: best.piece.by, hash: hashOf(back ?? best.piece.value) };
+    if (file.passed?.[key] !== undefined) delete file.passed[key];
+    file.at = Date.now();
+    this.write(file);
+    this.options.ports.log("info", `${agent}'s sign-in here stopped working: took the one ${best.from} holds`);
+    this.options.ports.changed(new Set(["login"]), new Set([agent]));
+    return best.from;
   }
 
   // --- what Settings shows ----------------------------------------------------------------------------------
@@ -962,8 +1072,10 @@ export class SettingsSync {
   /** The `settings:*` channels, answered for one paired machine's connection. */
   handlersFor(caller: { id: string; label: string }): Record<string, (request: never) => unknown> {
     return {
-      "settings:pull": ((request: { stamps?: Record<string, SyncStamp> }) =>
-        ({ pieces: this.answer(typeof request?.stamps === "object" && request.stamps !== null ? request.stamps : {}) })) as (request: never) => unknown,
+      "settings:pull": ((request: { stamps?: Record<string, SyncStamp>; keys?: unknown }) => {
+        const keys = Array.isArray(request?.keys) ? request.keys.filter((key): key is string => typeof key === "string").slice(0, 100) : undefined;
+        return { pieces: this.answer(typeof request?.stamps === "object" && request.stamps !== null ? request.stamps : {}, keys) };
+      }) as (request: never) => unknown,
       "settings:offer": ((request: { pieces?: SyncedPiece[] }) => {
         this.take(Array.isArray(request?.pieces) ? request.pieces.slice(0, 5_000) : [], caller.label);
         return null;

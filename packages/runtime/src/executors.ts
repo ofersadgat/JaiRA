@@ -328,10 +328,12 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
   if (signIn !== undefined && info.credential === undefined) {
     const read = await checkSignIn(info.command, signIn, options);
     accounts = read?.accounts;
-    // A warning, not a failure: the connector works, and the logins under it say who is missing. The
-    // detail stays about the CONNECTOR; signing in is the logins list's to offer.
+    // A warning, not a failure: the binary runs, and the logins under it say who is missing. The detail
+    // says what was asked and what it answered — "'claude' responded" beside "not signed in" read as a
+    // contradiction. Whether the sign-in on file stopped working (`lapsed`) the engine lays over this,
+    // since it is the one that reads where each agent keeps it.
     if (read?.signedIn === false) {
-      return { name: info.name, status: "needs-sign-in", detail: `'${info.command}' responded`, ...(version ? { version } : {}), accounts: [], ...withInstall };
+      return { name: info.name, status: "needs-sign-in", detail: `'${[info.command, ...signIn.status].join(" ")}' says it is not signed in`, ...(version ? { version } : {}), accounts: [], ...withInstall };
     }
   }
 

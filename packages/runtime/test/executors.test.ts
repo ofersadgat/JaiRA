@@ -163,7 +163,7 @@ describe("probeExecutor", () => {
     const result = await probeExecutor(cli(), { exec });
 
     // Nothing is broken — the connector answers, and the logins list is where signing in happens.
-    expect(result).toMatchObject({ status: "needs-sign-in", version: "2.1.142 (Claude Code)", accounts: [], detail: "'claude' responded" });
+    expect(result).toMatchObject({ status: "needs-sign-in", version: "2.1.142 (Claude Code)", accounts: [], detail: "'claude auth status --json' says it is not signed in" });
     expect(result.fix).toBeUndefined();
   });
 

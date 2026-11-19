@@ -2,7 +2,7 @@
 id: engineering/decisions/0026-settings-follow-the-person
 type: decision
 status: built
-updated: 2026-11-18
+updated: 2026-11-19
 decides_for: [engineering/decisions/0013-machines, engineering/units/user-settings, engineering/units/project-config, engineering/units/secret-chain, engineering/units/forge-integrations]
 ---
 
@@ -156,7 +156,8 @@ another's. An agent that arrives without a path gets this machine's path put bac
 - **Rotating sign-ins can race.** An agent that rotates its refresh token on every refresh (Codex's
   ChatGPT sign-in, Claude Code's) can be refreshed on two machines in the same minute: one machine's
   refresh token is then spent, the later stamp wins everywhere, and the losing machine's agent is told to
-  sign in again. Following within a minute makes this rare; it cannot make it impossible.
+  sign in again. Following within a minute makes this rare; it cannot make it impossible. (Amended
+  2026-11-19, below: it was not rare, and a machine now keeps its own sign-in while it works.)
 - **A sign-out travels.** Signing an agent or a forge out on one machine signs it out on all. That is
   what keeping them in step means; a machine that should keep its own turns the switch off.
 - **Secrets travel over the fleet's own link**: the tailnet's HTTPS, to machines holding a token this one
@@ -373,6 +374,52 @@ it. With a paired machine in Settings' path, a workflow read or written from Set
 
 Verified: `app/test/federation.test.ts` — a paired machine's workflow, read, written and deleted there
 and not here.
+
+## Amended 2026-11-19: a sign-in that works is kept; one that does not is neither sent nor taken
+
+What happened. On 2026-11-18 at 14:22 the Mac offered its Claude Code sign-in, and the Windows machine
+laid it over its own `.credentials.json`; the two then held one refresh token. The Mac's JaiRA closed at
+14:31, and Claude Code on the Mac (run outside JaiRA) went on refreshing, spending that token. At 23:07
+Claude Code on Windows tried it, was refused, and emptied both tokens in its file, keeping the account
+(`"accessToken":"","refreshToken":"","expiresAt":0`, `accountUuid` and the plan kept). Windows' JaiRA
+read that as a changed sign-in, stamped it, and would have handed it to the Mac — signing the Mac out —
+the next time the Mac's JaiRA came up. Settings said "not signed in — 'claude' responded".
+
+The person's rules, 2026-11-19:
+
+1. **A sign-in that is signed out or not working is never sent, nor taken.** `loginStateOf`
+   (`agentLogins.ts`) reads what an agent keeps without saying a token: Claude Code's is usable with a
+   refresh token not past `refreshTokenExpiresAt`, or an access token not past `expiresAt`; Codex's with
+   a key, a refresh token or an access token. The sync reads a sign-in that is not usable, or that this
+   machine's check or a run found not working (`loginWorks`: the last check said `needs-sign-in`, or a
+   run's call was refused), as not there — which for a sign-in is never a removal, so nothing is sent
+   until it works again. One arriving from an older JaiRA is passed over and listed under "Not taken"
+   ("it is signed out or expired").
+2. **A sign-in that works here is not overwritten.** Another machine's newer one is passed over, quietly,
+   while this machine's is usable and not known to be broken. Each machine refreshes its own copy, so
+   neither spends the other's.
+3. **One that stops working takes another machine's.** When the check finds the agent's sign-in lapsed
+   (below) or a run's call is refused, the engine (`recoverSignIn`, at most once a minute per agent)
+   asks every machine online for its sign-in — `settings:pull` with that one stamp left out and
+   `keys: [<key>]`, which an older JaiRA ignores and answers whole — and lays in the newest that is
+   usable and differs from the one here, even one passed over earlier; then checks again. Nothing
+   different anywhere is nothing taken, so a sign-in that fails everywhere is not passed back and forth.
+4. **"Sign in again", not "Sign in".** A `needs-sign-in` check whose sign-in on file still names its
+   account (Claude Code's `accountUuid`, Codex's `account_id`) is `lapsed`: the row says "sign-in
+   expired" with Sign in again, its detail that the sign-in "no longer works: it expired or was
+   revoked", and the conversation's error and the composer's button say to sign in again. One with
+   nothing on file is "not signed in", as before. The check's own detail now says what it asked
+   (`'claude auth status --json' says it is not signed in`), not "'claude' responded".
+
+Unchanged: a sign-out made through JaiRA still travels (Consequences, above) — it is a removal, not a
+sign-in. A machine whose agent was signed out in a terminal has nothing usable, so it takes the next
+sign-in another machine sends, as before.
+
+Verified: `app/test/settingsSync.test.ts` (a working sign-in kept and another's passed over; taken once
+it stops working; asked again with nothing different, nothing taken; a wiped, expired or refused sign-in
+neither sent nor taken), `app/test/agentLogins.test.ts` (`loginStateOf`, with the file seen on Windows),
+`app/test/lapsedSignIn.test.ts` (the row, its button, the + box and the conversation's error). Not run:
+two real machines, or a real refused refresh.
 
 ## Revisit when
 

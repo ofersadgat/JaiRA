@@ -946,7 +946,7 @@ export function RouteFixes({ down }: { down: RouteDown }): JSX.Element | null {
           </Press>
           {down.signIn ? (
             <Press onPress={() => void app.actions.signIn(down.route)} disabled={signing} title="Sign in, in the browser" paddingVertical={3} paddingHorizontal={10} borderRadius={7} backgroundColor={t.v("bad") as never}>
-              <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>{signing ? "Waiting for the browser…" : "Sign in"}</Txt>
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>{signing ? "Waiting for the browser…" : down.again === true ? "Sign in again" : "Sign in"}</Txt>
             </Press>
           ) : null}
         </View>

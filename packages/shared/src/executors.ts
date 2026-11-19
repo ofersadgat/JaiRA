@@ -222,6 +222,12 @@ export interface ProbeResult {
    */
   accounts?: AgentAccount[];
   /**
+   * Set on a `needs-sign-in` agent whose stored sign-in still names its account but no longer works —
+   * its tokens expired, were revoked or were wiped by the agent after a refused refresh. It needs
+   * signing in AGAIN, which is what the row and the conversation's error say, not signing in.
+   */
+  lapsed?: boolean;
+  /**
    * How the agent's binary got onto this machine, and the command that installs or updates it — only
    * for an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode — a generic CLI by
    * its program) or one of the {@link GitCliName}s, and only when the check looked.
@@ -296,9 +302,12 @@ export type AgentInstallOutcome = { ok: true; path?: string; onPath?: boolean } 
  * composer's model chip carries it, and the line over the composer says it. `signIn` says the fix is a
  * sign-in, which the composer and the conversation offer as a button.
  */
-export function agentDownOf(probe: ProbeResult | undefined): { why: string; signIn: boolean } | undefined {
+export function agentDownOf(probe: ProbeResult | undefined): { why: string; signIn: boolean; again?: boolean } | undefined {
   if (probe === undefined) return undefined;
   const title = EXECUTOR_TITLES[probe.name] ?? probe.name;
+  if (probe.status === "needs-sign-in" && (probe.lapsed === true || probe.accounts?.some((account) => account.refused !== undefined) === true)) {
+    return { why: `${title}'s sign-in has expired. Sign in to it again (Settings → Connections → Agents), then send again.`, signIn: true, again: true };
+  }
   if (probe.status === "needs-sign-in") {
     return { why: `${title} is signed out. Sign in to it (Settings → Connections → Agents), then send again.`, signIn: true };
   }

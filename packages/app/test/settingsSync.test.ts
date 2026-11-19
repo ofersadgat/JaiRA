@@ -50,7 +50,7 @@ function memoryLogin(agent: string, store: Map<string, string>, unavailable?: st
   };
 }
 
-async function machine(label: string, opts: { codexRefused?: boolean } = {}): Promise<Machine> {
+async function machine(label: string, opts: { codexRefused?: boolean; works?: Map<string, boolean> } = {}): Promise<Machine> {
   const base = mkdtempSync(join(tmpdir(), `jaira-sync-${label}-`));
   dirs.push(base);
   const keychain = new Map<string, string>();
@@ -65,6 +65,8 @@ async function machine(label: string, opts: { codexRefused?: boolean } = {}): Pr
     keychain: memoryKeychain(keychain),
     agentLogins: [memoryLogin("claude-cli", logins), memoryLogin("codex-cli", logins, opts.codexRefused === true ? "the keychain did not let JaiRA read it" : undefined)],
     settingsSyncTimings: { settleMs: 30 },
+    // Whether each agent's sign-in works here: what a test says, never the real agents on this machine.
+    agentLoginWorks: (agent) => opts.works?.get(agent),
     publish: (m) => hosted?.host.broadcast(m),
   });
   hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
@@ -196,7 +198,7 @@ describe("settings that follow the person", { timeout: 60_000 }, () => {
     await expect.poll(() => b.keychain.has("GITHUB_TOKEN"), { timeout: 8000 }).toBe(false);
   });
 
-  it("carries an agent's sign-in and its sign-out, but not into a store this machine cannot reach", async () => {
+  it("carries an agent's sign-in to a machine with none, and its sign-out, but not into a store this machine cannot reach", async () => {
     const a = await machine("desk");
     const b = await machine("mini", { codexRefused: true });
     await pairMachines(a.service.fleet, b.service.fleet);
@@ -211,15 +213,68 @@ describe("settings that follow the person", { timeout: 60_000 }, () => {
       { agent: "codex-cli", synced: false, why: "the keychain did not let JaiRA read it" },
     ]);
 
-    // The agent refreshed its own sign-in on A: B follows at A's next look.
-    a.logins.set("claude-cli", '{"claudeAiOauth":{"accessToken":"a2"}}');
-    a.service.settingsSync.kick(0);
-    await expect.poll(() => b.logins.get("claude-cli"), { timeout: 8000 }).toBe('{"claudeAiOauth":{"accessToken":"a2"}}');
-
     // Signed out through JaiRA on A.
     a.logins.delete("claude-cli");
     a.service.settingsSync.removed("login", "claude-cli");
     await expect.poll(() => b.logins.has("claude-cli"), { timeout: 8000 }).toBe(false);
+  });
+
+  it("keeps a machine's own sign-in while it works, and takes another's once it stops (2026-11-19)", async () => {
+    const works = new Map<string, boolean>();
+    const a = await machine("desk");
+    const b = await machine("mini", { works });
+    await pairMachines(a.service.fleet, b.service.fleet);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 8000 }).toBe("online");
+    // Both have looked before: what changes next is stamped now, not by its age.
+    a.service.settingsSync.scan();
+    b.service.settingsSync.scan();
+    b.logins.set("claude-cli", '{"claudeAiOauth":{"refreshToken":"b1","accountUuid":"u1"}}');
+    b.service.settingsSync.scan();
+
+    // A's agent refreshed its own: offered, and passed over by B, whose own works.
+    a.logins.set("claude-cli", '{"claudeAiOauth":{"refreshToken":"a2","accountUuid":"u1"}}');
+    a.service.settingsSync.kick(0);
+    const passed = (): unknown => (JSON.parse(at(b, "system/settings-sync.json") ?? "{}") as { passed?: Record<string, unknown> }).passed?.["login:claude-cli"];
+    await expect.poll(passed, { timeout: 8000 }).toBeDefined();
+    expect(b.logins.get("claude-cli")).toBe('{"claudeAiOauth":{"refreshToken":"b1","accountUuid":"u1"}}');
+
+    // B's stops working (its check found it signed out): it asks, and takes A's — the one it passed over.
+    works.set("claude-cli", false);
+    expect(await b.service.settingsSync.recoverLogin("claude-cli")).toBe("desk");
+    expect(b.logins.get("claude-cli")).toBe('{"claudeAiOauth":{"refreshToken":"a2","accountUuid":"u1"}}');
+    // Asked again with nothing different anywhere: nothing is taken, so a sign-in failing everywhere is not passed back and forth.
+    expect(await b.service.settingsSync.recoverLogin("claude-cli")).toBeUndefined();
+
+    // While it does not work, what A sends next is taken too.
+    a.logins.set("claude-cli", '{"claudeAiOauth":{"refreshToken":"a3","accountUuid":"u1"}}');
+    a.service.settingsSync.kick(0);
+    await expect.poll(() => b.logins.get("claude-cli"), { timeout: 8000 }).toBe('{"claudeAiOauth":{"refreshToken":"a3","accountUuid":"u1"}}');
+  });
+
+  it("never sends or takes a sign-in that is signed out, expired or not working", async () => {
+    const works = new Map<string, boolean>();
+    const a = await machine("desk", { works });
+    const b = await machine("mini");
+    await pairMachines(a.service.fleet, b.service.fleet);
+    await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 8000 }).toBe("online");
+    // What Claude Code leaves after a refused refresh: both tokens emptied, the account kept.
+    const wiped = '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"refreshTokenExpiresAt":1797485146918,"accountUuid":"u1"}}';
+    a.logins.set("claude-cli", wiped);
+    // …and Codex with a token its check found refused.
+    a.logins.set("codex-cli", '{"tokens":{"access_token":"c1","account_id":"acct"}}');
+    works.set("codex-cli", false);
+    a.service.settingsSync.kick(0);
+    // A key set alongside is the proof A's offer went out.
+    a.service.setSecret({ name: "MARKER", value: "m", target: "keychain" });
+    await expect.poll(() => b.keychain.get("MARKER"), { timeout: 8000 }).toBe("m");
+    expect(b.logins.has("claude-cli")).toBe(false);
+    expect(b.logins.has("codex-cli")).toBe(false);
+
+    // An older JaiRA still sends them: refused, and said.
+    const codexOut = '{"OPENAI_API_KEY":null,"tokens":{"access_token":"","refresh_token":"","account_id":"acct"}}';
+    expect(b.service.settingsSync.take([{ key: "login:claude-cli", at: Date.now() + 1000, by: "old-machine", value: wiped }, { key: "login:codex-cli", at: Date.now() + 1000, by: "old-machine", value: codexOut }], "old")).toBe(0);
+    expect(b.logins.size).toBe(0);
+    expect(b.service.fleet.view().self.settings?.refused?.map((r) => r.why)).toContain("it is signed out or expired");
   });
 
   it("carries your settings for one project to every clone of it, and keeps a clone with no remote's", async () => {

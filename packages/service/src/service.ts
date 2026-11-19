@@ -864,7 +864,7 @@ import { WorkspaceMaker } from "./workspaces";
 import { setupToolPort } from "./setupTools";
 import { Replicator } from "./replicator";
 import { SettingsSync, type SettingsSyncPorts, type SyncSecretStore } from "./settingsSync";
-import { nativeAgentLogins, type AgentLoginStore } from "./agentLogins";
+import { loginStateOf, nativeAgentLogins, type AgentLoginStore } from "./agentLogins";
 import { machineTags } from "./machine";
 import { candidatesOf, Placement, queuedView, waitsForWords, workspaceKey, type HeldStart, type MachineCapacity, type PlacementRules, type PlacementThresholds, type QueuedTask } from "./placement";
 import { ResourceSampler } from "./resources";
@@ -942,6 +942,11 @@ export interface AppServiceOptions {
    * (`nativeAgentLogins`) — a seam so a test signs nobody in or out of the real agents.
    */
   agentLogins?: AgentLoginStore[];
+  /**
+   * Tests: whether this machine's sign-in for an agent works, in place of what its check and its runs
+   * found (`SettingsSyncPorts.loginWorks`) — so a test does not depend on the real agents here.
+   */
+  agentLoginWorks?: (agent: string) => boolean | undefined;
   /** Tests: the settings sync's timings (`SettingsSyncOptions`). */
   settingsSyncTimings?: { settleMs?: number; scanMs?: number; pullMs?: number };
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
@@ -3730,6 +3735,8 @@ export class AppService {
       this.signInRefusals.set(agent, error!.reason);
       this.layRefusalOver(agent);
       this.kickAvailability();
+      // The sign-in here stopped working: another machine's may (decision 0026 §4, amended 2026-11-19).
+      void this.recoverSignIn(agent);
     } else if (error === undefined && this.signInRefusals.delete(agent)) {
       this.kickAvailability();
     }
@@ -12292,6 +12299,13 @@ export class AppService {
         ),
       ),
     );
+    // A signed-out agent whose sign-in on file still names its account stopped working rather than was
+    // never signed in: it says so, and another machine's sign-in is tried in its place.
+    for (let i = 0; i < results.length; i += 1) {
+      const lapsed = this.withLapsedSignIn(results[i]!, wanted.find((info) => info.name === results[i]!.name)?.command);
+      results[i] = lapsed;
+      if (lapsed.lapsed === true || lapsed.accounts?.some((account) => account.refused !== undefined) === true) void this.recoverSignIn(lapsed.name);
+    }
     // Remembered so a state view can say "this executor is not available" without probing again.
     // A workflow whose executor just came back to life should stop showing an error, so this is a
     // reason to re-lint the authoring surface.
@@ -12307,6 +12321,67 @@ export class AppService {
     this.limits.noticeAccounts();
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return results;
+  }
+
+  /**
+   * Whether this machine's sign-in for an agent works, as far as this engine has seen (the settings
+   * sync's `loginWorks`): not when a run's call on it was refused or the last check found it signed
+   * out; yes when the last check found it ready; otherwise unknown.
+   */
+  private agentLoginWorks(agent: string): boolean | undefined {
+    if (this.signInRefusals.has(agent)) return false;
+    const status = this.lastProbes.get(agent)?.status;
+    return status === "needs-sign-in" ? false : status === "ok" ? true : undefined;
+  }
+
+  /**
+   * A `needs-sign-in` check laid over with what the sign-in on file says: when it still names its
+   * account, the sign-in stopped working (expired, revoked, or wiped by the agent after a refused
+   * refresh) — `lapsed`, which the row and the conversation's error word as signing in AGAIN.
+   */
+  private withLapsedSignIn(probe: ProbeResult, command: string | undefined): ProbeResult {
+    if (probe.status !== "needs-sign-in" || probe.lapsed === true || probe.accounts?.some((account) => account.refused !== undefined) === true) return probe;
+    const store = this.agentLogins.find((one) => one.agent === probe.name);
+    if (store === undefined || store.unavailable() !== undefined) return probe;
+    let held: { value: string } | undefined;
+    try {
+      held = store.read();
+    } catch {
+      return probe;
+    }
+    if (held === undefined || loginStateOf(probe.name, held.value).account === undefined) return probe;
+    const login = signInCommand(probe.name, command);
+    return {
+      ...probe,
+      lapsed: true,
+      detail: "its sign-in here still names its account, and no longer works: it expired or was revoked",
+      fix: login !== undefined ? `sign in again — Sign in again here, or '${login}' in a terminal` : "sign in again",
+    };
+  }
+
+  /** When each agent's sign-in was last asked of the other machines (`recoverSignIn`). */
+  private readonly signInRecoveries = new Map<string, number>();
+
+  /**
+   * This machine's sign-in for an agent stopped working: take another machine's, when one holds a
+   * different one that could work (`SettingsSync.recoverLogin`), and check again. At most once a minute
+   * per agent, so a sign-in that fails everywhere is not asked for at every check.
+   */
+  private async recoverSignIn(agent: string): Promise<void> {
+    if (this.agentLogins.every((store) => store.agent !== agent)) return;
+    const last = this.signInRecoveries.get(agent) ?? 0;
+    if (Date.now() - last < 60_000) return;
+    this.signInRecoveries.set(agent, Date.now());
+    let from: string | undefined;
+    try {
+      from = await this.settingsSync.recoverLogin(agent);
+    } catch (e) {
+      this.log({ level: "warn", source: "machines", message: `could not ask the other machines for ${agent}'s sign-in: ${(e as Error).message}` });
+      return;
+    }
+    if (from === undefined) return;
+    this.signInRefusals.delete(agent);
+    this.kickAvailability();
   }
 
   /** Sign-ins waiting on the browser, by agent — what Cancel aborts. */
@@ -13093,7 +13168,10 @@ export class AppService {
         this.saveForgeMarks(next);
       },
       logins: () => this.agentLogins,
-      changed: (kinds) => {
+      loginWorks: (agent) => this.options.agentLoginWorks?.(agent) ?? this.agentLoginWorks(agent),
+      changed: (kinds, logins) => {
+        // A refusal a run saw was about the sign-in just replaced.
+        for (const agent of logins ?? []) this.signInRefusals.delete(agent);
         if (kinds.has("secret") || kinds.has("mark") || kinds.has("login")) {
           this.forges.clear();
           this.kickRepoWatch();

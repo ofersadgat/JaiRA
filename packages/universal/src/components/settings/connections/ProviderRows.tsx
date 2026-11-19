@@ -101,6 +101,7 @@ export function LoginCards({
   signingIn,
   busy,
   warn,
+  lapsed = false,
   onSignIn,
   onCancel,
   onSignOut,
@@ -113,6 +114,8 @@ export function LoginCards({
   busy: boolean;
   /** The row is not signed in: the + box is where that is resolved. */
   warn: boolean;
+  /** The sign-in on file stopped working: the + box signs in again. */
+  lapsed?: boolean;
   onSignIn: () => void;
   onCancel: () => void;
   onSignOut: () => void;
@@ -120,7 +123,7 @@ export function LoginCards({
 }): JSX.Element[] {
   const several = accounts.length > 1;
   const { binary, login } = loginCommandOf(agent, command);
-  const add = loginAddWords(accounts);
+  const add = loginAddWords(accounts, lapsed);
   const renewing = accounts.some((account) => account.refused !== undefined);
   const boxes = accounts.map((account, i) => (
     <LoginCard key={`${account.label}:${i}`} agent={agent} account={account} binary={binary} tagged={several && account.active} signingIn={signingIn} busy={busy} onSignIn={onSignIn} onCancel={onCancel} onSignOut={onSignOut} />

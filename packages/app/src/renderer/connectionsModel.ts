@@ -267,7 +267,7 @@ export function agentActionOf(spec: ProviderSpec, probe: ProbeResult | undefined
     return { kind: "install", label: fix.button, title: fix.title, ...(fix.method !== undefined ? { method: fix.method } : {}), ...(fix.path !== undefined ? { path: fix.path } : {}) };
   }
   if (probe.accounts?.some((account) => account.refused !== undefined) === true) return { kind: "sign-in", label: "Sign in again", title: "opens the sign-in page" };
-  if (state === "needs-sign-in" && probe.accounts !== undefined) return { kind: "sign-in", label: "Sign in", title: "opens the sign-in page" };
+  if (state === "needs-sign-in" && probe.accounts !== undefined) return { kind: "sign-in", label: probe.lapsed === true ? "Sign in again" : "Sign in", title: "opens the sign-in page" };
   if ((state === "unavailable" || state === "unconfigured") && spec.credential === "required" && probe.credential === undefined && probe.accounts === undefined) {
     const { plusTitle, plusSub } = keyBoxWords(spec, merged);
     return { kind: "add-key", label: plusTitle, title: `store ${plusSub}` };
@@ -356,10 +356,13 @@ export function routeChipOf(spec: ProviderSpec, probe: ProbeResult | undefined, 
   return { kind: "key", name: named, where: probe.credential !== undefined ? `in ${SECRET_SOURCE_LABELS[probe.credential.source]}` : undefined, missing: false };
 }
 
-/** The words of an agent's + box: "Sign in" when there is nobody, "Switch account" when there is somebody. */
-export function loginAddWords(accounts: readonly AgentAccount[]): { title: string; sub: string } {
+/**
+ * The words of an agent's + box: "Sign in" when there is nobody, "Sign in again" when the sign-in on file
+ * stopped working (`lapsed`), "Switch account" when there is somebody.
+ */
+export function loginAddWords(accounts: readonly AgentAccount[], lapsed = false): { title: string; sub: string } {
   return {
-    title: accounts.length === 0 ? "Sign in" : "Switch account",
+    title: accounts.length === 0 ? (lapsed ? "Sign in again" : "Sign in") : "Switch account",
     sub: accounts.length === 0 ? "opens the sign-in page" : "signs in as someone else",
   };
 }
@@ -516,8 +519,12 @@ export function useProviderRow({
   return { here, merged, fields, saved, form, setForm, problem, locked, enabled, state, dirty, write, save, revert };
 }
 
-/** The sentence's first word: "sign-in expired" over the state's own when a login's call was refused. */
+/**
+ * The sentence's first word: "sign-in expired" over the state's own when a login's call was refused, or
+ * when the sign-in on file still names its account and no longer works (`lapsed`).
+ */
 export function providerSayState(probe: ProbeResult | undefined, state: ProviderState): string {
+  if (state === "needs-sign-in" && probe?.lapsed === true) return "sign-in expired";
   return probe?.accounts?.some((account) => account.refused !== undefined) === true ? "sign-in expired" : stateWord(state);
 }
 

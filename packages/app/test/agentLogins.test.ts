@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CLAUDE_KEYCHAIN_SERVICE, macKeychainLogin, nativeAgentLogins, type WslRun } from "@jaira/service";
+import { CLAUDE_KEYCHAIN_SERVICE, loginStateOf, macKeychainLogin, nativeAgentLogins, type WslRun } from "@jaira/service";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -38,6 +38,30 @@ describe("an agent's sign-in kept in a file", () => {
     expect(claude!.read()).toBeUndefined();
   });
 
+});
+
+describe("what a stored sign-in holds", () => {
+  const now = 1_800_000_000_000;
+  it("reads Claude Code's: a live refresh or access token is usable, and the account is its accountUuid", () => {
+    expect(loginStateOf("claude-cli", '{"claudeAiOauth":{"accessToken":"a","expiresAt":1,"refreshToken":"r","refreshTokenExpiresAt":1900000000000,"accountUuid":"u1"}}', now)).toEqual({ usable: true, account: "u1" });
+    expect(loginStateOf("claude-cli", '{"claudeAiOauth":{"accessToken":"a","expiresAt":1900000000000}}', now)).toEqual({ usable: true });
+    // Both expired.
+    expect(loginStateOf("claude-cli", '{"claudeAiOauth":{"accessToken":"a","expiresAt":1,"refreshToken":"r","refreshTokenExpiresAt":2,"accountUuid":"u1"}}', now)).toEqual({ usable: false, account: "u1" });
+    // Seen 2026-11-19 on Windows, after a refused refresh: tokens emptied, the account kept.
+    expect(loginStateOf("claude-cli", '{"claudeAiOauth":{"accessToken":"","refreshToken":"","expiresAt":0,"refreshTokenExpiresAt":1797485146918,"subscriptionType":"max","accountUuid":"8b3e"}}', now)).toEqual({ usable: false, account: "8b3e" });
+    expect(loginStateOf("claude-cli", '{"mcpOAuth":{}}', now)).toEqual({ usable: false });
+    expect(loginStateOf("claude-cli", "not json", now)).toEqual({ usable: false });
+  });
+
+  it("reads Codex's: a key, a refresh or an access token is usable, and the account is its account_id", () => {
+    expect(loginStateOf("codex-cli", '{"OPENAI_API_KEY":null,"tokens":{"access_token":"a","refresh_token":"r","account_id":"acct"}}', now)).toEqual({ usable: true, account: "acct" });
+    expect(loginStateOf("codex-cli", '{"OPENAI_API_KEY":"sk-1"}', now)).toEqual({ usable: true });
+    expect(loginStateOf("codex-cli", '{"OPENAI_API_KEY":null,"tokens":{"access_token":"","refresh_token":"","account_id":"acct"}}', now)).toEqual({ usable: false, account: "acct" });
+  });
+
+  it("passes on an agent it does not know as it is", () => {
+    expect(loginStateOf("gemini-cli", "anything", now)).toEqual({ usable: true });
+  });
 });
 
 describe("an agent's sign-in inside the WSL distro the agents run in", () => {

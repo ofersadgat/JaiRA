@@ -54,6 +54,54 @@ export interface AgentLoginOptions {
   runWsl?: WslRun;
 }
 
+/** What a stored sign-in holds, read without ever saying a token. */
+export interface LoginState {
+  /**
+   * Whether it holds something that could sign the agent in: a refresh token not yet expired, or an
+   * access token (or a key) not yet expired. A sign-in an agent wiped after a refused refresh — Claude
+   * Code empties both tokens and keeps the account — is not.
+   */
+  usable: boolean;
+  /** The account it names, when it names one: Claude Code's `accountUuid`, Codex's `account_id`. */
+  account?: string;
+}
+
+/**
+ * Read one agent's stored sign-in (the value of its {@link AgentLoginStore}). An agent this does not
+ * know is taken as usable and naming no one: its value is passed on as it is.
+ *
+ * - **Claude Code** (`.credentials.json`, or the keychain item, the same JSON): `claudeAiOauth` with
+ *   `accessToken`, `expiresAt`, `refreshToken`, `refreshTokenExpiresAt` and `accountUuid`. Seen
+ *   2026-11-19 after a refused refresh: both tokens `""`, `expiresAt` 0, the account and plan kept.
+ * - **Codex** (`auth.json`): `OPENAI_API_KEY` (a key, or null) and `tokens` with `access_token`,
+ *   `refresh_token` and `account_id`.
+ */
+export function loginStateOf(agent: string, value: string, now: number = Date.now()): LoginState {
+  if (agent !== "claude-cli" && agent !== "codex-cli") return { usable: value.trim() !== "" };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return { usable: false };
+  }
+  const object = (v: unknown): Record<string, unknown> | undefined => (typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined);
+  const text = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" ? v : undefined);
+  const time = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : undefined);
+  const alive = (token: unknown, expires: unknown): boolean => text(token) !== undefined && (time(expires) === undefined || time(expires)! > now);
+  const root = object(parsed);
+  if (agent === "claude-cli") {
+    const oauth = object(root?.["claudeAiOauth"]);
+    if (oauth === undefined) return { usable: false };
+    const account = text(oauth["accountUuid"]);
+    const usable = alive(oauth["refreshToken"], oauth["refreshTokenExpiresAt"]) || alive(oauth["accessToken"], oauth["expiresAt"]);
+    return { usable, ...(account !== undefined ? { account } : {}) };
+  }
+  const tokens = object(root?.["tokens"]);
+  const account = text(tokens?.["account_id"]);
+  const usable = text(root?.["OPENAI_API_KEY"]) !== undefined || text(tokens?.["refresh_token"]) !== undefined || text(tokens?.["access_token"]) !== undefined;
+  return { usable, ...(account !== undefined ? { account } : {}) };
+}
+
 /** The keychain item Claude Code files its credentials under on a Mac. */
 export const CLAUDE_KEYCHAIN_SERVICE = "Claude Code-credentials";
 

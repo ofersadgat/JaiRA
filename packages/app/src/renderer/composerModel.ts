@@ -201,6 +201,8 @@ export interface RouteDown {
   route: string;
   why: string;
   signIn: boolean;
+  /** Its sign-in is on file and stopped working: the button says Sign in again. */
+  again?: boolean;
 }
 
 /**
