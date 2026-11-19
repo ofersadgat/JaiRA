@@ -436,6 +436,7 @@ import {
   registerEventsTaskFunctions,
   registerImproveFunctions,
   registerSkillTools,
+  skillsPluginDir,
   standingContextOf,
   scriptComponentNamesOf,
   START_TASK,
@@ -6452,10 +6453,13 @@ export class AppService {
     const securityFloor = securityFloorOf(config, workspace.root);
     // The layers' instructions and skill catalog (decision 0029 §9), read once as the run starts.
     const instructions = standingContextOf(project.paths.roots);
+    // …and the same skills as a plugin a Claude Code agent loads natively (decision 0029 §10).
+    const skillPlugin = skillsPluginDir(project.paths.roots);
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
       ...(securityFloor !== undefined ? { securityFloor } : {}),
       ...(instructions !== undefined ? { instructions } : {}),
+      ...(skillPlugin !== undefined ? { skillPlugins: [skillPlugin] } : {}),
       ...this.promptWiring(config, {
         fake: fakeRules !== undefined,
         secrets: opts.secrets,
@@ -7524,9 +7528,11 @@ export class AppService {
     // it under the session layers, which is the only difference between the two uses.
     // The layers' instructions and skill catalog (decision 0029 §9), read as this turn starts.
     const instructions = standingContextOf(project.paths.roots);
+    const skillPlugin = skillsPluginDir(project.paths.roots);
     const prompt = buildPromptExecutor({
       ...(fakeRules !== undefined ? { fakeRules } : {}),
       ...(instructions !== undefined ? { instructions } : {}),
+      ...(skillPlugin !== undefined ? { skillPlugins: [skillPlugin] } : {}),
       // No observer: a chat turn is not a run, so it holds no job claim for a child to hang off (see
       // `cancelChatTurn`). Stated rather than left out, because an observer omitted by accident is
       // exactly how the run path came to spawn unrecorded agents. An agent started from a

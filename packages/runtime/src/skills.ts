@@ -12,8 +12,10 @@
  *   `load_skill`, a JaiRA tool like any other: gated by permission sets, and recorded, so an improver can
  *   tell whether a skill was loaded when a correction happened.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, dirname, join, relative } from "node:path";
 import type { ExecServices, InlineFamily, Operation, Tool } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
 import type { StackedExecutor } from "./executorStack";
@@ -117,18 +119,80 @@ export function standingContextOf(roots: readonly string[]): string | undefined 
   return parts.length > 0 ? parts.join("\n\n") : undefined;
 }
 
+/** Every file under a directory, relative to it, sorted. */
+function filesUnder(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (at: string): void => {
+    for (const entry of readdirSync(at, { withFileTypes: true })) {
+      const full = join(at, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.isFile()) out.push(relative(dir, full).split("\\").join("/"));
+    }
+  };
+  walk(dir);
+  return out.sort();
+}
+
 /**
- * Put the standing context into every prompt call's system text — unless the call says
+ * The layers' skills as a Claude Code PLUGIN folder (decision 0029 §10), so the agent's own Skill tool
+ * finds them as it finds its own: `.claude-plugin/plugin.json` and `skills/<name>/…`, copied from the
+ * nearest layer that has each. Named by its content under `base` — the OS temp directory by default,
+ * since it is a copy, never something to commit — so the same skills are one folder however many runs
+ * use it, and a changed skill is a new one. `undefined` when there are no skills.
+ */
+export function skillsPluginDir(roots: readonly string[], base: string = join(tmpdir(), "jaira-skills")): string | undefined {
+  const skills = readSkills(roots);
+  if (skills.length === 0) return undefined;
+  const files: Array<{ rel: string; text: Buffer }> = [];
+  for (const skill of skills) {
+    const dir = dirname(skill.file);
+    for (const rel of filesUnder(dir)) files.push({ rel: `skills/${basename(dir)}/${rel}`, text: readFileSync(join(dir, rel)) });
+  }
+  const hash = createHash("sha256");
+  for (const f of files) hash.update(f.rel).update("\0").update(f.text).update("\0");
+  const out = join(base, hash.digest("hex").slice(0, 16));
+  if (existsSync(join(out, ".claude-plugin", "plugin.json"))) return out;
+  // Written beside, then moved into place: a run that finds the folder finds it whole.
+  const staging = `${out}.${process.pid}.${Date.now()}`;
+  for (const f of files) {
+    mkdirSync(dirname(join(staging, f.rel)), { recursive: true });
+    writeFileSync(join(staging, f.rel), f.text);
+  }
+  mkdirSync(join(staging, ".claude-plugin"), { recursive: true });
+  writeFileSync(
+    join(staging, ".claude-plugin", "plugin.json"),
+    `${JSON.stringify({ name: "jaira-skills", version: "1.0.0", description: "The skills of this project's JaiRA layers (skills/<name>/SKILL.md)." }, null, 2)}\n`,
+  );
+  try {
+    renameSync(staging, out);
+  } catch {
+    // Another run put the same folder there first: it is the same content.
+    rmSync(staging, { recursive: true, force: true });
+  }
+  return out;
+}
+
+/**
+ * Put the standing context into every prompt call's system text, and the skills plugin into what a
+ * Claude Code call loads (`providerOptions.claudeCode.pluginDirs`) — unless the call says
  * `instructions: false` in its config, a key that is taken off either way so no provider sees it.
  */
-export function withInstructions(context: string | undefined, inner: StackedExecutor): StackedExecutor {
+export function withInstructions(context: string | undefined, inner: StackedExecutor, pluginDirs: readonly string[] = []): StackedExecutor {
   const filled = (op: Operation<InlineFamily>): Operation<InlineFamily> => {
     if (op.kind !== "prompt") return op;
     const config = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? (op.config as Record<string, JsonValue>) : undefined;
     const optedOut = config?.["instructions"] === false;
     const stripped = config !== undefined && "instructions" in config ? (({ instructions: _i, ...rest }) => rest)(config) : config;
-    const withConfig = stripped !== config ? { ...op, config: stripped as JsonValue } : op;
-    if (context === undefined || optedOut) return withConfig as Operation<InlineFamily>;
+    if (optedOut) return (stripped !== config ? { ...op, config: stripped as JsonValue } : op) as Operation<InlineFamily>;
+    let nextConfig = stripped;
+    if (pluginDirs.length > 0) {
+      const po = (nextConfig?.["providerOptions"] ?? {}) as Record<string, JsonValue>;
+      const cc = (po["claudeCode"] ?? {}) as Record<string, JsonValue>;
+      const had = Array.isArray(cc["pluginDirs"]) ? (cc["pluginDirs"] as JsonValue[]) : [];
+      nextConfig = { ...(nextConfig ?? {}), providerOptions: { ...po, claudeCode: { ...cc, pluginDirs: [...had, ...pluginDirs] } } };
+    }
+    const withConfig = nextConfig !== config ? { ...op, config: nextConfig as JsonValue } : op;
+    if (context === undefined) return withConfig as Operation<InlineFamily>;
     const system = (op as { system?: unknown }).system;
     return { ...withConfig, system: typeof system === "string" && system.length > 0 ? `${system}\n\n${context}` : context } as Operation<InlineFamily>;
   };

@@ -108,6 +108,13 @@ The person: "build all of it". Built, with tests, across both repositories:
 - **More signals in `conversation_digest`**: a tool call the person refused (the command log's `denied`
   by `user`), and a place the conversation branched — a message edited and sent again, with the replies
   it replaced. The per-message check and the end review read them.
+- **Skills reach Claude Code natively** (§10). `skillsPluginDir` writes the layers' skills as a local
+  plugin folder (`.claude-plugin/plugin.json`, `skills/<name>/…`), named by their content under the OS
+  temp directory — a copy, never something to commit — and every prompt call is handed it as
+  `providerOptions.claudeCode.pluginDirs`, which the SDK transport loads as `plugins` and the CLI as
+  `--plugin-dir` (declarative-ai `agents-api`, `agents-cli`). The agent's own Skill tool finds them as
+  `jaira-skills:<name>`, and `claude plugin validate` accepts the folder. `load_skill` stays, for every
+  other runtime. A call that says `instructions: false` gets neither.
 - Found: the wiring checker refuses a union-typed parameter of a called script (`chat/turn` types its
   `conv` as `unknown`), and a script import's call is now POSITIONAL, binding the script's parameters in
   order — which also settles "a script cannot call another script's positional signature" below.
@@ -126,8 +133,7 @@ The person: "build all of it". Built, with tests, across both repositories:
 5. **Simulation** (§5 step 5), and so the `simulate` input.
 6. **Instructions pinned in the snapshot** (§9): they are read once when a run or a turn starts, not
    folded into its hash.
-7. **Native skill projection for Claude Code** (§10), and a non-durable run **reporting to JaiRA**
-   (ruling 12).
+7. A non-durable run **reporting to JaiRA** (ruling 12).
 8. **`maybe` notes** kept for the end review, a task the improver starts saying so in its own words
    (it reuses the events task's `startedBy` shape), promotion across projects, and the measurements
    under "Revisit when".

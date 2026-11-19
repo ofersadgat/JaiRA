@@ -72,7 +72,7 @@ either.
 - [ ] **Skills (§7.4, §15 Q11) — the tool pair is BUILT (decision 0029 §10, 2026-11-18):
       `skills/<name>/SKILL.md` along every layer, `list_skills` / `load_skill` in
       `runtime/skills.ts`, the catalog in every call's system text beside `instructions.md`.
-      Native projection for Claude Code and `container.skills` below are still open.
+      Native projection for Claude Code is built too; `container.skills` below is still open.
       The research this entry recorded follows.**
       `jaira init` creates `.jaira/skills/` and nothing reads it. But §7.4's mechanism
       is *gone upstream*, not unbuilt: `prompt.skill` and `registry.skills` were
@@ -92,9 +92,10 @@ either.
       "anthropic"/"claude"; `description` ≤1024) is the SAME layout `.claude/skills/`
       uses. So `.jaira/skills/<name>/SKILL.md` is one local format serving all three
       consumers below.
-  - [ ] **Delegated agents — projection.** Point `claude-code`/`claude-cli` at
+  - [x] **Delegated agents — projection.** Point `claude-code`/`claude-cli` at
         `.jaira/skills/` so its native filesystem mechanism finds them. Config + path
-        work, no loader. Cheapest of the three.
+        work, no loader. Cheapest of the three. Built 2026-11-18 (decision 0029 §10): the
+        skills as a local plugin folder, `providerOptions.claudeCode.pluginDirs`.
   - [ ] **Anthropic prompt ops — publish + reference.** `@ai-sdk/anthropic` exposes
         `container.skills` (`{type: 'anthropic'|'custom', skillId, version}`) in provider
         options, `llmConfig`'s `providerOptions` passthrough parses it, and `generate.ts`

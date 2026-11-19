@@ -193,6 +193,8 @@ export interface PromptExecutorOptions {
    * catalog (`standingContextOf`, decision 0029 §9). A call opts out with `instructions: false`.
    */
   instructions?: string;
+  /** The layers' skills as Claude Code plugin folders (`skillsPluginDir`, decision 0029 §10), for every Claude Code call. */
+  skillPlugins?: string[];
   /**
    * Call config every prompt is bounded with — see `withSecurityFloor`.
    *
@@ -276,7 +278,8 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
     options.securityFloor === undefined ? (fake ?? presetted) : withSecurityFloor(options.securityFloor, fake ?? presetted);
   // The instructions and the skill catalog (decision 0029 §9–§10), in every call's system text — a
   // scripted run's too, so a fake run exercises the same wiring.
-  const bounded = options.instructions === undefined ? floored : withInstructions(options.instructions, floored);
+  const bounded =
+    options.instructions === undefined && (options.skillPlugins ?? []).length === 0 ? floored : withInstructions(options.instructions, floored, options.skillPlugins ?? []);
   const base = repairing(
     bounded,
     options.repairTurns ?? DEFAULT_REPAIR_TURNS,

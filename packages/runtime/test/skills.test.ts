@@ -2,12 +2,12 @@
  * Instructions and skills (decision 0029 §9–§10): one file per layer every call is told, and skills a
  * call loads by name — read along the layers, nearest first.
  */
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecServices, InlineFamily, Operation } from "@declarative-ai/exec";
-import { createSkillTools, loadSkill, parseSkill, readInstructions, readSkills, skillNameProblem, standingContextOf, withInstructions } from "../src/skills";
+import { createSkillTools, loadSkill, parseSkill, readInstructions, readSkills, skillNameProblem, skillsPluginDir, standingContextOf, withInstructions } from "../src/skills";
 
 function layer(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), "jaira-layer-"));
@@ -75,5 +75,31 @@ describe("instructions", () => {
     expect((seen[1] as { system?: string }).system).toBeUndefined();
     // The opt-out key never reaches a provider.
     expect((seen[1] as { config?: Record<string, unknown> }).config).toEqual({ model: "m" });
+  });
+});
+
+describe("skills for Claude Code, natively (decision 0029 §10)", () => {
+  it("writes the layers' skills as a plugin folder named by their content", () => {
+    const root = layer({ "skills/logging/SKILL.md": skill("logging", "Adding logging", "Use the logger."), "skills/logging/example.ts": "x" });
+    const base = mkdtempSync(join(tmpdir(), "jaira-plugins-"));
+    const dir = skillsPluginDir([root], base)!;
+    expect(JSON.parse(readFileSync(join(dir, ".claude-plugin", "plugin.json"), "utf8"))).toMatchObject({ name: "jaira-skills" });
+    expect(readFileSync(join(dir, "skills", "logging", "SKILL.md"), "utf8")).toContain("Use the logger.");
+    expect(existsSync(join(dir, "skills", "logging", "example.ts"))).toBe(true);
+    // The same skills are the same folder; a changed skill is another.
+    expect(skillsPluginDir([root], base)).toBe(dir);
+    writeFileSync(join(root, "skills", "logging", "SKILL.md"), skill("logging", "Adding logging", "Use the NEW logger."));
+    expect(skillsPluginDir([root], base)).not.toBe(dir);
+    expect(skillsPluginDir([layer({})], base)).toBeUndefined();
+  });
+
+  it("hands the plugin to every Claude Code call, beside what it already loads — unless the call opts out", () => {
+    const seen: Array<Operation<InlineFamily>> = [];
+    const inner = { capabilities: {} as never, metrics: {} as never, start: (op: Operation<InlineFamily>) => (seen.push(op), {} as never) };
+    const wrapped = withInstructions(undefined, inner as never, ["/plugins/abc"]);
+    wrapped.start({ kind: "prompt", user: "hi", config: { model: "claude-code/default", providerOptions: { claudeCode: { pluginDirs: ["/mine"] } } } } as never, {} as ExecServices);
+    wrapped.start({ kind: "prompt", user: "title", config: { model: "m", instructions: false } } as never, {} as ExecServices);
+    expect((seen[0] as unknown as { config: { providerOptions: { claudeCode: { pluginDirs: string[] } } } }).config.providerOptions.claudeCode.pluginDirs).toEqual(["/mine", "/plugins/abc"]);
+    expect((seen[1] as unknown as { config: Record<string, unknown> }).config).toEqual({ model: "m" });
   });
 });
