@@ -21,6 +21,8 @@ Choose the LEVER the lesson needs. The kind of lesson picks the family:
 - "for this kind of work, follow that process" -> a sub-workflow, plus routing to it (routing).
 Start a NEW lesson at the cheapest lever of its family. When the same lesson is already on record and its fix WAS in effect, move it to a more certain lever of the same family. When its fix was NOT in effect (a skill that was never loaded, a step that never ran), fix how it is delivered instead (a sharper skill description, the step's condition).
 
+Where a conversation's behaviour lives: a conversation that is a program (\`chat/program\`) is only the loop; what it does with each message — its system prompt, the reply, what it checks after replying — is \`chat/turn\`, and a running conversation takes a changed \`chat/turn\` at its next message. Change \`chat/turn\` for a lesson about how a conversation answers.
+
 Write the change as WHOLE files, each a path relative to a layer root. Only these paths may be written: workflows/..., prompts/..., skills/..., functions/..., permission-sets/..., lessons/... and instructions.md. A file you change you rewrite whole, keeping what it said that the lesson does not change.
 - A workflow from the built-in layer is read-only: write your version at the same path (its "override"), which wins.
 - A workflow script (.ts) is a program: change the code itself (another llm() call, a loop, parallel(), a check). Keep its signature, so a running conversation can switch to it.

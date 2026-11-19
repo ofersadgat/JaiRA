@@ -159,7 +159,33 @@ export function createImproveHost(project: Project, options: ImproveHostOptions 
       const task = project.runtime.get(taskId);
       const pin = task !== undefined ? currentPin(project, task)?.snapshotHash : undefined;
       const messages: JsonValue[] = [];
+      /** What the record says the person DID, beyond what they typed (decision 0029 §8). */
+      const signals: JsonValue[] = [];
+      // A tool call the person was asked about and refused — the plainest correction there is.
+      for (const entry of project.commands.list(taskId)) {
+        if (entry.decision !== "denied" || entry.decidedBy !== "user") continue;
+        signals.push({
+          kind: "denied",
+          tool: entry.tool,
+          ...(entry.command !== undefined ? { command: entry.command } : {}),
+          ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+        });
+      }
       if (position !== undefined) {
+        // A place the conversation BRANCHED: a message the person edited and sent again, the reply it
+        // replaced kept beside it — they did not like what came after.
+        try {
+          for (const fork of sessionStoreFor(project, { taskId }).forks(position)) {
+            const replaced = fork.left
+              .flatMap((branch) => branch.rows)
+              .flatMap((row) => messagesOfRecord(row.value as JsonValue))
+              .map((m) => textOf((m as { content?: unknown }).content))
+              .filter((t) => t.length > 0);
+            signals.push({ kind: "edited", at: fork.at.seq, replaced: replaced.slice(0, 4) });
+          }
+        } catch {
+          // No branches to read: nothing was edited.
+        }
         const rows = sessionStoreFor(project, { taskId }).transcript(position);
         for (const row of rows) {
           const said = messagesOfRecord(row.value as JsonValue);
@@ -182,6 +208,7 @@ export function createImproveHost(project: Project, options: ImproveHostOptions 
         ...(pin !== undefined ? { snapshot: pin } : {}),
         ...(position !== undefined ? { position } : {}),
         messages: last !== undefined && last > 0 ? messages.slice(-last) : messages,
+        signals,
       } as JsonValue;
     },
 

@@ -79,19 +79,50 @@ The person: "build all of it". Built, with tests, across both repositories:
   go into every prompt call's system text (an agent receives it in its prompt); `list_skills` and
   `load_skill` are tools in the five top-level `chat` sets; the title call opts out.
 
+**The handoff** (§3), built the same day, the person: "Build handoff next".
+
+- **The boundary is a call.** Where a script calls another workflow, the engine asks the host for a
+  newer version of the called state (`EngineConfig.versions`); one whose inputs are the call's is
+  entered in its place, as a child, under a versioned id (`chat/turn@v…`) beside the old states, and
+  journaled (`version.adopted`, or `version.declined` with why). hw `versions.ts`, `SCRIPTS.md` §17.1.
+- **JaiRA's answer** (`service/versionSource.ts`) loads the run's root workflow fresh — a loaded state
+  carries what its mount chain hands it — and offers the called state's part when it differs, validates,
+  and every script in it is APPROVED; it is pinned as a snapshot first. A resume lays the versions a run
+  took back in before the load folds (`withRunVersions`).
+- **A conversation takes it at its next message.** `chat/program` is only the loop; each message is a
+  call of `chat/turn` (the reply and the strict check), so a lesson about how a conversation answers is
+  a change to `chat/turn`, and the authoring prompt says so.
+- **Non-durable**, the boundary is `workflow()`: the standalone host imports the called script by its
+  content, so an edited one is a fresh import.
+- **A program resumes across an app restart, with the versions it took.** It did not at all before,
+  edited or not: a compiled script's code is run by the engine, so no record held its value and the
+  resume was refused ("no readable record"), and the `input()` the app closed under was replayed as a
+  failure. Now the segment's value rides its `operation.completed`, which the load reads when no record
+  answers, and a call cut off by a stop is asked again. A message sent while the app is still resuming a
+  conversation is seeded for its `input()` rather than answering the stored gate, which would start it
+  a second time.
+- **A message's own settings.** `chat/program` takes the first message's settings as its `settings`
+  input and every later message's from `input()`, and hands them to `chat/turn`, whose reply runs on the
+  chosen model and reasoning — or on the defaults when none was chosen: a computed knob that comes to
+  nothing is now left out of the call (hw `fields.ts`), where it used to fail the knob's type.
+- **More signals in `conversation_digest`**: a tool call the person refused (the command log's `denied`
+  by `user`), and a place the conversation branched — a message edited and sent again, with the replies
+  it replaced. The per-message check and the end review read them.
+- Found: the wiring checker refuses a union-typed parameter of a called script (`chat/turn` types its
+  `conv` as `unknown`), and a script import's call is now POSITIONAL, binding the script's parameters in
+  order — which also settles "a script cannot call another script's positional signature" below.
+
 **Not built.** Each is still the decision; none was started:
 
-1. **Handing a running program to a new version** (§3), in either mode. Found while building it: a
-   task's session store is TASK-scoped, so a new version run as a child TASK cannot continue the old
-   one's conversation. The durable path is the engine loading the new version's states into the run in
-   flight, journaled so a replay loads them too.
+1. **A boundary at any state with the same inputs** (ruling 11). Only a call is a boundary: entering a
+   version's tree in its middle needs its ancestors' instances too.
 2. **`chat/session` replaced by the program, and the chat-turn path removed** (§2). `chat/program` ships
    beside it; about 24 test files and the screenshot rigs assume `chat/session` is one prompt state, and
    edit-and-resend, rewind and fork do not yet work on a program's passes.
-3. **A program applying per-message settings** (model, effort, tools): `input()` hands them over, and
-   `chat/program` does not use them yet.
-4. **The signals** (§8) beyond a stopped or failed turn: edited and resent, rewound, steered, denied
-   approvals, gate and changeset comments.
+3. **A program applying per-message TOOLS and permissions.** A message's model and reasoning are
+   applied (below); its tools and permission set are not yet.
+4. **The signals** (§8) beyond a stopped or failed turn, a denied tool call and an edited message:
+   rewound, steered, gate and changeset comments.
 5. **Simulation** (§5 step 5), and so the `simulate` input.
 6. **Instructions pinned in the snapshot** (§9): they are read once when a run or a turn starts, not
    folded into its hash.
@@ -106,9 +137,9 @@ Four things the build turned up that this document did not anticipate:
 - **A named type used twice in a script breaks loading in JaiRA.** hw puts it in `$defs`, and JaiRA's
   reference resolver reads the `#/$defs/<Name>` it leaves as a file. The shipped scripts inline their
   types; the resolver should leave a schema's own `$ref` alone.
-- **`workflow("name", args)` to a SCRIPT assumes Claude's `args` input**, and importing a script as a
-  state takes one object of named inputs, so a script cannot call another script's positional
-  signature. The end review shares the authoring code as a helper module instead.
+- **`workflow("name", args)` to a SCRIPT that is not imported assumes Claude's `args` input**, because
+  only an imported script's signature is read. (Calling an IMPORTED script positionally is built with
+  the handoff.) The end review shares the authoring code as a helper module instead.
 - **A gate a script calls from `$REGISTRY` was never registered**, because the walk that registers a
   run's gates reads states' named functions and a script's call is code. `scriptComponentNamesOf`
   reads the code, and only for component names, since every named function that walk finds becomes a

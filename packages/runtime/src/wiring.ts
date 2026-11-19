@@ -38,6 +38,7 @@ import {
   type ScriptModuleOptions,
   type SplitEntry,
   type DirectedTransitions,
+  type VersionSource,
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
@@ -323,6 +324,8 @@ export function workflowStartOp(inputs: Record<string, JsonValue>, label = "jair
 
 export interface WorkflowRunConfig {
   bundle: WorkflowBundle;
+  /** Newer versions of the states the run's scripts call (decision 0029 §3) — hw's `EngineConfig.versions`. */
+  versions?: VersionSource;
   inputs: Record<string, JsonValue>;
   registry: CapabilityRegistry<WorkflowMetrics>;
   prompt: Executor<ExecServices, WorkflowMetrics>;
@@ -528,6 +531,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.entryRefusal !== undefined ? { entryRefusal: cfg.entryRefusal } : {}),
     ...(cfg.directed !== undefined ? { directed: cfg.directed } : {}),
     ...(cfg.scripts !== undefined ? { scripts: cfg.scripts } : {}),
+    ...(cfg.versions !== undefined ? { versions: cfg.versions } : {}),
   });
   const ctx: ExecServices = {
     validator: new SchemaValidator(),

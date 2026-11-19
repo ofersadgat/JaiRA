@@ -42,11 +42,11 @@
  */
 import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { EngineEvent, WorkflowBundle } from "@declarative-ai/hw";
+import { withVersions, type AdoptedVersion, type EngineEvent, type WorkflowBundle } from "@declarative-ai/hw";
 import { createLogger } from "@declarative-ai/log";
 import { readJsonFile, refusal } from "@jaira/shared";
 import type { AuthoredState, DocumentAdditions } from "./dynamicWorkflow";
-import type { StoredEvent } from "./eventLog";
+import { SqliteEventLog, type StoredEvent } from "./eventLog";
 import type { Project } from "./project";
 import type { TaskRuntimeRow } from "./runtime";
 import { loadSnapshot } from "./snapshots";
@@ -228,6 +228,29 @@ export function loadPinnedBundle(project: Project, row: Pick<TaskRuntimeRow, "ta
   const pin = currentPin(project, row);
   if (pin === undefined) throw refusal(log, `task '${row.taskId}' has pinned no workflow`, { taskId: row.taskId });
   return loadSnapshot(project.paths.snapshotsDir, pin.snapshotHash);
+}
+
+/**
+ * The pinned bundle with the VERSIONS a run took laid in beside it (decision 0029 §3): each
+ * `version.adopted` the task's journal holds names a called state, the versioned id the run entered it
+ * under, and the snapshot that version was pinned as. A resume — and the load it folds — needs them back
+ * before anything is re-attached: an instance entered under `chat/turn@v…` is re-attached to those states,
+ * never to the version the task started with. A version whose snapshot cannot be read is left out, and
+ * what ran under it reads as unreadable rather than as something else.
+ */
+export function withRunVersions(project: Project, taskId: string, bundle: WorkflowBundle): WorkflowBundle {
+  const adopted: AdoptedVersion[] = [];
+  for (const row of new SqliteEventLog(project.db).list(taskId)) {
+    const event = row.event as { type?: string; stateId?: unknown; version?: unknown; snapshot?: unknown };
+    if (event.type !== "version.adopted" || typeof event.stateId !== "string" || typeof event.version !== "string" || typeof event.snapshot !== "string") continue;
+    if (bundle.states[event.version] !== undefined || adopted.some((a) => a.versioned === event.version)) continue;
+    try {
+      adopted.push({ base: event.stateId, versioned: event.version, bundle: loadSnapshot(project.paths.snapshotsDir, event.snapshot) });
+    } catch {
+      // The version's snapshot is gone: leave it out, and what ran under it reads as unreadable.
+    }
+  }
+  return withVersions(bundle, adopted);
 }
 
 /** The journal row a version pick-up writes. Host vocabulary: the engine neither writes nor reads it. */

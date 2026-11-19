@@ -16,7 +16,7 @@ export const meta = {
 
 const FIND = `You read a conversation between a person and an agent, looking for LESSONS: corrections the person made that the workflow should take into account so they never have to make them again.
 
-A lesson is a correction of how the agent works — "you keep doing X", "don't do Y", "always check Z first", the person redoing something the agent did, the same small fix asked for more than once. It is NOT a new request, a change of mind about this task, or a fact about this one task.
+A lesson is a correction of how the agent works — "you keep doing X", "don't do Y", "always check Z first", the person redoing something the agent did, the same small fix asked for more than once, a tool call they refused, a message they edited and sent again because of what the agent did with it. It is NOT a new request, a change of mind about this task, or a fact about this one task.
 
 Lessons already on record are listed: do not report one again unless it happened again here (then say so in the lesson). Report each lesson once, as one sentence a reviewer would accept as a rule, with the person's words that showed it. Report none when there are none — most conversations have none.`;
 
@@ -28,7 +28,10 @@ export default async function review(
   const digest = await conversation_digest({ task: context.task, session: context.session });
   const known = await lessons_list({ scope: scope });
   const found = await llm<{ lessons: Array<{ lesson: string; quote: string }> }>({
-    prompt: "## Lessons on record\n\n" + JSON.stringify(known, null, 2) + "\n\n## The conversation\n\n" + JSON.stringify(digest.messages, null, 2),
+    prompt:
+      "## Lessons on record\n\n" + JSON.stringify(known, null, 2) +
+      "\n\n## The conversation\n\n" + JSON.stringify(digest.messages, null, 2) +
+      "\n\n## What the record says the person did\n\nTool calls they refused, and messages they edited and sent again (with the replies they replaced):\n\n" + JSON.stringify(digest.signals, null, 2),
     system: FIND,
     label: "find lessons",
   });

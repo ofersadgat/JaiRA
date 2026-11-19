@@ -211,6 +211,11 @@ interface OpCompletion {
   operationId?: string;
   op: "prompt" | "function";
   metrics?: WorkflowMetrics;
+  /**
+   * The value the journal itself carries, for an operation no executor recorded — a compiled script's
+   * code (`$script`), which the engine runs in-process (decision 0029). Read when no record answers.
+   */
+  value?: JsonValue;
 }
 
 /** The record row the description joins to. */
@@ -533,6 +538,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
             ...(event.operationId !== undefined ? { operationId: event.operationId } : {}),
             op: event.op,
             ...(event.metrics !== undefined ? { metrics: event.metrics } : {}),
+            ...((event as { value?: JsonValue }).value !== undefined ? { value: (event as { value?: JsonValue }).value } : {}),
           };
           // A call of an operation LIST is kept at its index, so a resume sees every call that
           // completed rather than only the last one.
@@ -668,8 +674,13 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
       return undefined;
     };
     const opId = completion.operationId;
+    const row = opId !== undefined ? recordById.get(opId) : undefined;
+    // An operation the engine ran itself (a script's code) is recorded in the journal, not the store.
+    if (row === undefined && completion.value !== undefined) {
+      loadedOps += 1;
+      return { value: completion.value as ResolvedValue, ...(completion.metrics !== undefined ? { metrics: completion.metrics } : {}) };
+    }
     if (opId === undefined) return miss("its completion names no operation record");
-    const row = recordById.get(opId);
     if (row === undefined) return miss("no operation record for this event");
     if (row.status !== "completed") return miss(`its record is '${row.status}', not completed`);
     const value = recordValue(project.db, row.result_json, completion.op);

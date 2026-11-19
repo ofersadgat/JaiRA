@@ -30,6 +30,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { createImproveHost } from "./improveHost";
+import { versionSourceFor } from "./versionSource";
 import {
   DirectedTransitions,
   INPUT_FUNCTION,
@@ -75,6 +76,7 @@ import {
   releaseUnmirroredAdoptions,
   settleAdoptions,
   withAdoptedStandIns,
+  withRunVersions,
   writeAdoption,
   type ValueCheck,
   rehydrateArtifactInputs,
@@ -6661,7 +6663,11 @@ export class AppService {
         const result = await executeWorkflow({
           // A loaded machine that ADOPTED a task (decision 0005 §2) reads that child through a
           // stand-in state — see `withAdoptedStandIns`. Every other run gets its bundle as pinned.
-          bundle: withAdoptedStandIns(started.bundle, opts.loaded),
+          // A resumed run lays back in the versions it took of the states its scripts call (decision
+          // 0029 §3) before anything re-attaches — `withRunVersions`.
+          bundle: withAdoptedStandIns(opts.loaded !== undefined ? withRunVersions(project, taskId, started.bundle) : started.bundle, opts.loaded),
+          // …and may take newer ones, at the calls still to come.
+          ...(eventsTask ? {} : { versions: versionSourceFor(project, started.bundle.rootId, (stateId, files) => this.log({ level: "info", source: "run", message: `a newer '${stateId}' waits for approval of ${files.join(", ")} before this run can take it`, project: open.key, taskId })) }),
           inputs: started.meta.inputs ?? {},
           registry,
           prompt: streaming,
@@ -7347,7 +7353,10 @@ export class AppService {
       ...(request.overrides !== undefined && Object.keys(request.overrides).length > 0 ? { settings: request.overrides as unknown as JsonValue } : {}),
     };
     const live = open.hub.list().find((r) => r.component === INPUT_FUNCTION && (r.taskId ?? open.requestTask.get(r.requestId)) === taskId);
-    const stored = live === undefined ? open.project.interactions.forTask(taskId).find((row) => row.component === INPUT_FUNCTION) : undefined;
+    // A RUNNING task not yet parked — a call in flight, or a run the app is resuming on its own at open —
+    // is answered by the seed below, never through the stored row, whose answer would start it again.
+    const running = open.live.has(taskId);
+    const stored = live === undefined && !running ? open.project.interactions.forTask(taskId).find((row) => row.component === INPUT_FUNCTION) : undefined;
     if (live === undefined && stored === undefined && !this.isProgramConversation(open, taskId)) return undefined;
     const at = { instanceId: request.instanceId ?? "", index: 0 };
     if (live !== undefined) {
@@ -8963,7 +8972,7 @@ export class AppService {
       throw this.refusal("run", `task '${taskId}' cannot continue: what '${title}' produced does not fit the child it was adopted as — ${first.reason}`, at);
     }
     const bundle = loadPinnedBundle(open.project, row);
-    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    const load = buildTaskLoad(open.project, taskId, withRunVersions(open.project, taskId, bundle).states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       throw this.refusal("run", `task '${taskId}' cannot be resumed: ${load.blocked ?? "nothing was recorded"}`, at);
     }
@@ -10135,7 +10144,7 @@ export class AppService {
       return { taskId, kind: "fresh", loaded: 0, frontier: [] };
     }
     const bundle = loadPinnedBundle(open.project, row);
-    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    const load = buildTaskLoad(open.project, taskId, withRunVersions(open.project, taskId, bundle).states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       return { taskId, kind: "none", loaded: 0, frontier: [], ...(load.blocked !== undefined ? { blocked: load.blocked } : {}) };
     }
@@ -10625,7 +10634,7 @@ export class AppService {
     }
     releaseUnconsumedFailures(open.project, taskId);
     const bundle = loadPinnedBundle(open.project, row);
-    const load = buildTaskLoad(open.project, taskId, bundle.states);
+    const load = buildTaskLoad(open.project, taskId, withRunVersions(open.project, taskId, bundle).states);
     if (load.blocked !== undefined || load.loaded === undefined) {
       throw this.refusal("run", `task '${taskId}' cannot be moved: ${load.blocked ?? "it has never run, so it stands nowhere to be moved from — start it instead"}`, at);
     }
