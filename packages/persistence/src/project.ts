@@ -51,6 +51,7 @@ import { TaskFileStore } from "./taskStore";
 import { registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
 import { touch } from "./sync";
 import { movePermissionSetsOutOfChat, moveTaskPermissionSets } from "./permissionSetsMove";
+import { renameSessionTasks, renameSessionWorkflow } from "./sessionRename";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.project");
@@ -335,6 +336,8 @@ export function initBase(baseDir?: string): JairaBasePaths {
     workflowsDir: base.workflowsDir,
     settingsFiles: [base.settingsFile, base.personalSettingsFile],
   });
+  // `chat/session` became `session` (2026-11-18, `sessionRename.ts`): this root's copy and settings.
+  renameSessionWorkflow({ workflowsDir: base.workflowsDir, settingsFiles: [base.settingsFile, base.personalSettingsFile] });
   return base;
 }
 
@@ -460,6 +463,7 @@ export function openProject(
   // A replica is another machine's to move; its owner does, and the copy follows.
   if (opts?.replica !== true) {
     movePermissionSetsOutOfChat({ permissionSetsDir: join(paths.jairaDir, "permission-sets"), workflowsDir: paths.workflowsDir, settingsFiles: [paths.settingsFile] });
+    renameSessionWorkflow({ workflowsDir: paths.workflowsDir, settingsFiles: [paths.settingsFile] });
   }
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
@@ -497,6 +501,8 @@ function openAt(
   // The permission sets left `chat/` (2026-11-05): a conversation that names its stack by the old
   // reference is given the new one before anything reads it (`permissionSetsMove.ts`).
   if (!replica) moveTaskPermissionSets(paths.tasksDir, paths.snapshotsDir, db);
+  // …and `chat/session` became `session`: a conversation's task file names the new id.
+  if (!replica) renameSessionTasks(paths.tasksDir, db);
   // A copy of another machine's workspace is its owner's id, as written; this machine's own is held to
   // what the database knows (`workspaceIdFor`: a committed id file is not a second clone's to take).
   const workspace = replica ? workspaceIdOf(paths) : workspaceIdFor(db, paths);

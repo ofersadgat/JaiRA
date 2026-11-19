@@ -90,7 +90,7 @@
  * function is running something, which is not this rule's to skip. The
  * engine goes straight to what the move asked for. The conversation exists all the same: typed
  * turns run as the synthetic child `chat:<root>` (`chat-turns`), which the engine never sees, and
- * the first of them is whatever the person types. A root whose operation DID run — a `chat/session`
+ * the first of them is whatever the person types. A root whose operation DID run — a conversation of one prompt
  * that grew a child — is read from its record like any other.
  */
 import type { JsonValue } from "@declarative-ai/json";
@@ -567,6 +567,7 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
           site: event.site,
           ...(event.outcome === "value" ? { value: event.value as ResolvedValue } : {}),
           ...(event.failure !== undefined ? { failure: event.failure } : {}),
+          ...(event.session !== undefined ? { session: event.session } : {}),
           ...(event.costUsd !== undefined ? { costUsd: event.costUsd } : {}),
         });
         break;

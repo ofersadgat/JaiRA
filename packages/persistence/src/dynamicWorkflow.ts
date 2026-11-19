@@ -1,9 +1,10 @@
 /**
  * The dynamic workflow GENERATOR (decision 0005 §3) — the pure half.
  *
- * A dynamic workflow is an ordinary workflow document: a root state with an operation (a
- * conversation) and children (what was started from it), in the authored format, linted like any
- * other. This module writes one, or the next version of one, from three things and nothing else:
+ * A dynamic workflow is an ordinary workflow document: a root state whose children are the work a
+ * person moved, and whose rules are how they moved it, in the authored format, linted like any other.
+ * It holds no conversation (decision 0005, amended 2026-11-19: "all we need is to create a workflow which
+ * can connect all the other sub workflows / tasks together encapsulating how they were moved"). This module writes one, or the next version of one, from three things and nothing else:
  *
  *  - **producers** — the children of the document that have run for the task being moved, with their
  *    declared output schemas and what they recorded;
@@ -106,8 +107,8 @@ export interface Producer {
 }
 
 export type DynamicBase =
-  /** No document yet: the root is the conversation state, and the producers become its first children. */
-  | { kind: "new"; conversation: AuthoredState }
+  /** No document yet: a root named `label`, and the producers become its first children. */
+  | { kind: "new"; label: string }
   /** An existing dynamic document, as authored. It is augmented. */
   | { kind: "dynamic"; document: AuthoredState }
   /**
@@ -178,8 +179,6 @@ export interface GenerateResult {
   targetKey: string;
   /** True when the document already mounted the target: nothing to add, and no new version to write. */
   existing: boolean;
-  /** The document holds no target: a conversation grafted on and nothing else (`ensureControlConversation`). */
-  deferred?: boolean;
   mount: "plain" | "split";
   wires: GeneratedWire[];
   literals: GeneratedLiteral[];
@@ -426,20 +425,19 @@ export function generateDynamicWorkflow(input: GenerateInput): GenerateResult {
   offer(targetKey);
 
   const document =
-    base.kind === "clone" ? undefined : withAdditions(base.kind === "new" ? rootFrom(base.conversation) : base.document, additions);
+    base.kind === "clone" ? undefined : withAdditions(base.kind === "new" ? rootFrom(base.label) : base.document, additions);
   return { ok: true, ...(document !== undefined ? { document } : {}), additions, targetKey, existing: false, mount, wires, literals, unsettled };
 }
 
 /**
- * The root of a new document: the conversation state, as authored, with no children yet and NO SPINE.
+ * The root of a new document: a label, no children yet and NO SPINE.
  *
  * `sequence: []` is the point: nothing here runs because it comes next. Every child is entered by a
- * person's move, the conversation's turn ends the way it always did, and a task with nothing asked
- * of it finishes rather than walking into work nobody started.
+ * person's move, and a task with nothing asked of it finishes rather than walking into work nobody
+ * started.
  */
-function rootFrom(conversation: AuthoredState): AuthoredState {
-  const { id: _id, children: _children, sequence: _sequence, transitions, ...rest } = conversation;
-  return { ...rest, children: {}, sequence: [], transitions: Array.isArray(transitions) ? transitions : [] };
+function rootFrom(label: string): AuthoredState {
+  return { label, children: {}, sequence: [], transitions: [] };
 }
 
 /** A document with additions APPENDED — existing children and rules keep their place and their text. */

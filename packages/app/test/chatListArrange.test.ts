@@ -3,7 +3,7 @@
  * round, and cut into groups in a fixed order — the day, how it stands, or where it runs.
  */
 import { describe, expect, it } from "vitest";
-import { CHAT_WHENS, arrangeConversations, dayOf, pinnedOf, shownConversations, whenOf, withPinned, type ChatRow } from "../src/renderer/chatListModel";
+import { CHAT_WHENS, arrangeConversations, chatRowMenu, dayOf, pinnedOf, shownConversations, whenOf, withPinned, type ChatRow } from "../src/renderer/chatListModel";
 
 const NOW = new Date(2026, 10, 12, 15, 0).getTime();
 const HOUR = 3_600_000;
@@ -91,5 +91,17 @@ describe("grouping", () => {
       ["JaiRA", ["t1", "t3"]],
       ["JaiRA-2", ["t2", "t4"]],
     ]);
+  });
+});
+
+describe("a row's menu", () => {
+  const verbs = { open: () => undefined, rename: () => undefined, copyId: () => undefined, askDelete: () => undefined };
+  it("offers End conversation only for a conversation waiting for its next message (decision 0029 §2)", () => {
+    expect(chatRowMenu(rows[0]!, verbs).map((item) => item.label)).not.toContain("End conversation");
+    let ended = 0;
+    const items = chatRowMenu(rows[0]!, { ...verbs, end: () => (ended += 1) });
+    expect(items.map((item) => item.label)).toEqual(["Open", "Rename…", "End conversation", "Copy task id", "Delete…"]);
+    items.find((item) => item.label === "End conversation")!.onSelect!();
+    expect(ended).toBe(1);
   });
 });

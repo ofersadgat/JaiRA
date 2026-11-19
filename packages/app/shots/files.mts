@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   let app = await open(world, 9261);
   try {
     const project = (await app.ipc<Array<{ project: string; kind: string; label: string }>>("project:list", {})).find((p) => p.kind === "user")!;
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: SAID.title, workflow: "chat/session", inputs: { message: SAID.title }, project: project.project });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: SAID.title, workflow: "session", conversation: true, inputs: { message: SAID.title }, project: project.project });
     await app.ipc("task:start", { taskId: made.taskId, project: project.project, fake: [{ output: SAID.answer }] });
     await conversation(app, project.label, "as made");
     await app.shot("kept");

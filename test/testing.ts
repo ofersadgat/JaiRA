@@ -20,9 +20,10 @@
  * — which is how "lists the syncs this task made" quietly became "lists every sync in the suite".
  * A home per test is empty at the start of each one, which is the state assertions are written for.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { onTestFinished } from "vitest";
 import { resetUserModules } from "@jaira/persistence";
 import { defaultBuiltInDir, setBuiltInDir } from "@jaira/shared";
@@ -83,6 +84,21 @@ export function shippedLayer(): void {
   const floor = defaultBuiltInDir();
   setBuiltInDir(undefined);
   onTestFinished(() => setBuiltInDir(floor));
+}
+
+/**
+ * A conversation of ONE PROMPT as the project's own `session`: the shape the Chat view's conversation
+ * had before it became a program (decision 0029 §2), and what a project that kept its own copy of
+ * `chat/session` has under that name since the rename (`sessionRename.ts`). Written into the project
+ * layer, where it hides the shipped `session.ts`.
+ *
+ * For the tests about a conversation that is NOT a program: its opening message is the run, it takes no
+ * more messages (decision 0029 §2), and the records it left are read as a conversation's. What a program
+ * conversation does is tested against the shipped file.
+ */
+export function jsonConversation(workflowsDir: string): void {
+  mkdirSync(workflowsDir, { recursive: true });
+  copyFileSync(join(dirname(fileURLToPath(import.meta.url)), "fixtures", "session.json"), join(workflowsDir, "session.json"));
 }
 
 /**

@@ -2,11 +2,34 @@
 id: engineering/decisions/0005-connect
 type: decision
 status: built
-updated: 2026-09-22
+updated: 2026-11-19
 decides_for: [engineering/units/adoption, engineering/units/fan-out-host, engineering/units/workflow-snapshots, engineering/units/task-lifecycle, engineering/units/board-projection, engineering/units/interaction-hub, engineering/units/workflow-browser]
 ---
 
 # 0005. Connect: a task moves to any state, and "top level" stops being a concept
+
+> **Amended 2026-11-19: a dynamic workflow holds no conversation.** The person, asked how a dynamic
+> workflow should hold `chat/control` once conversations are programs (decision 0029 §2): "I dont think we
+> need chat/control for this. all we need is to create a workflow which can connect all the other sub
+> workflows / tasks together encapsulating how they were moved from state to state etc. … its better to
+> just write the json and use that." And, of who answers a fast-forward's questions: "The conversation that
+> asked for the move." So, overriding §3 and §4 where they say otherwise:
+>
+> - **A dynamic workflow is a JSON document whose root is the work and the moves.** A new document's root
+>   is named for the task it was made from and holds its children and their standing `task_move` rules;
+>   it has no operation. A cloned workflow gains the child and the rule and nothing is grafted onto its
+>   root. `chat/control`, its `control/*` permission sets, the `conversations.moved` setting and a
+>   move's choice of conversation are gone. A dynamic workflow's task is not a conversation: it is not
+>   listed in the Chat view.
+> - **An input nothing wires is asked of the person on the task**, as the rulings of 2026-09-22 already
+>   had it — a question parked there — and never by a model in words.
+> - **A fast-forward is answered by the conversation that asked for the move.** A conversation's
+>   `move_task` names itself (`TaskConnectRequest.conversation`), and what the states on the way ask is
+>   answered with that conversation's words behind it (the same one call and the same
+>   `autopilot.askBelow` as before), by `answer_question`, which may answer for a task it is
+>   fast-forwarding. A move a person made directly — a board drop, `jaira task move` — has no such
+>   conversation, and what comes up on the way is theirs, as in any run. Nothing is grafted onto a task
+>   for a fast-forward, so a RUNNING task is fast-forwarded as it runs.
 
 ## Context
 

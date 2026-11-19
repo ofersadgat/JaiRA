@@ -39,6 +39,8 @@ export interface ChatListSurface {
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
   onDelete: (taskIds: readonly string[], project?: string) => void;
+  /** End a conversation that waits for its next message — `ChatSurface.onEnd`. Absent: a row's menu has no End. */
+  onEnd?: (taskId: string, project?: string) => void;
 }
 
 /**
@@ -136,6 +138,7 @@ export function ChatListPanel({ surface, find = false, arrange }: { surface: Cha
         open: () => open(task),
         rename: () => setRenaming({ taskId: task.taskId, title: task.title }),
         copyId: () => void copyText(task.taskId),
+        ...(surface.onEnd !== undefined && task.waitsForMessage === true ? { end: () => surface.onEnd!(task.taskId, homeOf(task, surface)) } : {}),
         ...(arrange !== undefined
           ? {
               pinned: arrange.pinned.has(task.taskId),

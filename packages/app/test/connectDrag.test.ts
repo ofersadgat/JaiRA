@@ -167,7 +167,7 @@ describe("previewOf", () => {
     expect(skipping.drop).toBe("Drop to skip ahead");
     // The board's own case (decision 0005 §4): a forward drop RUNS what is between.
     const forward = previewOf(answered({ ok: true, dryRun: true, plan: plan({ standsAt: { path: ["build"], stateId: "feature/build" }, forward: "fast-forward", move: { direction: "forward", to: "build", path: [], passes: ["ux", "ui"] } }) }), mine, column("build"))!;
-    expect(forward.facts.map(text)).toEqual(["runs ux → ui on the way, the conversation answering what comes up"]);
+    expect(forward.facts.map(text)).toEqual(["runs ux → ui on the way — what comes up is yours to answer"]);
     expect(forward.drop).toBe("Drop to fast-forward");
     expect(over.drop).toBeUndefined();
     expect(over.refused).toBe("…");
@@ -249,7 +249,7 @@ describe("previewOf", () => {
     });
   });
 
-  it("INPUTS nothing binds are asked in the task's OWN conversation: the column lights and says so, by name", () => {
+  it("INPUTS nothing binds are asked of the person, on the task: the column lights and says so, by name", () => {
     const question = { state: "explore", name: "question", schema: { type: "string" }, description: "What to explore.", reason: "nothing the task produced fits it" };
     const made = previewOf(
       answered({ ok: true, dryRun: true, plan: plan({ resolution: "modify", modification: "new", adoptedAs: "product", standsAt: { path: ["explore"], stateId: "explore" }, question: [question, { ...question, name: "depth", description: undefined } as never] }) }),
@@ -257,8 +257,8 @@ describe("previewOf", () => {
       column("explore"),
     )!;
     expect(made.refused).toBeUndefined();
-    expect(made.facts.map(text)).toEqual(["this task becomes its first child, product", "question will be asked in this task's conversation — What to explore.", "depth will be asked in this task's conversation"]);
-    expect(made.drop).toBe("Drop to add the move and take it, then answer in its conversation");
+    expect(made.facts.map(text)).toEqual(["this task becomes its first child, product", "question will be asked on this task — What to explore.", "depth will be asked on this task"]);
+    expect(made.drop).toBe("Drop to add the move and take it, then answer what it asks");
   });
 
   it("names the workflows to choose between when more than one holds both", () => {

@@ -43,7 +43,7 @@ import type { ProjectSession } from "./session";
 export function noteFastForwardStart(project: Project, run: FastForwardRun): void {
   recordHostRow(project, run.taskId, {
     type: FAST_FORWARD_EVENT,
-    controlTaskId: run.controlTaskId,
+    ...(run.controlTaskId !== undefined ? { controlTaskId: run.controlTaskId } : {}),
     target: run.target,
     targetLabel: run.targetLabel,
     to: run.to,
@@ -148,7 +148,9 @@ export function noteHeldMove(project: Project, request: TaskMoveRequest, move: D
     type: MOVE_HELD_EVENT,
     ...(move.instanceId !== undefined ? { under: move.instanceId } : {}),
     to: move.to,
-    by: move.by,
+    // A host's move is a person's or a control's; a VERSION's way down (decision 0029 §3) is the
+    // engine's own and never queued here.
+    by: move.by as "person" | "control",
     ...(move.inputs !== undefined ? { inputs: move.inputs as Record<string, JsonValue> } : {}),
     ...(move.path !== undefined && move.path.length > 0 ? { path: [...move.path] } : {}),
   });

@@ -30,6 +30,8 @@ export interface LiveCall {
   sessionId: string;
   /** Absent when the transport underneath declares no `sessionSteering` — see the module header. */
   control?: ExecControl;
+  /** The task whose run made the call, when the registering stack was built for one. */
+  taskId?: string;
   /**
    * Resolves when this call settles, however it settles.
    *
@@ -38,6 +40,12 @@ export interface LiveCall {
    * turn "the run failed" into "your message could not be sent".
    */
   settled: Promise<void>;
+  /**
+   * Stop this call: it settles as a `canceled` failure of its own, which is a failure the code that
+   * made it may catch — not the run being stopped. What a STOP of a program's reply comes to when
+   * the transport cannot end a turn early (`control.interrupt`).
+   */
+  cancel(): Promise<void>;
 }
 
 /**
@@ -107,6 +115,11 @@ export class LiveCalls {
     }
   }
 
+  /** Every call one task's run has in flight. */
+  ofTask(taskId: string): LiveCall[] {
+    return [...this.calls.values()].filter((call) => call.taskId === taskId);
+  }
+
   /** Every session with a call in flight — for a UI asking "is anything running". */
   sessions(): string[] {
     return [...this.calls.keys()];
@@ -173,6 +186,8 @@ export function register(
   live: LiveCalls,
   ctx: ExecServices,
   handle: ExecHandle<ResolvedValue, WorkflowMetrics>,
+  /** The task whose run makes the call — see {@link LiveCall.taskId}. */
+  taskId?: string,
 ): ExecHandle<ResolvedValue, WorkflowMetrics> {
   const sessionId = conversationOf(ctx.session);
   if (sessionId === undefined) return handle;
@@ -215,6 +230,8 @@ export function register(
     get control(): ExecControl | undefined {
       return handle.control;
     },
+    cancel: () => handle.cancel(),
+    ...(taskId !== undefined ? { taskId } : {}),
   };
   live.add(entry);
   return {

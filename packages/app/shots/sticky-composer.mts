@@ -42,7 +42,7 @@ async function main(): Promise<void> {
     await app.resize(1180, 860);
     const made: string[] = [];
     for (const title of [FIRST, SECOND]) {
-      const { taskId } = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: `Say hello (${title}).` } });
+      const { taskId } = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", conversation: true, inputs: { message: `Say hello (${title}).` } });
       await app.ipc("task:start", { taskId, fake: [{ output: "hello" }] });
       made.push(taskId);
     }

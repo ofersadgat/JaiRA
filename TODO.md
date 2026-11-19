@@ -69,6 +69,16 @@ Surfaces DESIGN describes that no phase claimed. They are not regressions — no
 update says they landed — but §14 is complete, so nothing is scheduled to pick them up
 either.
 
+- [ ] **What decision 0029 still owes ("Not built" there).** Built since 2026-11-18: a program
+      conversation's fork and stop, switching below the top level, the signals, pinned instructions,
+      `maybe` notes, promotion across projects, the measurements (`jaira lessons`), the idle stretch,
+      End conversation, a waiting conversation shown as idle, and (2026-11-19) simulation — `simulate`
+      in `improve/lesson` and `improve/conversation`, sandboxed — and a non-durable run reporting to
+      JaiRA (`scriptEndpoint.ts`, declarative-ai SCRIPTS.md §17.3), and the chat-turn path removed
+      (dynamic workflows hold no conversation — decision 0005, amended; old one-prompt conversations
+      take no more messages). Still owed: re-running the screenshot rigs that drive a real model (and a
+      first trial on one).
+
 - [ ] **Skills (§7.4, §15 Q11) — the tool pair is BUILT (decision 0029 §10, 2026-11-18):
       `skills/<name>/SKILL.md` along every layer, `list_skills` / `load_skill` in
       `runtime/skills.ts`, the catalog in every call's system text beside `instructions.md`.

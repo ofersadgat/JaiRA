@@ -267,6 +267,29 @@ export class ApprovalHub {
     return this.stopping.has(taskId);
   }
 
+  /** Tasks nobody answers for, and why — see {@link unattend}. */
+  private readonly unattendedTasks = new Map<string, string>();
+
+  /**
+   * Nobody answers for this task's calls while this holds: what would be asked is refused at once, the
+   * agent told `why`. A SIMULATION's run (decision 0029 §5 step 5) is one — a pass made to see what the
+   * conversation would do now, with nobody watching it. The answer lets go.
+   */
+  unattend(taskId: string, why: string): () => void {
+    this.unattendedTasks.set(taskId, why);
+    return () => {
+      if (this.unattendedTasks.get(taskId) === why) this.unattendedTasks.delete(taskId);
+    };
+  }
+
+  /** Refuse a call of an unattended task, saying why — `undefined` for a task somebody answers for. */
+  private nobodyFor(taskId: string | undefined, input: unknown): PermissionDecision | undefined {
+    const why = taskId !== undefined ? this.unattendedTasks.get(taskId) : undefined;
+    if (why === undefined) return undefined;
+    noteRefusal(input, { kind: "nobody", why: "unattended", reason: why });
+    return { decision: "deny", scope: "once" };
+  }
+
   /**
    * The `Approver` to place on `ctx.approve`.
    *
@@ -299,6 +322,8 @@ export class ApprovalHub {
       noteRefusal(req.input, { kind: "nobody", why: "stopped" });
       return Promise.resolve({ decision: "deny", scope: "once" });
     }
+    const nobody = this.nobodyFor(taskId, req.input);
+    if (nobody !== undefined) return Promise.resolve(nobody);
     const requestId = this.options.nextId?.() ?? `approval-${++this.counter}`;
     const input = req.input as Record<string, unknown>;
     // The policy judged this very call a moment ago and kept what it found against the input.
@@ -353,6 +378,7 @@ export class ApprovalHub {
       noteRefusal(request.input, { kind: "nobody", why: "stopped" });
       return Promise.resolve("deny");
     }
+    if (this.nobodyFor(context.taskId, request.input) !== undefined) return Promise.resolve("deny");
     const command = request.line ?? request.part?.text;
     // The line as the policy took it apart, kept against the call's own input — the same breakdown
     // the policy's ask draws, the function's part among the rest. Absent when a function document

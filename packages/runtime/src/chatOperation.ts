@@ -162,8 +162,18 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
 
   const model = inherited<string>("model", config["model"]);
   const reasoning = inherited<ReasoningSpec>("reasoning", config["reasoning"]);
-  const tools = inherited<readonly string[]>("tools", environmentOf(host ?? {})?.tools);
-  const lowered = inherited<PermissionsDecl>("permissions", environmentOf(host ?? {})?.permissions);
+  // The tools a call runs under are its state's environment, or else the one its mount chain hands it —
+  // the nearest state on the path out that declares one (a program's reply inherits its root's,
+  // decision 0029 §2: `meta.environment` on the script, nothing on the call).
+  const declares = (state: LoadedState | undefined): boolean => {
+    const env = state !== undefined ? environmentOf(state) : undefined;
+    return env !== undefined && (env.tools !== undefined || env.permissions !== undefined);
+  };
+  // From the host out — or, where no state on the path holds a single prompt (a program's reply is a
+  // list of operations, decision 0029 §2), from the instance's own state out.
+  const envHolder = path.slice(host !== undefined ? Math.max(0, path.indexOf(host)) : 0).find(declares);
+  const tools = inherited<readonly string[]>("tools", environmentOf(envHolder ?? {})?.tools);
+  const lowered = inherited<PermissionsDecl>("permissions", environmentOf(envHolder ?? {})?.permissions);
   // The shell's entry lowers as `ask`, with the mode its author wrote carried in `subjects`
   // (decision 0007 §4). A composer shows and edits the AUTHORED mode, so it is put back here; sending
   // lowers it again, and `permissionSetOfEnvironment` reads either spelling as the same permission set.
@@ -222,7 +232,9 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
       implementations: implementationsOrigin,
       permissionSet: permissionSetOrigin,
     },
-    ...(host?.id !== undefined ? { from: host.id } : {}),
+    // Where they came from: the state that speaks — or, for a program, whose reply is a list of
+    // operations with nothing on the call, the state that declares what it runs under.
+    ...(host?.id !== undefined ? { from: host.id } : envHolder?.id !== undefined ? { from: envHolder.id } : {}),
     ...(hostCall?.system !== undefined ? { system: hostCall.system } : {}),
     passthrough,
     unresolved,

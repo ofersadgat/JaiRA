@@ -31,7 +31,7 @@ It deliberately does not own:
 - The scripted executor: [scripted-doubles](scripted-doubles.md).
 - Loading and pinning the bundle: [workflow-snapshots](workflow-snapshots.md) and [task-lifecycle](task-lifecycle.md). Building the load description: [run-load](run-load.md).
 - Storing events and records: [event-journal](event-journal.md) and [operation-record-store](operation-record-store.md). What the app does with each delta, the numbered pushes and the durable partial: [live-turns](live-turns.md).
-- Running a typed message into a conversation: [chat-turns](chat-turns.md), which composes `withSessionLayers` and `withTurnStream` itself.
+- Writing a reported script's call into a task outside a run: `reportedCallSettled` in `service.ts`, which composes `withSessionLayers` itself and hands it to `runChatTurn`. A conversation's reply is a call of its run, wired here.
 
 ## The wiring is core code over the engine's executor, session and persistence seams, and both drivers call it
 
@@ -47,7 +47,7 @@ It deliberately does not own:
 | `WorkflowBundle` | read | the pinned snapshot `beginTaskRun` returns | none |
 | Journal events | written through `cfg.persistence.record` | the task's journal | the app's tee pushes each as `engine:event` |
 | Operation records and conversation positions | written by the session layers through `cfg.session` | `SqliteSessionStore`, or a `MapSessionStore` that dies with the process | [native-session-capture](native-session-capture.md) decorates `records` in the app |
-| `LiveCalls` entries `{sessionId, control, settled}` | added in `register`, removed when the call settles | in memory, one register per project session | chat send reads it to wait and to steer |
+| `LiveCalls` entries `{sessionId, control, settled}` | added in `register`, removed when the call settles | in memory, one register per project session | `chat:send` reads it to steer, and `chat:cancel` to stop a task's calls |
 
 ## The invariants keep one conversation per session name and keep watching from changing a call's outcome
 
@@ -72,15 +72,13 @@ It deliberately does not own:
 | The event stream throws | the drain stops and the call still settles | none needed | streaming stops early; the record lands at close |
 | A state runs a delegated agent as a function op | `withTurnStream` wraps only `cfg.prompt`, and a function op reaches the registry through the dispatcher, so no delta is published and the call is not in `LiveCalls` | none | nothing streams and the agent cannot be steered until it settles |
 | Two calls claim one conversation position | upstream `withSessionPosition` forks the later call onto a branch, and `LiveCalls` keeps whichever registered last | none needed | the conversation shows a fork |
-| A chat message waits on a call that does not settle | `settle` gives up at `CHAT_WAIT_MS` and returns `false`, and the message is appended beside the call | none needed | the message lands on a fork |
 | The model's output fails its schema | the repair loop re-asks with the errors, each attempt a real provider call | fails after `DEFAULT_REPAIR_TURNS` repairs | the state fails with the validation reason |
 | The process dies mid-call | the open record row keeps the last flushed partial; the in-memory register is gone | crash recovery and native capture at the next open | the state reads interrupted with its partial turn |
 | A caller passes `definitions` or sets `memo.enabled` in settings | `PromptExecutorOptions` has no `definitions` field and nothing reads `memo.enabled`, so both are dropped | name a `memoize` step on an executor node instead | nothing is memoized and no named executor is reachable |
 
-## The budgets are the repair turns and the chat wait
+## The one budget is the repair turns
 
 - `DEFAULT_REPAIR_TURNS = 2` in `wiring.ts`; the CLI overrides it with `--repair-turns`.
-- `CHAT_WAIT_MS = 120_000` in `packages/service/src/service.ts`, the bound chat send passes to `LiveCalls.settle`.
 
 ## The wiring departs from the session design's layer order, and records every operation
 

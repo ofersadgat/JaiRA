@@ -13,11 +13,12 @@
  *   tell whether a skill was loaded when a correction happened.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative } from "node:path";
 import type { ExecServices, InlineFamily, Operation, Tool } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
+import { definitionExists, listDefinitions, overlaidText, readDefinition } from "./definitionOverlay";
 import type { StackedExecutor } from "./executorStack";
 
 export const LIST_SKILLS = "list_skills";
@@ -59,18 +60,19 @@ export function readSkills(roots: readonly string[]): SkillInfo[] {
   const out = new Map<string, SkillInfo>();
   for (const root of roots) {
     const dir = join(root, "skills");
-    if (!existsSync(dir)) continue;
+    // Read as a simulation's run reads them (`definitionOverlay.ts`): a proposed skill is one.
+    if (!definitionExists(dir)) continue;
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = listDefinitions(dir);
     } catch {
       continue;
     }
     for (const entry of entries) {
       if (!entry.isDirectory() || out.has(entry.name)) continue;
       const file = join(dir, entry.name, "SKILL.md");
-      if (!existsSync(file)) continue;
-      const parsed = parseSkill(readFileSync(file, "utf8"));
+      if (!definitionExists(file)) continue;
+      const parsed = parseSkill(readDefinition(file));
       const name = parsed.name ?? entry.name;
       if (skillNameProblem(name) !== undefined || parsed.description === undefined) continue;
       out.set(entry.name, { name, description: parsed.description.slice(0, 1024), root, file });
@@ -85,9 +87,9 @@ export function loadSkill(roots: readonly string[], name: string): { name: strin
   if (problem !== undefined) return { error: problem };
   const skill = readSkills(roots).find((s) => s.name === name);
   if (skill === undefined) return { error: `no skill '${name}' — list_skills says which there are` };
-  const { body } = parseSkill(readFileSync(skill.file, "utf8"));
+  const { body } = parseSkill(readDefinition(skill.file));
   const dir = join(skill.root, "skills", name);
-  const files = readdirSync(dir).filter((f) => f !== "SKILL.md").sort();
+  const files = listDefinitions(dir).map((entry) => entry.name).filter((f) => f !== "SKILL.md").sort();
   return { name, body, files };
 }
 
@@ -96,8 +98,8 @@ export function readInstructions(roots: readonly string[]): string | undefined {
   const parts: string[] = [];
   for (const root of [...roots].reverse()) {
     const file = join(root, "instructions.md");
-    if (!existsSync(file)) continue;
-    const text = readFileSync(file, "utf8").trim();
+    if (!definitionExists(file)) continue;
+    const text = readDefinition(file).trim();
     if (text.length > 0) parts.push(text);
   }
   return parts.length > 0 ? parts.join("\n\n") : undefined;
@@ -123,7 +125,7 @@ export function standingContextOf(roots: readonly string[]): string | undefined 
 function filesUnder(dir: string): string[] {
   const out: string[] = [];
   const walk = (at: string): void => {
-    for (const entry of readdirSync(at, { withFileTypes: true })) {
+    for (const entry of listDefinitions(at)) {
       const full = join(at, entry.name);
       if (entry.isDirectory()) walk(full);
       else if (entry.isFile()) out.push(relative(dir, full).split("\\").join("/"));
@@ -146,7 +148,10 @@ export function skillsPluginDir(roots: readonly string[], base: string = join(tm
   const files: Array<{ rel: string; text: Buffer }> = [];
   for (const skill of skills) {
     const dir = dirname(skill.file);
-    for (const rel of filesUnder(dir)) files.push({ rel: `skills/${basename(dir)}/${rel}`, text: readFileSync(join(dir, rel)) });
+    for (const rel of filesUnder(dir)) {
+      const overlaid = overlaidText(join(dir, rel));
+      files.push({ rel: `skills/${basename(dir)}/${rel}`, text: overlaid !== undefined ? Buffer.from(overlaid, "utf8") : readFileSync(join(dir, rel)) });
+    }
   }
   const hash = createHash("sha256");
   for (const f of files) hash.update(f.rel).update("\0").update(f.text).update("\0");
@@ -173,14 +178,48 @@ export function skillsPluginDir(roots: readonly string[], base: string = join(tm
 }
 
 /**
+ * The config key a PINNED workflow's prompt calls carry their standing context under (decision 0029 §9):
+ * the instructions and the skill catalog as they were when the run was pinned, in the snapshot like a
+ * prompt fragment — so a resumed run is told what it was told, and a change to `instructions.md` is a
+ * newer version of the workflow a running conversation can take at a boundary.
+ */
+export const STANDING_KEY = "standing";
+
+/**
+ * Pin the standing context into a loaded bundle, in place: on every prompt call of every state, under
+ * {@link STANDING_KEY} — except a call that says `instructions: false`. Nothing is pinned when there is
+ * no context, which leaves the call as it was.
+ */
+export function pinStandingContext(states: Record<string, unknown>, context: string | undefined): void {
+  if (context === undefined) return;
+  for (const def of Object.values(states)) {
+    if (def === null || typeof def !== "object") continue;
+    const operation = (def as { operation?: unknown }).operation;
+    for (const op of Array.isArray(operation) ? operation : operation !== undefined ? [operation] : []) {
+      if (op === null || typeof op !== "object" || (op as { kind?: unknown }).kind !== "prompt") continue;
+      const call = op as { config?: unknown };
+      const config = call.config !== null && typeof call.config === "object" && !Array.isArray(call.config) ? (call.config as Record<string, JsonValue>) : {};
+      if (config["instructions"] === false) continue;
+      call.config = { ...config, [STANDING_KEY]: context };
+    }
+  }
+}
+
+/**
  * Put the standing context into every prompt call's system text, and the skills plugin into what a
  * Claude Code call loads (`providerOptions.claudeCode.pluginDirs`) — unless the call says
- * `instructions: false` in its config, a key that is taken off either way so no provider sees it.
+ * `instructions: false` in its config, a key that is taken off either way so no provider sees it. A
+ * call that carries its PINNED context ({@link STANDING_KEY}) is given that one, not today's.
  */
 export function withInstructions(context: string | undefined, inner: StackedExecutor, pluginDirs: readonly string[] = []): StackedExecutor {
   const filled = (op: Operation<InlineFamily>): Operation<InlineFamily> => {
     if (op.kind !== "prompt") return op;
-    const config = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? (op.config as Record<string, JsonValue>) : undefined;
+    const raw = op.config !== null && typeof op.config === "object" && !Array.isArray(op.config) ? (op.config as Record<string, JsonValue>) : undefined;
+    const pinned = typeof raw?.[STANDING_KEY] === "string" ? (raw[STANDING_KEY] as string) : undefined;
+    const config = raw !== undefined && STANDING_KEY in raw ? (({ [STANDING_KEY]: _s, ...rest }) => rest)(raw) : raw;
+    // What THIS call is told: what its run was pinned with, else what the run was started with.
+    const told = pinned ?? context;
+    if (config !== raw) op = { ...op, config: config as JsonValue } as Operation<InlineFamily>;
     const optedOut = config?.["instructions"] === false;
     const stripped = config !== undefined && "instructions" in config ? (({ instructions: _i, ...rest }) => rest)(config) : config;
     if (optedOut) return (stripped !== config ? { ...op, config: stripped as JsonValue } : op) as Operation<InlineFamily>;
@@ -192,9 +231,9 @@ export function withInstructions(context: string | undefined, inner: StackedExec
       nextConfig = { ...(nextConfig ?? {}), providerOptions: { ...po, claudeCode: { ...cc, pluginDirs: [...had, ...pluginDirs] } } };
     }
     const withConfig = nextConfig !== config ? { ...op, config: nextConfig as JsonValue } : op;
-    if (context === undefined) return withConfig as Operation<InlineFamily>;
+    if (told === undefined) return withConfig as Operation<InlineFamily>;
     const system = (op as { system?: unknown }).system;
-    return { ...withConfig, system: typeof system === "string" && system.length > 0 ? `${system}\n\n${context}` : context } as Operation<InlineFamily>;
+    return { ...withConfig, system: typeof system === "string" && system.length > 0 ? `${system}\n\n${told}` : told } as Operation<InlineFamily>;
   };
   return {
     capabilities: inner.capabilities,

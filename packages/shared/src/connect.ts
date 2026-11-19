@@ -66,14 +66,14 @@ export interface TaskConnectRequest {
   forward?: ConnectForward;
   /** `skip: true` is `forward: "skip"` — the spelling the conversation's `move` tool and the CLI use. */
   skip?: boolean;
-  /** Who asked: a person directly (the default), or a control conversation on their behalf. */
+  /** Who asked: a person directly (the default), or a conversation on their behalf. */
   by?: "person" | "control";
   /** Say what WOULD happen — which resolution, where the task will stand, what is missing — and change nothing. */
   dryRun?: boolean;
   /**
-   * The workflow a move that makes a dynamic workflow gives the task to steer it, chosen for THIS
-   * move — what a person picks when the configured one is disabled (`ConnectPlan.chooseConversation`).
-   * Absent ⇒ the configured one.
+   * The conversation that asked for the move, by its task id (`by: "control"`) — what answers the
+   * questions a fast-forward meets on the way (decision 0005 §4, amended 2026-11-19). A move a person
+   * made directly has none, and those questions are theirs.
    */
   conversation?: string;
   /**
@@ -145,9 +145,7 @@ export interface ConnectRefusal {
     /** An ASK cell the caller has not confirmed: `message` is the question. */
     | "confirm"
     /** The target is switched off in the live files (decision 0021): nothing is moved there. */
-    | "disabled"
-    /** The workflow the move would give the task to steer it is disabled: choose one (`ConnectPlan.chooseConversation`). */
-    | "conversation";
+    | "disabled";
   message: string;
   /** `inputs-missing`: exactly which, with their schemas. */
   missing?: ConnectMissingInput[];
@@ -232,18 +230,6 @@ export interface ConnectPlan {
   judgement?: MoveJudgement;
   /** The branch the new parent takes up, when the adopted task had one. */
   branch?: string;
-  /**
-   * The workflow this move would give the task to steer it is DISABLED (decision 0021), so the move
-   * asks which to use instead — the person's pick rides the drop again as `TaskConnectRequest.conversation`.
-   * `choices` are the enabled workflows that can be a conversation.
-   */
-  chooseConversation?: { disabled: string; choices: ConversationChoice[] };
-}
-
-/** A workflow that can be a conversation (decision 0021), as a choice is offered. */
-export interface ConversationChoice {
-  stateId: string;
-  label?: string;
 }
 
 /**
@@ -321,8 +307,8 @@ export interface ConnectIntent {
  */
 export type ConnectStep =
   /** Generate and write the document version the move needs — `new`, `augmented` or `cloned`. */
-  | { kind: "document"; conversation: string }
-  /** Make the document's task: the conversation, with the source adopted into it next. */
+  | { kind: "document" }
+  /** Make the document's task, with the source adopted into it next. */
   | { kind: "parent"; title: string; inputs?: Record<string, JsonValue>; provenance?: Record<string, InputProvenance> }
   /** Adopt the dragged task — into the `parent` step's task, or into a new task of `workflow`. */
   | { kind: "adopt"; intoParent?: true; workflow?: string; childKey?: string; start: boolean; inputs?: Record<string, JsonValue>; suppliedVia?: "inferred" | "asked" }

@@ -19,7 +19,7 @@ import { parseRemoteProjectKey, remoteProjectKey, type ProjectSummary, type Push
 import type { Fleet } from "./fleet";
 
 /** Answers that may wait for an offline machine: the ones a person gives, which have nowhere else to go. */
-export const QUEUEABLE = new Set(["approval:submit", "question:submit", "interaction:submit", "chat:send", "task:cancel", "task:archive", "task:unarchive"]);
+export const QUEUEABLE = new Set(["approval:submit", "question:submit", "interaction:submit", "chat:send", "chat:end", "task:cancel", "task:archive", "task:unarchive"]);
 
 /** Answers addressed by request id alone, found on the machine that asked. */
 const BY_REQUEST = new Set(["approval:submit", "question:submit", "interaction:submit", "userEvent:deliver"]);
@@ -269,6 +269,7 @@ export class Federation {
       "question:submit": "an answer to an agent's question",
       "interaction:submit": "a decision at a gate",
       "chat:send": "a message",
+      "chat:end": "the end of a conversation",
       "task:cancel": "a cancel",
       "task:archive": "an archive",
       "task:unarchive": "an unarchive",

@@ -44,7 +44,7 @@ It deliberately does not own:
 - Making tasks of fan-out elements: [fan-out-host](fan-out-host.md). Taking up a task that ran alone: [adoption](adoption.md).
 - The worktree a bound task runs in: [task-worktrees](task-worktrees.md). Run claims, heartbeats and the cancel flag: [process-claims](process-claims.md).
 - The snapshot format: [workflow-snapshots](workflow-snapshots.md). The approval store and the module freeze: [module-approvals](module-approvals.md).
-- Parked gates and their durable rows: [interaction-gateway](interaction-gateway.md). The live tail: [live-turns](live-turns.md). Typed turns: [chat-turns](chat-turns.md). The terminal verbs: [cli](cli.md).
+- Parked gates and their durable rows: [interaction-gateway](interaction-gateway.md). The live tail: [live-turns](live-turns.md). A conversation's messages: [chat-channels](../contracts/chat-channels.md). The terminal verbs: [cli](cli.md).
 
 ## The lifecycle is service code on the workflow and run boundary, and the only path into a run
 
@@ -143,7 +143,6 @@ It deliberately does not own:
 | The process dies after a fast-forward's target entered and before its end row | the resume finds the entry after the open start and writes `arrived` instead of restoring the mode | none needed | the target's questions are the person's |
 | A move reaches a run after its engine let go and before the run settled | the port keeps it, and the run-end handler publishes it again when the run completed, which reopens the task | none needed | the task finishes, then reopens at the target |
 | A `skip` interrupts a state whose agent has a tool approval or a question parked | a gate withdraws itself on the skip's abort signal; the approval and the question cannot see it (`Approver` and `AskUser` take no signal), so the run's journal is watched instead (`SkipWithdrawals`, `app/main/fastForward.ts`): when a child ends `skipped`, every parked question and approval whose `instanceId` (stamped by the engine) is that child or under it is dismissed or denied once, and an `async` sibling's are left for their answers | none needed | the interrupted agent's asks leave the inbox as the target is entered |
-| A stopped task takes a typed turn that needs approval | `approvals.stop` holds until the next `startRun` calls `allow`, and chat turns never call it | resume the task or restart the app | each approval in the turn is denied unasked |
 
 ## The runtime row absorbed the runs table, and neither migration rolls back
 

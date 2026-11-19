@@ -30,9 +30,9 @@ export function isUnread(task: TaskSummary, seen: Readonly<Record<string, number
 /**
  * Whether it is producing something RIGHT NOW.
  *
- * Two sources, because there are two ways a conversation speaks and only one of them is a run. The
- * opening message IS the run, so it moves the task's status; every message after it is a typed
- * turn, which deliberately moves nothing (`runChatMessage`) and is visible only in the journal.
+ * Two sources. The opening message IS the run, so it moves the task's status. A conversation that is a
+ * program and waits for its next message is listed `completed` (`idleStatusOf`), so a message it is
+ * answering after that is a call in flight (`TaskSummary.answering`, read into `producing`).
  */
 export function isAnswering(task: TaskSummary, producing: Readonly<Record<string, number>>): boolean {
   return task.status === "running" || (producing[task.taskId] ?? 0) > 0;
@@ -182,7 +182,8 @@ export function deleteAskOf(task: TaskSummary, onConfirm: () => void): AskSpec {
 /**
  * A row's menu — its right-click, and the ⋯ a hovered row shows (board 28): Open, Rename…, Pin or
  * Unpin, Mark unread (only once read), Run on… each other workspace (only while it waits for one: a
- * conversation that has started stays where its record is), Copy task id, Delete….
+ * conversation that has started stays where its record is), End conversation (only a program waiting for
+ * its next message, decision 0029 §2: its end runs — `session`'s review for lessons), Copy task id, Delete….
  */
 export function chatRowMenu(
   task: TaskSummary,
@@ -191,6 +192,8 @@ export function chatRowMenu(
     rename: () => void;
     copyId: () => void;
     askDelete: () => void;
+    /** End the conversation — present only for one waiting for its next message. */
+    end?: () => void;
     pinned?: boolean;
     pin?: (on: boolean) => void;
     unread?: boolean;
@@ -204,6 +207,7 @@ export function chatRowMenu(
     ...(verbs.pin !== undefined ? [{ label: verbs.pinned === true ? "Unpin" : "Pin to top", separator: true, onSelect: () => verbs.pin!(verbs.pinned !== true) }] : []),
     ...(verbs.markUnread !== undefined && verbs.unread !== true ? [{ label: "Mark unread", onSelect: verbs.markUnread }] : []),
     ...(verbs.runOn ?? []).map((place, i) => ({ label: `Run on ${place.label}`, ...(place.note !== undefined ? { note: place.note } : {}), ...(i === 0 ? { separator: true } : {}), onSelect: place.onSelect })),
+    ...(verbs.end !== undefined ? [{ label: "End conversation", separator: true, onSelect: verbs.end }] : []),
     { label: "Copy task id", separator: true, onSelect: verbs.copyId },
     { label: "Delete…", separator: true, danger: true, onSelect: verbs.askDelete },
   ];

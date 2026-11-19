@@ -60,6 +60,7 @@ import {
   type SetLayer,
   type WorkflowLayer,
 } from "@jaira/shared";
+import { definitionExists } from "@jaira/runtime";
 import { readRepositoryIdentity } from "./repositoryIdentity";
 import { readWorkflowFiles } from "./snapshots";
 
@@ -183,7 +184,7 @@ export function nearerStates(paths: JairaPaths, tolerant = false): Record<string
   const out: Record<string, unknown> = {};
   // Farthest first, so a nearer layer's copy of an id replaces a farther one's.
   for (const dir of [...nearerWorkflowDirs(paths)].reverse()) {
-    if (!existsSync(dir)) continue;
+    if (!definitionExists(dir)) continue;
     let files: Record<string, unknown>;
     try {
       files = readWorkflowFiles(dir, tolerant ? { onError: () => undefined } : {});

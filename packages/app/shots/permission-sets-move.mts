@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   const tasksDir = join(project, ".jaira", "system", "tasks");
   const conversations = readdirSync(tasksDir)
     .map((name) => JSON.parse(readFileSync(join(tasksDir, name), "utf8")) as { id: string; title: string; workflow: string; chatSettings?: { permissionSet?: unknown } })
-    .filter((task) => task.workflow === "chat/session");
+    .filter((task) => task.workflow === "session");
   console.log(`permission-sets-move: ${conversations.length} conversations, ${oldRequests} turn requests naming the old folder, before`);
 
   const failures: string[] = [];

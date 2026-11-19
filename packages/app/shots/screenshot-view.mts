@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     const norm = (a: string): string => a.split("\\").join("/").toLowerCase();
     const project = (projects.find((p) => norm(p.project) === norm(world.project)) ?? projects.find((p) => p.kind === "user")!).project;
     const title = "Chat panel designs";
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: "Chat panel designs" }, project, conversation: true });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message: "Chat panel designs" }, project, conversation: true });
     await app.ipc("task:start", { taskId: made.taskId, project, fake: [{ output: "Done." }] });
     await app.until(says(title), "the conversation to be listed");
     await settle(1500);

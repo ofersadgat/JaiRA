@@ -43,7 +43,7 @@ async function main(): Promise<void> {
       ["Plan the lighthouse rota", "Here is a rota."],
       ["Check the tide tables", "The tables are current."],
     ] as const) {
-      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", conversation: true, inputs: { message: title } });
+      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", conversation: true, inputs: { message: title } });
       await app.ipc("task:start", { taskId: made.taskId, fake: [{ output: answer }] });
     }
     for (const label of ["All tasks", "All conversations", "Settings", "open another project"]) {

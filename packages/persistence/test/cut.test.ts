@@ -96,6 +96,23 @@ describe("what a cut keeps", () => {
     expect([...part.droppedRecords]).toEqual(["r-b"]);
   });
 
+  it("cuts the end of a state whose own call had settled before the cut — a program's root, ended by its children", () => {
+    // A compiled program (decision 0029 §2): the root runs its own code, then its children; it ends
+    // when the last child does. Cut at that child's call, the root's end goes with the child.
+    const events = [
+      stored(1, "instance.entered", "root"),
+      stored(2, "operation.started", "root"),
+      stored(3, "operation.completed", "root"),
+      stored(4, "instance.entered", "input", { parentInstanceId: "root", childKey: "input" }),
+      stored(5, "operation.started", "input"),
+      stored(6, "operation.completed", "input"),
+      stored(7, "instance.terminated", "input", { outcome: "success" }),
+      stored(8, "instance.terminated", "root", { outcome: "success" }),
+    ];
+    const part = partitionAt(events, 5);
+    expect(part.kept.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
+
   it("cuts a chat thread at a turn: the turns before stay, the turn and everything typed after go", () => {
     // One chat instance, entered once, then one transition per message.
     const events = [

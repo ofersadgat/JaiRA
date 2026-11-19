@@ -9,7 +9,7 @@
  * ## Three resolutions, one call
  *
  *  - **new** — the task FINISHED a real workflow. Its outputs are readable only as a child of
- *    something, so a new dynamic document is made: the conversation state as root, the task's root
+ *    something, so a new dynamic document is made: a root named for the task, the task's root
  *    state as its first child (mounted with what the task ran with), the target as the second, wired
  *    from the first by schema fit. The task is not touched — joining it to the document is
  *    adoption's (§2), which `connect` composes with this.
@@ -37,15 +37,13 @@
  * Nothing is lowered by hand. One consequence, stated rather than hidden: the grafted child resolves
  * under its own defaults, not under the `environment` the cloned root hands its other children.
  *
- * ## The conversation is grafted too (step 6)
+ * ## No conversation (2026-11-19)
  *
- * A diverged root that has no operation of its own is given the conversation's: the loaded
- * conversation state's resolved `operation` and execution `environment` are moved onto the frozen
- * root, exactly as the lowered mount is. An instance loaded with an operation it never ran would
- * dispatch it — so the LOAD (`load.ts`, "A conversation starts idle") reads a document root's
- * never-started operation as settled with nothing said, and the first turn is whatever the person
- * types. A root that already speaks — a `chat/session` that grew a child — keeps its own operation:
- * a session that starts work stays a session.
+ * A dynamic workflow records how work was moved from state to state, and holds nothing else: no
+ * conversation is made with it or grafted onto a cloned root (the person: "I dont think we need
+ * chat/control for this. all we need is to create a workflow which can connect all the other sub
+ * workflows / tasks together encapsulating how they were moved"). A document written before then may
+ * still name the conversation it was given; nothing reads it.
  */
 import { mkdirSync, existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -65,7 +63,6 @@ import {
 import {
   generateDynamicWorkflow,
   isStandingMoveRule,
-  type AuthoredState,
   type DynamicBase,
   type GenerateResult,
   type Producer,
@@ -150,8 +147,6 @@ export interface GenerateVersionRequest {
   taskId: string;
   /** The target state, as a reference (`feature/ux`). */
   target: string;
-  /** The conversation that controls the document — `chat/control`, `chat/session`, any state with an operation. */
-  conversation: string;
   targetKey?: string;
   /** Values the caller settled, by the target's own declared input, with who settled them. */
   supplied?: Readonly<Record<string, SuppliedValue>>;
@@ -250,22 +245,6 @@ export async function generateDocumentVersion(project: Project, request: Generat
   // ---- a finished task, wrapped in a new document -------------------------------------------------
   if (mode === "new") {
     if (!finishedWell) throw refusal(log, `task '${taskId}' is ${row.status} — only a task that finished well has outputs a new document can wire from`, { taskId });
-    const conversation = workflowLoadOptions(project.paths, { path: project.config.workflows.path }).loadState?.(request.conversation);
-    if (conversation === null || typeof conversation !== "object" || Array.isArray(conversation)) {
-      throw refusal(log, `conversation state '${request.conversation}' was not found on the workflow path`);
-    }
-    // Whether it SPEAKS is asked of the state as it LOADS: a file that follows another
-    // (`{ "$ref": "$SYSTEM/workflows/chat/control", … }`, a project's override of what ships) has no
-    // operation of its own to read, and is a conversation all the same.
-    let loadedConversation: WorkflowBundle;
-    try {
-      loadedConversation = loadLive(project, request.conversation);
-    } catch (e) {
-      throw refusal(log, `conversation state '${request.conversation}' does not load: ${(e as Error).message}`);
-    }
-    if (loadedConversation.states[loadedConversation.rootId]?.operation === undefined) {
-      throw refusal(log, `conversation state '${request.conversation}' has no operation — a dynamic workflow's root is a state with an operation and children`);
-    }
     const source: Producer = {
       key: sourceStateId(previous.rootId).split("/").at(-1)!.replace(/[^A-Za-z0-9_]+/g, "_") || "source",
       state: stateShapeOf(previousRoot),
@@ -274,7 +253,8 @@ export async function generateDocumentVersion(project: Project, request: Generat
       taskId,
     };
     const generated = generateDynamicWorkflow({
-      base: { kind: "new", conversation: conversation as AuthoredState },
+      // Named for the work it was made from: it holds that work and what it was moved to, and nothing else.
+      base: { kind: "new", label: meta.title },
       producers: request.producers ?? [source],
       target,
       ...(request.targetKey !== undefined ? { targetKey: request.targetKey } : {}),
@@ -289,7 +269,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
     const snap = await snapshotWithModules(project, bundle);
     const document = createDocument(
       snapshotsDir,
-      { id, kind: "dynamic", rootId, conversation: request.conversation, createdAt },
+      { id, kind: "dynamic", rootId, createdAt },
       { snapshotHash: snap.hash, createdAt, authored: generated.document!, additions: generated.additions, cause },
     );
     return { resolution: "new", generated, document, version: latestVersion(document) };
@@ -343,7 +323,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
   if (!generated.ok) return { resolution: "unsettled", generated, ...(existing !== undefined ? { document: existing } : {}) };
   if (request.dryRun === true) return { resolution: existing !== undefined ? "augmented" : "cloned", generated, ...(existing !== undefined ? { document: existing } : {}) };
 
-  const bundle = graft(project, previous, generated, existing?.conversation ?? request.conversation);
+  const bundle = graft(project, previous, generated);
   lintOrRefuse(bundle, `the diverged copy of '${sourceStateId(previous.rootId)}'`, request.functions);
   const snap = await snapshotWithModules(project, bundle);
   const next = { snapshotHash: snap.hash, createdAt, additions: generated.additions, cause };
@@ -354,7 +334,7 @@ export async function generateDocumentVersion(project: Project, request: Generat
   const id = `d-${uuidv7(nowMs)}`;
   const document = createDocument(
     snapshotsDir,
-    { id, kind: "diverged", rootId: previous.rootId, conversation: request.conversation, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash! }, createdAt },
+    { id, kind: "diverged", rootId: previous.rootId, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash! }, createdAt },
     next,
   );
   // The task stops following the workflow it came from: it names the document, and its next load
@@ -365,71 +345,10 @@ export async function generateDocumentVersion(project: Project, request: Generat
 }
 
 /**
- * Give a task a CONTROL CONVERSATION and nothing else (decision 0005 §3, §4, step 7).
- *
- * "A task with no controlling conversation is adopted into one first, because the conversation is
- * what answers on the way." This is that, and the departure from §3's word "adopted" is deliberate:
- * wrapping the task in a parent would make the PARENT the thing that moves, and a fast-forward is a
- * move of the task's own machine through its own workflow. So the conversation is grafted onto the
- * task's own frozen root — the same graft a clone does, with no child and no rule added — and the
- * task's document is that copy. Its root now speaks; §3's idle rule (`load.ts`) is what keeps that
- * from spending a model call on a conversation nobody has typed into.
- *
- * A root that already has an operation is left exactly as it is: a `chat/session`, a `chat/control`
- * made by an earlier move, or an authored workflow whose root happens to run something. The first
- * two ARE the conversation; the third is a root that is running its own work, and taking that over
- * is not this function's to do.
- */
-export interface ControlConversationResult {
-  /** The root already spoke — nothing was written. */
-  had: boolean;
-  /** The task's document, when it has one. Absent only for `had` with no document. */
-  document?: FrozenDocument;
-  version?: DocumentVersion;
-}
-
-export async function ensureControlConversation(
-  project: Project,
-  request: { taskId: string; conversation: string; functions?: ReadonlyMap<string, FunctionCapabilities>; nowMs?: number },
-): Promise<ControlConversationResult> {
-  const nowMs = request.nowMs ?? Date.now();
-  const { taskId } = request;
-  const row = project.runtime.get(taskId);
-  if (row === undefined) throw refusal(log, `unknown task '${taskId}'`, { taskId });
-  if (row.snapshotHash === undefined) throw refusal(log, `task '${taskId}' has never run, so it has no workflow to give a conversation to`, { taskId });
-  const meta = project.tasks.read(taskId);
-  const snapshotsDir = project.paths.snapshotsDir;
-  const existing = row.documentId !== undefined ? readDocument(snapshotsDir, row.documentId) : undefined;
-  const previous = loadSnapshot(snapshotsDir, existing !== undefined ? latestVersion(existing).snapshotHash : row.snapshotHash);
-  if (previous.states[previous.rootId]!.operation !== undefined) {
-    return { had: true, ...(existing !== undefined ? { document: existing, version: latestVersion(existing) } : {}) };
-  }
-  const nothing: GenerateResult = { ok: true, additions: { children: {}, transitions: [] }, targetKey: "", existing: false, mount: "plain", wires: [], literals: [], unsettled: [], deferred: true };
-  const bundle = graft(project, previous, nothing, existing?.conversation ?? request.conversation);
-  lintOrRefuse(bundle, `the copy of '${sourceStateId(previous.rootId)}' a conversation was grafted onto`, request.functions);
-  const snap = await snapshotWithModules(project, bundle);
-  const createdAt = new Date(nowMs).toISOString();
-  const next = { snapshotHash: snap.hash, createdAt, additions: nothing.additions, cause: { taskId, target: sourceStateId(previous.rootId) } };
-  if (existing !== undefined) {
-    const appended = appendVersion(snapshotsDir, existing.id, latestVersion(existing).version, next);
-    return { had: false, document: appended.document, version: appended.version };
-  }
-  const id = `d-${uuidv7(nowMs)}`;
-  const document = createDocument(
-    snapshotsDir,
-    { id, kind: "diverged", rootId: previous.rootId, conversation: request.conversation, divergedFrom: { workflow: meta.workflow, snapshotHash: row.snapshotHash }, createdAt },
-    next,
-  );
-  project.runtime.setPin(taskId, row.snapshotHash, id, nowMs);
-  log.info(`task ${taskId} was given the conversation '${request.conversation}' (${id})`);
-  return { had: false, document, version: latestVersion(document) };
-}
-
-/**
  * Lower a clone's additions through the loader, and move the lowered pieces onto the frozen root —
- * see the header. A root with no operation of its own is given `conversation`'s.
+ * see the header.
  */
-function graft(project: Project, frozen: WorkflowBundle, generated: GenerateResult, conversation: string): WorkflowBundle {
+function graft(project: Project, frozen: WorkflowBundle, generated: GenerateResult): WorkflowBundle {
   const root = frozen.states[frozen.rootId]!;
   const rootId = sourceStateId(frozen.rootId);
   const scaffold: Record<string, unknown> = {
@@ -450,26 +369,8 @@ function graft(project: Project, frozen: WorkflowBundle, generated: GenerateResu
   const loweredRoot = lowered.states[lowered.rootId]!;
 
   const added = Object.keys(generated.additions.children);
-  // The conversation, where the root has none: lowered by the loader like everything else here.
-  let speaks: Pick<LoadedState, "operation" | "environment" | "scopeSession"> = {};
-  if (root.operation === undefined) {
-    let loadedConversation: WorkflowBundle;
-    try {
-      loadedConversation = loadLive(project, conversation);
-    } catch (e) {
-      throw refusal(log, `conversation state '${conversation}' does not load: ${(e as Error).message}`);
-    }
-    const state = loadedConversation.states[loadedConversation.rootId]!;
-    if (state.operation === undefined) throw refusal(log, `conversation state '${conversation}' has no operation — a dynamic workflow's root is a state with an operation and children`);
-    speaks = {
-      operation: state.operation,
-      environment: { ...(root.environment ?? {}), ...(state.environment ?? {}) },
-      ...(state.scopeSession !== undefined ? { scopeSession: state.scopeSession } : {}),
-    };
-  }
   const grafted: LoadedState = {
     ...root,
-    ...speaks,
     // Written out: a state that mounted nothing has no spine, and a child must not join one by being declared.
     sequence: root.sequence ?? [],
     children: { ...(root.children ?? {}), ...Object.fromEntries(added.map((key) => [key, loweredRoot.children![key]!])) },

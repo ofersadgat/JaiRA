@@ -35,10 +35,10 @@ It deliberately does not own:
 
 ## Main's log sits in the service layer behind the prompt stream, and the renderer reaches it only through pushes and one channel
 
-- Layer `service`. `startRun` and `runChatMessage` in `service.ts` each build a flusher, register `liveFlush` for the task, and wire `withTurnStream` so that each delta runs `liveTurns.apply`, then `liveFlush.note()`, then publishes `session:turn` with the returned `n`.
+- Layer `service`. `startRun` in `service.ts` builds a flusher, registers `liveFlush` for the task, and wires `withTurnStream` so that each delta runs `liveTurns.apply`, then `liveFlush.note()`, then publishes `session:turn` with the returned `n`. A conversation's reply is a call of its run, so it streams through the same wiring.
 - Upstream seam: the `events` iterator of an `ExecHandle` from `@declarative-ai/exec`. hw never drains it, so `withTurnStream` is its one consumer, and nothing in the engine reads the tail.
 - Boundary: renderer and main. The renderer holds a copy only; `session:live` serves main's snapshot back, and neither path carries a person's answer.
-- Clearing: the journal tee of a run and of a typed turn calls `liveTurns.clear` on `operation.completed` and `operation.failed` before publishing `engine:event`. A run's `finally` calls `liveTurns.drop`, disposes its flusher and deletes `liveFlush`. A typed turn's `whileChatting` disposes its flusher, and clears the tail and `liveFlush` only once no typed turn is left in flight for the task.
+- Clearing: the journal tee of a run calls `liveTurns.clear` on `operation.completed` and `operation.failed` before publishing `engine:event`. A run's `finally` calls `liveTurns.drop`, disposes its flusher and deletes `liveFlush`.
 - `task:cancel` and `chat:cancel` call the task's `liveFlush` before they abort, while the record is still open.
 
 ## Main's log is memory only, and the record row is the tail's one durable copy
@@ -48,7 +48,7 @@ It deliberately does not own:
 | `LiveTurnLog` tail per task | written by `apply`; read by `snapshot`, `session:live` and the flusher; deleted by `clear` and `drop` | this process, while a call streams | none |
 | `LiveTurnLog` counter per task | incremented per applied delta; kept by `clear`; deleted by `drop` | this process | every `session:turn` push carries it as `n` |
 | Open record `result_json` and `provider_session_id` | replaced wholesale by `update(ref, {value, providerSessionId})` on each flush; the handle is written only where the row has none | the record row, until the settle replaces the value | the executor's settle; [native-session-capture](native-session-capture.md) at close and at recovery |
-| `ProjectSession.liveFlush` | registered by a run or a typed turn; called by both cancel paths | memory | [chat-turns](chat-turns.md), the run path |
+| `ProjectSession.liveFlush` | registered by a run; called by both cancel paths | memory | the run path; `cancelChatTurn` |
 | Renderer `AppState.liveTurn` | folded from pushes for the selected task; seeded in `refreshSession`; set to `null` on a settle event for the selected task and on `run:finished` | the renderer | every view that draws the tail |
 
 ## The invariants keep one tail per task, count every delta once, and never let bookkeeping crowd out the conversation
@@ -79,7 +79,6 @@ It deliberately does not own:
 | A timer fires after the settle | `update` matches no open row and writes nothing | none needed | none |
 | A flush and the settle race on one row | `update` repeats the `status = 'open'` guard on its write, so a settle landing between its read and write is not overwritten | none needed | none |
 | Two positions stream in one task at once, as parallel children do | each delta replaces the other's tail in main and in the renderer, and each flush replaces that record's partial with what arrived since the last switch | the settle replaces the partial | the tail flips between the two; a crash keeps a short partial |
-| A run and a typed turn stream in one task at once | they share one tail and one `liveFlush` slot: the later registration takes the slot, either one's settle or end clears the other's tail, and the run's end deletes the slot | none | the tail blanks mid-call, and a stop can flush the wrong record or none |
 | A task is selected while it streams and a push arrives before its seed lands | `select` keeps the previous tail, the push replaces it with that one delta, and the seed's `n` is then not above the tail's, so `tailIsAhead` keeps the push-built tail | the next finished assistant message restarts the text, and the record replaces the entries at settle | the live turn lacks what was said before the selection |
 | Between a selection and its seed | `liveTurn` still holds the previous task's tail and names no task; the run conversation and `SessionPanel` match `sessionId` and `seq` before drawing it, while the Chat view and the leaf file surface do not | the seed replaces it | the previous task's tail shows briefly |
 | `session:live` rejects | the store takes it as `null` and replaces a tail that is not ahead with nothing | the next push or refresh | the tail blanks, then rebuilds from later deltas only |

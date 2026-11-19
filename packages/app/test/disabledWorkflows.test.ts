@@ -126,30 +126,37 @@ describe("switching one off and on (workflow:setDisabled)", () => {
   });
 
   it("switches a built-in off in this project with a file that follows it, and Enable deletes that file", () => {
-    const written = service.setWorkflowDisabled({ stateId: "chat/session", layer: "project", project: dir, disabled: true });
-    expect(JSON.parse(written.text)).toEqual({ $ref: "$SYSTEM/workflows/chat/session", disabled: true });
-    expect(offHere("chat/session")).toBe(true);
-    const enabled = service.setWorkflowDisabled({ stateId: "chat/session", layer: "project", project: dir, disabled: false });
+    const written = service.setWorkflowDisabled({ stateId: "debug/hello_world", layer: "project", project: dir, disabled: true });
+    expect(JSON.parse(written.text)).toEqual({ $ref: "$SYSTEM/workflows/debug/hello_world", disabled: true });
+    expect(offHere("debug/hello_world")).toBe(true);
+    const enabled = service.setWorkflowDisabled({ stateId: "debug/hello_world", layer: "project", project: dir, disabled: false });
     expect(enabled.exists).toBe(false);
-    expect(offHere("chat/session")).toBe(false);
+    expect(offHere("debug/hello_world")).toBe(false);
   });
 
   it("switches one off in Shared for every project, and back on in this project only", () => {
-    service.setWorkflowDisabled({ stateId: "chat/session", layer: "base", disabled: true });
-    expect(offHere("chat/session")).toBe(true);
-    const here = service.setWorkflowDisabled({ stateId: "chat/session", layer: "project", project: dir, disabled: false });
+    service.setWorkflowDisabled({ stateId: "debug/hello_world", layer: "base", disabled: true });
+    expect(offHere("debug/hello_world")).toBe(true);
+    const here = service.setWorkflowDisabled({ stateId: "debug/hello_world", layer: "project", project: dir, disabled: false });
     // Taking a field out of a file that has none would change nothing: this project says `false`.
-    expect(JSON.parse(here.text)).toEqual({ $ref: "$BASE/workflows/chat/session", disabled: false });
-    expect(offHere("chat/session")).toBe(false);
-    // Both files only follow: the conversation still loads as what ships, its permission set included.
-    const session = service.browseWorkflows(dir).workflows.find((w) => w.rootId === "chat/session");
-    expect(session?.loadError).toBeUndefined();
-    expect(session?.conversationInput).toBe("message");
-    service.setWorkflowDisabled({ stateId: "chat/session", layer: "base", disabled: false });
+    expect(JSON.parse(here.text)).toEqual({ $ref: "$BASE/workflows/debug/hello_world", disabled: false });
+    expect(offHere("debug/hello_world")).toBe(false);
+    // Both files only follow: the workflow still loads as what ships.
+    const shipped = service.browseWorkflows(dir).workflows.find((w) => w.rootId === "debug/hello_world");
+    expect(shipped?.loadError).toBeUndefined();
+    service.setWorkflowDisabled({ stateId: "debug/hello_world", layer: "base", disabled: false });
+  });
+
+  it("switches the shipped conversation — a workflow SCRIPT — off with a file that follows it", () => {
+    const written = service.setWorkflowDisabled({ stateId: "session", layer: "project", project: dir, disabled: true });
+    expect(JSON.parse(written.text)).toEqual({ $ref: "$SYSTEM/workflows/session", disabled: true });
+    expect(offHere("session")).toBe(true);
+    expect(service.setWorkflowDisabled({ stateId: "session", layer: "project", project: dir, disabled: false }).exists).toBe(false);
+    expect(offHere("session")).toBe(false);
   });
 
   it("refuses the layer that ships", () => {
-    expect(() => service.setWorkflowDisabled({ stateId: "chat/session", layer: "system", disabled: true })).toThrow(/read-only/);
+    expect(() => service.setWorkflowDisabled({ stateId: "session", layer: "system", disabled: true })).toThrow(/read-only/);
   });
 });
 
@@ -164,38 +171,19 @@ describe("a conversation", () => {
     expect(all.find((t) => t.taskId === plain.taskId)?.startedBy).toBeUndefined();
   });
 
-  it("runs what the settings name, chat/session unless a layer says otherwise", () => {
+  it("runs what the settings name, session unless a layer says otherwise", () => {
     expect(service.chatStartPlan({ project: dir }).settings).toBeDefined();
-    const effective = service.readConfig(dir).effective as { conversations: { workflow: string; moved: string } };
-    expect(effective.conversations).toEqual({ workflow: "chat/session", moved: "chat/control" });
-  });
-});
-
-describe("a move that makes a dynamic workflow", () => {
-  it("asks which workflow steers the task when the one the settings name is disabled", async () => {
-    const { taskId } = service.createTask({ title: "Write notes", workflow: "notes" });
-    await service.startTask({ taskId });
-    await answer("notes?");
-    await until(() => statusOf(taskId) === "completed", "notes to complete");
-    // No workflow relates `notes` to `flow/b`, so the move makes one — steered by `chat/control`.
-    service.setWorkflowDisabled({ stateId: "chat/control", layer: "project", project: dir, disabled: true });
-    const dry = await service.connectTask({ taskId, target: "flow/b", dryRun: true });
-    expect(dry.ok).toBe(true);
-    expect(dry.ok ? dry.plan.chooseConversation : undefined).toEqual({ disabled: "chat/control", choices: expect.arrayContaining([expect.objectContaining({ stateId: "chat/session" })]) });
-    // Not one of the choices, and the drop came back without a pick: refused, and nothing moved.
-    expect(dry.ok ? dry.plan.chooseConversation?.choices.some((c) => c.stateId === "chat/control") : true).toBe(false);
-    const real = await service.connectTask({ taskId, target: "flow/b" });
-    expect(real.ok ? undefined : real.refusal.code).toBe("conversation");
-    const picked = await service.connectTask({ taskId, target: "flow/b", conversation: "chat/control", dryRun: true });
-    expect(picked.ok ? undefined : picked.refusal).toEqual({ code: "disabled", message: "Not moved: 'chat/control' is disabled." });
+    const effective = service.readConfig(dir).effective as { conversations: { workflow: string } };
+    expect(effective.conversations).toEqual({ workflow: "session" });
   });
 });
 
 describe("a conversation's tools", () => {
   it("leave a disabled workflow out of list_workflows and refuse to start it", async () => {
-    const { taskId } = service.createTask({ title: "talk", workflow: "chat/session", inputs: { message: "hello" } });
+    const { taskId } = service.createTask({ title: "talk", workflow: "session", inputs: { message: "hello", improve: false } });
     await service.startTask({ taskId, fake: [{ output: "hi." }] as unknown as JsonValue });
-    await until(() => statusOf(taskId) === "completed", "the opening turn");
+    // A program (decision 0029 §2): its opening reply lands, and it waits for the next message.
+    await until(() => service.sessionHistory({ taskId }).length >= 1, "the opening turn");
     const tools = createWorkflowTools(service.workflowHostFor(dir, taskId));
     const listed = async (): Promise<string[]> => {
       const result = (await tools["list_workflows"]!.run({} as never, {} as never)) as unknown as WorkflowsResult;

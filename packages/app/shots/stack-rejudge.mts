@@ -94,7 +94,7 @@ async function main(): Promise<void> {
 
     // A conversation as the Chat view starts one, under ask-first.
     const title = "Stack after using it";
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: "Reply with the single word: ready." }, conversation: true });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message: "Reply with the single word: ready." }, conversation: true });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: ASK_FIRST } });
     await app.clickText("Chat");
     await app.until(says(title), "the conversation to be listed", 200);

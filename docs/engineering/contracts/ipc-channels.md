@@ -36,7 +36,7 @@ Types are from `ipc.ts` unless a table says otherwise; view types are from `view
 | Family | Channels | Contract |
 | --- | --- | --- |
 | Task actions and module approval | `task:create`, `task:start`, `task:cancel`, `task:rerun`, `task:resume`, `task:resumable`, `task:move`, `task:adopt`, `task:connect`, `task:connectUndo`, `task:inputSources`, `task:rewind`, `task:fork`, `task:delete`, `task:rename`, `functions:pending`, `functions:approve` | [task-channels](task-channels.md) |
-| Typed conversation | `chat:plan`, `chat:startPlan`, `chat:send`, `chat:cancel`, `chat:thread` | [chat-channels](chat-channels.md) |
+| Typed conversation | `chat:plan`, `chat:startPlan`, `chat:send`, `chat:cancel`, `chat:end`, `chat:thread` | [chat-channels](chat-channels.md) |
 | Inbox | `interaction:pending`, `interaction:submit`, `approval:pending`, `approval:submit`, `question:pending`, `question:submit`, `userEvent:pending`, `userEvent:deliver` | [inbox-channels](inbox-channels.md) |
 | Live turn snapshot | `session:live` | [session-live-protocol](session-live-protocol.md) |
 | Schema checks | `schema:validate`, `schema:check`, `schema:detect` | [schema-check-channels](schema-check-channels.md) |
@@ -325,6 +325,12 @@ These are [app-shell](../units/app-shell.md).
 | `history:prune` | `{olderThanDays?: number; apply?: boolean}`; no `project` | `PruneResult` with `remaining: HistorySize`; without `apply: true` it is a plan and deletes nothing |
 
 `HistorySize` and `PruneResult` are [task-view-models](task-view-models.md); the rule is [history-pruning](../units/history-pruning.md).
+
+### `learning:measures` reads what a project learned from corrections
+
+| Channel | Request | Response |
+| --- | --- | --- |
+| `learning:measures` | `{project?}` or `void` | `LearningMeasures`: each lesson of the project's and the Shared layer's (occurrences, applied, turned down, recurred, recurred with a fix in effect, the lever, the projects it turned up in), proposals applied and turned down, corrections per conversation, lessons more than one project learned, newer versions offered to running work and how many were taken within the pass that offered them, and `revisit` — the conditions of decision 0029's "Revisit when" the numbers show. `jaira lessons` prints it. |
 
 ### Settings, configuration, executor and secret channels
 

@@ -1,8 +1,7 @@
 /**
  * The workflow tools (decision 0005 §3, step 6) — what each takes and what each answers.
  *
- * Eight tools a conversation holds: all of what `chat/control` has, and part of what `chat/session`
- * has. Each is the HOST's operation and not a second implementation of it — `move_task` is `connectTask`,
+ * Eight tools a conversation holds — part of what `session` has. Each is the HOST's operation and not a second implementation of it — `move_task` is `connectTask`,
  * `start_task` is the generator and a `task_move`, `hold_task` / `release_task` / `stop_task` are what the board's
  * gestures call — so the shapes here are the contract between the tool a model calls
  * (`runtime/workflowTools.ts`) and the host that serves it (`AppService.workflowHost`).
@@ -102,7 +101,10 @@ export interface InputsMissing {
 export type StartResult =
   | {
       ok: true;
-      /** The task the child runs in — this conversation's own. */
+      /**
+       * The task the child runs in — this conversation's own; or, for a conversation that is a
+       * program (decision 0029 §2), the task it was started as, filed under this conversation.
+       */
       task: string;
       /** The child key the state is mounted under, and the state. */
       key: string;

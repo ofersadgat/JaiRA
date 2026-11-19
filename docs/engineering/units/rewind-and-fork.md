@@ -29,10 +29,10 @@ Both verbs take a `seq` of the task's `state_machine_events`, and both are defin
 | `standing` | The copy's status | Its start, end and outcome | Caller |
 | --- | --- | --- | --- |
 | `startable` | `interrupted` | the parent's start, now, `interrupted` | a run fork, resumed at once |
-| `asIs` | the parent's status when `completed`, `failed` or `canceled`, else `interrupted` | the parent's, or now and `interrupted` | a chat fork, continued by a message |
+| `asIs` | the parent's status when `completed`, `failed` or `canceled`, else `interrupted` | the parent's, or now and `interrupted` | none since 2026-11-19; a chat fork took it, continued by a typed turn |
 | `queued` | `queued` | none | a split copy, with `ofLiveTask`, `id`, `branch`, `origin`, `split` and `dependsOn` from the fan-out host |
 
-`AppService.rewindTask` and `forkTask` in `service.ts` put the verbs behind [task-channels](../contracts/task-channels.md). Both refuse a task in `open.live` or with a `jobs.liveRunJob`. A rewind rejects the task's parked gates with `the task was rewound to before this question` and dismisses its questions, cuts, and then resumes the task when `resumable` names a frontier, or else restores the status and outcome it had. A fork without a message copies `startable` and resumes the copy; with one, it copies `asIs` and sends the message into the copy's first instance that spoke, without awaiting the reply.
+`AppService.rewindTask` and `forkTask` in `service.ts` put the verbs behind [task-channels](../contracts/task-channels.md). `forkTask` refuses a task in `open.live` or with a `jobs.liveRunJob`, unless it is a program conversation, whose run is live while it waits. `rewindTask` refuses a task another process runs and stops one in `open.live` before it cuts; with `stop: false` it answers `busy` instead, unless the task is a program conversation waiting with no call in flight. A rewind rejects the task's parked gates with `the task was rewound to before this question` and dismisses its questions, cuts, and then resumes the task when `resumable` names a frontier, or else restores the status and outcome it had. A fork copies `startable` and resumes the copy. A program conversation's copy is made with `ofLiveTask`, and a message given with the fork is then sent to the copy's `input()` through `sendChatMessage` and awaited until it is delivered; a message given for any other task is refused before anything is copied.
 
 It deliberately does not own:
 
@@ -40,7 +40,7 @@ It deliberately does not own:
 - Cutting a conversation's rows and branches and stamping its remote: `cutSession` in [operation-record-store](operation-record-store.md).
 - The tombstone lines and how an import applies them: [journal-events](../contracts/journal-events.md) and [storage-files](../contracts/storage-files.md).
 - When a split copies a task and what it stamps on the copy: [fan-out-host](fan-out-host.md).
-- The message sent into a chat fork: [chat-turns](chat-turns.md). The origin label drawn at the seam: [board-projection](board-projection.md).
+- The message sent into a conversation's fork: `chat:send` in [chat-channels](../contracts/chat-channels.md). The origin label drawn at the seam: [board-projection](board-projection.md).
 
 ## The cut is service code that sequences six stores under one rule
 
@@ -77,14 +77,14 @@ It deliberately does not own:
 | 9 | A chat fork stands as its parent does | `cut.test.ts` "stands as its parent does when asked to (a chat fork)" |
 | 10 | A copy of a running task is refused unless the caller says the cut is at a parked point, and a `queued` copy has no start, end or outcome and takes its own binding and provenance | `holding.test.ts` "refuses a live parent unless the caller says the cut is at a parked point", "keeps everything so far, stands queued with no start and no end, and takes its own binding and provenance", "unbinds the copy when asked, rather than copying the parent's branch" |
 | 11 | A rewound run resumes and asks the cut question again, and a run fork asks it again while the original keeps its answers | `runCut.test.ts` "deletes the state and everything after it, and the resume asks the question again", "is a second task that asks the question again, while the original keeps its answers" |
-| 12 | A rewind among turns typed after the run finished leaves the task finished, and the next message takes the cut message's place | `chatCut.test.ts` "deletes the message and everything after it, and the next message goes where it stood", "can cut the last message alone" |
+| 12 | A rewind to a conversation's message leaves the task `completed` and waiting for a message, and the next message takes the cut message's place | `chatCut.test.ts` "deletes the message and everything after it, and the next message goes where it stood", "can cut the last message alone" |
 | 13 | A chat fork shares every turn before the point and takes the new message after them | `chatCut.test.ts` "is a second conversation that shares everything up to the message and takes a new one from there" |
 
 ## Every file line appended before a rollback outlives it
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| The task runs in this process or another, or is `stopping` | refused: `is running — stop it before rewinding it` or `forking it`, or `is stopping — stop it before cutting its journal` | stop it and let it settle | refusal |
+| A rewind of a task another process runs, a fork of a running task that is not a program conversation, or a cut of a task still `running` or `stopping` | refused: `is running in another process — stop it there before rewinding it`, `is running — stop it before forking it`, or `is running` or `is stopping — stop it before cutting its journal` | stop it and let it settle | refusal |
 | The journal file's surviving lines disagree with the table, as after a retry while file-backed | the rewind refuses after `cutSession` and `dropRecords` ran, and the transaction rolls back | have the file imported before rewinding: it is at an open that finds the files moved since the last close, and deleting the journal's `storage_index` row forces it | refusal naming both counts |
 | A rewind's transaction does not commit after a file append: that refusal, or a kill | SQLite rolls back, and the files keep every line already appended: `jaira.tombstone` and cut session rows, and `jaira.rewound` once the check passed | none | after reopen the files win: records are gone while journal events still name them, and a resume can refuse as unreadable |
 | The fork's transaction throws, or the process is killed inside it | `createTask` already wrote the copy's file and `queued` row, and conversation lines appended before the throw stay in the copy's file | delete the copy | an extra queued task with the parent's title |
@@ -92,8 +92,8 @@ It deliberately does not own:
 | A fork is retried | each call mints another copy; with `id` given, the second is refused as existing | delete the extra copy | a duplicate task |
 | The cut leaves no frontier, or the load is blocked or unreadable | the service restores the status and outcome the task had and does not resume; `markCut` already cleared `outputs_json` and `failure_json` | none | the task reads as before, shorter and without its outputs |
 | The resume after a rewind or a run fork refuses | the cut or the copy stands, and the request rejects | clear the cause, then resume | refusal; the task or its copy reads interrupted |
-| A chat fork's copy has no instance that spoke | refused `the fork of '<id>' holds no conversation to continue` after the copy exists | delete the copy | refusal and an extra task |
-| The first message into a chat fork fails | logged `the fork's first message failed: <reason>` after the request already answered | send the message again | the fork opens with no reply |
+| A message is given with the fork of a task that is not a program conversation | refused `task '<id>' is not a conversation that takes messages — fork it without one`, before anything is copied | fork it without a message | refusal |
+| The message into a conversation's fork rejects | the copy stands, resumed, and the request rejects with the message's refusal | send the message to the copy again | refusal |
 | Two writers reach one task during a cut | none in this process: the checks and the cut run with no await between them; a start in another process between the status read and the transaction is not detected | none | none shown |
 
 ## The fork stamp needs migration 17, and a cut is never taken back

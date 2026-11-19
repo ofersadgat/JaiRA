@@ -22,7 +22,7 @@ describe("switchItems", () => {
 
   it("offers an inherited one for this project or for every project", () => {
     const writes: Array<[string, boolean]> = [];
-    const items = switchItems({ stateId: "chat/session", layer: "system", hasProject: true }, (layer, disabled) => writes.push([layer, disabled]));
+    const items = switchItems({ stateId: "session", layer: "system", hasProject: true }, (layer, disabled) => writes.push([layer, disabled]));
     expect(labels(items)).toEqual(["Disable in this project", "Disable in every project"]);
     items.forEach((item) => item.onSelect());
     expect(writes).toEqual([
@@ -43,13 +43,13 @@ const entry = (rootId: string, extra: Partial<WorkflowEntry> = {}): WorkflowEntr
 
 describe("conversationStartOf", () => {
   const workflows = [
-    entry("chat/session", { label: "Session", layer: "system", conversationInput: "message" }),
+    entry("session", { label: "Session", layer: "system", conversationInput: "message" }),
     entry("planning/plan", { label: "Planning", conversationInput: "goal" }),
     entry("feature", { label: "Feature" }),
   ];
 
-  it("runs what the settings name, chat/session by default", () => {
-    expect(conversationStartOf({}, workflows)).toMatchObject({ workflow: "chat/session", input: "message", disabled: false });
+  it("runs what the settings name, session by default", () => {
+    expect(conversationStartOf({}, workflows)).toMatchObject({ workflow: "session", input: "message", disabled: false });
     expect(conversationStartOf({ conversations: { workflow: "planning/plan" } }, workflows)).toMatchObject({ workflow: "planning/plan", input: "goal", label: "Planning" });
   });
 
@@ -72,11 +72,12 @@ describe("openingOf", () => {
 
 describe("conversationsSchemaOf", () => {
   it("offers the workflows that can be a conversation by name, and keeps the value set", () => {
-    const schema = { type: "object", properties: { workflow: { type: "string", default: "chat/session" }, moved: { type: "string", default: "chat/control" } } };
-    const out = conversationsSchemaOf(schema, [entry("chat/session", { label: "Session", conversationInput: "message" }), entry("feature")], { moved: "lost/one" }) as unknown as {
-      properties: Record<string, { enum: string[]; enumDescriptions: string[] }>;
-    };
-    expect(out.properties["workflow"]).toMatchObject({ enum: ["chat/session"], enumDescriptions: ["Session — chat/session"] });
-    expect(out.properties["moved"]).toMatchObject({ enum: ["chat/session", "lost/one"], enumDescriptions: ["Session — chat/session", "lost/one — cannot be a conversation"] });
+    const schema = { type: "object", properties: { workflow: { type: "string", default: "session" } } };
+    const workflows = [entry("session", { label: "Session", conversationInput: "message" }), entry("feature")];
+    type Out = { properties: Record<string, { enum: string[]; enumDescriptions: string[] }> };
+    const unset = conversationsSchemaOf(schema, workflows, {}) as unknown as Out;
+    expect(unset.properties["workflow"]).toMatchObject({ enum: ["session"], enumDescriptions: ["Session — session"] });
+    const kept = conversationsSchemaOf(schema, workflows, { workflow: "lost/one" }) as unknown as Out;
+    expect(kept.properties["workflow"]).toMatchObject({ enum: ["session", "lost/one"], enumDescriptions: ["Session — session", "lost/one — cannot be a conversation"] });
   });
 });

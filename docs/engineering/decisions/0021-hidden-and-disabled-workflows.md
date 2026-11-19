@@ -70,21 +70,18 @@ workflow ids hidden from that board. A column's menu has Hide column; "N hidden"
 bar lists the board's columns with a tick each and Show all. A hidden workflow runs, starts from New
 task, and is listed to an agent.
 
-**Conversations** (ruling 3) are a setting, `conversations: { workflow, moved }`, on Settings → Runs →
-Conversations. `workflow` is what the Chat view starts a conversation as (default `chat/session`),
-`moved` what a move that makes a dynamic workflow gives the task to steer it (default `chat/control`).
-Either may be any workflow that takes ONE required text input — `WorkflowEntry.conversationInput`
-names it, and what is typed fills it.
+**Conversations** (ruling 3) are a setting, `conversations: { workflow }`, on Settings → Runs →
+Conversations: what the Chat view starts a conversation as (default `session`). It may be any workflow
+that takes ONE required text input — `WorkflowEntry.conversationInput` names it, and what is typed fills
+it. (`moved`, what a move that made a dynamic workflow gave the task to steer it, went with that
+conversation on 2026-11-19: a dynamic workflow holds none — decision 0005, amended.)
 
 - Where `workflow` is disabled, the empty Chat room asks: "Session is disabled in this project, so
   choose what this conversation runs", a dashed choice opening "Run this conversation as". The
   composer is off until a pick, and the pick is that conversation's alone.
-- Where `moved` is disabled, a drop that would make a dynamic workflow asks the same in its confirm
-  box (`ConnectPlan.chooseConversation`); the pick rides the drop again as `TaskConnectRequest.conversation`.
-  A fast-forward, which has no box to ask in, is refused and says where to choose another.
 - **A conversation is one because the Chat view started it**, not because of its workflow's id:
-  `startedBy: { by: "chat" }` on the task (`isConversation`, which also counts a dynamic workflow's
-  task). Before this, `isChatWorkflow` read the id, so a conversation running Planning would have been a
+  `startedBy: { by: "chat" }` on the task (`isConversation`; a dynamic workflow's task counted too until
+  2026-11-19, when dynamic workflows stopped holding a conversation). Before this, `isChatWorkflow` read the id, so a conversation running Planning would have been a
   card on the board. Task files from before are stamped when their workspace opens
   (`TaskFileStore.stampConversations`, to be deleted once every workspace has opened).
 

@@ -52,7 +52,7 @@ async function main(): Promise<void> {
 
   /** Start a conversation and wait until `done` says its artifacts are what was asked for, refusing any ask. */
   const converse = async (title: string, set: string, message: string, done: (published: Published[], files: (id: string) => Promise<Record<string, string>>) => Promise<boolean>, shot: string): Promise<boolean> => {
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", conversation: true, inputs: { message } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", conversation: true, inputs: { message } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: { layers: [set] } } });
     await app.clickText("Chat");
     await app.until(says(title), "the conversation in the Chat room", 200);

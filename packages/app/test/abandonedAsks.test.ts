@@ -161,15 +161,6 @@ describe("a permission request whose call ended without an answer", () => {
     expect(JSON.stringify(entries[2])).toContain('"by":"abandoned"');
   });
 
-  it("is let go of when the conversation's last turn has ended and no run holds it", async () => {
-    const { taskId } = service.createTask({ title: titleOf("end"), workflow: CHAT_SESSION, inputs: { message: "end" } });
-    const session = sessionOf();
-    const asked = askSmart(session, taskId);
-    (service as never as { abandonAsksOfTask(s: Session, t: string): void }).abandonAsksOfTask(session, taskId);
-    expect(await asked).toBe("deny");
-    expect(service.pendingApprovals()).toEqual([]);
-  });
-
   it("is kept while the call is still going — another call's result is not its end", async () => {
     const { taskId } = service.createTask({ title: titleOf("two"), workflow: CHAT_SESSION, inputs: { message: "two" } });
     const session = sessionOf();

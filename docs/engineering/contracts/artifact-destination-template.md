@@ -6,7 +6,7 @@ updated: 2026-09-13
 visibility: public
 kind: schema
 owned_by: [engineering/units/artifact-placement]
-consumers: ["people and the Settings view writing artifacts.destination in settings.json", "@jaira/runtime artifactSink.ts artifactWiring and persistEngineArtifacts", "@jaira/runtime fileTools.ts write_file, edit and show_artifact", "@jaira/app main service.ts startRun and runChatMessage", "@jaira/cli cli.ts runTaskNow"]
+consumers: ["people and the Settings view writing artifacts.destination in settings.json", "@jaira/runtime artifactSink.ts artifactWiring and persistEngineArtifacts", "@jaira/runtime fileTools.ts write_file, edit and show_artifact", "@jaira/app main service.ts startRun", "@jaira/cli cli.ts runTaskNow"]
 siblings: [engineering/contracts/settings-json, engineering/contracts/jaira-layout, engineering/contracts/host-tool-vocabulary, engineering/contracts/storage-files]
 ---
 
@@ -87,7 +87,7 @@ In a one-segment variable, `/` and `\` become `-` and `..` becomes `-`.
 | A scheme with nothing after it | `artifact destination '<template>' has no path` | add a path |
 | The root climbs out of its base | `artifact destination '<template>' resolves its root to '<root>', outside '<base>'`, followed by a hint to write an absolute path | fix `artifacts.dir` or the template, or write it absolute |
 | A logical path climbs out of the root | `artifact path '<path>' resolves to '<absolute>', outside the destination root '<root>'` | name a path inside it |
-| Any of these while a run starts or a turn is sent | `artifactWiring` throws: a run start is refused after the task was marked running, and a turn's send is refused | fix the template; the next open marks the task `interrupted` |
+| Any of these while a run starts | `artifactWiring` throws: a run start is refused after the task was marked running | fix the template; the next open marks the task `interrupted` |
 | Any of these in `write_file`, `edit` or `show_artifact` | `{error: <message>}` returned to the model | the model names another path |
 | Any of these while placing a returned blob | reported through `onError`: an unjournaled `artifact.failed` push in the app, a `warning: could not store artifact` line in the CLI | fix the template and run again |
 
@@ -99,7 +99,7 @@ In a one-segment variable, `/` and `\` become `-` and `..` becomes `-`.
 
 ## Variables, roots and producers each mean less than the template suggests
 
-- The template is checked only when a run starts, a turn is sent or a blob is placed. A project with a broken template opens, and `settings.json` saves it.
+- The template is checked only when a run starts or a blob is placed. A project with a broken template opens, and `settings.json` saves it.
 - A lowercase `$name` is not a variable and is kept as literal text, so `$worktree/$RELPATH` writes into a directory named `$worktree` inside the workspace.
 - The file tools carry no instance, state or slot, so under `$CENTRAL_FLAT` every `write_file` and `edit` resolves to `<taskId>/-.<ext>`, and writes with one extension share one file.
 - `show_artifact` ignores the template and uses `$CENTRAL`, unless the template is `virtual:`.

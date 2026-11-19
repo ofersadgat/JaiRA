@@ -63,19 +63,19 @@ The vocabulary is `EngineEvent` in `@declarative-ai/hw` `ports.ts`. `failure` is
 
 | `type` | Payload fields | Written by | Meaning |
 | --- | --- | --- | --- |
-| `instance.entered` | `instanceId, stateId, childKey?, parentInstanceId?, element?, inputs` | engine; fan-out host; chat turns | an instance began; `element` is its position in a fan-out batch |
+| `instance.entered` | `instanceId, stateId, childKey?, parentInstanceId?, element?, inputs` | engine; fan-out host; reported runs | an instance began; `element` is its position in a fan-out batch |
 | `instance.blocked` | `stateId, childKey?, parentInstanceId?, reason` | engine | a child could not be entered because its inputs did not resolve; no instance exists |
-| `operation.started` | `instanceId, stateId, op` where `op` is `prompt` or `function` | engine; chat turns | the operation began, before its inputs resolved |
+| `operation.started` | `instanceId, stateId, op` where `op` is `prompt` or `function` | engine; reported runs | the operation began, before its inputs resolved |
 | `operation.dispatched` | `instanceId, stateId, op, operationId` | engine | the operation's record row exists; `operationId` is the scoped id |
-| `operation.completed` | `instanceId, stateId, op, operationId?, metrics?` | engine; chat turns | the operation succeeded; `metrics.sessionRef` is where its conversation ended |
-| `operation.failed` | `instanceId, stateId, op, operationId?, failure, metrics?` | engine; chat turns | the operation failed; `metrics` is present only when the call ran |
+| `operation.completed` | `instanceId, stateId, op, operationId?, metrics?` | engine; reported runs | the operation succeeded; `metrics.sessionRef` is where its conversation ended |
+| `operation.failed` | `instanceId, stateId, op, operationId?, failure, metrics?` | engine; reported runs | the operation failed; `metrics` is present only when the call ran |
 | `call.waiting` | `instanceId, stateId, call, operationId` | engine | a deferred call started and the state now waits on it |
 | `call.settled` | `instanceId, stateId, call, operationId, outcome` where `outcome` is `value` or `error` | engine | the deferred call ended; a cancelled wait is `error` |
 | `value.settled` | `instanceId, stateId, field, outcome, value?, error?, fallback?` | engine | a computed field such as `title` settled, with its value |
 | `fanout.made` | `instanceId, stateId, childKey, occurrence, kind, runs: [{element, id?, runId, title}]` where `kind` is `task` or `split` | fan-out host | the tasks a hosted fan-out made of its elements; `runId` is a task id |
-| `transition.taken` | `instanceId, stateId, to, index, iteration, by?, skip?, inputs?, descent?` where `by` is `person` or `control` | engine; chat turns | a transition fired; `index` counts every transition and `iteration` only backward ones. `by` is present exactly when the transition was directed |
+| `transition.taken` | `instanceId, stateId, to, index, iteration, by?, skip?, inputs?, descent?` where `by` is `person` or `control` | engine | a transition fired; `index` counts every transition and `iteration` only backward ones. `by` is present exactly when the transition was directed |
 | `child.superseded` | `instanceId, stateId, childKey` | engine | the instance named dropped its child under `childKey` |
-| `instance.terminated` | `instanceId, stateId, outcome, failure?` | engine; fan-out host; chat turns | the instance ended |
+| `instance.terminated` | `instanceId, stateId, outcome, failure?` | engine; fan-out host; reported runs | the instance ended |
 
 What the fan-out host makes around `fanout.made` and its mirrored rows is [fan-out-host-answers](fan-out-host-answers.md).
 
@@ -118,7 +118,7 @@ A person's move ([decision 0005](../decisions/0005-connect.md)) reaches the engi
 Three reading rules follow, and `load.ts`, `projection.ts` and every other folder of the journal share them:
 
 - `skipped` is an answer. `buildTaskLoad` never revives a skipped instance, although its row lands after the transition that decided it, which is the shape the revival rule otherwise brings back.
-- A directed `transition.taken` on an instance that had already written `instance.terminated` reopens it, and every ancestor with it, exactly as a chat turn's transition reopens its instance. The reopened instances write `instance.terminated` again when they end, so one instance can hold two ends with a directed transition between them.
+- A directed `transition.taken` on an instance that had already written `instance.terminated` reopens it, and every ancestor with it, exactly as the `transition.taken` of a `chat:` instance reopens it. The reopened instances write `instance.terminated` again when they end, so one instance can hold two ends with a directed transition between them.
 - A directed `transition.taken` with no later `instance.entered` under that instance for `to` is an entry still owed: the process died between the rows. `buildTaskLoad` hands it to the engine as `LoadedInstance.directed`, and the loaded run makes the entry without writing the transition again.
 - A move to a NESTED target writes one directed `transition.taken` per level, each on the composite that took it; a step whose target is not the end of the move carries `descent: {path, inputs?, by, skip?}` — the child keys still to go beneath `to`, and what the last of them is handed (the step's own `inputs` are only what a standing rule wired). The instance that step entered owes the next step until it writes a directed `transition.taken` of its own; `buildTaskLoad` hands a live one that still owes it `LoadedInstance.descent` (and an owed entry its `directed.descent`), and the loaded engine takes the step before the composite's spine.
 
@@ -150,19 +150,20 @@ The reading rules, which `openFastForward`, `heldMoves`, `reopenedAfter` and `op
 - A fork or a split copy (`forkTask`) does not copy `jaira.fastForward`, `jaira.fastForwardEnded`, `jaira.moveHeld`, `jaira.moveDropped`, `jaira.connect` or `jaira.left`: the copy is another task, and no process was doing anything with it. `projectRun`, `buildTaskLoad` and the conversation view ignore all seven.
 - A move question is open while its `jaira.moveAsked` row has no `jaira.moveAnswered` after it AND its gate row stands in `pending_interactions` (`openMoveQuestion`). A rewind, a stop, a re-run clears the gate row, so the question is withdrawn with them; the conversation then says it is no longer open.
 
-### A chat turn journals a synthetic child whose id is derived from its host
+### A reported call journals a child of its run's root, and a `chat:` instance is an older conversation's
 
-`runChatTurn` in `@jaira/runtime` `chatTurn.ts` writes a typed message into the host task's journal as a child of the instance the conversation belongs to.
+A script run as a plain program reports to JaiRA ([decision 0029](../decisions/0029-workflows-that-learn-from-corrections.md) ruling 12), and `AppService` writes its run into its task's journal through the task's recorder. `reportedRunBegin` writes the root's `instance.entered`, under a minted id with the script's workflow as `stateId` and `inputs: {args}`. `reportedRunEnd` writes the root's `instance.terminated`: `success`; `error` with the program's error as a `permanent` failure; or `canceled` with an `interrupted` failure when the program went away without saying. `reportedCallSettled` writes each call once it has settled, through `runChatTurn` in `@jaira/runtime` `chatTurn.ts`:
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `instanceId` | `chat:<hostInstanceId>` | yes | derived, so every message of one conversation lands on one instance |
-| `parentInstanceId` | string | on `instance.entered` | the host instance |
-| `stateId` | string | yes | the host instance's own state id |
-| `childKey` | `"ask"` | on `instance.entered` | the one reserved key per host |
-| `index` | integer | on `transition.taken` | 1 for the second message, then one more per message; `iteration` is always 0 |
+| `instanceId` | string | yes | minted per call |
+| `parentInstanceId` | string | on `instance.entered` | the reported run's root |
+| `stateId` | `<workflow>/call_<n>` | yes | `n` counts the run's calls from 0, in the order they began |
+| `childKey` | `call_<n>` | on `instance.entered` | the same `n` |
 
-The first message writes `instance.entered` with `inputs: {}`, and each later one writes `transition.taken` to the host's state id. Then every message writes `operation.started`, then `operation.completed` or `operation.failed` with `metrics.sessionRef`, then `instance.terminated`.
+Each call writes `instance.entered` with `inputs: {}` and `operation.started`, both at the time the program began the call, then `operation.completed` or `operation.failed` with `metrics.sessionRef`, then `instance.terminated`.
+
+Journals written before 2026-11-19 also hold the instances of the chat-turn path ([chat-turns](../units/chat-turns.md)), which nothing writes any more and every reader still knows: a typed message under `instanceId` `chat:<hostInstanceId>`, a child of the host instance under the host's own state id and `childKey` `"ask"`. Its first message wrote `instance.entered` with `inputs: {}`, and each later one `transition.taken` to the host's state id, `index` 1 for the second message and one more per message, `iteration` always 0. Every message then wrote `operation.started`, then `operation.completed` or `operation.failed` with `metrics.sessionRef`, then `instance.terminated`.
 
 ## Errors are skipped on read and refused at a cut, and none is thrown by a reader
 
@@ -189,7 +190,7 @@ The first message writes `instance.entered` with `inputs: {}`, and each later on
 - `seq` lasts only as long as the table that minted it. A file-backed journal's import re-mints the `seq` of every event of the tasks its files name, so a `seq` kept across a reopen, such as `task_runtime.forked_at_seq` and `fork_boundary_seq`, can name a different event.
 - A tombstone's ordinals count only lines that parse. A line that stops parsing after a rewind, such as one a merge broke, shifts every later ordinal, and the tombstone then removes different events.
 - `operationId` on `operation.*` is scoped to the dispatch site, and on `call.*` it is the bare content hash. Both fill the `operation_id` column, and comparing one kind with the other matches nothing.
-- A chat turn writes no `operation.dispatched`, and its `operation.completed` and `operation.failed` carry no `operationId`; its record joins through `session_ref`.
+- A reported call writes no `operation.dispatched`, and its `operation.completed` and `operation.failed` carry no `operationId`; its record joins through `session_ref`. So did a `chat:` instance.
 - `buildTaskLoad` skips every event of a `chat:` instance, while the tree and conversation projections keep it.
 - The fan-out host writes `fanout.made`, its mirrored rows and a split copy's entry through a bare recorder, not the app's tee, so none of them is pushed as `engine:event`.
 - Journals written before 2026-09-08 hold re-stated `instance.entered` rows under an id already entered; readers merge them by id.

@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { changesSince, initProject, openProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
-import { shippedLayer, testHome } from "@jaira/testing";
+import { jsonConversation, shippedLayer, testHome } from "@jaira/testing";
 import { AppService, commentMessage } from "@jaira/service";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
@@ -24,7 +24,8 @@ let pushes: PushMessage[];
 beforeEach(async () => {
   shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-comments-"));
-  initProject(dir, testHome());
+  // A conversation of one prompt: these are about the chat-turn machinery (see `jsonConversation`).
+  jsonConversation(initProject(dir, testHome()).workflowsDir);
   pushes = [];
   service = new AppService({ baseDir: testHome(), watchWorkflows: false, publish: (m) => pushes.push(m) });
   await service.open(dir);

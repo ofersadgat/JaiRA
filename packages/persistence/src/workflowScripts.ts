@@ -25,8 +25,8 @@
  * compile is reused only while every file it read still hashes as it did (`generated.inputs`), which
  * is exactly the staleness rule hw applies to a materialized generated file.
  */
-import { join, relative, sep } from "node:path";
-import { readdirSync } from "node:fs";
+import { basename, join, relative, sep } from "node:path";
+import { listDefinitions, readDefinition } from "@jaira/runtime";
 import { compileScriptWith, hasScriptMeta, moduleHash, stateFilePath, type CompiledScript, type StateDef, type Vfs } from "@declarative-ai/hw";
 
 import { canonicalModulePath, userModules, type UserModules } from "./userModules";
@@ -39,6 +39,24 @@ export function isScriptFile(name: string): boolean {
 }
 
 const SCRIPT_SUFFIXES = [".ts", ".js"] as const;
+
+/**
+ * Whether a file under `workflows/` is a workflow SCRIPT — a state — rather than code a script imports:
+ * a `.ts`/`.js` that declares a `meta`, the same test the browser lists scripts by (`scriptStatesIn`).
+ */
+export function isWorkflowScript(file: string): boolean {
+  if (!isScriptFile(basename(file))) return false;
+  let text: string;
+  try {
+    text = readDefinition(file);
+  } catch {
+    return false;
+  }
+  const modules = userModules();
+  // Without the compiler at hand, what `hasScriptMeta` reads: an exported `meta`.
+  if (modules === undefined) return /\bexport\s+const\s+meta\b/.test(text);
+  return hasScriptMeta(modules.signatures.ts, file, text);
+}
 
 /** Compiles by `<file>\n<state id>`, each with the hashes of what it read. */
 const compiles = new Map<string, CompiledScript>();
@@ -117,7 +135,7 @@ export function scriptStatesIn(workflowsDir: string, onError?: (relPath: string,
   const walk = (dir: string): void => {
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      entries = listDefinitions(dir);
     } catch {
       return;
     }

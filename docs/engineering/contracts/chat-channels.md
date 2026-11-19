@@ -12,15 +12,15 @@ siblings: [engineering/contracts/task-channels, engineering/contracts/session-li
 
 # Chat channels
 
-The five IPC channels through which the renderer asks what a typed message would run under, sends one into a conversation a task's run started, stops typed turns, and reads the conversation back whole.
+The six IPC channels through which the renderer asks what a message would run under, sends one into a conversation as the answer to its program's `input()`, stops the reply in flight, ends the conversation, and reads it back whole.
 
 ## A caller reaches for these to continue a conversation, and never to start or stop a run
 
-**Use when.** Showing the composer's settings before a send, continuing a conversation a run started, stopping the typed turns in flight, or reading a task's whole conversation with its edit points and forks.
+**Use when.** Showing the composer's settings before a send, continuing a conversation a run started, stopping the reply in flight, ending a conversation, or reading a task's whole conversation with its edit points and forks.
 
-**Do not use when.** Starting a conversation, which is `task:create` then `task:start` with `overrides`, or stopping a run, including the opening message, which is `task:cancel`: see [task-channels](task-channels.md). Cutting or copying a conversation at a message, which is `task:rewind` or `task:fork` with an edit point's `seq`. Renaming a conversation's task, which is `task:rename` in [ipc-channels](ipc-channels.md). Following a turn while it streams: [session-live-protocol](session-live-protocol.md).
+**Do not use when.** Starting a conversation, which is `task:create` then `task:start` with `overrides`, or stopping the program itself, which is `task:cancel`: see [task-channels](task-channels.md). Cutting or copying a conversation at a message, which is `task:rewind` or `task:fork` with an edit point's `seq`. Renaming a conversation's task, which is `task:rename` in [ipc-channels](ipc-channels.md). Following a turn while it streams: [session-live-protocol](session-live-protocol.md).
 
-## The shape is five request and response pairs over two shared value types
+## The shape is six request and response pairs over two shared value types
 
 Every request's `project` is the project directory as a string; it may be omitted only while exactly one project is open.
 
@@ -43,7 +43,15 @@ Every request's `project` is the project directory as a string; it may be omitte
 | `overrides` | `ChatSettings` | no | picks folded over the state file |
 | response | `ChatPlanView` | yes | never `null`; a state that is not installed gives every origin `unset`, and `live` is always `idle` |
 
-### `chat:send` runs one message, or joins a call in flight
+### `chat:send` answers a program conversation's `input()`, or joins a call in flight
+
+Only a conversation that is a PROGRAM takes a message (decision 0029 §2, 2026-11-19): the message is the
+answer to its `input()` — a wait answered now, one the app closed on answered with its run started again,
+a call in flight steered where its transport can take it and otherwise the next `input()` seeded, an ended
+conversation rewound to the wait it ended at. A conversation whose workflow is not a program — one
+recorded as a single prompt state before the switch, or a workflow of one call — rejects `this
+conversation takes no more messages: it is not a program that waits for them — start a new conversation`.
+There is no other way a message runs: no turn outside a run, no `chat:<host>` child made.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -51,23 +59,39 @@ Every request's `project` is the project directory as a string; it may be omitte
 | `instanceId` | string | yes | as for `chat:plan` |
 | `message` | string | yes | the prompt; refused when blank after trimming |
 | `project` | string | no | the project holding the task |
-| `overrides` | `ChatSettings` | no | applied to this message only; never stored |
-| `branchAt` | string | no | an edit point's `at` from `chat:thread`; the message replaces the one at that position on a new branch and is never steered |
-| `fake` | fake rules | no | not in the declared type; main reads it to script the turn's prompt answers |
-| response `instanceId` | string | yes | `chat:<hostInstanceId>` for a turn; the host's own id for a steered message |
-| response `index` | number | yes | the turn's index on the chat instance; for a steered message, the index the next turn will take |
-| response `sessionRef` | string | no | `<sessionId>@<seq>`, where the conversation now ends |
-| response `failure` | string | no | why the turn did not answer, a stop included |
-| response `steered` | `true` | no | the message joined a call in flight and has no record or journal event of its own |
-| response `value` | resolved value | no | not in the declared type; what the turn returned |
+| `overrides` | `ChatSettings` | no | folded over the conversation's kept settings and handed to the program in the answer; settings that name tools or a permission set are also kept on the task and reach the run's calls |
+| `branchAt` | string | no | an edit point's `at` from `chat:thread`; the task is rewound to that point and the message answers the `input()` that asked there; never steered |
+| `fake` | fake rules | no | not in the declared type; main hands it to the resume a rewind makes, for an edit or an ended conversation |
+| response `instanceId` | string | yes | as sent |
+| response `index` | number | yes | `0` |
+| response `program` | `true` | no | the message went to the program's `input()`: the run's next call is the reply, streamed and landing as a run's calls do |
+| response `steered` | `true` | no | the message joined a call in flight: the call's record holds it, and the journal a `jaira.steered` row |
 
-### `chat:cancel` stops every typed turn in flight for a task
+### `chat:cancel` stops the reply a program conversation is making
+
+Every call in flight for the task is ended early where its transport can end a turn, and canceled
+otherwise; the task's pending approvals are denied, its questions stopped and its live tail written down
+first. The program goes on to wait for the next message.
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `taskId` | string | yes | the task |
 | `project` | string | no | the project holding the task |
-| response `canceled` | boolean | yes | `false` when no typed turn was registered |
+| response `canceled` | boolean | yes | `false` when no call was in flight |
+
+### `chat:end` ends a conversation that is a program
+
+Its `input()` returns `null` (decision 0029 §2), and the program does what it does at its end: `session`
+reviews the conversation for lessons. Waiting now: the wait is answered. A reply in flight: the wait after
+it is. A conversation the app closed on while it waited: its run starts again with the answer in hand.
+A message sent to it afterwards takes it up again where it ended (a rewind to that wait, the message its
+answer). The Chat list offers it for a row whose `TaskSummary.waitsForMessage` is set.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `taskId` | string | yes | the task |
+| `project` | string | no | the project holding the task |
+| response `ended` | boolean | yes | `false` for a conversation that is not a program, or one already ended |
 
 ### `chat:thread` reads a task's conversation whole, forks walked
 
@@ -114,34 +138,28 @@ Every request's `project` is the project directory as a string; it may be omitte
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | `project` names a project that is not open, or is absent while several are open | rejects: `project '<ref>' is not open`, `several projects are open, so this call must name one` or `no project is open` | name an open project |
-| The task's pinned snapshot is gone | `chat:plan`, `chat:send` and `chat:thread` reject `the snapshot for task <taskId> is missing` | nothing from the composer; the project's snapshots are damaged |
+| The task's pinned snapshot is gone | `chat:plan` and `chat:thread` reject `the snapshot for task <taskId> is missing` | nothing from the composer; the project's snapshots are damaged |
 | No conversation is at the instance | `chat:plan` and `chat:thread` answer `null` | disable the composer |
-| `chat:send` to a task that never ran | rejects `task '<taskId>' has never run` | show the text |
-| `chat:send` to an instance the projection lacks | rejects `task <taskId> has no instance <instanceId>` | refresh and send again |
-| `chat:send` where no state on the path runs a prompt | rejects with a message beginning `instance <instanceId> is not part of any conversation` | address a speaking instance |
-| `chat:send` to a host that made no model call | rejects `instance <hostId> ran no model call, so there is no conversation to continue` | show the text |
-| `branchAt` names nothing in the task's record store | rejects `'<ref>' is not a message in this conversation` | read the thread again |
+| `chat:send` to a task whose run is not a program: one recorded as a single prompt, a workflow of one call, a task that never ran or whose snapshot is gone | rejects `this conversation takes no more messages: it is not a program that waits for them — start a new conversation` | start a new conversation |
+| `branchAt` names no edit point of the thread with a journal position | rejects `'<branchAt>' is not a message in this conversation that can be edited` | read the thread again |
 | A blank `message` | rejects `a message cannot be empty` | keep the composer open |
-| `overrides.tools` names a tool nothing registered | rejects `tool '<name>' is not registered` | pick from `available.tools` |
 | The pinned workflow names a model no configured route serves | rejects with the executor tree's start-time refusal | make a route that serves it available |
-| The model or transport fails, or the turn is stopped | resolves with `failure` | show `failure` |
-| `chat:cancel` with no typed turn in flight | `{canceled: false}` | nothing |
+| The reply's call fails, or is stopped | `chat:send` has already resolved; the call's `operation.failed` is journaled as any call of the run is | read the thread |
+| `chat:cancel` with no call in flight | `{canceled: false}` | nothing |
 
 ## A change to any field breaks the composer and the thread together, and nothing is versioned
 
 - Main and the renderer are built together and no request carries a version, so a renamed field or channel breaks at once rather than degrading.
-- The renderer reads only `failure` from a `chat:send` response and the rejection's message; the tests match refusal wording, so rewording a refusal breaks them.
-- `points[].at` and `sessionRef` are the session store's spelling and are parsed by nothing in the renderer; changing that spelling breaks every edit point a thread already returned.
+- The renderer reads `failure` and `waiting` from a `chat:send` response, and the rejection's message. Main sets `waiting` when the message's account is known to be spent and the message is held until the reset; it never sets `failure`, since a reply's failure is journaled. The tests match refusal wording, so rewording a refusal breaks them.
+- `points[].at` is the session store's spelling and is parsed by nothing in the renderer; changing that spelling breaks every edit point a thread already returned.
 - There is no deprecation path.
 
 ## Sends wait, steer and refuse in ways the channel names do not show
 
-- `chat:send` may wait up to 240 s before its turn starts: 120 s for the send ahead of it, then 120 s for a call registered on the same session. Past either bound it goes ahead, and an occupied position forks onto a branch the thread may not show.
+- `chat:send` resolves once the message is delivered — answered at the wait, steered into the call in flight, or seeded for the next `input()` — never when the reply lands; the reply is the run's next call. To a conversation that ended it first rewinds the task to the last `input()` it asked, cutting what came after.
 - `live` is read at plan time and is stale by send time; `chat:send` decides steering again.
-- A steered message returns the host's id and no `sessionRef`, and it appears in the thread only once the call it joined writes its record.
-- `chat:cancel` reaches only typed turns that have started. A message waiting behind the stopped turn still runs, and a message steered into a run's call, or the opening run itself, stops only through `task:cancel`.
-- Overrides are not stored anywhere: every send must carry them again, or the message runs under the host's settings.
-- `chat:send` checks every model the pinned workflow names, not only the host's, so one unservable model anywhere in the snapshot refuses every send, while `chat:plan` builds its router without that check and shows the plan.
-- `branchAt` is checked only as a record existing at that position in the task's store, not as a position on the chain the thread shows.
+- A steered message appears in the thread only once the call it joined writes its record, which folds it in.
+- `chat:cancel` stops every call in flight for the task, the opening message's reply and a call a message was steered into included, and never the program: stopping the program is `task:cancel`. A message already seeded for the next `input()` is not withdrawn, so it answers that `input()` at once.
+- A message is sent under the conversation's kept settings (`TaskMeta.chatSettings`, which `chat:settings` writes) with its own `overrides` over them, all of it handed to the program inside the answer, `{text, settings}`. Settings that name tools or a permission set are also kept on the task and handed to the run's calls (`changeChatSettings`); the model and the reasoning are the program's to use or not.
+- `branchAt` must name an edit point the thread shows now: an edit is a rewind of the task to that point's journal position, and the message is the answer to the `input()` that asked there.
 - `chat:thread`'s host is the first speaking instance in the task's history, so a task with several conversations exposes only the first through this channel.
-- A `NoConversationHere` rejection from `chat:send` is logged at `error` by the IPC boundary, while the other refusals are logged at `warn` where they are decided.

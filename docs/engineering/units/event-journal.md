@@ -23,7 +23,7 @@ siblings: [engineering/units/storage-policy, engineering/units/run-load, enginee
 It deliberately does not own:
 
 - The event vocabulary. `EngineEvent` is upstream `@declarative-ai/hw`, stored verbatim.
-- The events JaiRA adds beside the engine's. `fanout.made` and the mirrored element rows come from [fan-out-host](fan-out-host.md); `chat:` turns come from [chat-turns](chat-turns.md).
+- The events JaiRA adds beside the engine's. `fanout.made` and the mirrored element rows come from [fan-out-host](fan-out-host.md); a reported script's run and calls from `reportedRunBegin`, `reportedCallSettled` and `reportedRunEnd` in `service.ts`, each call through `runChatTurn`. The `chat:` turns in journals written before 2026-11-19 came from [chat-turns](chat-turns.md).
 - Whether a file-backed concern's files are exported, imported or left as they are at open, and the staging table an import replays into: [storage-policy](storage-policy.md).
 - Folding rows into a tree, a board, a conversation or a resume: [board-projection](board-projection.md) and [run-load](run-load.md).
 - Deleting rows. Rewind and fork are [rewind-and-fork](rewind-and-fork.md), released failures are [run-load](run-load.md), task deletion is [task-lifecycle](task-lifecycle.md) and pruning is [history-pruning](history-pruning.md).

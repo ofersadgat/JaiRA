@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     await app.until(drawn, "the window to draw");
     await app.resize(1180, 760);
     // A conversation as the Chat view starts one (`conversation: true`), so the Chat room lists it.
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", conversation: true, inputs: { message: "Reply with the single word: ready." } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", conversation: true, inputs: { message: "Reply with the single word: ready." } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL } });
     await app.clickText("Chat");
     await app.until(says(TITLE), "the conversation in the Chat room", 200);

@@ -86,7 +86,7 @@ It deliberately does not own:
 | Two runs share the bridge worker | cannot collide: upstream separates runs by a per-run token in the URL path | none needed | none |
 | The run is stopped | `kill` ends the agent's whole process tree | none needed | the run stops |
 | JaiRA dies while an agent runs | the job row's heartbeat goes stale; the agent keeps running and nothing kills it | kill the process by hand | the next `jaira` command warns of a process left running; the app shows nothing |
-| A chat turn, a follow-up round, or an app run's generic CLI prompt route starts an agent | no observer reaches that spawn, so no `process` job row is written | none | an agent that outlives JaiRA is missing from the orphan report |
+| A follow-up round, or an app run's generic CLI prompt route, starts an agent | no observer reaches that spawn, so no `process` job row is written | none | an agent that outlives JaiRA is missing from the orphan report |
 | An agent runs with a bridge | its argv carries the bridge URL with the run's token, and the observer writes it to `jobs.command` and the app's `started` log entry | none | the token is readable in Logs until the run ends |
 | An executor names a `credential` | only the probe resolves it; nothing passes the value to the agent, and `agentSpawn` ignores `SpawnOptions.env` | put the key where the binary reads it | the probe passes and the agent may still lack its key |
 | A prompt state reaches a generic CLI or `claude-cli` through a model prefix | `gateCapabilities` reads function ops only, so the start check does not examine it; a generic CLI route still refuses at the call when the state's permission set denies anything | none | the run starts |

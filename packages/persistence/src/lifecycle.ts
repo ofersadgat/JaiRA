@@ -8,6 +8,7 @@ import { createLogger } from "@declarative-ai/log";
 import { ApprovalRequired, approvalRefusalMessage, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, refusal } from "@jaira/shared";
 import type { Failure, FunctionCapabilities, JsonValue } from "@declarative-ai/exec";
 import { validateBundle, type WorkflowBundle } from "@declarative-ai/hw";
+import { pinStandingContext, standingContextOf } from "@jaira/runtime";
 import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } from "./permissionSets";
 import { newTaskId, isStartableStatus, type ChatSettings, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStartedBy, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
@@ -289,6 +290,25 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
 }
 
 /**
+ * A workflow loaded the way a run PINS it: the project's search path, and what stands over each
+ * bucket's permission sets (decision 0023 §2.6). Whatever compares the files with a run's pin — a
+ * newer version of what it runs (decision 0029 §3) — loads through here, or an unchanged file reads as
+ * changed.
+ */
+export function loadForPin(
+  project: Project,
+  files: Record<string, unknown>,
+  workflow: string,
+  extra: Pick<NonNullable<Parameters<typeof workflowLoadOptions>[1]>, "vfs" | "watch"> = {},
+): WorkflowBundle {
+  return loadWorkflowBundle(files, workflow, {
+    ...workflowLoadOptions(project.paths, { ...extra, path: project.config.workflows.path }),
+    // What stands over each bucket's sets in this project (decision 0023 §2.6), pinned with the run.
+    standingLayers: project.config.permissions.layers,
+  });
+}
+
+/**
  * Read a workflow off disk, validate it, FREEZE the modules it reaches and snapshot it — what a
  * task's first start pins, as its own step.
  *
@@ -325,19 +345,7 @@ export async function pinWorkflow(
     const modules = userModules();
     const watch = modules !== undefined ? watchingForUnapproved(modules) : undefined;
     try {
-      bundle = loadWorkflowBundle(
-        files,
-        workflow,
-        {
-          ...workflowLoadOptions(project.paths, {
-            vfs,
-            path: project.config.workflows.path,
-            ...(watch !== undefined ? { watch } : {}),
-          }),
-          // What stands over each bucket's sets in this project (decision 0023 §2.6), pinned with the run.
-          standingLayers: project.config.permissions.layers,
-        },
-      );
+      bundle = loadForPin(project, files, workflow, { vfs, ...(watch !== undefined ? { watch } : {}) });
     } catch (e) {
       // An unapproved module is raised FIRST, because it explains the load failure rather than
       // accompanying it: the parse error the loader raised is downstream of the symbol the gate
@@ -351,6 +359,9 @@ export async function pinWorkflow(
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");
       throw refusal(log, `workflow validation failed for '${workflow}':\n  ${detail}`);
     }
+    // The instructions and the skill catalog, pinned like a prompt fragment (decision 0029 §9): a resumed
+    // run is told what it was told, and a change to them is a newer version of the workflow.
+    pinStandingContext(bundle.states as Record<string, unknown>, standingContextOf(project.paths.roots));
     const snap = await snapshotWithModules(project, bundle);
     return { bundle: snap.bundle, hash: snap.hash, dir: snap.dir };
   }

@@ -278,8 +278,9 @@ export function buildPromptExecutor(options: PromptExecutorOptions = {}): Execut
     options.securityFloor === undefined ? (fake ?? presetted) : withSecurityFloor(options.securityFloor, fake ?? presetted);
   // The instructions and the skill catalog (decision 0029 §9–§10), in every call's system text — a
   // scripted run's too, so a fake run exercises the same wiring.
-  const bounded =
-    options.instructions === undefined && (options.skillPlugins ?? []).length === 0 ? floored : withInstructions(options.instructions, floored, options.skillPlugins ?? []);
+  // Always: a pinned workflow's calls carry their standing context in their config (`STANDING_KEY`),
+  // which is read and taken off here even when the run itself was started with none.
+  const bounded = withInstructions(options.instructions, floored, options.skillPlugins ?? []);
   const base = repairing(
     bounded,
     options.repairTurns ?? DEFAULT_REPAIR_TURNS,
@@ -789,6 +790,8 @@ export function withTurnStream(
    * first half of it. See {@link LiveCalls}.
    */
   live?: LiveCalls,
+  /** The task these calls are made for, so a stop can find them — see `LiveCall.taskId`. */
+  taskId?: string,
 ): Executor<ExecServices, WorkflowMetrics> {
   const executor = inner;
   return {
@@ -856,7 +859,7 @@ export function withTurnStream(
           // A stream that ends badly must not fail the call it was narrating.
         }
       })();
-      return live === undefined ? handle : register(live, ctx, handle);
+      return live === undefined ? handle : register(live, ctx, handle, taskId);
     },
   };
 }

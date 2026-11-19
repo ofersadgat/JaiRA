@@ -249,8 +249,7 @@ export function BoardColumn(): JSX.Element {
                   // dry run asked once per column per drag, the drop the commit.
                   connect={{
                     ask: (card, column) => actions.connectPreview(own(card), card.taskId, column.stateId),
-                    onDrop: (card, column, confirmed, conversation) =>
-                      void actions.connectTask(own(card), card.taskId, column.stateId, { ...(confirmed === true ? { confirmed: true } : {}), ...(conversation !== undefined ? { conversation } : {}) }),
+                    onDrop: (card, column, confirmed) => void actions.connectTask(own(card), card.taskId, column.stateId, confirmed === true ? { confirmed: true } : {}),
                     onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
                     undoable: undoableOn(board),
                     onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),

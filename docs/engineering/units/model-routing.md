@@ -59,7 +59,7 @@ It deliberately does not own:
 A candidate list is settled once per SESSION (`ctx.session.id`):
 
 1. what this executor already chose for the session;
-2. on a call past the session's first (`at.seq > 0`), the candidate matching the model the session's last call recorded (`recorded`, then `keptCandidate`: exact, or a dated snapshot of it, under any route). This is how a resumed task, or a chat turn built afresh, keeps its model;
+2. on a call past the session's first (`at.seq > 0`), the candidate matching the model the session's last call recorded (`recorded`, then `keptCandidate`: exact, or a dated snapshot of it, under any route). This is how a resumed task keeps its model;
 3. `chooseFirstAvailable(candidates, available)`: the first candidate the host calls available. None available fails the call, naming each candidate and why.
 
 A call with no session (the judge) chooses every time. The chosen id is written into `model`, so the record, and the conversation drawn from it, show the model that ran.

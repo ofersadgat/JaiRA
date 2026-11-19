@@ -8,6 +8,9 @@ decides_for: [engineering/units/tool-policy, engineering/units/host-tools, engin
 
 # 0007. A permission set is the permission model: subject → mode, in buckets; one shell line is several requests
 
+> **Amended 2026-11-19:** the control conversation's own sets (`control/*`, written `chat_control/*` below)
+> no longer ship: a dynamic workflow holds no conversation (decision 0005, amended).
+
 ## Context
 
 What a state's agent may do is said in four places that overlap:

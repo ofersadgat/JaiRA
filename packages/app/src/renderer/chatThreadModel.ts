@@ -15,7 +15,7 @@ import { invoke, syncCache } from "./store";
 import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { contextTotalOf } from "./runConversationModel";
-import { conversationAnswering, openingRunAnswering, stillRunningIn } from "./childRunModel";
+import { conversationAnswering, isProgramConversation, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
 import { seenClockOf } from "./pillModel";
 import type { CutSide } from "./transcriptViewTypes";
@@ -386,7 +386,9 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    */
   const stop = (): void => {
     // The conversation's own run — never the run it started, which a turn answering beside it is not.
-    if (runAnswering) {
+    // A PROGRAM's reply is a call of its run, and stopping it must not end the program: `chat:cancel`
+    // ends just the reply (decision 0029 §2).
+    if (runAnswering && !isProgramConversation(surface.detail?.instances)) {
       surface.onCancelRun(taskId, project);
       return;
     }

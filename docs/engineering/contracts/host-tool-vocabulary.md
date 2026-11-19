@@ -102,8 +102,7 @@ package's `id`); a list is cut to `limit` and says its `count`. Rules the same o
 
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no
-agent has a built-in that is one. `chat/control` holds these and nothing else; `chat/session` holds them
-beside the rest. Where nothing serves them — the CLI, a test registry — the names still resolve and every
+agent has a built-in that is one. `session` holds them beside the rest. Where nothing serves them — the CLI, a test registry — the names still resolve and every
 call answers that it cannot be served there, so a state that holds one still loads and runs.
 
 Claude's `Task`, `Agent` and `SlashCommand` are declared with no standard tool and answer to `other`. Claude declares both its shells, `Bash` and `PowerShell`, as `shell`. Codex declares its own `shell` as the standard `shell` and `apply_patch` as `edit`, and one switch, its `workspace-write` sandbox, which `write_file`, `edit` or `shell` turns on. A generic CLI declares nothing.

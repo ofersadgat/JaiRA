@@ -51,7 +51,7 @@ async function main(): Promise<void> {
 
     const title = "Remove while running";
     const message = process.env.BARE ? "Use your grep tool once to search for the word wheel in the folder packages. Then use your shell tool to run exactly: ping -n 25 127.0.0.1\nThen reply with the single word: done." :"Use your shell tool to run exactly this line, once: hostname\nThen use your shell tool again to run exactly: ping -n 25 127.0.0.1\nThen reply with the single word: done.";
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message }, conversation: true });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message }, conversation: true });
     await app.clickText("Chat");
     await app.until(says(title), "the conversation to be listed", 200);
     await app.clickText(title);

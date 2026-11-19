@@ -46,7 +46,7 @@ async function main(): Promise<void> {
   try {
     await app.until(drawn, "the window to draw");
     await app.resize(1180, 860);
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", inputs: { message: "Reply with the single word: ready." } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", inputs: { message: "Reply with the single word: ready." } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL } });
     await app.until(says(TITLE), "the conversation to be listed", 200);
     await app.clickText(TITLE);

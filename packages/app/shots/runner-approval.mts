@@ -109,7 +109,7 @@ async function main(): Promise<void> {
     const open = async (title: string, permissionSet: unknown): Promise<{ title: string; taskId: string; instanceId: string }> => {
       // A conversation as the Chat view starts one (`conversation: true`), so it is drawn there: a task's
       // own run page draws a later turn's approval nowhere (see the report of 2026-11-02).
-      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: "Reply with the single word: ready." }, conversation: true });
+      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message: "Reply with the single word: ready." }, conversation: true });
       // Under the set its turns will use: one picked afresh for a turn is another session of the conversation.
       await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet } });
       await app.clickText("Chat");

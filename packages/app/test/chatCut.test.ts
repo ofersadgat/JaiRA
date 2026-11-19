@@ -6,14 +6,20 @@
  * behind a seam; a fork is a second conversation that shares everything up to a message and takes a
  * new one from there, while the original is exactly as it was. Both take the journal position the
  * thread reports for the message (`ChatEditPoint.seq`).
+ *
+ * The conversation is a PROGRAM — the shipped `session`, a loop over `input()` (decision 0029 §2) —
+ * which is the only kind that takes a message after its opening one. A message is the answer to its
+ * `input()`; rewound to a message, the program is taken back to the `input()` that took it and waits
+ * for that message again; forked at one, the copy waits there and takes the new message as its answer.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
+import type { FakeRule } from "@jaira/runtime";
 import type { PushMessage } from "@jaira/shared";
-import { shippedLayer, testHome } from "@jaira/testing";
+import { eventually, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
@@ -22,12 +28,11 @@ let service: AppService;
 let pushes: PushMessage[];
 
 beforeEach(async () => {
-  // What really ships, not the empty layer the suite's setup registers — see `shippedLayer`.
+  // What really ships, not the empty layer the suite's setup registers — see `shippedLayer`. The
+  // conversation is the shipped `session` program, resolved from the built-in layer at the end of
+  // every project's search path (decision 0006): no state files are written.
   shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-chatcut-"));
-  // No state files are written: the chat states SHIP, in the built-in layer at the end of every
-  // project's search path (decision 0006), so an empty project over an empty shared root resolves
-  // them — which is the install step's absence, tested by everything below.
   initProject(dir, testHome());
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
@@ -39,23 +44,24 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function until(predicate: () => boolean, label: string, budgetMs = 8000): Promise<void> {
-  const deadline = Date.now() + budgetMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${label}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
+/**
+ * Every reply the conversations below make, by the message it answers. First match wins and a rule
+ * matches a message that CONTAINS its words, so the longer messages come first.
+ */
+const RULES: FakeRule[] = [
+  { promptIncludes: "two, again", output: "another second answer" },
+  { promptIncludes: "three, differently", output: "a different third answer" },
+  { promptIncludes: "one", output: "first answer" },
+  { promptIncludes: "two", output: "second answer" },
+  { promptIncludes: "three", output: "third answer" },
+];
 
-const REPLY = (text: string): Array<{ output: string }> => [{ output: text }];
-
-async function started(message: string): Promise<string> {
-  // A conversation, as the Chat view makes one (`newConversation`).
-  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message }, conversation: true });
-  await service.startTask({ taskId, fake: REPLY("first answer") });
-  await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
-  return taskId;
-}
+/** Waiting at its `input()` for the next message — where a program conversation stands between replies. */
+const parked = (taskId: string): boolean =>
+  (service as unknown as { session(): { hub: { list(): Array<{ component: string; taskId?: string }> } } })
+    .session()
+    .hub.list()
+    .some((r) => r.component === "input" && r.taskId === taskId);
 
 function said(taskId: string): string[] {
   const thread = service.chatThread({ taskId });
@@ -63,39 +69,63 @@ function said(taskId: string): string[] {
   return thread.session.turns.map((turn) => `${turn.role}: ${turn.text ?? ""}`);
 }
 
-/** A conversation three messages long: the opening run, then two typed turns. */
-async function threeLong(): Promise<string> {
-  const taskId = await started("one");
-  const thread = service.chatThread({ taskId })!;
-  await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", fake: REPLY("second answer") });
-  await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY("third answer") });
+/** Its replies in, and waiting for the next message. */
+async function settled(taskId: string, turns: number, what: string): Promise<void> {
+  await eventually(() => (service.chatThread({ taskId })?.session.turns.length ?? 0) >= turns && parked(taskId), what, 20_000);
+}
+
+async function started(message: string): Promise<string> {
+  // A conversation, as the Chat view makes one (`newConversation`).
+  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message, improve: false }, conversation: true });
+  await service.startTask({ taskId, fake: RULES });
+  await settled(taskId, 2, "the opening reply");
   return taskId;
 }
 
-describe("rewinding a conversation", () => {
+/** A message, answered: the conversation `turns` long once its reply is in. */
+async function send(taskId: string, message: string, turns: number): Promise<void> {
+  await service.sendChatMessage({ taskId, instanceId: "", message });
+  await settled(taskId, turns, `the reply to '${message}'`);
+}
+
+/** Taken back to before a message: the program waits at the `input()` that took it, under `rules`. */
+async function rewound(taskId: string, at: number, rules: FakeRule[] = RULES): Promise<void> {
+  await service.rewindTask({ taskId, at, fake: rules as never });
+  await eventually(() => parked(taskId), "the conversation to wait for the message again", 20_000);
+}
+
+/** A conversation three messages long: the opening one, then two typed after it. */
+async function threeLong(): Promise<string> {
+  const taskId = await started("one");
+  await send(taskId, "two", 4);
+  await send(taskId, "three", 6);
+  return taskId;
+}
+
+describe("rewinding a conversation", { timeout: 60_000 }, () => {
   it("deletes the message and everything after it, and the next message goes where it stood", async () => {
     const taskId = await threeLong();
     const before = service.chatThread({ taskId })!;
     // Every typed message names the journal position its turn begins at.
     expect(before.points.map((p) => typeof p.seq)).toEqual(["number", "number"]);
 
-    await service.rewindTask({ taskId, at: before.points[0]!.seq! });
+    await rewound(taskId, before.points[0]!.seq!);
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer"]);
     // No seam: nothing was kept to be reached.
     const after = service.chatThread({ taskId })!;
     expect(after.forks).toBeUndefined();
     expect(after.points).toEqual([]);
-    // The machine had finished before any of the deleted turns; it stands as it did.
-    expect(service.taskDetail(taskId).status).toBe("completed");
+    // Waiting for the message again, as it waited for it the first time: idle, not working.
+    expect(service.listTasks().find((t) => t.taskId === taskId)).toMatchObject({ waitsForMessage: true, status: "completed" });
 
-    await service.sendChatMessage({ taskId, instanceId: after.instanceId, message: "two, again", fake: REPLY("another second answer") });
+    await send(taskId, "two, again", 4);
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two, again", "assistant: another second answer"]);
   });
 
   it("can cut the last message alone", async () => {
     const taskId = await threeLong();
     const before = service.chatThread({ taskId })!;
-    await service.rewindTask({ taskId, at: before.points[1]!.seq! });
+    await rewound(taskId, before.points[1]!.seq!);
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
   });
 
@@ -103,8 +133,8 @@ describe("rewinding a conversation", () => {
     const taskId = await threeLong();
     for (const reply of ["third answer, again", "third answer, once more"]) {
       const thread = service.chatThread({ taskId })!;
-      await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
-      await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY(reply) });
+      await rewound(taskId, thread.points[1]!.seq!, [{ promptIncludes: "three", output: reply }, ...RULES]);
+      await send(taskId, "three", 6);
       expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer", "user: three", `assistant: ${reply}`]);
       expect(service.chatThread({ taskId })!.forks).toBeUndefined();
     }
@@ -113,8 +143,8 @@ describe("rewinding a conversation", () => {
   it("frees the seat for different words too, with nothing left behind a seam", async () => {
     const taskId = await threeLong();
     const thread = service.chatThread({ taskId })!;
-    await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
-    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three, differently", fake: REPLY("a different third answer") });
+    await rewound(taskId, thread.points[1]!.seq!);
+    await send(taskId, "three, differently", 6);
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer", "user: three, differently", "assistant: a different third answer"]);
     expect(service.chatThread({ taskId })!.forks).toBeUndefined();
   });
@@ -122,16 +152,16 @@ describe("rewinding a conversation", () => {
   it("rewinds a message that was itself sent again", async () => {
     const taskId = await threeLong();
     const thread = service.chatThread({ taskId })!;
-    await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
-    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY("third answer, again") });
+    await rewound(taskId, thread.points[1]!.seq!, [{ promptIncludes: "three", output: "third answer, again" }, ...RULES]);
+    await send(taskId, "three", 6);
     const cutAgain = service.chatThread({ taskId })!.points[1]!.seq!;
-    await service.rewindTask({ taskId, at: cutAgain });
+    await rewound(taskId, cutAgain);
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
     expect(service.chatThread({ taskId })!.points).toHaveLength(1);
   });
 });
 
-describe("rewinding to before the message a conversation opened with", () => {
+describe("rewinding to before the message a conversation opened with", { timeout: 60_000 }, () => {
   it("is offered for the opening message alone, at the run's own entry", async () => {
     const taskId = await started("one");
     const thread = service.chatThread({ taskId })!;
@@ -155,14 +185,14 @@ describe("rewinding to before the message a conversation opened with", () => {
   });
 });
 
-describe("forking a conversation", () => {
+describe("forking a conversation", { timeout: 60_000 }, () => {
   it("is a second conversation that shares everything up to the message and takes a new one from there", async () => {
     const taskId = await threeLong();
     const before = service.chatThread({ taskId })!;
 
-    const fork = await service.forkTask({ taskId, at: before.points[1]!.seq!, message: "three, differently", fake: REPLY("a different third answer") });
+    const fork = await service.forkTask({ taskId, at: before.points[1]!.seq!, message: "three, differently", fake: RULES as never });
     expect(fork.taskId).not.toBe(taskId);
-    await until(() => (service.chatThread({ taskId: fork.taskId })?.session.turns.length ?? 0) >= 6, "the fork's first reply");
+    await settled(fork.taskId, 6, "the fork's first reply");
     expect(said(fork.taskId)).toEqual([
       "user: one",
       "assistant: first answer",
@@ -177,13 +207,13 @@ describe("forking a conversation", () => {
     // A copy of what was kept: the cut turn is not carried along, seated past the cut.
     expect(thread.forks).toBeUndefined();
     expect(thread.origin!.boundary).toBeGreaterThan(0);
-    // Listed as its own conversation, filed under its parent.
+    // Listed as its own conversation, filed under its parent, waiting for its next message.
     const listed = service.listTasks().find((t) => t.taskId === fork.taskId)!;
     expect(listed.parentTaskId).toBe(taskId);
     expect(listed.origin?.label).toBe("before message 3");
-    expect(listed.status).toBe("completed");
+    expect(listed).toMatchObject({ status: "completed", waitsForMessage: true });
 
-    // The original is exactly as it was.
+    // The original is exactly as it was, and still waiting for ITS next message.
     expect(said(taskId)).toEqual([
       "user: one",
       "assistant: first answer",
@@ -193,5 +223,6 @@ describe("forking a conversation", () => {
       "assistant: third answer",
     ]);
     expect(service.chatThread({ taskId })!.origin).toBeUndefined();
+    expect(parked(taskId)).toBe(true);
   });
 });

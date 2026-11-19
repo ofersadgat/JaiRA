@@ -8,6 +8,10 @@ decides_for: [engineering/units/project-layout, engineering/units/workflow-snaps
 
 # 0006. A built-in layer: what JaiRA ships is the bottom of the search path, not files it writes
 
+> **Amended 2026-11-19:** `chat/control` and its permission sets no longer ship — a dynamic workflow holds
+> no conversation (decision 0005, amended) — and `chat/session` ships as the program `session.ts`
+> (decision 0029 §2). Where this decision shows `chat/control` below, read it as the example it was.
+
 ## Context
 
 JaiRA needs a few states to exist on every machine: the conversations the

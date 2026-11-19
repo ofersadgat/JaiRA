@@ -72,6 +72,7 @@ import type {
   FileTree,
   HistorySize,
   PruneResult,
+  LearningMeasures,
   StateSlots,
   StateView,
   ResumePlan,
@@ -2065,10 +2066,11 @@ export interface IpcContract {
     response: ChatPlanView;
   };
   /**
-   * Send one message into the conversation an instance ran, as a child of that instance.
-   *
-   * Not a run: no workspace is materialized, no job is claimed, and the task's status does not move.
-   * A conversation continued by hand is a conversation, not a second execution of the workflow.
+   * Send one message into a conversation: the answer to its program's `input()` (decision 0029 §2) —
+   * delivered there, steered into the reply in flight, or held for the next `input()`, in the order
+   * messages were sent. Resolves once the message is DELIVERED, not once it is answered: the reply is a
+   * call of the run, journaled and streamed as one. A conversation that is not a program takes no more
+   * messages, and is refused.
    */
   "chat:send": {
     request: {
@@ -2081,11 +2083,9 @@ export interface IpcContract {
        * Send this message INSTEAD of the one at this position, rather than after everything.
        *
        * What "edit and send again" means down here, and the value is an opaque handle from
-       * `chat:thread`'s `points` — the renderer never builds or parses one. The conversation is a
-       * chain of records at `<session>@<seq>`, so re-asking at an occupied position forks it: the
-       * branch keeps every turn before that message and the new one takes its place. Nothing is
-       * deleted; the abandoned branch stays in the record and simply stops being on the path, which
-       * is exactly what a reader expects an edited message to do.
+       * `chat:thread`'s `points` — the renderer never builds or parses one. The conversation is
+       * rewound to the `input()` that took that message, and this one is its answer: what came before
+       * it stays, and what came after it goes, as a rewind's does.
        */
       branchAt?: string;
     };
@@ -2104,14 +2104,18 @@ export interface IpcContract {
     };
   };
   /**
-   * Stop the turn this conversation is taking, if it is taking one.
-   *
-   * A chat turn is not a run — it claims no job and moves no task status — so `task:cancel` has
-   * nothing to abort here (`sendChatMessage` deliberately registers nothing in `live`). This aborts
-   * the CALL, which lands in the journal as a canceled turn: the message stays, and what the model
-   * had said by then is what the transcript keeps.
+   * Stop the reply this conversation is making, if it is making one — the call, never the program,
+   * which goes on to wait for the next message (`task:cancel` stops the program). Ended early where the
+   * transport can, else canceled: the message stays, and what the model had said by then is what the
+   * transcript keeps. `canceled: false` when nothing was in flight.
    */
   "chat:cancel": { request: { taskId: string; project?: string }; response: { canceled: boolean } };
+  /**
+   * End a conversation that is a program (decision 0029 §2): its `input()` returns `null`, and the
+   * program does what it does at its end — `session` reviews the conversation for lessons (§6). Writing
+   * in it again takes it up from there. `ended: false` for one that is not a program, or already ended.
+   */
+  "chat:end": { request: { taskId: string; project?: string }; response: { ended: boolean } };
   /**
    * A task's terminals (decision 0028): every command its agents ran through JaiRA's `shell`, and
    * every one the person ran in its workspace, that the engine still keeps — oldest first. This
@@ -2604,6 +2608,13 @@ export interface IpcContract {
   "history:size": { request: { project?: ProjectRef } | void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
   /**
+   * What a project's learning measures (decision 0029, "Revisit when"): its lessons and the Shared
+   * layer's — recurrence, applied and turned down — corrections per conversation, lessons more than one
+   * project learned, and how often running work found a place to take a newer version. `revisit` names
+   * the decision's conditions the numbers show.
+   */
+  "learning:measures": { request: { project?: string }; response: LearningMeasures };
+  /**
    * The window's own state — panes, folds, read marks, the log policy, the open projects. Readable with
    * no project open. How the app LOOKS is not here: it is the `appearance` block of the layered
    * configuration (`config:read`), whose personal layer is `personal-settings.json`.
@@ -2842,6 +2853,7 @@ export const IPC_CHANNELS = [
   "chat:startPlan",
   "chat:send",
   "chat:cancel",
+  "chat:end",
   "terminal:list",
   "terminal:read",
   "terminal:input",
@@ -2933,6 +2945,7 @@ export const IPC_CHANNELS = [
   "shell:edit",
   "history:size",
   "history:prune",
+  "learning:measures",
   "settings:read",
   "settings:write",
   "config:read",
@@ -3284,13 +3297,6 @@ export type PushMessage =
       /** Whose run it was — see `store:invalidate`. */
       project?: string;
     }
-  /**
-   * A conversation's last chat turn is over, however it ended — `run:finished` for the turns that are
-   * not runs. A turn is journaled `operation.started` and one terminal event, and that pair is what
-   * says a conversation is answering; a turn that ends WITHOUT its terminal event (the call threw
-   * before it could write one) would otherwise read as answering until the window closed.
-   */
-  | { type: "chat:turnEnded"; taskId: string; project?: string }
   /** One line of what the app did — the Logs panel's live feed (§11.4). */
   | { type: "log:entry"; entry: LogEntry }
   /**

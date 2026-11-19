@@ -54,6 +54,7 @@ export * from "./interactions";
 export * from "./remoteHandles";
 export * from "./repoWatch";
 export * from "./cut";
+export * from "./lessons";
 // Versioned frozen documents and the dynamic workflow generator (decision 0005 §3).
 export * from "./documents";
 export * from "./dynamicWorkflow";

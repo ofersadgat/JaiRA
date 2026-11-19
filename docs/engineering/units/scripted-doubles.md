@@ -30,7 +30,7 @@ It deliberately does not own:
 - Layer `core`, package `@jaira/runtime`. They import `refusal` from `@jaira/shared` and nothing else of JaiRA's.
 - Upstream seams: the `Executor` interface of `@declarative-ai/exec`, which reaches the engine as `WorkflowRunConfig.prompt`, and `hostFunction` entries in `CapabilityRegistry.functions`, which the engine dispatches function ops through. Metrics use `emptyWorkflowMetrics` and `mergeWorkflowMetrics` from `@declarative-ai/hw`; a failed call is `failureOf` from `@declarative-ai/exec`.
 - Boundary: renderer and main. A scripted gate answer is a registered function's return value and never crosses the interaction hub.
-- Callers: CLI `runWiringOf` and `buildRunEnvironment`; app `startRun`, `sendChatMessage` and `askFollowUp`, which reads the task's rules for a follow-up round.
+- Callers: CLI `runWiringOf` and `buildRunEnvironment`; app `startRun`, `askFollowUp`, which reads the task's rules for a follow-up round, and `reportedCallSettled`, which answers each call a reported script made with one rule holding what the program was answered.
 
 ## The scripts live only in memory, for as long as the run that was given them
 

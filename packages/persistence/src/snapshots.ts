@@ -24,6 +24,7 @@
  * restores it. This is also why a `LoadedState` has to be plain JSON — see hw's
  * `fanOut`, which was a `Set` and serialized to `{}`.
  */
+import { listDefinitions, readDefinition } from "@jaira/runtime";
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { createHash } from "node:crypto";
@@ -132,7 +133,8 @@ export function readWorkflowFiles(
   const walk = (dir: string): void => {
     let entries;
     try {
-      entries = readdirSync(dir, { withFileTypes: true });
+      // As a simulation's run reads them (`definitionOverlay.ts`): a proposed state is one.
+      entries = listDefinitions(dir);
     } catch {
       return;
     }
@@ -180,7 +182,7 @@ export function readWorkflowFiles(
  * keys), which would otherwise be enforced in one place and not the other.
  */
 export function readStateDocument(file: string): unknown {
-  return parseReferencedFile(file, readFileSync(file, "utf8"));
+  return parseReferencedFile(file, readDefinition(file));
 }
 
 export interface SnapshotRef {

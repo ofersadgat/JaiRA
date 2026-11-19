@@ -10,9 +10,11 @@ import {
   childRunsOf,
   conversationAnswering,
   fitPills,
+  isProgramConversation,
   keysTo,
   openingRunAnswering,
   pillWidth,
+  programWaiting,
   runningStepOf,
   scopedWaits,
   secondLine,
@@ -168,5 +170,42 @@ describe("the run's own words", () => {
     expect(runningStepOf(feature)).toBeUndefined();
     expect(stepsIn(feature)).toBe(3);
     expect(keysTo(instances, "answer")).toEqual(["session", "feature", "product", "answer"]);
+  });
+});
+
+describe("a conversation that is a program (decision 0029 §2)", () => {
+  /** `session`: its reply done, waiting at its `input()` — the states are the program's own. */
+  const waiting = [
+    node("root", "session", "running", [done("reply", "session/call_0"), node("wait", "session/input", "waiting_for_user", [], { operation: { kind: "function", status: "running" } })], { operation: { kind: "function", status: "completed" } }),
+  ];
+  /** The same, answering: its reply in flight. */
+  const answering = [node("root", "session", "running", [done("reply0", "session/call_0"), done("wait0", "session/input"), node("reply", "session/call_0", "running", [], { operation: { kind: "prompt", status: "running" } })])];
+  /** Improved while it ran: the newer version, mounted under the root, waits at its `input()`. */
+  const improved = [
+    node("root", "session", "running", [done("reply", "session/call_0"), node("v", "session@v1a2b3c4d5e6f", "running", [node("wait", "session@v1a2b3c4d5e6f/input", "waiting_for_user", [], { childKey: "input", operation: { kind: "function", status: "running" } })], { childKey: "$version" })]),
+  ];
+
+  it("has no runs it started among its own states, a newer version of itself included", () => {
+    for (const tree of [waiting, answering, improved]) {
+      expect(isProgramConversation(tree)).toBe(true);
+      expect(childRunsOf(tree)).toEqual([]);
+      expect(waitsOf({ instances: tree })).toEqual([]);
+    }
+    expect(isProgramConversation(instances)).toBe(false);
+  });
+
+  it("is not answering, and nothing of it still runs, while all it does is wait for the next message", () => {
+    expect(programWaiting(waiting)).toBe(true);
+    expect(programWaiting(improved)).toBe(true);
+    // The wait holds its call open as a gate does — what the index counts — and that is no answer.
+    expect(conversationAnswering(waiting, true, 1)).toBe(false);
+    expect(stillRunningIn(waiting, true, 1)).toEqual({ agent: false, workflow: false });
+    expect(stillRunningIn(improved, true, 1)).toEqual({ agent: false, workflow: false });
+  });
+
+  it("is answering while its reply is in flight — the agent, never a workflow it started", () => {
+    expect(programWaiting(answering)).toBe(false);
+    expect(openingRunAnswering(answering, true)).toBe(true);
+    expect(stillRunningIn(answering, true, 1)).toEqual({ agent: true, workflow: false });
   });
 });

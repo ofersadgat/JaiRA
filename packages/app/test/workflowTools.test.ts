@@ -6,30 +6,29 @@
  * engine, driven the way a conversation drives them. What is asserted here is what the decision is
  * actually about:
  *
- *  - a SESSION that starts work stays a session — its own state roots the document, never `chat/control`;
- *  - a CONTROL conversation holds the task and workflow tools and NOTHING of the project, and a
- *    project tool called in it is refused;
+ *  - a SESSION that starts work stays a session — its own state roots the document;
+ *  - a session holds the project's tools AND the workflow tools, on its operation and not its children;
  *  - `start` and `move` bind what the workflow binds, ask for what is left, and take the value the
  *    second time, recording which of the two it was;
  *  - `answer` reaches a question and a judgement gate and can never reach an approval;
- *  - a drop that makes a dynamic workflow dispatches NO model call, and a grafted clone does not
- *    dispatch on resume either;
+ *  - what a conversation starts is a child, not another turn: no second model call of its own;
  *  - a generated split makes its tasks held, and `release` starts the ones named;
  *  - a question nobody answers still parks durably.
  *
  * Nothing here is scripted except the two prompts that produce values; when everything binds, the
  * assertion is that no model was reached at all.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
+import { canonicalModulePath, initProject, openProject, SqliteEventLog, userModules } from "@jaira/persistence";
+import { moduleHash } from "@declarative-ai/hw";
 import { writeWorkflowFiles, createWorkflowTools, type FakeRule } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
 import { ANSWERED_EVENT, MOVED_EVENT, type AnsweredEvent, type MovedEvent, type MoveResult, type StartResult, type TasksResult, type WorkflowsResult } from "@jaira/shared";
-import { shippedLayer, testHome } from "@jaira/testing";
+import { jsonConversation, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 import { ANSWERABLE_COMPONENTS } from "@jaira/service/workflowHost";
 import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared";
@@ -87,10 +86,15 @@ let service: AppService;
 const seen = new Set<string>();
 
 beforeEach(async () => {
-  // The REAL `chat/session` and `chat/control`, because half of what is asserted here is what they say.
+  // The shipped layer, for the permission sets a session names — and, for `session`,
+  // a conversation of ONE PROMPT (`jsonConversation`): what these drive is the document a conversation's
+  // `start` grafts work onto, which such a conversation still has. A PROGRAM conversation's `start` is
+  // the last block of this file.
   shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-wtools-"));
-  writeWorkflowFiles(initProject(dir, testHome()).workflowsDir, files());
+  const paths = initProject(dir, testHome());
+  writeWorkflowFiles(paths.workflowsDir, files());
+  jsonConversation(paths.workflowsDir);
   seen.clear();
   service = new AppService({ baseDir: testHome(), publish: () => undefined });
   await service.open(dir);
@@ -167,61 +171,45 @@ const call = async (taskId: string, tool: string, input: unknown, toolCallId?: s
 
 /** A conversation of `state`, started and settled — what a person typing in the Chat view makes. */
 async function conversation(state: string, message = "let's work on this"): Promise<string> {
-  // `chat/session` opens on what the person typed; `chat/control` on what the move did. Neither
-  // name is the platform's to know (§0) — the test knows them because it wrote neither file, it
-  // reads the one required string input each declares.
-  const inputs: Record<string, JsonValue> = state === "chat/control" ? { opening: message } : { message };
+  // `session` opens on what the person typed — the one required string input it declares.
+  const inputs: Record<string, JsonValue> = { message };
   const { taskId } = service.createTask({ title: message, workflow: state, inputs });
   await service.startTask({ taskId, fake: [{ output: "right." }] as unknown as JsonValue });
-  await until(() => statusOf(taskId) === "completed", "the opening turn to land");
+  // A conversation of one prompt ends its run with its opening turn. A PROGRAM (decision 0029 §2) has
+  // its opening turn land and waits at `input()` for the next message.
+  await until(
+    () => statusOf(taskId) === "completed" || (service.sessionHistory({ taskId }).length >= 1 && waitingForMessage(taskId)),
+    "the opening turn to land",
+  );
   return taskId;
+}
+
+/** Whether a program conversation is waiting at `input()` for the person's next message. */
+function waitingForMessage(taskId: string): boolean {
+  return (service as unknown as { session(): { hub: { list(): Array<{ component: string; taskId?: string }> } } })
+    .session()
+    .hub.list()
+    .some((r) => r.component === "input" && r.taskId === taskId);
 }
 
 // ---------------------------------------------------------------------------------------------
 // what each conversation HOLDS
 // ---------------------------------------------------------------------------------------------
 
-describe("the two conversations", () => {
-  it("gives a SESSION the project's tools and the workflow tools, and a CONTROL only the workflow tools", () => {
-    const session = service.chatStartPlan({ stateId: "chat/session" });
-    const control = service.chatStartPlan({ stateId: "chat/control" });
+describe("a session's tools", () => {
+  it("are the project's tools and the workflow tools", () => {
+    const session = service.chatStartPlan({ stateId: "session" });
     const WORKFLOW = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
     const PROJECT = ["read_file", "glob", "grep", "edit", "write_file", "shell", "web_fetch", "web_search"];
-
     for (const name of [...WORKFLOW, ...PROJECT]) expect(session.settings.tools, name).toContain(name);
-    // The whole of `chat/control`: the eight, and not one thing of the project's. Asserted as an
-    // EQUALITY, because "the project's tools are absent" is the claim and a `toContain` per name
-    // would pass for a control that had also been handed something nobody listed here.
-    expect([...(control.settings.tools ?? [])].sort()).toEqual([...WORKFLOW].sort());
-    for (const name of PROJECT) expect(control.settings.tools, name).not.toContain(name);
-    // …and anything it was never offered is denied outright, rather than asked about.
-    expect(control.settings.permissions?.other).toBe("deny");
   });
 
-  it("carries them on the OPERATION, so a child a dynamic root starts inherits none of it", () => {
-    // `environment` on a dynamic workflow's root is the default for every child it starts, which is
-    // why neither state writes one: what resolves here is the state's own execution environment,
-    // lowered from its `operation`, and the authored file has no `environment` block to hand down.
-    const control = service.readWorkflow({ stateId: "chat/control", layer: "system" });
-    const authored = JSON.parse(control.text) as Record<string, unknown>;
-    expect(authored["environment"]).toBeUndefined();
-    expect((authored["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/control/ask-first");
-    const session = JSON.parse(service.readWorkflow({ stateId: "chat/session", layer: "system" }).text) as Record<string, unknown>;
+  it("are carried on the OPERATION, so a child it starts inherits none of them", () => {
+    // `environment` on a root is the default for every child it starts, which is why the state writes
+    // none: what resolves here is its own execution environment, lowered from its `operation`.
+    const session = JSON.parse(service.readWorkflow({ stateId: "session", layer: "project" }).text) as Record<string, unknown>;
     expect(session["environment"]).toBeUndefined();
     expect((session["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/ask-first");
-  });
-
-  it("denies a project tool in a control conversation rather than offering it, per tool and by `other`", async () => {
-    const control = await conversation("chat/control", "steer this");
-    const plan = service.chatPlan({ taskId: control, instanceId: rootInstanceOf(control) });
-    // Two separate refusals, and both matter. The tool is not OFFERED — a delegated agent's deny
-    // floor is built from this list, so a tool that is not on it is never handed over at all…
-    for (const name of ["shell", "read_file", "write_file", "edit"]) expect(plan?.settings.tools, name).not.toContain(name);
-    // …and a native the agent has anyway answers to `other`, which this permission set denies outright.
-    expect(plan?.settings.permissions?.other).toBe("deny");
-    expect(plan?.settings.permissions?.tools?.["shell"]).toBeUndefined();
-    // The eight it DOES hold are all it holds.
-    expect([...(plan?.settings.tools ?? [])].sort()).toEqual(["answer_question", "hold_task", "list_tasks", "list_workflows", "move_task", "release_task", "start_task", "stop_task"]);
   });
 });
 
@@ -231,7 +219,7 @@ describe("the two conversations", () => {
 
 describe("start_task", () => {
   it("asks for what nothing binds, writes nothing, and takes the value the second time — recorded as ASKED", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const before = documentOf(session);
 
     // `lib/needs` takes a string nothing in this conversation produces. The first call is the ASK.
@@ -259,30 +247,28 @@ describe("start_task", () => {
   });
 
   it("records a value the conversation worked out for itself as INFERRED, with its confidence", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/needs", inputs: { text: "what we said" }, confidence: 0.7 });
     await parked();
     const supplied = journal(session).find((e) => (e as { type: string }).type === "jaira.supplied") as unknown as { provenance: Record<string, unknown> };
     expect(supplied.provenance).toEqual({ text: { via: "inferred", confidence: 0.7 } });
   });
 
-  it("STAYS A SESSION: the document it makes is rooted in its own state, never in chat/control", async () => {
-    const session = await conversation("chat/session");
-    expect(metaOf(session)?.workflow).toBe("chat/session");
+  it("KEEPS ITS OWN ROOT: the document it makes is its own state's frozen copy, diverged", async () => {
+    const session = await conversation("session");
+    expect(metaOf(session)?.workflow).toBe("session");
     await call(session, "start_task", { state: "lib/done" });
     await parked();
 
     const documentId = documentOf(session)!;
-    const document = read((p) => JSON.parse(readFileSync(join(p.paths.snapshotsDir, "_documents", `${documentId}.json`), "utf8")) as { conversation: string; kind: string });
-    expect(document.conversation).toBe("chat/session");
-    expect(document.kind).toBe("diverged");
-    // The task is the same task, still a session — nothing turned into a control.
-    expect(metaOf(session)?.workflow).toBe("chat/session");
-    expect(metaOf(session)?.workflow).not.toBe("chat/control");
+    const document = read((p) => JSON.parse(readFileSync(join(p.paths.snapshotsDir, "_documents", `${documentId}.json`), "utf8")) as { rootId: string; kind: string });
+    expect(document).toMatchObject({ rootId: "session", kind: "diverged" });
+    // The task is the same task, running the same workflow.
+    expect(metaOf(session)?.workflow).toBe("session");
   });
 
   it("journals what it started on the conversation's own task, and nothing for the ask that wrote nothing", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/needs" });
     expect(movedRows(session)).toEqual([]);
     const done = (await call(session, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] }, "toolu_start")) as unknown as StartResult;
@@ -291,48 +277,8 @@ describe("start_task", () => {
     expect(movedRows(session)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: session, outcome: { verb: "entered", standsAt: (done as { key: string }).key }, toolCallId: "toolu_start" }]);
   });
 
-  it("is taken back by a REWIND to before the message that started it: the run is stopped, cut, and the conversation stands as it did", async () => {
-    const session = await conversation("chat/session");
-    const instanceId = rootInstanceOf(session);
-    await service.sendChatMessage({ taskId: session, instanceId, message: "start the gate", fake: [{ output: "starting it." }] as unknown as JsonValue });
-    await call(session, "start_task", { state: "lib/done" });
-    const gate = await parked();
-    // The conversation HOLDS the run while it waits on the person — what made a rewind refuse it.
-    expect(statusOf(session)).toBe("running");
-
-    const point = service.chatThread({ taskId: session })!.points.at(-1)!;
-    await service.rewindTask({ taskId: session, at: point.seq! });
-    const thread = service.chatThread({ taskId: session })!;
-    expect(thread.session.turns.map((turn) => turn.text)).toEqual(["let's work on this", "right."]);
-    expect(statusOf(session)).toBe("completed");
-    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(false);
-    expect(movedRows(session)).toEqual([]);
-    // …and it takes a message again.
-    await service.sendChatMessage({ taskId: session, instanceId: thread.instanceId, message: "something else", fake: [{ output: "sure." }] as unknown as JsonValue });
-    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual(["let's work on this", "right.", "something else", "sure."]);
-  });
-
-  it("takes back a LATER message that started a run, and the same words can be said again", async () => {
-    const session = await conversation("chat/session");
-    const instanceId = rootInstanceOf(session);
-    const say = (message: string, output: string) => service.sendChatMessage({ taskId: session, instanceId, message, fake: [{ output }] as unknown as JsonValue });
-    await say("look at this first", "looked.");
-    await say("build it all", "starting it.");
-    await call(session, "start_task", { state: "lib/done" });
-    await parked();
-
-    const point = service.chatThread({ taskId: session })!.points.at(-1)!;
-    await service.rewindTask({ taskId: session, at: point.seq! });
-    const kept = ["let's work on this", "right.", "look at this first", "looked."];
-    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual(kept);
-    expect(statusOf(session)).toBe("completed");
-
-    await say("build it all", "starting it again.");
-    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual([...kept, "build it all", "starting it again."]);
-  });
-
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const opening = prompts(session);
     await call(session, "start_task", { state: "lib/done" });
     await parked();
@@ -345,8 +291,8 @@ describe("start_task", () => {
 // ---------------------------------------------------------------------------------------------
 
 describe("move_task", () => {
-  it("is `connect`, asked by the CONTROL: it adopts into the workflow that relates the two and says where the task stands", async () => {
-    const session = await conversation("chat/session");
+  it("is `connect`, asked by the conversation: it adopts into the workflow that relates the two and says where the task stands", async () => {
+    const session = await conversation("session");
     const done = await ran("lib/done", 1, "Pause and stop");
     const moved = (await call(session, "move_task", { task: done, to: "lib/next" })) as unknown as MoveResult;
     expect(moved).toMatchObject({ ok: true, resolution: "adopt", workflow: "feat", adoptedAs: "done", standsAt: "next" });
@@ -359,7 +305,7 @@ describe("move_task", () => {
   });
 
   it("journals what it did on the CONVERSATION's task — the row its rail draws — and nothing for a refusal or a move still asking", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const done = await ran("lib/done", 1, "Pause and stop");
     // Waiting on the person's answer, nothing has moved yet: no row.
     const asking = await call(session, "move_task", { task: done, to: "lib/needs" });
@@ -378,7 +324,7 @@ describe("move_task", () => {
   });
 
   it("does not hand what is missing back to the model to ask in words: the PERSON is asked, in the moved task's own conversation", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const done = await ran("lib/done", 1);
     const asked = (await call(session, "move_task", { task: done, to: "lib/needs" })) as unknown as MoveResult;
     expect(asked).toMatchObject({ ok: true, task: done, asked: { inputs: [{ name: "text", description: "What to call it." }] } });
@@ -387,7 +333,7 @@ describe("move_task", () => {
   });
 
   it("refuses a task it does not know, and says so rather than throwing", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     expect(await call(session, "move_task", { task: "t-nope", to: "lib/next" })).toMatchObject({ ok: false, code: "unknown-task" });
   });
 });
@@ -398,7 +344,7 @@ describe("move_task", () => {
 
 describe("list_tasks", () => {
   it("says what was started here, where it stands, and what it is asking — and nothing of the rest of the project", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const stranger = await ran("lib/done", 1, "Somebody else's");
     await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
@@ -426,7 +372,7 @@ describe("answer_question", () => {
     expect(ANSWERABLE_COMPONENTS.has("confirm_action")).toBe(false);
     expect(ANSWERABLE_COMPONENTS.has("review_artifacts")).toBe(false);
 
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
     // It IS on the pending list — the person can answer it — and the tool still refuses it, naming
@@ -445,7 +391,7 @@ describe("answer_question", () => {
     // a fast-forward offers its conversation only what is on that list (decision 0005 §4).
     expect(ANSWERABLE_COMPONENTS.has(APPROVAL_PROMPT_FUNCTION)).toBe(false);
 
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/approve" });
     // The ONE approval prompt: a function reaching it parks on the approval hub, as the policy does —
     // not as a gate a conversation's tools could see.
@@ -465,7 +411,7 @@ describe("answer_question", () => {
   });
 
   it("refuses a request nobody is waiting on, and one that belongs to a task this conversation did not start", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     expect(await call(session, "answer_question", { request: "r-nope", confidence: 0.5, value: 1 })).toMatchObject({ ok: false, reason: expect.stringContaining("no question") });
 
     const stranger = service.createTask({ title: "Someone else's", workflow: "lib/done" }).taskId;
@@ -478,7 +424,7 @@ describe("answer_question", () => {
   });
 
   it("journals an agent's answered question with the call and the instance that asked — what the transcript marks the block by", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     // What an agent in this conversation's own task would park: the hub's asker, as a run hands it on.
     const open = (service as unknown as { session(p?: string): { questions: { asker(c: { taskId?: string }): (r: unknown) => Promise<unknown> } } }).session();
     const asked = open.questions.asker({ taskId: session })({
@@ -501,7 +447,7 @@ describe("answer_question", () => {
   });
 
   it("leaves a question nobody answered parked DURABLY, across a close and an open", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/done" });
     const gate = await parked();
     await service.close();
@@ -514,7 +460,7 @@ describe("answer_question", () => {
 
 describe("hold, release and stop", () => {
   it("refuses a task this conversation did not start, and says which it was", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const stranger = await ran("lib/done", 1, "Not mine");
     expect(await call(session, "stop_task", { tasks: [stranger] })).toMatchObject({
       results: [{ task: stranger, ok: false, reason: expect.stringContaining("not started from this conversation") }],
@@ -522,7 +468,7 @@ describe("hold, release and stop", () => {
   });
 
   it("stops a running task and RELEASES it again, from where it stood", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     await call(session, "start_task", { state: "lib/done" });
     await parked();
     const child = (await call(session, "list_tasks", {})) as unknown as TasksResult;
@@ -541,7 +487,7 @@ describe("hold, release and stop", () => {
 
 describe("a generated split", () => {
   it("makes one task per element, HELD, and `release` starts the ones named", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const source = service.createTask({ title: "Pieces", workflow: "lib/list" }).taskId;
     await service.startTask({ taskId: source, fake: RULES as unknown as JsonValue });
     await until(() => statusOf(source) === "completed", "the list");
@@ -575,7 +521,7 @@ describe("a generated split", () => {
 
 describe("list_workflows", () => {
   it("lists the workflows, then ONE state at a time with its schemas and what it mounts", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     const all = (await call(session, "list_workflows", {})) as unknown as WorkflowsResult;
     expect("workflows" in all && all.workflows.map((w) => w.id)).toContain("feat");
 
@@ -590,7 +536,95 @@ describe("list_workflows", () => {
   });
 
   it("says so rather than throwing when the state is not on the path", async () => {
-    const session = await conversation("chat/session");
+    const session = await conversation("session");
     expect(await call(session, "list_workflows", { state: "nope/at/all" })).toMatchObject({ error: expect.stringContaining("nope/at/all") });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// a PROGRAM conversation's `start` (decision 0029 §2)
+// ---------------------------------------------------------------------------------------------
+
+describe("start_task in a conversation that is a program", () => {
+  /** The shipped conversation, under a name of its own here — `session` is this file's one-prompt one. */
+  async function program(message = "let's work on this"): Promise<string> {
+    const shipped = readFileSync(join(__dirname, "..", "..", "shared", "builtin", "workflows", "session.ts"), "utf8");
+    const file = join(dir, ".jaira", "workflows", "talk.ts");
+    writeFileSync(file, shipped, "utf8");
+    userModules()!.approvals.approve(canonicalModulePath(file), moduleHash(shipped));
+    const { taskId } = service.createTask({ title: message, workflow: "talk", conversation: true, inputs: { message, improve: false } });
+    await service.startTask({ taskId, fake: [{ output: "right." }] as unknown as JsonValue });
+    await until(() => service.sessionHistory({ taskId }).length >= 1 && waitingForMessage(taskId), "the opening turn to land");
+    return taskId;
+  }
+
+  it("starts the work as a task of its own, filed under the conversation at the call — and the conversation goes on as it was", async () => {
+    const talk = await program();
+    // What nothing supplies is asked for first, and nothing is made.
+    const asked = (await call(talk, "start_task", { state: "lib/needs" })) as unknown as StartResult;
+    expect(asked).toMatchObject({ ok: false, code: "inputs-missing", missing: [{ state: "lib/needs", name: "text" }] });
+    expect(read((p) => p.tasks.list().filter((t) => t.origin?.taskId === talk))).toEqual([]);
+
+    const done = (await call(talk, "start_task", { state: "lib/needs", inputs: { text: "the thing" }, asked: ["text"] }, "toolu_start")) as unknown as StartResult;
+    if (!done.ok) throw new Error(`refused: ${JSON.stringify(done)}`);
+    expect(done).toMatchObject({ ok: true, state: "lib/needs", status: "started", inputs: [{ name: "text", via: "asked" }] });
+    const child = done.task;
+    expect(child).not.toBe(talk);
+    // The link every started child has: its origin names the conversation and the call that started it…
+    expect(metaOf(child)).toMatchObject({ workflow: "lib/needs", inputs: { text: "the thing" }, inputProvenance: { text: { via: "asked" } }, origin: { kind: "started", taskId: talk, key: "call_0" } });
+    // …and the conversation's journal mirrors it there.
+    expect(journal(talk).some((e) => e.type === "instance.entered" && e.instanceId === child && (e as { started?: boolean }).started === true)).toBe(true);
+    // The work runs in its own task, and asks its own question.
+    expect(await parked()).toMatchObject({ taskId: child, state: "needs", inputs: { text: "the thing" } });
+    // The conversation is not grafted onto, and still waits for the person's next message.
+    expect(documentOf(talk)).toBeUndefined();
+    expect(waitingForMessage(talk)).toBe(true);
+    // The row the rail draws names the task that was started.
+    expect(movedRows(talk)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: child, outcome: { verb: "entered", standsAt: "lib/needs" }, toolCallId: "toolu_start" }]);
+  });
+
+  it("lists what it started, and stops and releases it as one of its own", async () => {
+    const talk = await program();
+    const stranger = await ran("lib/done", 1, "Somebody else's");
+    const started = (await call(talk, "start_task", { state: "lib/done" })) as unknown as StartResult;
+    if (!started.ok) throw new Error("refused");
+    const child = started.task;
+    await parked();
+    const listed = (await call(talk, "list_tasks", {})) as unknown as TasksResult;
+    expect(listed.tasks.map((t) => [t.task, t.relation])).toEqual(expect.arrayContaining([[talk, "this"], [child, "made"]]));
+    expect(listed.tasks.map((t) => t.task)).not.toContain(stranger);
+    expect(await call(talk, "stop_task", { tasks: [child] })).toMatchObject({ results: [{ task: child, ok: true, did: "stopped" }] });
+    await until(() => statusOf(child) === "canceled", "the started task to stop");
+    expect(await call(talk, "release_task", { tasks: [child] })).toMatchObject({ results: [{ task: child, ok: true }] });
+    await until(() => fresh() !== undefined || statusOf(child) === "running", "it to pick up again");
+    // The conversation itself was never stopped.
+    expect(waitingForMessage(talk)).toBe(true);
+  });
+
+  it("takes what a message started back with it, when it is rewound to before that message", async () => {
+    const talk = await program();
+    await service.sendChatMessage({ taskId: talk, instanceId: "", message: "start the gate", fake: [{ output: "starting it." }] as unknown as JsonValue });
+    await until(() => service.sessionHistory({ taskId: talk }).length >= 2 && waitingForMessage(talk), "the second reply");
+    const started = (await call(talk, "start_task", { state: "lib/done" })) as unknown as StartResult;
+    if (!started.ok) throw new Error("refused");
+    const gate = await parked();
+    const point = service.chatThread({ taskId: talk })!.points.at(-1)!;
+    await service.rewindTask({ taskId: talk, at: point.seq!, fake: [{ output: "again." }] as unknown as JsonValue });
+    await until(() => waitingForMessage(talk), "the conversation to wait for that message again");
+    // The task the message started went with it; the conversation stands as it was before it.
+    expect(read((p) => p.tasks.tryRead(started.task))).toBeUndefined();
+    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(false);
+    expect(service.chatThread({ taskId: talk })!.session.turns.map((t) => t.text)).toEqual(["let's work on this", "right."]);
+  });
+
+  it("takes what it started back with it, when it is rewound to before its opening message", async () => {
+    const talk = await program();
+    const started = (await call(talk, "start_task", { state: "lib/done" })) as unknown as StartResult;
+    if (!started.ok) throw new Error("refused");
+    const gate = await parked();
+    await service.rewindTask({ taskId: talk, at: service.chatThread({ taskId: talk })!.opening!.seq });
+    expect(read((p) => p.tasks.tryRead(talk))).toBeUndefined();
+    expect(read((p) => p.tasks.tryRead(started.task))).toBeUndefined();
+    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(false);
   });
 });

@@ -109,16 +109,20 @@ export function partitionAt(events: readonly StoredEvent[], seq: number): Partit
   const lastStarted = new Map<string, number>();
   /** Instances that had ENDED since their newest call started, before the cut. */
   const endedBefore = new Set<string>();
+  /** Instances whose newest call had SETTLED before the cut — nothing of theirs was in flight there. */
+  const settledBefore = new Set<string>();
   for (const row of events) {
     const inst = row.instanceId;
     if (row.type === "operation.started" && inst !== undefined) {
       lastStarted.set(inst, row.seq);
       endedBefore.delete(inst);
+      settledBefore.delete(inst);
     }
     let keep: boolean;
     if (row.seq < seq) {
       keep = true;
       if (row.type === "instance.terminated" && inst !== undefined) endedBefore.add(inst);
+      if ((row.type === "operation.completed" || row.type === "operation.failed") && inst !== undefined) settledBefore.add(inst);
     } else if (inst === undefined || doomed.has(inst)) keep = false;
     else {
       // A kept instance's event past the cut: only the settle of a call that had already started
@@ -126,9 +130,11 @@ export function partitionAt(events: readonly StoredEvent[], seq: number): Partit
       // A composite's end, a transition, a child entered, a turn typed: the machine moving, cut. So
       // is an end for an instance that had ALREADY ended by the cut — a conversation's root, opened
       // again as the parent of a run it started, and ended `canceled` by the stop a rewind makes:
-      // there is no call of it in flight for that end to settle.
+      // there is no call of it in flight for that end to settle. And so is the end of a state whose
+      // call had already SETTLED by the cut — a program's root, whose own code ran first and whose
+      // children ran after it (decision 0029 §2): that end is its children's, and they are cut.
       const started = lastStarted.get(inst);
-      const before = started !== undefined && started < seq && !endedBefore.has(inst);
+      const before = started !== undefined && started < seq && !endedBefore.has(inst) && !settledBefore.has(inst);
       switch (row.type) {
         case "operation.dispatched":
         case "operation.completed":
@@ -168,9 +174,10 @@ interface SeatRow {
 /**
  * The task's journal, checked for the two things a cut cannot be made through.
  *
- * `ofLiveTask` lifts the standing check for the one caller that cuts a RUNNING task on purpose: a
- * split (decision 0003) copies its parent while the parent is parked inside the mount, which is a
- * stable point — nothing is being appended past it until the host answers. The seq may then be one
+ * `ofLiveTask` lifts the standing check for the callers that copy a RUNNING task on purpose, each at a
+ * stable point: a split (decision 0003) copies its parent while the parent is parked inside the mount —
+ * nothing is being appended past it until the host answers — and a PROGRAM conversation (decision 0029
+ * §2) is forked at a message while it waits for the next one, its past fixed behind the wait. The seq may then be one
  * past the last event, meaning "everything so far": a cut BEFORE the newest event would drop it.
  */
 function journalOf(project: Project, taskId: string, seq: number, ofLiveTask = false): StoredEvent[] {
@@ -464,11 +471,13 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
     }
     return fresh;
   };
+  /** A position (`<session>@<seq>`), or a session id alone, renamed when it names a copied conversation. */
   const mapRef = (ref: string): string => {
+    if (sessionIds.has(ref)) return mapSession(ref);
     const at = ref.lastIndexOf("@");
     if (at <= 0) return ref;
     const id = ref.slice(0, at);
-    return sessionIds.has(id) ? `${mapSession(id)}${ref.slice(at)}` : ref;
+    return sessionIds.has(id) && /^\d+$/.test(ref.slice(at + 1)) ? `${mapSession(id)}${ref.slice(at)}` : ref;
   };
 
   // --- what is copied ---------------------------------------------------------------------
@@ -728,14 +737,20 @@ function rewriteEvent(
   mapRef: (ref: string) => string,
   recordIds: ReadonlyMap<string, string>,
 ): EngineEvent {
-  const out = { ...(event as unknown as Record<string, unknown>) };
-  if (typeof out["instanceId"] === "string") out["instanceId"] = mapInstance(out["instanceId"]);
-  if (typeof out["parentInstanceId"] === "string") out["parentInstanceId"] = mapInstance(out["parentInstanceId"]);
-  if (typeof out["operationId"] === "string" && recordIds.has(out["operationId"])) out["operationId"] = recordIds.get(out["operationId"]);
-  const metrics = out["metrics"];
-  if (metrics !== null && typeof metrics === "object" && typeof (metrics as { sessionRef?: unknown }).sessionRef === "string") {
-    out["metrics"] = { ...(metrics as object), sessionRef: mapRef((metrics as { sessionRef: string }).sessionRef) };
-  }
+  // A conversation's position travels in VALUES too — a reply's `{ session }`, and a program's variables
+  // holding it (decision 0029 §2) — so every string that names a copied conversation is renamed with it,
+  // wherever it sits. A session id is a uuid: nothing else spells one.
+  const values = (value: unknown): unknown => {
+    if (typeof value === "string") return mapRef(value);
+    if (Array.isArray(value)) return value.map(values);
+    if (value === null || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, values(v)]));
+  };
+  const out = values(event) as Record<string, unknown>;
+  const raw = event as unknown as Record<string, unknown>;
+  if (typeof raw["instanceId"] === "string") out["instanceId"] = mapInstance(raw["instanceId"]);
+  if (typeof raw["parentInstanceId"] === "string") out["parentInstanceId"] = mapInstance(raw["parentInstanceId"]);
+  if (typeof raw["operationId"] === "string") out["operationId"] = recordIds.get(raw["operationId"]) ?? raw["operationId"];
   return out as unknown as EngineEvent;
 }
 

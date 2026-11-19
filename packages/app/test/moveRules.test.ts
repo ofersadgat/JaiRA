@@ -85,11 +85,6 @@ function files(): Record<string, JsonValue> {
     "feat/product": gate("product"),
     "feat/ux": gate("ux", flag),
     "feat/ship": gate("ship", flag),
-    "conv/standin": {
-      label: "Talk",
-      inputs: { opening: { schema: { type: "string" }, description: "What the person did, in a sentence." } },
-      operation: { kind: "prompt", prompt: "{{.inputs.opening}}" },
-    },
     "lib/second": gate("second", flag),
     "lib/needs": gate("needs", { text: { schema: { type: "string", minLength: 3 }, description: "What to call it." } }),
     // One of each kind of step the question UI makes of an input the task produced nothing for: an
@@ -108,7 +103,7 @@ let service: AppService;
 const seen = new Set<string>();
 
 const open = async (): Promise<void> => {
-  service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+  service = new AppService({ baseDir: testHome(), publish: () => undefined });
   await service.open(dir);
 };
 
@@ -245,11 +240,9 @@ describe("the move table — AHEAD, through the transitions the workflow defines
 
   it("a target off the spine that only a DECISION enters is run to — never jumped to past the decision", async () => {
     const taskId = await standingIn("fork", []); // at decide
-    const right = no(await service.connectTask({ taskId, target: "fork/right", dryRun: true }));
-    // Ahead (the decision can go there), so it is a fast-forward — which this running task, with no
-    // conversation to answer the decision, cannot take. Refused for THAT, and the plan says why it was run.
+    const right = ok(await service.connectTask({ taskId, target: "fork/right", dryRun: true }));
+    // Ahead (the decision can go there), so it is a fast-forward: run to, the decision answered on the way.
     expect(right.plan).toMatchObject({ judgement: { where: "ahead", way: "fast-forward" }, forward: "fast-forward", move: { direction: "aside" } });
-    expect(right.refusal.code).toBe("fast-forward");
   });
 });
 
@@ -516,8 +509,8 @@ describe("next-transition chips", () => {
       ]),
     );
     expect(next).toHaveLength(2);
-    // Running with no conversation to answer the decision, the branch cannot be run to now — and says why.
-    expect(next.find((move) => move.path[0] === "right")?.blocked).toMatch(/no conversation to answer/);
+    // A running task can be run to its branch: nothing blocks it (decision 0005 §4, amended 2026-11-19).
+    expect(next.find((move) => move.path[0] === "right")?.blocked).toBeUndefined();
   });
 
   it("include the move a rule of the workflow is waiting for, marked as the event", async () => {

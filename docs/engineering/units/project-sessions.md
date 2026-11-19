@@ -16,7 +16,7 @@ siblings: [engineering/units/view-addressing, engineering/units/project-store, e
 
 ## The unit decides which projects are open in this process, in what order they open and close, and what each holds while it is open
 
-`AppService` keeps `sessions`, a map from `sessionKey(dir)` to a `ProjectSession` from `session.ts`. A session is one open project and everything the process holds for it: its `Project` handle, its runs in `live`, its typed turns in `chatTurns`, its calls in `liveCalls`, its tails in `liveTurns`, its four hubs, its gate vocabulary in `interactive`, its request maps `requestTask` and `subjectProject`, its scripted rules in `fakeRules`, its workflow watchers and its sync state. `kind` is `user` for a checkout and `shared` for the base root.
+`AppService` keeps `sessions`, a map from `sessionKey(dir)` to a `ProjectSession` from `session.ts`. A session is one open project and everything the process holds for it: its `Project` handle, its runs in `live`, its calls in `liveCalls`, its tails in `liveTurns`, its four hubs, its gate vocabulary in `interactive`, its request maps `requestTask` and `subjectProject`, its scripted rules in `fakeRules`, its workflow watchers and its sync state. `kind` is `user` for a checkout and `shared` for the base root.
 
 The unit owns:
 
@@ -55,7 +55,7 @@ A close runs in this order:
 
 1. `close()` sets `closed`, hands back the log sink and level policy it still owns, closes every user session in open order, then the shared one, then calls `resetUserModules()` and closes the type-check worker and the MCP bridge host.
 2. `closeSession(key)` logs `closing <dir>`, removes the session from the map and its request ids from `requestOwner`, and awaits `resuming`.
-3. `ProjectSession.close()` clears the watchers, records in `suspendedAtClose` each live task parked on a gate or a wait, settles the hubs, drops the sync state, aborts typed turns, aborts every live run and awaits each run's `done`, and closes the database.
+3. `ProjectSession.close()` clears the watchers, records in `suspendedAtClose` each live task parked on a gate or a wait, settles the hubs, drops the sync state, aborts every live run and awaits each run's `done`, and closes the database.
 
 `restore()` walks `projects` in order. A directory that is not a project is forgotten when its parent exists and kept with the warning `<dir> is not reachable, so it stays in the list rather than being forgotten` when it does not. An open that throws is logged `could not re-open <dir>: <message>` and kept. It logs `restored N project(s)` or `no projects were remembered from the last session`, and rewrites `projects` without the forgotten ones.
 
@@ -64,7 +64,7 @@ A close runs in this order:
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
 | `AppService.sessions`, keyed by `sessionKey`, which is the real path, lower-cased on Windows | added by `open` and `roleSession`, removed by `closeSession` | process memory | every request resolves through it, as [view-addressing](view-addressing.md) describes |
-| A session's run state: `live`, `chatTurns`, `chatDone`, `liveCalls`, `liveTurns`, `liveFlush`, `fakeRules` | created empty at open, aborted and dropped at close | process memory | [task-lifecycle](task-lifecycle.md), [chat-turns](chat-turns.md), [live-turns](live-turns.md) |
+| A session's run state: `live`, `liveCalls`, `liveTurns`, `liveFlush`, `fakeRules` | created empty at open, aborted and dropped at close | process memory | [task-lifecycle](task-lifecycle.md), [live-turns](live-turns.md) |
 | A session's hubs, `requestTask`, `subjectProject`, `interactive` | created at open, settled at close | process memory | [interaction-gateway](interaction-gateway.md) |
 | `projects` in `user-settings.json` | read by `restore`; appended by `remember`; rewritten by `restore` when it forgets | the file | [user-settings](user-settings.md) |
 | Each project's database handle | opened through `openProject` or `openSharedProject`, closed last in `ProjectSession.close` | the database | [project-store](project-store.md) |

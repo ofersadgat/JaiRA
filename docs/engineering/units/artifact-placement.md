@@ -18,7 +18,7 @@ siblings: [engineering/units/host-tools, engineering/units/uri-and-artifact-read
 
 - `artifactPath.ts`: `parseDestination(source)` reads the scheme, expands the `$DEFAULT`, `$CENTRAL` and `$CENTRAL_FLAT` aliases, and refuses an unknown scheme, an unknown variable and an empty template with `DestinationError`. `resolveDestination(destination, vars, logicalPath)` substitutes the variables in the path view `vars` carries, confines the root to its anchor unless the template is absolute, and refuses a resolved path outside that root rather than clamping it. `withinWorkspace(root, logicalPath)` joins a path onto a root, or answers `undefined` for one that climbs out. The grammar is [artifact-destination-template](../contracts/artifact-destination-template.md).
 - `artifacts.ts`: `ArtifactRecord`, the `ArtifactStore` interface whose `put` replaces any record for the same task and logical path, and `MemoryArtifactStore`.
-- `artifactSink.ts`: `artifactWiring(input)` parses `artifacts.destination` and assembles the variables for one run or one conversation turn. `persistEngineArtifacts(outputs, options)` walks a finished run's root outputs for the engine's blob references that carry inline content, derives the logical path `<slot>.<ext>` and the state, instance and slot from the reference's name, writes and records each, and reports a failure through `onError` instead of throwing.
+- `artifactSink.ts`: `artifactWiring(input)` parses `artifacts.destination` and assembles the variables for one run. `persistEngineArtifacts(outputs, options)` walks a finished run's root outputs for the engine's blob references that carry inline content, derives the logical path `<slot>.<ext>` and the state, instance and slot from the reference's name, writes and records each, and reports a failure through `onError` instead of throwing.
 - `artifactStore.ts` in `@jaira/persistence`: `SqliteArtifactStore` upserts on `(task_id, logical_path)`, stores `interactive` as 0 or 1 and reads back only `true`, and appends the re-read row to the task's row file when `storage.artifacts` is file-backed.
 
 It deliberately does not own:
@@ -35,13 +35,13 @@ It deliberately does not own:
 - Layer `core`, package `@jaira/runtime`, with its durable store in `@jaira/persistence`. `artifactPath.ts` imports `SYSTEM_DIR_NAME` from [project-layout](project-layout.md); `SqliteArtifactStore` calls `RowLog.appendFrom` from [storage-policy](storage-policy.md).
 - Upstream seam: the engine's inline reference for a blob output slot, `{artifact: true, name: "<state.dotted>#<instanceId>.<slot>", format?, content?}`, read structurally by `isEngineArtifact`.
 - Boundaries: derived and committed, because `$DEFAULT` writes the person's work tree while `$CENTRAL` and `$CENTRAL_FLAT` write under `system/<dir>/<taskId>/`, which [jaira-layout](../contracts/jaira-layout.md) keeps committable; Windows and WSL, because substitution happens at resolve time in whichever path view the caller passes, and the app and the CLI pass host paths.
-- Callers: app `startRun` and `runChatMessage` call `artifactWiring` and hand the result to the file tools; app `startRun` and CLI `runTaskNow` call `persistEngineArtifacts` once `executeWorkflow` resolves and before `finishTaskRun`. `withinWorkspace` is also called by the file and search tools, `changesetGate.ts`, file reads in `service.ts` and CLI changeset review.
+- Callers: app `startRun` calls `artifactWiring` and hands the result to the file tools; app `startRun` and CLI `runTaskNow` call `persistEngineArtifacts` once `executeWorkflow` resolves and before `finishTaskRun`. `withinWorkspace` is also called by the file and search tools, `changesetGate.ts`, file reads in `service.ts` and CLI changeset review.
 
 ## The artifact map is the truth for where a logical path went, and the filesystem for what it holds
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `artifacts.destination`, `artifacts.dir`, `artifacts.inlineMaxBytes` | read by `artifactWiring` at each run start and each turn | layered `settings.json`, defaults `$DEFAULT`, `artifacts` and 65536 | project-config checks only that the destination is a non-empty string |
+| `artifacts.destination`, `artifacts.dir`, `artifacts.inlineMaxBytes` | read by `artifactWiring` at each run start | layered `settings.json`, defaults `$DEFAULT`, `artifacts` and 65536 | project-config checks only that the destination is a non-empty string |
 | `artifacts` rows | `put` upserts, `get` and `list` read | the project database, or `system/artifactRows/<taskId>.jsonl` when `storage.artifacts` is file-backed | host-tools puts and gets; uri-and-artifact-reads lists and serves; task-lifecycle deletes |
 | Bytes at `$WORKTREE/<logical path>` under `$DEFAULT` | written | the filesystem, as the person's work | git, agents and the person |
 | Bytes under `<project>/.jaira/system/<dir>/<taskId>/` under `$CENTRAL` and `$CENTRAL_FLAT` | written | the filesystem | uri-and-artifact-reads serves them |
@@ -63,7 +63,7 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| `artifacts.destination` does not parse | the settings save and the project opens; `artifactWiring` throws `DestinationError` after `beginTaskRun` marked the task running, or before a conversation turn starts | fix the template; the next open marks the task `interrupted` | the start or send is refused with the message, and the task reads running until the next open |
+| `artifacts.destination` does not parse | the settings save and the project opens; `artifactWiring` throws `DestinationError` after `beginTaskRun` marked the task running | fix the template; the next open marks the task `interrupted` | the start is refused with the message, and the task reads running until the next open |
 | Two states return blobs under one slot name | both get the logical path `<slot>.<ext>`: the later record replaces the earlier under every destination, and the later file overwrites the earlier under `$DEFAULT` and `$CENTRAL` | `$CENTRAL_FLAT` keeps both files | the list shows the last one |
 | A returned blob's `<slot>.<ext>` matches a file in the work tree under `$DEFAULT` | the file is overwritten | none | a workspace file replaced by the blob |
 | `write_file` or `edit` runs under `$CENTRAL_FLAT` | the tools pass no instance, state or slot, so every write resolves to `<taskId>/-.<ext>` and writes with one extension share one file, while each logical path keeps its own record | use `$CENTRAL` | a file over the inline limit reads back as the last write with its extension |

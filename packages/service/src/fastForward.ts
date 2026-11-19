@@ -24,8 +24,11 @@ import { ANSWERED_EVENT, LEFT_EVENT, type FastForwardEnd, type FastForwardEvent,
 export interface FastForwardRun {
   /** The task being walked forward. */
   taskId: string;
-  /** The conversation answering on the way, by its task — the task's own root, or the one it was given. */
-  controlTaskId: string;
+  /**
+   * The conversation answering on the way, by its task — the one that asked for the move (decision 0005
+   * §4, amended 2026-11-19). Absent: nobody does, and what comes up is the person's.
+   */
+  controlTaskId?: string;
   /** The target state id. */
   target: string;
   /** What the strip calls it. */
@@ -64,7 +67,7 @@ export interface FastForwardRun {
 export function fastForwardView(run: FastForwardRun): FastForwardView {
   return {
     taskId: run.taskId,
-    controlTaskId: run.controlTaskId,
+    ...(run.controlTaskId !== undefined ? { controlTaskId: run.controlTaskId } : {}),
     target: run.target,
     targetLabel: run.targetLabel,
     to: run.to,
@@ -187,7 +190,7 @@ export function restoredFastForward(
 ): { run: FastForwardRun; arrived: boolean } {
   const run: FastForwardRun = {
     taskId,
-    controlTaskId: start.controlTaskId,
+    ...(start.controlTaskId !== undefined ? { controlTaskId: start.controlTaskId } : {}),
     target: start.target,
     targetLabel: start.targetLabel,
     to: start.to,
@@ -219,7 +222,7 @@ export function restoredFastForward(
   let arrived = false;
   for (const event of since) {
     const row = event as unknown as { type: string; byTaskId?: string };
-    if (row.type === ANSWERED_EVENT && row.byTaskId === start.controlTaskId) run.answered += 1;
+    if (row.type === ANSWERED_EVENT && start.controlTaskId !== undefined && row.byTaskId === start.controlTaskId) run.answered += 1;
     if (row.type === LEFT_EVENT) {
       const left = event as unknown as LeftEvent;
       run.left += 1;

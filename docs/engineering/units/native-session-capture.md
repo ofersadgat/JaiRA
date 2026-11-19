@@ -29,7 +29,7 @@ siblings: [engineering/units/operation-record-store, engineering/units/live-turn
 - A result value that is an object, as a prompt record's `LlmOutput` is, is folded directly. A delegated function op that settles with bare text has its `sessionOutcome.messages` converted to entries first. Any other payload is stored untouched.
 - `isEmptyCapture` says a capture found nothing, and an empty capture is never folded.
 
-The app uses it in three places. `startRun` and `runChatMessage` in `service.ts` wrap their record stores with `cwd` set to the run's workspace root. `recoverNativeSessions` in `service.ts` runs after an open that recovered tasks, and for each row `SqliteSessionStore.recoverable(taskId)` returns it calls `captureNativeSession` with the row's start time, then `foldNativeCapture` with `foldIntoEntries`.
+The app uses it in two places. `startRun` in `service.ts` wraps its record store with `cwd` set to the run's workspace root, so a conversation's replies, which are calls of its run, are captured too. `recoverNativeSessions` in `service.ts` runs after an open that recovered tasks, and for each row `SqliteSessionStore.recoverable(taskId)` returns it calls `captureNativeSession` with the row's start time, then `foldNativeCapture` with `foldIntoEntries`.
 
 It deliberately does not own:
 
@@ -80,7 +80,6 @@ It deliberately does not own:
 | The file is missing, pruned or under a folder the `cwd` does not name, or the transport writes none, such as codex or a scripted fake | upstream reads it as no lines, and the record closes as it settled with no `capturedAt` | none | the transcript shows what streamed |
 | A read throws during a close | `onError` logs `native session capture failed: <message>` at `warn`, and the record closes as it settled | none | the transcript shows what streamed |
 | The process is killed while a close is capturing | `inner.finish` never runs and the row stays `open` with its last flush | for a task whose status was `running`, the next open settles the row `interrupted` and recovery captures it | the partial turn, then the full transcript once recovery lands |
-| A typed turn's process is killed | its task's status is not `running`, so the row is never settled or recovered | none | the flushed partial only |
 | Recovery fails for one row | logs `recovering a native session failed: <message>` at `warn` and moves to the next row | none | the streamed partial |
 | The agent is still writing its file when it is read | a line that does not parse reaches the fold as a string and is skipped | none | that line's annotation or event is missing |
 | A line's partner is absent from the entries | the line annotates nothing | none | its structured result is not shown |

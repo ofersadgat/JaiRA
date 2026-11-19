@@ -107,7 +107,7 @@ async function main(): Promise<void> {
     await app.shot("1b-typed");
 
     // 2. Sent anyway.
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: "Sent anyway", workflow: "chat/session", conversation: true, inputs: { message: MESSAGE } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: "Sent anyway", workflow: "session", conversation: true, inputs: { message: MESSAGE } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: "claude-cli/default" } });
     await app.until(says("Sent anyway"), "the conversation to be listed", 200);
     await app.clickText("Sent anyway");

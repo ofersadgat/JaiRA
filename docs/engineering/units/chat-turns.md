@@ -14,6 +14,14 @@ siblings: [engineering/units/live-turns, engineering/units/conversation-lookup, 
 
 # Chat turns
 
+> **Since 2026-11-19 a conversation no longer continues by chat turns** (decision 0029 §2): every
+> conversation is a program, and a message answers its `input()`. `sendChatMessage` refuses a conversation
+> that is not one, and `runChatMessage`, the turn bookkeeping and the continuation of a cut turn are gone.
+> `runChatTurn` stays as the primitive that writes ONE call into a task's journal and records outside a
+> run — what a script run as a plain program reports through (`AppService.reportedCallSettled`, ruling 12)
+> — and `chatPlanFor` / `chatOperationOf` still answer what a message would run under. What follows
+> describes the mechanism as it was, for reading conversations recorded under it.
+
 ## A chat turn runs one typed message as a synthetic child of the conversation's host, and leaves reading, streaming and cutting to others
 
 - `chatPlanFor(path, overrides)` in `chatOperation.ts` takes the settings a message inherits from the first state on the path whose operation is a prompt, as `holdsConversation` decides: the pinned snapshot's merged `operation.config` model and reasoning, `operation.system`, every other config key as passthrough, and `environment.tools` and `environment.permissions`. An override wins per field, and `origin` says `inherited`, `override` or `unset`. An inherited `{expr}` value is listed in `unresolved` and not used.

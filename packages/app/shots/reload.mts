@@ -37,7 +37,7 @@ const DRAFT = "and the gate should say which mode it read";
 const THEIRS = { title: "Survey the untested handlers", answer: "Eleven handlers have no test." };
 
 async function converse(app: App, project: string, said: { title: string; answer: string }): Promise<string> {
-  const made = await app.ipc<{ taskId: string }>("task:create", { title: said.title, workflow: "chat/session", inputs: { message: said.title }, project });
+  const made = await app.ipc<{ taskId: string }>("task:create", { title: said.title, workflow: "session", conversation: true, inputs: { message: said.title }, project });
   await app.ipc("task:start", { taskId: made.taskId, project, fake: [{ output: said.answer }] });
   return made.taskId;
 }

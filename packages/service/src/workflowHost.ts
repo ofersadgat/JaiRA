@@ -4,22 +4,25 @@
  * `runtime/workflowTools.ts` is what a model calls; this is what answers. Nothing here is a
  * mechanism of its own:
  *
- *  - `move`    is `AppService.connectTask` — the drop's and the CLI's one path — with `by: "control"`
- *              and the values the conversation supplied;
+ *  - `move`    is `AppService.connectTask` — the drop's and the CLI's one path — with `by: "control"`,
+ *              the values the conversation supplied, and this conversation named, so a fast-forward it
+ *              starts is answered by it;
  *  - `start`   is `connect` FROM THE CONVERSATION ITSELF: the conversation's own task gains a child
- *              (the document generator) and takes a `task_move` to it (`moveTask`);
+ *              (the document generator) and takes a `task_move` to it (`moveTask`) — or, for a
+ *              conversation that is a PROGRAM (decision 0029 §2), a task of its own filed under the
+ *              conversation as the events task's children are (`startChild`);
  *  - `answer`  is `submitInteraction` / `submitQuestion`, reached through the pending lists of the
  *              interaction and question hubs and through NOTHING else — the approval hub is not a
  *              dependency of this module, so an approval is not reachable from it by construction;
  *  - `hold`, `release`, `stop` are `cancelTask`, `resumeTask` and `startTask`, what the board calls;
  *  - `workflows` and `tasks` are reads.
  *
- * ## A session that starts work stays a session
+ * ## A run that starts work keeps its own root
  *
- * `start` never makes a `chat/control`. The conversation's task is pointed at a document rooted in
- * ITS OWN state: a task in no document has its frozen copy diverged (`mode: "clone"` — the frozen
- * root, operation and all, with the child and its standing rule grafted on), and a task already in
- * a document has it augmented. The root that speaks is the root that spoke.
+ * A PROGRAM conversation's `start` is a task of its own, filed under it (`startChild`). Any other run's
+ * task is pointed at a document rooted in ITS OWN state: a task in no document has its frozen copy
+ * diverged (`mode: "clone"` — the frozen root, operation and all, with the child and its standing rule
+ * grafted on), and a task already in a document has it augmented.
  *
  * ## While an engine holds the task
  *
@@ -43,6 +46,7 @@ import {
   type AnswerResult,
   type ConnectMissingInput,
   type ConnectSupplied,
+  type InputProvenance,
   type InputsMissing,
   type MoveInput,
   type MoveResult,
@@ -75,7 +79,6 @@ import {
   generatorSupplied,
   holdingOf,
   latestVersion,
-  readDocument,
   recordSupplied,
   stateShapeOf,
   taskRun,
@@ -93,6 +96,21 @@ import type { EngineEvent } from "@declarative-ai/hw";
  */
 export const ANSWERABLE_COMPONENTS: ReadonlySet<string> = new Set(["choose_option", "fill_form", "review_artifact", "edit_artifact"]);
 
+/** What a program conversation's `start` asks the service to make: a task of its own, filed under the conversation. */
+export interface StartChildRequest {
+  /** The state it runs. */
+  state: string;
+  /** What the task is called — the state's id when absent. */
+  title?: string;
+  inputs: Record<string, JsonValue>;
+  provenance: Record<string, InputProvenance>;
+  /** The conversation's instance whose call started it — the reply that used the tool. */
+  instanceId?: string;
+}
+
+/** What a program conversation's `start` made — the task, and why its run did not start when it did not — or why nothing was made. */
+export type StartChildResult = { taskId: string; error?: string } | { taskId?: undefined; error: string };
+
 /** What the service lends: its own operations, each exactly as its channel reaches it. */
 export interface WorkflowHostDeps {
   project: Project;
@@ -100,6 +118,11 @@ export interface WorkflowHostDeps {
   projectRef: string;
   /** The task this conversation is. */
   taskId: string;
+  /**
+   * The tasks this conversation is fast-forwarding — moved, not started, by it: what comes up on their
+   * way is its to answer (decision 0005 §4, amended 2026-11-19), so `answer` reaches them too.
+   */
+  forwarding?: () => readonly string[];
   connect(request: TaskConnectRequest): Promise<TaskConnectResult>;
   move(request: TaskMoveRequest): Promise<TaskMoveResult>;
   /** An engine is running the task in this process. */
@@ -128,6 +151,18 @@ export interface WorkflowHostDeps {
   startTask(taskId: string): Promise<unknown>;
   resumable(taskId: string): ResumePlan;
   invalidate(): void;
+  /**
+   * Whether this conversation is a PROGRAM — code looping over `input()` (decision 0029 §2). Its run
+   * is the program's own: work it starts is not grafted onto it, but made a task of its own beside it.
+   */
+  isProgram?(): boolean;
+  /**
+   * Make and start a task for `state`, filed under this conversation through the link every started
+   * child has — `origin.kind: "started"`, mirrored into the conversation's journal at the call that
+   * started it — so `list_tasks`, the gestures and `answer_question` reach it as one of this
+   * conversation's. Resolves once its run has started, or could not.
+   */
+  startChild?(request: StartChildRequest): Promise<StartChildResult>;
 }
 
 /** `inputs` / `asked` / `confidence`, as the values `connect` takes. */
@@ -231,6 +266,31 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
     return result;
   };
 
+  /**
+   * `start` for a conversation that is a PROGRAM (decision 0029 §2): the state runs as a task of its
+   * own, filed under the conversation — never grafted onto the program's run, whose next step is the
+   * program's to take. What it needs and nothing supplies is asked for first, and nothing is made.
+   */
+  const startChild = async (target: string, supplied: Record<string, ConnectSupplied> | undefined, call: WorkflowToolCall | undefined): Promise<StartResult> => {
+    const surface = targetSurface(target)!;
+    const missing: ConnectMissingInput[] = Object.entries(surface.inputs)
+      .filter(([name, slot]) => slot.optional !== true && supplied?.[name] === undefined)
+      .map(([name, slot]) => ({ state: target, name, ...(slot.schema !== undefined ? { schema: slot.schema } : {}), ...(slot.description !== undefined ? { description: slot.description } : {}), reason: "nothing this conversation started it with supplies it" }));
+    if (missing.length > 0) return inputsMissing(target, `'${target}' was not started: ${missing.length === 1 ? "a required input is" : "required inputs are"} open`, missing, []);
+    const entries = Object.entries(supplied ?? {});
+    const made = await deps.startChild!({
+      state: target,
+      inputs: Object.fromEntries(entries.map(([name, entry]) => [name, entry.value])),
+      provenance: Object.fromEntries(entries.map(([name, entry]) => [name, { via: entry.via, ...(entry.via === "inferred" && entry.confidence !== undefined ? { confidence: entry.confidence } : {}) }])),
+      ...(call?.instanceId !== undefined ? { instanceId: call.instanceId } : {}),
+    });
+    deps.invalidate();
+    if (made.taskId === undefined) return { ok: false, code: "start", reason: `'${target}' was not started: ${made.error}` };
+    if (made.error !== undefined) return { ok: false, code: "start", reason: `'${target}' was made as task '${made.taskId}', and could not start: ${made.error}` };
+    const inputs = entries.map(([name, entry]): SettledInputView => ({ name, via: entry.via }));
+    return journalMoved("start_task", { ok: true, task: made.taskId, key: target, state: target, status: "started", mount: "plain", inputs }, call);
+  };
+
   const release = async (id: string): Promise<string> => {
     const plan = deps.resumable(id);
     if (plan.kind === "fresh") {
@@ -301,12 +361,11 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       if (off !== undefined) return { ok: false, code: "disabled", reason: off };
       if (row.snapshotHash === undefined && row.documentId === undefined) return { ok: false, code: "never-run", reason: "this conversation has not run yet" };
       const supplied = suppliedOfTool(input);
+      if (deps.startChild !== undefined && deps.isProgram?.() === true) return startChild(target, supplied, call);
       const literals = generatorSupplied(supplied);
-      // The conversation's OWN root stays the root: a document keeps the conversation it has, and a
-      // task in none diverges under the state it runs — never under `chat/control`.
-      const conversation = row.documentId !== undefined ? readDocument(project.paths.snapshotsDir, row.documentId).conversation : sourceStateId(meta.workflow);
+      // The run's OWN root stays the root: its frozen copy diverges and gains the child.
       const generate = (dryRun: boolean): Promise<GenerateVersionResult> =>
-        generateDocumentVersion(project, { taskId, target, conversation, mode: "clone", ...(literals !== undefined ? { supplied: literals } : {}), ...(dryRun ? { dryRun: true } : {}) });
+        generateDocumentVersion(project, { taskId, target, mode: "clone", ...(literals !== undefined ? { supplied: literals } : {}), ...(dryRun ? { dryRun: true } : {}) });
       let made: GenerateVersionResult;
       try {
         const preview = await generate(true);
@@ -355,6 +414,8 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
           taskId: moved,
           target: input.to,
           by: "control",
+          // This conversation asked: a fast-forward it starts is answered by it (decision 0005 §4, amended).
+          conversation: taskId,
           ...(input.workflow !== undefined ? { workflow: input.workflow } : {}),
           ...(input.skip === true ? { skip: true } : {}),
           ...(input.confirm === true ? { confirmed: true } : {}),
@@ -434,6 +495,7 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
 
     answer(input: AnswerInput): AnswerResult {
       const mine = family();
+      for (const id of deps.forwarding?.() ?? []) if (!mine.has(id)) mine.set(id, "this");
       const settled_by = { via: "control" as const, confidence: input.confidence };
       const journal = (askedTaskId: string, kind: AnsweredEvent["kind"], instanceId?: string, toolCallId?: string): void => {
         const event: AnsweredEvent = {

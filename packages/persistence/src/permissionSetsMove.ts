@@ -179,7 +179,8 @@ export function movePermissionSetsOutOfChat(root: PermissionSetMoveRoot): void {
 }
 
 /** The workflows whose tasks are conversations: their composer's stack is the task's own. */
-const CONVERSATION_WORKFLOWS = new Set(["chat/session", "chat/control"]);
+// `chat/control` too: what this move renames is how old tasks were written down.
+const CONVERSATION_WORKFLOWS = new Set(["chat/session", "session", "chat/control"]);
 
 /**
  * A workspace's TASK files, after its database is open: each one's references renamed, and a

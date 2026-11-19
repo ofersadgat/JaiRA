@@ -293,7 +293,7 @@ function withNearer(files: Record<string, unknown>, nearer: Readonly<Record<stri
 const SWITCH_ONLY: ReadonlySet<string> = new Set(["$ref", "disabled"]);
 
 /**
- * A state file that only follows another and switches it — `{ "$ref": "$SYSTEM/workflows/chat/session",
+ * A state file that only follows another and switches it — `{ "$ref": "$SYSTEM/workflows/session",
  * "disabled": … }`, what Disable writes (decision 0021) — read AS the file it follows, a chain of them
  * to its end. The switch is no part of a load ({@link withoutSwitches}), so the two load the same. Done
  * here, BEFORE lowering, because the engine's own `$ref` expansion runs after it and would meet the

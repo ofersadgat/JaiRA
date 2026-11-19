@@ -78,7 +78,7 @@ It deliberately does not own:
 | A cancel flag is raised | `onCancelRequested` runs at every beat until release, not once, so the handler must be idempotent | none needed | stopping, then canceled |
 | The process is killed between flushes | up to one debounce window of output per stream never reaches the table | none | the output ends early |
 | A flush repeats or retries | both rows are deleted and rewritten, so nothing duplicates | none needed | none |
-| A child is spawned outside a run: a chat turn, a follow-up round, a probe, or git in `ensureWorkspace` | its `NodeExec` or agent spawn has no observer, so it gets no job row and is never reported as an orphan | none | an agent a conversation left running is never shown |
+| A child is spawned outside a run: a follow-up round, a probe, or git in `ensureWorkspace` | its `NodeExec` or agent spawn has no observer, so it gets no job row and is never reported as an orphan | none | an agent it left running is never shown |
 | The Logs view opens a job's output while several projects are open | `job:output` carries no project, `sessionOf()` finds no single session, and the answer is empty; with one project open, a job id logged by another database is read from that project's | open the output with only the job's project open | the output reads empty or shows another process |
 
 ## Two migrations shaped the tables, and neither rolls back

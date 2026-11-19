@@ -169,6 +169,18 @@ export function mirrorStarted(project: Project, eventsTaskId: string, at: Pick<C
 }
 
 /**
+ * The tasks `parentTaskId` started as its CHILDREN whose mirror its journal no longer holds — a rewind
+ * cut away the call that started them (decision 0029 §2). Oldest first.
+ */
+export function unmirroredStarted(project: Project, parentTaskId: string): string[] {
+  const mirrored = new Set(project.events.list(parentTaskId).flatMap(({ event }) => (event.type === "instance.entered" && (event as { started?: boolean }).started === true ? [event.instanceId] : [])));
+  return project.tasks
+    .list()
+    .filter((meta) => meta.origin?.kind === "started" && meta.origin.taskId === parentTaskId && !mirrored.has(meta.id))
+    .map((meta) => meta.id);
+}
+
+/**
  * The END of a started child's mirror, once its task has ended: an `instance.terminated` for it in the
  * events task's journal, as `fanOut.ts` writes an element's. Nothing when the task was started on its
  * own, when the events task that started it is gone, or when the end is already written. Returns the

@@ -77,7 +77,7 @@ export function followsOnly(text: string): boolean {
 }
 
 /**
- * A new state file that follows `follows` — `$SYSTEM/workflows/chat/session`, a root written out so
+ * A new state file that follows `follows` — `$SYSTEM/workflows/session`, a root written out so
  * a bare `$` cannot find the file itself — and sets the switch. How a workflow a layer only inherits
  * is switched off (or back on) there without a copy that would stop hearing about the original.
  */

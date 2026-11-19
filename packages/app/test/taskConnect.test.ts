@@ -92,16 +92,6 @@ function files(): Record<string, JsonValue> {
     // A SECOND workflow holding `product` and `ux`: a target of `feat/ux` is ambiguous.
     other: { label: "Other", children: { product: { state: "feat/product" }, ux: { state: "feat/ux", inputs: { flag: ".children.product.output.confirmed" } } }, sequence: ["product", "ux"] },
     // Rule 3: states no workflow relates to anything.
-    // The conversation a move makes. A PROMPT with a required opening line and no outputs, which is
-    // the shape `chat/control` ships as — and the shape the idle rule is about (decision 0005 step 6):
-    // a root loaded with an operation it never ran would otherwise dispatch it, and a drop would
-    // spend a model call on a message nobody sent.
-    "conv/standin": {
-      label: "Talk",
-      inputs: { opening: { schema: { type: "string" }, description: "What the person did, in a sentence." } },
-      // No model, as the shipped conversations declare none: the machine it runs on answers.
-      operation: { kind: "prompt", prompt: "{{.inputs.opening}}" },
-    },
     "lib/second": gate("second", flag),
     "lib/third": gate("third", flag),
     "lib/needs": gate("needs", { text: { schema: { type: "string", minLength: 3 }, description: "What to call it." } }),
@@ -116,7 +106,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-connect-"));
   writeWorkflowFiles(initProject(dir, testHome()).workflowsDir, files());
   seen.clear();
-  service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+  service = new AppService({ baseDir: testHome(), publish: () => undefined });
   await service.open(dir);
 });
 
@@ -228,15 +218,10 @@ describe("rule 1 — the target is in the task's workflow", () => {
     const taskId = await standingIn("flow", 0); // parked at a
     expect(ok(await service.connectTask({ taskId, target: "flow/b", dryRun: true })).plan.move).toMatchObject({ direction: "next", passes: [] });
 
-    // Forward past states is a FAST-FORWARD (decision 0005 §4, step 7). This task is RUNNING and
-    // nothing speaks at its root: there is no conversation to answer on the way, and a running engine
-    // cannot pick one up. The dry run says so — a hover must not promise a drop that will be refused —
-    // and the real thing is refused the same way, having done nothing.
-    const message = "'In flow' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly";
-    const dry = no(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
-    expect(dry.refusal).toEqual({ code: "fast-forward", message });
+    // Forward past states is a FAST-FORWARD (decision 0005 §4, step 7) — a running task's too, since
+    // nothing is grafted onto it for one (amended 2026-11-19). The dry run plans it and does nothing.
+    const dry = ok(await service.connectTask({ taskId, target: "flow/d", dryRun: true }));
     expect(dry.plan).toMatchObject({ resolution: "move", forward: "fast-forward", move: { direction: "forward", passes: ["b", "c"] } });
-    expect(no(await service.connectTask({ taskId, target: "flow/d" })).refusal).toEqual({ code: "fast-forward", message });
     expect(journal(taskId).some((e) => e.type === "transition.taken")).toBe(false);
     expect(documents()).toEqual([]);
 
@@ -252,8 +237,8 @@ describe("rule 1 — the target is in the task's workflow", () => {
 
   it("enters the ANCESTORS of a nested target on the way down, and goes straight to it", async () => {
     const taskId = await standingIn("deep", 0); // parked at one
-    // Running with no conversation, it cannot be fast-forwarded — but the plan still says the way down.
-    const dry = no(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
+    // The plan says the way down.
+    const dry = ok(await service.connectTask({ taskId, target: "deep/two/y", dryRun: true }));
     // `x` comes before `y` inside the composite: stepping over it is a skip like any other.
     expect(dry.plan?.move).toMatchObject({ direction: "forward", to: "two", path: ["y"], passes: ["two/x"] });
 
@@ -288,7 +273,7 @@ describe("the way down survives a restart (decision 0005, the descent)", () => {
 
     // The process goes away here. Nothing in memory carries the rest of the way down any more.
     await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
     await service.open(dir);
     seen.clear();
     // The resumed run asks `two`'s question again, and once it is answered goes straight to `y` —
@@ -484,7 +469,7 @@ describe("rule 3 — the workflow is modified", () => {
     await expect(service.undoConnect({ taskId: parent })).rejects.toThrow(/has no connect to take back/);
   });
 
-  it("roots a new document in the SHIPPED conversation, opened with what happened — an input filled by schema, never by name", async () => {
+  it("roots a new document in nothing but the work it connects — no conversation, and nothing said", async () => {
     shippedLayer();
     await service.close();
     service = new AppService({ baseDir: testHome(), publish: () => undefined });
@@ -495,10 +480,9 @@ describe("rule 3 — the workflow is modified", () => {
     const done = ok(await service.connectTask({ taskId: product, target: "lib/second" }));
     const parent = metaOf(done.taskId!)!;
     expect(read((p) => p.runtime.get(parent.id)!.documentId)).toBeDefined();
-    // `chat/control` declares one required input that takes a string. It was given the sentence.
-    expect(Object.values(parent.inputs ?? {})).toEqual([`"Ran feat/product" was moved to lib/second.`]);
-    expect(Object.values(parent.inputProvenance ?? {})).toEqual([{ via: "bound" }]);
-    // And says nothing: no model route was even configured here, which a dispatched turn would need.
+    // The document is the record of the move (decision 0005, amended 2026-11-19): it takes nothing to open.
+    expect(parent.inputs ?? {}).toEqual({});
+    // And says nothing: no model route was even configured here, which a call would need.
     expect(await parked()).toMatchObject({ state: "second", inputs: { flag: true } });
     expect(journal(done.taskId!).filter((e) => e.type === "operation.started" && e.op === "prompt")).toEqual([]);
   });
@@ -568,7 +552,7 @@ describe("a drop that stopped part-way is finished as it was meant (its written 
     expect(documents()).toHaveLength(1);
 
     await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
     await service.open(dir);
     await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
     // A new process numbers its requests from the start again.
@@ -590,7 +574,7 @@ describe("a drop that stopped part-way is finished as it was meant (its written 
     await expect(service.connectTask({ taskId: product, target: "lib/second" })).rejects.toThrow("refused: busy");
     (service as unknown as { moveTask: unknown }).moveTask = real;
     await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
     await service.open(dir);
     await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
     // A new process numbers its requests from the start again.
@@ -623,7 +607,7 @@ describe("UNDO outlives the process that handed it out", () => {
     // A restart while it stands where it landed: a close is not a decision, so nothing in this
     // process was handed the token, the run is resumed to its gate, and the card still offers it.
     await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
     await service.open(dir);
     seen.clear();
     expect((await parked()).state).toBe("a");
@@ -651,7 +635,7 @@ describe("UNDO outlives the process that handed it out", () => {
     const done = ok(await service.connectTask({ taskId: product, target: "feat", start: false }));
     const parent = done.taskId!;
     await service.close();
-    service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
     await service.open(dir);
     expect(await service.undoConnect({ taskId: parent })).toEqual({ taskId: product, removed: parent });
     expect(metaOf(product)?.origin).toBeUndefined();

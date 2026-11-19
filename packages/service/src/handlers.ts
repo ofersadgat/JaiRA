@@ -178,6 +178,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "chat:startPlan": ((request: Parameters<typeof service.chatStartPlan>[0]) => service.chatStartPlan(request)) as Handler,
     "chat:send": ((request: Parameters<typeof service.sendChatMessage>[0]) => service.sendChatMessage(request)) as Handler,
     "chat:cancel": ((request: Parameters<typeof service.cancelChatTurn>[0]) => service.cancelChatTurn(request)) as Handler,
+    "chat:end": ((request: Parameters<typeof service.endConversation>[0]) => service.endConversation(request)) as Handler,
     "terminal:list": ((request: Parameters<typeof service.terminalList>[0]) => service.terminalList(request)) as Handler,
     "terminal:read": ((request: Parameters<typeof service.terminalRead>[0]) => service.terminalRead(request)) as Handler,
     "terminal:input": ((request: Parameters<typeof service.terminalInput>[0]) => service.terminalInput(request)) as Handler,
@@ -273,6 +274,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "history:size": ((request: { project?: string } | undefined) => service.historySize(request?.project)) as Handler,
     "history:prune": ((request: Parameters<typeof service.pruneHistory>[0]) =>
       service.pruneHistory(request)) as Handler,
+    "learning:measures": ((request: { project?: string } | undefined) => service.learningMeasures(request ?? {})) as Handler,
     "settings:read": (() => service.readSettings()) as Handler,
     "settings:write": ((request: Parameters<typeof service.writeSettings>[0]) => service.writeSettings(request)) as Handler,
     "config:read": ((request: { project?: string } | undefined) => service.readConfig(request?.project)) as Handler,

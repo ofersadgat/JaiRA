@@ -3,7 +3,7 @@
  * repository: a bound task gets its own worktree, an unbound one runs in the
  * project directory, and removal protects uncommitted work.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -12,7 +12,7 @@ import { worktreePathFor } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { createTask } from "../src/lifecycle";
 import { initProject, openProject, type Project } from "../src/project";
-import { ensureWorkspace, removeWorktree } from "../src/worktrees";
+import { ensureWorkspace, makeThrowawayWorkspace, removeThrowawayWorkspace, removeWorktree, throwawayWorkspacePath } from "../src/worktrees";
 
 const exec = new NodeExec();
 let root: string;
@@ -173,5 +173,43 @@ describe("removeWorktree", () => {
     const result = await removeWorktree(project, newTask());
     expect(result).toMatchObject({ removed: false });
     expect(result.reason).toMatch(/no worktree/);
+  });
+});
+
+describe("a simulation's throwaway workspace (decision 0029 §5 step 5)", () => {
+  it("is a worktree on no branch where the workspace stood — its uncommitted and untracked work carried over, never .jaira's — and goes without a trace", async () => {
+    const taskId = newTask();
+    writeFileSync(join(projectDir, "README.md"), "# project, changed\n", "utf8");
+    writeFileSync(join(projectDir, "draft.md"), "a draft\n", "utf8");
+    mkdirSync(join(projectDir, ".jaira", "scratch"), { recursive: true });
+    writeFileSync(join(projectDir, ".jaira", "scratch", "x.txt"), "jaira's\n", "utf8");
+    const workspace = await makeThrowawayWorkspace(project, taskId, projectDir);
+    expect(workspace).toMatchObject({ root: throwawayWorkspacePath(project, taskId), isWorktree: true });
+    expect(project.runtime.get(taskId)?.worktreePath).toBe(workspace.root);
+    expect(readFileSync(join(workspace.root, "README.md"), "utf8")).toBe("# project, changed\n");
+    expect(readFileSync(join(workspace.root, "draft.md"), "utf8")).toBe("a draft\n");
+    expect(existsSync(join(workspace.root, ".jaira", "scratch", "x.txt"))).toBe(false);
+    const git = new Git({ exec, repoDir: projectDir });
+    expect(await git.currentBranch()).toBe("main");
+    expect((await git.listWorktrees()).map((w) => w.detached)).toEqual([false, true]);
+    // The workspace it was copied from is as it was.
+    expect(readFileSync(join(projectDir, "README.md"), "utf8")).toBe("# project, changed\n");
+    await removeThrowawayWorkspace(project, taskId);
+    expect(existsSync(workspace.root)).toBe(false);
+    expect(await git.listWorktrees()).toHaveLength(1);
+    expect(project.runtime.get(taskId)?.worktreePath).toBeUndefined();
+  });
+
+  it("is a copy of the directory where there is no repository", async () => {
+    const plain = join(root, "plain");
+    mkdirSync(join(plain, ".jaira"), { recursive: true });
+    writeFileSync(join(plain, "a.txt"), "a\n", "utf8");
+    writeFileSync(join(plain, ".jaira", "settings.json"), "{}", "utf8");
+    const taskId = newTask();
+    const workspace = await makeThrowawayWorkspace(project, taskId, plain);
+    expect(readdirSync(workspace.root)).toEqual(["a.txt"]);
+    await removeThrowawayWorkspace(project, taskId);
+    expect(existsSync(workspace.root)).toBe(false);
+    expect(existsSync(join(plain, "a.txt"))).toBe(true);
   });
 });

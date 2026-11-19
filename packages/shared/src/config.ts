@@ -8,7 +8,7 @@
  * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
 import type { Scope } from "./scopes";
-import { CHAT_CONTROL, CHAT_SESSION } from "./task";
+import { CHAT_SESSION } from "./task";
 import { PERMISSION_MODES, type PermissionMode } from "./operationVocabulary";
 import type { JsonValue } from "@declarative-ai/json";
 import type { CredentialUse } from "./executors";
@@ -567,18 +567,18 @@ export const DEFAULT_ARCHIVE: JairaArchiveConfig = { auto: true, keepLatest: 5, 
  * Which workflow a conversation runs (decision 0021; the person, 2026-10-26: "What does make sense as a
  * setting is: what is the default workflow to use for a chat session").
  *
- * `workflow` is what the Chat view starts a conversation as; `moved` is what a move that makes a dynamic
- * workflow gives the task to steer it. Either can be any workflow that takes ONE required text input —
- * what the person typed fills it. Unstated ⇒ the built-in ones, {@link DEFAULT_CONVERSATIONS}, which the
+ * `workflow` is what the Chat view starts a conversation as: any workflow that takes ONE required text
+ * input — what the person typed fills it. (A move that makes a dynamic workflow gives the task no
+ * conversation since 2026-11-19: the dynamic workflow is the record of how the work was moved, and
+ * nothing more — decision 0005, amended.) Unstated ⇒ the built-in ones, {@link DEFAULT_CONVERSATIONS}, which the
  * parse fills in so the effective settings say what is in force. A conversation whose workflow is
  * disabled is not started: the Chat view asks which to run instead.
  */
 export interface JairaConversationsConfig {
   workflow: string;
-  moved: string;
 }
 
-export const DEFAULT_CONVERSATIONS: JairaConversationsConfig = { workflow: CHAT_SESSION, moved: CHAT_CONTROL };
+export const DEFAULT_CONVERSATIONS: JairaConversationsConfig = { workflow: CHAT_SESSION };
 
 /** The workflow a conversation of this kind runs, by the effective settings. */
 export function conversationWorkflowOf(config: Pick<JairaConfig, "conversations">, kind: keyof JairaConversationsConfig): string {
@@ -590,7 +590,7 @@ function parseConversations(raw: unknown): JairaConversationsConfig {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.conversations must be an object");
   const doc = raw as Record<string, unknown>;
   const out: JairaConversationsConfig = { ...DEFAULT_CONVERSATIONS };
-  for (const key of ["workflow", "moved"] as const) {
+  for (const key of ["workflow"] as const) {
     const value = doc[key];
     if (value === undefined) continue;
     if (typeof value !== "string" || value.trim().length === 0) throw new Error(`config.conversations.${key} must be a workflow's id`);

@@ -77,7 +77,7 @@ async function main(): Promise<void> {
         ? { taskId: kept }
         : await app.ipc<{ taskId: string }>("task:create", {
             title: TITLE,
-            workflow: "chat/session",
+            workflow: "session",
             inputs: { message: "I want a high fidelity mock up of a settings screen for a small todo app. Come up with two different ideas for how it can look." },
           });
     if (kept === undefined) await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: FULL } });

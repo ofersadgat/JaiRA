@@ -23,12 +23,11 @@
  * same trust boundary an absolute artifact destination sits on. Nothing an agent produces reaches
  * this path.
  */
-import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { LoadBundleOptions, Vfs } from "@declarative-ai/hw";
 import { stateFilePath } from "@declarative-ai/hw";
 import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/shared";
-import { hostCalleeSignatures } from "@jaira/runtime";
+import { hostCalleeSignatures, readDefinition } from "@jaira/runtime";
 
 import { userModules, type UnapprovedWatch } from "./userModules";
 import { scriptStateFor } from "./workflowScripts";
@@ -249,7 +248,8 @@ function readStateFile(id: string, roots: string | readonly string[], tolerant: 
     const file = `${stateFilePath(id, root)}.json`;
     let text: string;
     try {
-      text = readFileSync(file, "utf8");
+      // As a simulation's run reads it (`definitionOverlay.ts`): a proposed state is one.
+      text = readDefinition(file);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") continue; // not at this root — try the next
       if (tolerant) return undefined;

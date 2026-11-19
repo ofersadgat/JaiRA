@@ -90,15 +90,18 @@ export interface DocumentVersion {
 export interface FrozenDocument {
   id: string;
   /**
-   * `dynamic` — generated: a conversation with children, authored from nothing.
+   * `dynamic` — generated: the work a move connected, as children, authored from nothing.
    * `diverged` — a real workflow's frozen copy that took a move its workflow did not support. It no
    * longer follows the workflow it came from, which a pinned task never did anyway.
    */
   kind: "dynamic" | "diverged";
   /** The root state id every version's bundle has. A diverged copy keeps its workflow's. */
   rootId: string;
-  /** The conversation state that controls it — its root's operation, for a `dynamic` one. */
-  conversation: string;
+  /**
+   * The conversation state a document written before 2026-11-19 was given to steer it. Nothing is given
+   * one since (decision 0005, amended), and nothing reads this.
+   */
+  conversation?: string;
   /** Where a `diverged` copy came from. */
   divergedFrom?: { workflow: string; snapshotHash: string };
   createdAt: string;
@@ -234,18 +237,21 @@ export function loadPinnedBundle(project: Project, row: Pick<TaskRuntimeRow, "ta
  * The pinned bundle with the VERSIONS a run took laid in beside it (decision 0029 §3): each
  * `version.adopted` the task's journal holds names a called state, the versioned id the run entered it
  * under, and the snapshot that version was pinned as. A resume — and the load it folds — needs them back
- * before anything is re-attached: an instance entered under `chat/turn@v…` is re-attached to those states,
+ * before anything is re-attached: an instance entered under `session@v…` is re-attached to those states,
  * never to the version the task started with. A version whose snapshot cannot be read is left out, and
  * what ran under it reads as unreadable rather than as something else.
  */
 export function withRunVersions(project: Project, taskId: string, bundle: WorkflowBundle): WorkflowBundle {
   const adopted: AdoptedVersion[] = [];
   for (const row of new SqliteEventLog(project.db).list(taskId)) {
-    const event = row.event as { type?: string; stateId?: unknown; version?: unknown; snapshot?: unknown };
+    const event = row.event as { type?: string; stateId?: unknown; version?: unknown; snapshot?: unknown; at?: unknown; from?: unknown };
     if (event.type !== "version.adopted" || typeof event.stateId !== "string" || typeof event.version !== "string" || typeof event.snapshot !== "string") continue;
     if (bundle.states[event.version] !== undefined || adopted.some((a) => a.versioned === event.version)) continue;
+    // A version of the ROOT, taken `at` a boundary, is mounted under the version that handed off to it
+    // (`from`: the root, or a version that had taken the run before) — as the run mounted it.
+    const root = typeof event.at === "string" ? (typeof event.from === "string" ? event.from : bundle.rootId) : undefined;
     try {
-      adopted.push({ base: event.stateId, versioned: event.version, bundle: loadSnapshot(project.paths.snapshotsDir, event.snapshot) });
+      adopted.push({ base: event.stateId, versioned: event.version, bundle: loadSnapshot(project.paths.snapshotsDir, event.snapshot), ...(root !== undefined ? { root } : {}) });
     } catch {
       // The version's snapshot is gone: leave it out, and what ran under it reads as unreadable.
     }

@@ -436,7 +436,7 @@ describe("the implementation choice — a conversation turn, which knows its per
       asked.push(req.tool);
       return { decision: "allow", scope: "once" };
     };
-    // What `runChatMessage` builds: ours wrapped and gated, and the permission set published for the executor.
+    // What a run's call builds (`startRun`): ours wrapped and gated, and the permission set published for the executor.
     const { tools, gate } = gateTools({ registry: registry(), names: plan.inject.filter((name) => name !== "show_artifact"), sessionId: "s1", approve, permissionSet });
     const services = withPermissionSetService({ tools, gate, approve } as ExecServices, permissionSet);
     const operation: PromptOp<InlineFamily> = {

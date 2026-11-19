@@ -15,10 +15,10 @@
  * answers for every project, and asking again per project would pay for the same socket twice.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import type { FakeRule } from "@jaira/runtime";
+import type { DefinitionOverlay, FakeRule } from "@jaira/runtime";
 import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
-import type { Project } from "@jaira/persistence";
+import type { Project, TaskWorkspace } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalJudge, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UnansweredAsk, UserEventHub } from "@jaira/runtime";
 import type { InlineFamily, PromptOp } from "@declarative-ai/exec";
@@ -224,36 +224,9 @@ export class ProjectSession {
    */
   readonly liveCalls = new LiveCalls();
   /**
-   * The hand-typed turns in flight, by task id — what a "stop" has to reach.
-   *
-   * Separate from {@link live} because a chat turn is deliberately not a run: it claims no job, moves
-   * no task status, and registers nothing there. Without this there was simply nothing to abort, so a
-   * message sent to an agent that then worked for four minutes could only be waited out.
-   *
-   * A SET per task, not one controller — because more than one turn can be in flight in a thread.
-   *
-   * It held a single controller on the premise that "`sendChatMessage` already waits for a call in
-   * flight before starting another", and the premise was never quite true: a message can JOIN a turn
-   * rather than wait for it, and the wait itself is bounded and can time out. What the single slot
-   * then did was not merely lose track of one — the new turn ABORTED the old one on its way in, so
-   * sending a follow-up killed the answer being written. The stop button worked by accident and
-   * typing twice worked like pressing it.
-   *
-   * The set is per task because the button is: one conversation, one stop, and it means everything
-   * this thread has going.
-   */
-  readonly chatTurns = new Map<string, Set<AbortController>>();
-  /**
-   * The same turns as promises that settle when each has ended — written down, permissions let go.
-   * Kept apart from {@link chatTurns} because a stop forgets the controllers at once, and a rewind,
-   * which stops them, must then wait for what they were still writing before it cuts.
-   */
-  readonly chatTurnEnds = new Map<string, Set<Promise<unknown>>>();
-  /**
    * What each turn and run in flight decides its calls under, by task — see {@link LivePermissions}.
    *
-   * A SET per task for the reason {@link chatTurns} is one: more than one call can be in flight in a
-   * thread, and a person switching the conversation to another permission set means all of them. Each
+   * A SET per task: more than one call can be in flight in a thread, and a person switching the conversation to another permission set means all of them. Each
    * turn and run adds its own when it starts and takes it out when it ends, so nothing here outlives
    * the call it governs and a message sent later is decided under its own settings.
    */
@@ -272,23 +245,6 @@ export class ProjectSession {
    * or a headless test of the loop would reach for a provider.
    */
   readonly fakeRules = new Map<string, FakeRule[]>();
-  /**
-   * The newest typed turn's COMPLETION, by task — what the message behind it waits for.
-   *
-   * Where a message goes is computed from where the conversation is recorded as ENDING, so a message
-   * still in flight is invisible to the next one's arithmetic: both resolve to the same position, the
-   * second collides, and the store branches. One conversation becomes two and the thread reads one.
-   *
-   * Resolved when the send returns, which is after its journal entry — so a waiter that re-reads the
-   * conversation's end at that point sees the turn in it. The live register cannot answer the same
-   * question: it holds a call only while it RUNS, so it is silent both before the call starts and
-   * after it settles, and a waiter consulting it in either window computes a position something else
-   * is already holding.
-   *
-   * Only a message that cannot JOIN the turn in flight waits on this — see `sendChatMessage`. One
-   * that can is not going to claim a position at all.
-   */
-  readonly chatDone = new Map<string, Promise<void>>();
 
   /**
    * What a conversation asked for while an engine held its task (decision 0005 step 6): a `start`
@@ -307,8 +263,8 @@ export class ProjectSession {
   /**
    * How to write down what a task's live turn holds RIGHT NOW, by task id.
    *
-   * Registered by whatever is streaming — a run or a typed turn — and called by "stop" before it
-   * aborts anything. The throttle behind it is right for the ordinary case and wrong for exactly this
+   * Registered by the run that is streaming — a conversation's reply is a call of its run — and called
+   * by "stop" before it aborts anything. The throttle behind it is right for the ordinary case and wrong for exactly this
    * one: an interrupted call has no settled result to supersede its partial, so what survives is the
    * last flush, which is up to an interval stale and, for a turn stopped early, nothing at all. A
    * stop is the one moment the exact tail matters, because it is the tail the person was reading.
@@ -345,6 +301,17 @@ export class ProjectSession {
   readonly hub: InteractionHub;
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();
+  /**
+   * The waits for a message that give up after an idle stretch — `input({ idle })` (decision 0029 §6) —
+   * by request id: each answers its wait `{ idle: true }` when the stretch since it first asked is over.
+   */
+  readonly idleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /**
+   * The simulations running here (decision 0029 §5 step 5), by the FORK's task id: the proposed files
+   * its run reads as if written, the throwaway workspace it works in, and the set that stands over its
+   * own while it makes its one pass.
+   */
+  readonly simulations = new Map<string, { overlay: DefinitionOverlay; workspace: TaskWorkspace; sandbox: Readonly<Record<string, unknown>> }>();
   /**
    * taskId → the project this task's work is ABOUT, when that is not this session.
    *
@@ -470,6 +437,9 @@ export class ProjectSession {
     for (const taskId of this.fastForwards.keys()) if (this.live.has(taskId)) this.forwardingAtClose.add(taskId);
     clearTimeout(this.watchTimer);
     this.watchTimer = undefined;
+    // An idle stretch is counted from when the wait first asked, so the next open arms it again.
+    for (const timer of this.idleTimers.values()) clearTimeout(timer);
+    this.idleTimers.clear();
     for (const watcher of this.watchers) watcher.close();
     this.watchers = [];
     // Which live runs are parked, noted before the hubs below let go of the question. Closing the app
@@ -494,17 +464,8 @@ export class ProjectSession {
     // does go is the proposal it was about to produce, which belongs to a project that is going away.
     this.syncTask = undefined;
     this.pendingSync = undefined;
-    // A hand-typed turn is not in `live`, so it would otherwise keep talking to a provider on behalf
-    // of a project that is gone — and finish by writing to a closed database. Stopped as the stop
-    // button stops one (`cancelChatTurn`): what it had said is written down first, while its record
-    // is still open, and then it is aborted.
-    for (const [taskId, turns] of this.chatTurns) {
-      this.liveFlush.get(taskId)?.();
-      for (const turn of turns) turn.abort();
-    }
-    this.chatTurns.clear();
     const inFlight = [...this.live.values()];
-    // A run's turn is written down before it is cut, as a hand-typed one is.
+    // A run's turn is written down before it is cut.
     for (const run of inFlight) this.liveFlush.get(run.taskId)?.();
     for (const run of inFlight) run.abort.abort();
     // And WAITED for, like the runs. Aborting only asked: the turn still has to settle its record and
@@ -512,7 +473,7 @@ export class ProjectSession {
     // the process has exited. Not waiting is how a quit left a turn's record open for good — its
     // settle threw "The database connection is not open" — and its agent running on with nobody
     // listening, finishing its answer into its own file a minute after the app was gone (2026-09-26).
-    const settled = Promise.allSettled([...inFlight.map((run) => run.done), ...this.chatDone.values()]);
+    const settled = Promise.allSettled(inFlight.map((run) => run.done));
     // What an agent was asking — a tool's permission, a question — is let go of only AFTER the agent is
     // stopped, and is never answered: closing the app is not an answer. Answered first, the agent read
     // a no (or "decide yourself") and wrote its reaction into the record before the abort reached it,

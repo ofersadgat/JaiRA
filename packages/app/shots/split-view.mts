@@ -197,7 +197,7 @@ async function main(): Promise<void> {
         ? { taskId: kept }
         : await app.ipc<{ taskId: string }>("task:create", {
             title: TITLE,
-            workflow: "chat/session",
+            workflow: "session",
             // A conversation is one the Chat view started (decision 0021): without this it is a plain
             // task, listed under Tasks and not under Chat.
             conversation: true,

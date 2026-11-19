@@ -45,6 +45,7 @@ import type { Project } from "./project";
 import { workflowLayerDirs } from "./fileLayers";
 import { boardPathOf, breadcrumbOf, endedAtOf, headingOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
+import { isWorkflowScript } from "./workflowScripts";
 import { workflowShape } from "./shape";
 import { bundleFor, taskRun, taskSummaries, type ViewOptions } from "./views";
 
@@ -194,7 +195,9 @@ function walkDir(
     }
     if (!entry.isFile()) continue;
     const layerPath = layerRelative(rel, prefix);
-    const kind = kindOf(layerPath, entry.name);
+    // A workflow SCRIPT is a state like a JSON file is (decision 0029 §2) — told from a helper it
+    // imports by what it declares, which only its text says.
+    const kind = layerPath?.startsWith("workflows/") === true && isWorkflowScript(full) ? "workflow" : kindOf(layerPath, entry.name);
     const node: FileNode = {
       path: rel,
       name: entry.name,
@@ -210,7 +213,7 @@ function walkDir(
       // loader uses, so the tree and a `--workflow` argument name the same thing. Taken from the
       // LAYER path, so a project's `.jaira/workflows/feature/plan.json` is `feature/plan` and not
       // `.jaira/feature/plan`.
-      node.stateId = layerPath.replace(/^workflows\//, "").replace(/\.(json|ya?ml)$/i, "");
+      node.stateId = layerPath.replace(/^workflows\//, "").replace(/\.(json|ya?ml|ts|js)$/i, "");
     }
     nodes.push(node);
   }

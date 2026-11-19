@@ -45,7 +45,7 @@
  */
 // Which tasks are conversations lives in `@jaira/shared` (`task.ts`): the engine archives tasks by themselves
 // and leaves conversations alone, so it has to ask the same question the Chat view does.
-export { CHAT_CONTROL, CHAT_SESSION, DYNAMIC_WORKFLOW_PREFIX, isConversation } from "@jaira/shared/browser";
+export { CHAT_SESSION, DYNAMIC_WORKFLOW_PREFIX, isConversation } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { DEFAULT_CONVERSATIONS, SHARED_SESSION, isConversation, type TaskSummary, type WorkflowEntry } from "@jaira/shared/browser";
 
@@ -71,7 +71,7 @@ export { openingOf, openingTitleOf as titleOf } from "@jaira/shared/browser";
 
 /**
  * Settings → Runs → Conversations (decision 0021): each row a choice of the workflows that can be a
- * conversation, named as a person knows them ("Session — chat/session"), and the value in effect kept
+ * conversation, named as a person knows them ("Session — session"), and the value in effect kept
  * in the list even where it does not qualify or is disabled, so the row says what is set.
  */
 export function conversationsSchemaOf<S extends Record<string, unknown>>(schema: S, workflows: readonly WorkflowEntry[], effective: unknown): S {

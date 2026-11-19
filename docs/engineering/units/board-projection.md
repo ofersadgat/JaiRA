@@ -46,7 +46,7 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `state_machine_events` | read whole per task by `project.events.list`; one row by `seq` in `taskOriginOf` | the journal, see [event-journal](event-journal.md) | written by the engine, the fan-out host and chat turns |
+| `state_machine_events` | read whole per task by `project.events.list`; one row by `seq` in `taskOriginOf` | the journal, see [event-journal](event-journal.md) | written by the engine, the fan-out host and a reported script's run |
 | `task_runtime` row | read: `status`, `snapshotHash`, `forkedAtSeq`, `forkBoundarySeq`, `rootInstanceId`, `outcome`, `outputsJson`, `failureJson`, timing | the row | [task-lifecycle](task-lifecycle.md) |
 | Task file | read by `tryRead`: `title`, `workflow`, `labels`, `description`, `inputs`, `inputProvenance`, `origin`, `dependsOn` | the file, see [task-file](../contracts/task-file.md) | task-lifecycle and the fan-out host |
 | `command_log` | read by `project.commands.list` into `tool` and `policy` turns | the table | written by [tool-policy](tool-policy.md) |

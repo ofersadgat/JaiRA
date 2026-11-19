@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     // deferred tools stale and may say the server is gone, which is the CLI's, not this rig's.
     const made = await app.ipc<{ taskId: string }>("task:create", {
       title: TITLE,
-      workflow: "chat/session",
+      workflow: "session",
       inputs: { message: "Use the web_fetch tool to fetch https://example.com, then tell me the page title. Do not use any other tool." },
     });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: AUTO } });

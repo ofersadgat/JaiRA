@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   try {
     await app.until(drawn, "the window to draw");
     await app.resize(1700, 980);
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", conversation: true, inputs: { message: ASK } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", conversation: true, inputs: { message: ASK } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: FULL } });
     await app.until(says(TITLE), "the conversation to be listed", 200);
     for (let i = 0; ; i++) {

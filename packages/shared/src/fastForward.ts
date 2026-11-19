@@ -33,8 +33,11 @@ export type FastForwardEnd =
 export interface FastForwardView {
   /** The task being walked forward. */
   taskId: string;
-  /** The conversation answering on the way, by its task — never the same thing as `taskId` unless the task IS one. */
-  controlTaskId: string;
+  /**
+   * The conversation answering on the way, by its task: the one that asked for the move. Absent when a
+   * person moved it directly — what comes up on the way is theirs.
+   */
+  controlTaskId?: string;
   /** The target state id, as `list_workflows` spells it. */
   target: string;
   /** What the strip calls it: the target's child key, or the tail of its id. */

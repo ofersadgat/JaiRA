@@ -54,8 +54,6 @@ const leaf = (label: string, inputs: Record<string, unknown>, outputs: Record<st
 });
 
 const FILES: Record<string, unknown> = {
-  // The stand-in for `chat/control` / `chat/session`, which ship in a later step: any state with an operation.
-  "chat/standin": leaf("Conversation", {}, { said: STRING }),
   "lib/product": leaf("Product", { idea: STRING }, { brief: STRING, features: FEATURES }),
   "lib/ux": leaf("UX", { feature: FEATURE }, { design: STRING }),
   "lib/plan_all": leaf("Plan all", { features: FEATURES }, { plan: STRING }),
@@ -131,21 +129,23 @@ const markersOf = (p: Project, taskId: string): WorkflowVersionEvent[] =>
     .filter(isWorkflowVersionEvent);
 
 describe("generating a new document", () => {
-  it("makes a conversation with children, wired by schema fit, that lints clean and is frozen as version 1", async () => {
+  it("makes a root with children, wired by schema fit, that lints clean and is frozen as version 1 — and no conversation", async () => {
     const p = project();
     await finishedProduct(p);
-    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/plan_all", nowMs: tick() });
 
     expect(result.resolution).toBe("new");
     const document = result.document!;
-    expect(document).toMatchObject({ kind: "dynamic", conversation: "chat/standin", rootId: `dynamic/${document.id}` });
+    expect(document).toMatchObject({ kind: "dynamic", rootId: `dynamic/${document.id}` });
+    expect(document.conversation).toBeUndefined();
     expect(document.versions.map((v) => v.version)).toEqual([1]);
     // It lives where workflows are frozen — and NOT under `workflows/`.
     expect(existsSync(join(p.paths.snapshotsDir, "_documents", `${document.id}.json`))).toBe(true);
     expect(existsSync(join(p.paths.workflowsDir, "dynamic"))).toBe(false);
 
     const authored = result.version!.authored!;
-    expect(authored["operation"]).toEqual((FILES["chat/standin"] as { operation: unknown }).operation);
+    // Named for the work it was made from, and holding no conversation (decision 0005, amended 2026-11-19).
+    expect(authored["operation"]).toBeUndefined();
     expect(authored["children"]).toEqual({
       product: { state: "lib/product", inputs: { idea: { json: "a board game", provenance: { via: "recorded", by: "t-product" } } } },
       // Takes the LIST: a plain mount — the join.
@@ -167,7 +167,7 @@ describe("generating a new document", () => {
   it("generates `each: split`, held, when the target takes one element of a list the source produced", async () => {
     const p = project();
     await finishedProduct(p);
-    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", nowMs: tick() });
     expect(result.generated.mount).toBe("split");
     expect((result.version!.authored!["children"] as Record<string, unknown>)["ux"]).toEqual({
       state: "lib/ux",
@@ -183,7 +183,7 @@ describe("generating a new document", () => {
   it("returns what it cannot settle, with the schema, and writes nothing — then takes the value as a literal with provenance", async () => {
     const p = project();
     await finishedProduct(p);
-    const open = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/costed", conversation: "chat/standin", nowMs: tick() });
+    const open = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/costed", nowMs: tick() });
     expect(open.resolution).toBe("unsettled");
     expect(open.generated.unsettled).toEqual([{ input: "budget", schema: { type: "number" }, kind: "json", required: true, reason: "no-fit" }]);
     expect(open.document).toBeUndefined();
@@ -192,7 +192,6 @@ describe("generating a new document", () => {
     const settled = await generateDocumentVersion(p, {
       taskId: "t-product",
       target: "lib/costed",
-      conversation: "chat/standin",
       supplied: { budget: { value: 40, provenance: { via: "asked", by: "person" } } },
       nowMs: tick(),
     });
@@ -208,24 +207,17 @@ describe("generating a new document", () => {
     const p = project();
     const pinned = await finishedProduct(p);
     write("lib/product", leaf("Product, rewritten since", { idea: STRING }, { brief: STRING, features: FEATURES }));
-    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    const result = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/plan_all", nowMs: tick() });
     const bundle = loadSnapshot(p.paths.snapshotsDir, result.version!.snapshotHash);
     expect(bundle.states["lib/product"]).toEqual(loadSnapshot(p.paths.snapshotsDir, pinned).states["lib/product"]);
     expect(bundle.states["lib/product"]!.label).toBe("Product");
-  });
-
-  it("refuses a conversation state that has no operation, and one that is not there", async () => {
-    const p = project();
-    await finishedProduct(p);
-    await expect(generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", conversation: "flow" })).rejects.toThrow(/has no operation/);
-    await expect(generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", conversation: "chat/nowhere" })).rejects.toThrow(/was not found/);
   });
 });
 
 /** A document with one task standing in it that has run `product` there. */
 async function documentWithTask(p: Project): Promise<{ documentId: string; rootId: string; v1: string }> {
   await finishedProduct(p);
-  const made = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+  const made = await generateDocumentVersion(p, { taskId: "t-product", target: "lib/ux", nowMs: tick() });
   const { id, rootId } = made.document!;
   createTask(p, { id: "t-dyn", title: "In the document", workflow: rootId, documentId: id });
   const started = await beginTaskRun(p, "t-dyn", { nowMs: tick() });
@@ -243,7 +235,7 @@ describe("versions", () => {
     const { documentId, v1 } = await documentWithTask(p);
     const before = readDocument(p.paths.snapshotsDir, documentId);
 
-    const result = await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    const result = await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() });
     expect(result.resolution).toBe("augmented");
     expect(result.document!.id).toBe(documentId);
     expect(result.document!.versions.map((v) => v.version)).toEqual([1, 2]);
@@ -263,7 +255,7 @@ describe("versions", () => {
     expect(lint(second)).toEqual([]);
     for (const id of Object.keys(first.states)) if (id !== first.rootId) expect(second.states[id]).toEqual(first.states[id]);
     // A move the document already offers writes nothing.
-    const again = await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    const again = await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() });
     expect(again.resolution).toBe("existing");
     expect(readDocument(p.paths.snapshotsDir, documentId).versions).toHaveLength(2);
   });
@@ -277,7 +269,7 @@ describe("versions", () => {
     p.events.recorder("t-fresh").record({ type: WORKFLOW_VERSION_EVENT } as unknown as EngineEvent, tick());
     expect(hasJournalHistory(p, "t-fresh")).toBe(false);
 
-    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() })).version!.snapshotHash;
+    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() })).version!.snapshotHash;
     // Until it loads, the task still says what it last RAN under; what it will load is the latest.
     expect(p.runtime.get("t-dyn")!.snapshotHash).toBe(v1);
     expect(currentPin(p, p.runtime.get("t-dyn")!)).toEqual({ snapshotHash: v2, documentId, version: 2 });
@@ -306,7 +298,7 @@ describe("versions", () => {
     const p = project();
     const { documentId, rootId } = await documentWithTask(p);
     createTask(p, { id: "t-other", title: "Another item", workflow: rootId, documentId });
-    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() })).version!.snapshotHash;
+    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() })).version!.snapshotHash;
     expect((await beginTaskRun(p, "t-other", { nowMs: tick() })).snapshotHash).toBe(v2);
     expect(markersOf(p, "t-other").map((m) => m.version)).toEqual([2]);
   });
@@ -314,7 +306,7 @@ describe("versions", () => {
   it("keeps history valid: a row reads against the version it ran under after the document moved on", async () => {
     const p = project();
     const { v1 } = await documentWithTask(p);
-    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() })).version!.snapshotHash;
+    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() })).version!.snapshotHash;
     await beginTaskRun(p, "t-dyn", { continues: true, reopen: true, nowMs: tick() });
     ranChild(p, "t-dyn", "t-dyn-root", "plan_all", "lib/plan_all");
 
@@ -332,7 +324,7 @@ describe("versions", () => {
   it("refuses a modification made against a version the document has moved past", async () => {
     const p = project();
     const { documentId } = await documentWithTask(p);
-    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() });
     const { appendVersion } = await import("../src/documents");
     expect(() => appendVersion(p.paths.snapshotsDir, documentId, 1, { snapshotHash: "x", createdAt: "now" })).toThrow(/is at version 2, not 1/);
   });
@@ -342,7 +334,7 @@ describe("a cut across a version boundary", () => {
   it("rewinds the task back under the version that was current at the cut; the next load picks the latest up again", async () => {
     const p = project();
     const { documentId, v1 } = await documentWithTask(p);
-    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() })).version!.snapshotHash;
+    const v2 = (await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() })).version!.snapshotHash;
     await beginTaskRun(p, "t-dyn", { continues: true, reopen: true, nowMs: tick() });
     ranChild(p, "t-dyn", "t-dyn-root", "plan_all", "lib/plan_all");
     finishTaskRun(p, "t-dyn", "completed", {}, tick());
@@ -365,7 +357,7 @@ describe("a cut across a version boundary", () => {
   it("forks a copy into the same document, under the version current at ITS cut", async () => {
     const p = project();
     const { documentId, v1 } = await documentWithTask(p);
-    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() });
     await beginTaskRun(p, "t-dyn", { continues: true, reopen: true, nowMs: tick() });
     finishTaskRun(p, "t-dyn", "completed", {}, tick());
 
@@ -393,9 +385,9 @@ describe("a move a real workflow does not support", () => {
     const pinned = await midFlow(p);
     const frozen = loadSnapshot(p.paths.snapshotsDir, pinned);
 
-    const result = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+    const result = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", nowMs: tick() });
     expect(result.resolution).toBe("cloned");
-    expect(result.document).toMatchObject({ kind: "diverged", rootId: "flow", conversation: "chat/standin", divergedFrom: { workflow: "flow", snapshotHash: pinned } });
+    expect(result.document).toMatchObject({ kind: "diverged", rootId: "flow", divergedFrom: { workflow: "flow", snapshotHash: pinned } });
     expect(result.generated.additions).toEqual({
       children: { ux: { state: "lib/ux", inputs: { feature: { $expr: ".children.product.output.features", each: "split", start: "manual" } } } },
       transitions: [{ when: "on_user_event('task_move', { to_state: 'ux' })", to: "ux", standing: true }],
@@ -423,7 +415,7 @@ describe("a move a real workflow does not support", () => {
   it("is picked up on the next load, and a rewind behind the divergence un-diverges", async () => {
     const p = project();
     const pinned = await midFlow(p);
-    const cloned = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+    const cloned = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", nowMs: tick() });
     const resumed = await beginTaskRun(p, "t-flow", { continues: true, nowMs: tick() });
     expect(resumed.snapshotHash).toBe(cloned.version!.snapshotHash);
     expect(markersOf(p, "t-flow")).toEqual([
@@ -433,7 +425,7 @@ describe("a move a real workflow does not support", () => {
     finishTaskRun(p, "t-flow", "completed", {}, tick());
 
     // A diverged document is augmented like any other — a graft onto its latest version.
-    const again = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/costed", conversation: "chat/standin", supplied: { budget: { value: 3, provenance: { via: "asked" } } }, nowMs: tick() });
+    const again = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/costed", supplied: { budget: { value: 3, provenance: { via: "asked" } } }, nowMs: tick() });
     expect(again.resolution).toBe("augmented");
     const second = loadSnapshot(p.paths.snapshotsDir, again.version!.snapshotHash);
     expect(lint(second)).toEqual([]);
@@ -449,8 +441,8 @@ describe("a move a real workflow does not support", () => {
   it("writes nothing for a target the workflow itself mounts and already offers", async () => {
     const p = project();
     await midFlow(p);
-    const first = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
-    const again = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+    const first = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", nowMs: tick() });
+    const again = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", nowMs: tick() });
     expect(again.resolution).toBe("existing");
     expect(readDocument(p.paths.snapshotsDir, first.document!.id).versions).toHaveLength(1);
   });
@@ -460,7 +452,7 @@ describe("save as workflow", () => {
   it("writes the latest version into a layer's workflows/, where it lints exactly as an authored workflow does", async () => {
     const p = project();
     const { documentId } = await documentWithTask(p);
-    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", conversation: "chat/standin", nowMs: tick() });
+    await generateDocumentVersion(p, { taskId: "t-dyn", target: "lib/plan_all", nowMs: tick() });
 
     const saved = saveDocumentAsWorkflow(p, { documentId, layer: "project", as: "saved/discovery" });
     expect(saved).toMatchObject({ stateId: "saved/discovery", layer: "project", version: 2 });
@@ -485,7 +477,7 @@ describe("save as workflow", () => {
     expect(() => saveDocumentAsWorkflow(p, { documentId, layer: "project", as: "../x" })).toThrow(/not a state id/);
     expect(() => saveDocumentAsWorkflow(p, { documentId, layer: "project", as: "dynamic/x" })).toThrow(/frozen documents are rooted/);
     await midFlow(p);
-    const cloned = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", conversation: "chat/standin", nowMs: tick() });
+    const cloned = await generateDocumentVersion(p, { taskId: "t-flow", target: "lib/ux", nowMs: tick() });
     expect(() => saveDocumentAsWorkflow(p, { documentId: cloned.document!.id, layer: "project", as: "saved/y" })).toThrow(/diverged copy of 'flow'/);
   });
 });

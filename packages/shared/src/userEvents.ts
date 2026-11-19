@@ -58,7 +58,7 @@ export interface TaskMoveRequest {
   project?: string;
   taskId: string;
   toState: string;
-  /** Who asked: a person directly (the default), or a control conversation on their behalf. */
+  /** Who asked: a person directly (the default), or a conversation on their behalf. */
   by?: "person" | "control";
   /** Go NOW: interrupt the running state and record it, and every state stepped over, `skipped`. */
   skip?: boolean;
@@ -117,6 +117,11 @@ export interface TaskFastForwardRequest {
   /** The states stepped through on the way, as child-key paths from the run's root. */
   through?: string[];
   by?: "person" | "control";
+  /**
+   * The conversation that asked for the move, by its task id — what answers the questions the states on
+   * the way ask (decision 0005 §4, amended 2026-11-19). Absent: they are the person's, as in any run.
+   */
+  conversation?: string;
   /** What the asker hands the target when it is finally entered. */
   inputs?: Record<string, JsonValue>;
   interactions?: Record<string, JsonValue[]>;
@@ -125,8 +130,8 @@ export interface TaskFastForwardRequest {
 
 export interface TaskFastForwardResult {
   taskId: string;
-  /** The conversation answering on the way — the task's own root, or the one it was given. */
-  controlTaskId: string;
+  /** The conversation answering on the way — the one that asked for the move — when there is one. */
+  controlTaskId?: string;
   status: "fast-forwarding";
 }
 

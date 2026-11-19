@@ -9,7 +9,7 @@
  * the definition every running task of it follows (`withoutSwitches`).
  *
  * A state is switched off by the WINNING file for its id — the first layer that has one — saying
- * `"disabled": true`, itself or through the file it follows: `{ "$ref": "$SYSTEM/workflows/chat/session",
+ * `"disabled": true`, itself or through the file it follows: `{ "$ref": "$SYSTEM/workflows/session",
  * "disabled": true }` is how a built-in is switched off in one project without copying it, and
  * `{ "$ref": "$BASE/workflows/feature", "disabled": false }` is how a project switches a Shared one
  * back on. Every state under a switched-off id is off with it ({@link disabledBy}).

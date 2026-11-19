@@ -27,7 +27,7 @@ The numbered `session:turn` deltas main pushes for the call a task is streaming,
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `type` | `"session:turn"` | yes | the discriminant |
-| `taskId` | string | yes | the task whose run or typed turn produced the delta |
+| `taskId` | string | yes | the task whose run produced the delta |
 | `sessionId` | string | no | the conversation the call claims a position in; absent for a call with no session |
 | `seq` | number | no | the position in that conversation |
 | `stateId` | string | no | the part of the call's session seed before its first `:` |
@@ -94,11 +94,10 @@ The numbered `session:turn` deltas main pushes for the call a task is streaming,
 
 ## Ordinals, clocks and state ids each mean less than their names suggest
 
-- `n` counts per task only within one run. A run's end forgets the counter, so the next run or typed turn starts again at 1, and the renderer's clear on `run:finished` is what keeps the skip rule from discarding those pushes. Typed turns alone never reset it.
+- `n` counts per task only within one run. A run's end forgets the counter, so the next run starts again at 1, and the renderer's clear on `run:finished` is what keeps the skip rule from discarding those pushes. A conversation's replies are calls of one run, so they share one count.
 - A tail at an equal `n` is kept over the snapshot, so a viewer that selects a streaming task and receives a push before its seed lands keeps a tail that lacks everything said before the selection.
 - Text and thinking pushes carry no `at`, so the renderer starts their clocks at its own time where main used the delta's arrival, and a seeded tail and a push-built tail can report slightly different thinking durations.
 - The renderer asks `startsThinking` of subagent entries too, while main asks it only of main-chain entries.
-- There is one tail per task. Two positions streaming in one task, as parallel children do, replace each other's tail on every delta, and a run and a typed turn in one task share it.
-- `stateId` is `"chat"` for every typed turn, not the host's state id, because a typed turn's seed is `chat:chat:<hostInstanceId>:<index>`.
+- There is one tail per task. Two positions streaming in one task, as parallel children do, replace each other's tail on every delta.
 - The renderer's `LiveTurn` names no task, so a view that draws it without matching `sessionId` and `seq` can draw the previous task's tail until the seed lands.
 - `providerSessionId` never reaches the renderer's tail, and an empty text or thinking fragment is never pushed.

@@ -1,11 +1,16 @@
 /**
- * Continuing a run's conversation by hand, against a real project.
+ * Typing into a conversation, against a real project — what the composer offers, and what a message does.
  *
  * Every layer below this is unit-tested against fakes, which leaves exactly one thing unproven: that
- * the pieces meet. This drives the service the way the renderer will — start a real run, pick the
- * instance whose transcript is on screen, send a message — and checks that the reply lands where the
- * panel reads from. The failures it exists to catch are the integration ones: a position computed off
- * the wrong row, a snapshot that cannot be found, a child that projects under the wrong parent.
+ * the pieces meet. This drives the service the way the renderer does. The composer's settings are
+ * planned for whichever instance is on screen — a run's state that spoke, read off its pinned
+ * snapshot. A message goes to a conversation that is a PROGRAM (decision 0029 §2) — the shipped
+ * `session`, a loop over `input()` — as the answer to its `input()`, and the reply is the run's next
+ * call, on the same chain; a run that is not one takes no message, and says so. The failures it exists
+ * to catch are the integration ones: a position computed off the wrong row, a snapshot that cannot be
+ * found, a reply that lands somewhere the panel does not read.
+ *
+ * Every model call is scripted (`fake`): the rules a run starts with answer every call it makes.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,9 +18,9 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, chatInstanceIdOf, isChatInstance } from "@jaira/runtime";
-import { READ_ONLY_PRESET_TOOLS, subjectKindOf, type ChatSettings, type InstanceNode, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
-import { testHome } from "@jaira/testing";
+import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, type FakeRule } from "@jaira/runtime";
+import { subjectKindOf, type ChatSettings, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
+import { eventually, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 
 /** The permission set files that ship — the source of truth the built-in layer is copied from. */
@@ -25,14 +30,20 @@ let dir: string;
 let service: AppService;
 let pushes: PushMessage[];
 
-beforeEach(async () => {
+/**
+ * A project and the service over it. `shipped`: on what JaiRA really ships (`shippedLayer`), where the
+ * Chat view's conversation — the `session` program — is; otherwise on the suite's empty built-in layer,
+ * with the spec-planning workflow written into the project.
+ */
+async function openProject(shipped: boolean): Promise<void> {
+  if (shipped) shippedLayer();
   dir = mkdtempSync(join(tmpdir(), "jaira-chat-"));
   const paths = initProject(dir, testHome());
-  writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
+  if (!shipped) writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   await service.open(dir);
-});
+}
 
 afterEach(async () => {
   await service.close();
@@ -78,7 +89,45 @@ function planOf(request: Parameters<AppService["chatPlan"]>[0]): NonNullable<Ret
   return plan;
 }
 
+/** The program waits at its `input()` for the next message — between replies, idle. */
+const parked = (taskId: string): boolean =>
+  (service as unknown as { session(): { hub: { list(): Array<{ component: string; taskId?: string }> } } })
+    .session()
+    .hub.list()
+    .some((r) => r.component === "input" && r.taskId === taskId);
+
+/** The program's replies so far — one per message it answered, whether the call settled or failed. */
+const replies = (taskId: string): number => service.sessionHistory({ taskId }).length;
+
+/** What the model answers each message. */
+const SCRIPT: FakeRule[] = [
+  { promptIncludes: "hello there", output: "hi" },
+  { promptIncludes: "one", output: "the first reply" },
+  { promptIncludes: "two", output: "the second reply" },
+  { promptIncludes: "hello", output: "hello back" },
+  { promptIncludes: "have a look around", output: "looked" },
+];
+
+/** A conversation as the Chat view starts one, its opening reply in, waiting for the next message. */
+async function conversation(fake: FakeRule[] = SCRIPT): Promise<string> {
+  const { taskId } = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "hello there", improve: false } });
+  await service.startTask({ taskId, fake });
+  await eventually(() => replies(taskId) >= 1 && parked(taskId), "the opening reply", 20_000);
+  return taskId;
+}
+
+/** Send a message and wait for its reply, and for the program to wait again. */
+async function send(taskId: string, message: string, extra: { instanceId?: string; overrides?: ChatSettings } = {}): Promise<void> {
+  const before = replies(taskId);
+  const sent = await service.sendChatMessage({ taskId, instanceId: extra.instanceId ?? "", message, ...(extra.overrides !== undefined ? { overrides: extra.overrides } : {}) });
+  // Taken by the program: the answer to its `input()`, never a turn beside the run.
+  expect(sent).toMatchObject({ program: true });
+  await eventually(() => replies(taskId) > before && parked(taskId), `the reply to "${message}"`, 20_000);
+}
+
 describe("the settings a message would run under", () => {
+  beforeEach(() => openProject(false));
+
   it("are the ones the run actually used, read from its pinned snapshot", async () => {
     const { taskId, instanceId } = await ranTask();
     const plan = planOf({ taskId, instanceId });
@@ -118,12 +167,10 @@ describe("the settings a message would run under", () => {
   it("names the permission posture after the PERMISSION_SET the map exactly is — a match, never a memory", async () => {
     // The suite runs over an empty built-in layer, so the permission sets that ship are put where a project
     // would override them: the match is the same whichever layer supplies the file.
-    for (const name of ["ask-first", "read-only", "auto", "full"]) {
-      for (const bucket of ["", "control"]) {
-        const file = join(dir, ".jaira", "permission-sets", bucket, `${name}.json`);
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, readFileSync(join(SHIPPED_PERMISSION_SETS, bucket, `${name}.json`), "utf8"));
-      }
+    for (const id of ["ask-first", "read-only", "auto", "full", "improve/simulation"]) {
+      const file = join(dir, ".jaira", "permission-sets", `${id}.json`);
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, readFileSync(join(SHIPPED_PERMISSION_SETS, `${id}.json`), "utf8"));
     }
     const shipped = (id: string): PermissionSetDecl => JSON.parse(readFileSync(join(SHIPPED_PERMISSION_SETS, `${id}.json`), "utf8")) as PermissionSetDecl;
     const { taskId, instanceId } = await ranTask();
@@ -152,17 +199,13 @@ describe("the settings a message would run under", () => {
 
     // The card opens on the bucket whose permission set the map is, and the label is that bucket's: the top level's is "".
     expect(planned({ permissionSet: shipped("read-only") }).available.bucket).toBe("");
-    const control = planned({ permissionSet: shipped("control/ask-first") });
-    expect(control.available.bucket).toBe("control");
-    expect(control.effective.permissions).toBe("ask first");
-    expect(control.available.permissionSets?.filter((t) => t.bucket === "control").map((t) => [t.name, t.layer])).toEqual([
-      ["ask-first", "project"],
-      ["auto", "project"],
-      ["full", "project"],
-      ["read-only", "project"],
-    ]);
+    const bucketed = planned({ permissionSet: shipped("improve/simulation") });
+    expect(bucketed.available.bucket).toBe("improve");
+    // A set JaiRA has no words for is called by its file's name.
+    expect(bucketed.effective.permissions).toBe("simulation");
+    expect(bucketed.available.permissionSets?.filter((t) => t.bucket === "improve").map((t) => [t.name, t.layer])).toEqual([["simulation", "project"]]);
     // The workflow tools are offered a line, and since step 6 something answers when one is called.
-    expect(control.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["list_workflows", "start_task", "stop_task"]));
+    expect(bucketed.available.tools.map((t) => t.name)).toEqual(expect.arrayContaining(["list_workflows", "start_task", "stop_task"]));
   });
 
   it("keeps a map as a NEW permission set — in a writable layer, under a name a reference can carry, never over another", async () => {
@@ -212,154 +255,124 @@ describe("the settings a message would run under", () => {
 
   it("keeps SENDING a refusal, because a typed message deserves a reason", async () => {
     // The other half of the same change. Asking whether you can type here may answer no; pressing
-    // Enter and being told nothing would leave the message to vanish silently.
-    const { taskId } = await ranTask();
+    // Enter and being told nothing would leave the message to vanish silently. A run that is not a
+    // program waits for no message — not at its composite root, and not at the state that spoke.
+    const { taskId, instanceId } = await ranTask();
     const root = service.taskDetail(taskId).instances[0]!;
-    await expect(
-      service.sendChatMessage({ taskId, instanceId: root.instanceId, message: "hello", fake: happyRules() }),
-    ).rejects.toThrow(/not part of any conversation/);
+    for (const at of [root.instanceId, instanceId]) {
+      await expect(service.sendChatMessage({ taskId, instanceId: at, message: "hello", fake: happyRules() })).rejects.toThrow(
+        /takes no more messages: it is not a program that waits for them/,
+      );
+    }
   });
 });
 
-describe("sending a message", () => {
-  it("records a reply as a child of the instance being read", async () => {
-    const { taskId, instanceId } = await ranTask();
-    const sent = await service.sendChatMessage({
-      taskId,
-      instanceId,
-      message: "why did you pick that approach?",
-      // The run is scripted, so the continuation is too — otherwise this needs a provider. Same
-      // executor path either way; only the leaf differs.
-      fake: happyRules(),
-    });
-
-    expect(sent.failure).toBeUndefined();
-    expect(sent.instanceId).toBe(chatInstanceIdOf(instanceId));
-    expect(sent.index).toBe(0);
-
-    // Where the panel reads from: the child must be in the tree, under the right parent.
-    const detail = service.taskDetail(taskId);
-    const parent = findNode(detail.instances, instanceId);
-    expect(parent).toBeDefined();
-    const chat = parent!.children.find((c) => c.instanceId === chatInstanceIdOf(instanceId));
-    expect(chat).toBeDefined();
-    expect(chat!.childKey).toBe("ask");
-    expect(chat!.superseded).toBe(false);
-  });
+describe("sending a message to a conversation", { timeout: 60_000 }, () => {
+  beforeEach(() => openProject(true));
 
   it("continues the conversation rather than starting one beside it", async () => {
-    const { taskId, instanceId } = await ranTask();
-    const first = await service.sendChatMessage({ taskId, instanceId, message: "one", fake: happyRules() });
-    const second = await service.sendChatMessage({ taskId, instanceId, message: "two", fake: happyRules() });
-
-    // The second message reopens the SAME node at the next iteration. A new instance under this key
-    // would supersede the first and the panel filters those out.
-    expect(second.instanceId).toBe(first.instanceId);
-    expect(second.index).toBe(1);
-
-    const detail = service.taskDetail(taskId);
-    const parent = findNode(detail.instances, instanceId);
-    const chats = parent!.children.filter((c) => isChatInstance(c.instanceId));
-    expect(chats).toHaveLength(1);
-    expect(chats[0]!.index).toBe(1);
+    const taskId = await conversation();
+    await send(taskId, "one");
+    await send(taskId, "two");
+    // Every reply is the next position of ONE conversation — never a second one beside it, and never a
+    // branch of it, either of which the panel would show as a separate conversation or not at all.
+    const history = service.sessionHistory({ taskId });
+    expect(new Set(history.map((h) => h.sessionId)).size).toBe(1);
+    expect(history.map((h) => h.seq)).toEqual([0, 1, 2]);
+    expect(history.every((h) => h.branch === undefined)).toBe(true);
+    expect(service.chatThread({ taskId })!.session.turns.map((t) => t.text)).toEqual(["hello there", "hi", "one", "the first reply", "two", "the second reply"]);
+    service.cancelTask(taskId);
   });
 
   it("continues the conversation when the REPLY is what was addressed, rather than nesting inside it", async () => {
-    // Clicking the answer on screen and typing is the ordinary way to carry on. The chat child is
-    // recorded under its host's state id, so it passes the "does this state speak" test on the state
-    // alone — and matching it would mount a second conversation inside the first, at iteration 0,
-    // under `2_000_000 + n`. A chat child IS a conversation; it does not host one.
-    const { taskId, instanceId } = await ranTask();
-    const first = await service.sendChatMessage({ taskId, instanceId, message: "one", fake: happyRules() });
-    const second = await service.sendChatMessage({ taskId, instanceId: first.instanceId, message: "two", fake: happyRules() });
-
-    expect(second.instanceId).toBe(first.instanceId);
-    expect(second.index).toBe(1);
-    // And the plan for the reply is the HOST's plan — same state, same inherited settings.
-    expect(planOf({ taskId, instanceId: first.instanceId }).from).toBe(planOf({ taskId, instanceId }).from);
+    // Clicking the answer on screen and typing is the ordinary way to carry on. The reply is a call
+    // state of the program, below its root — and addressing it must reach the same conversation, not
+    // mount a second one inside it.
+    const taskId = await conversation();
+    const reply = service.sessionHistory({ taskId })[0]!.instanceId;
+    const thread = service.chatThread({ taskId })!;
+    expect(reply).not.toBe(thread.instanceId);
+    await send(taskId, "one", { instanceId: reply });
+    const history = service.sessionHistory({ taskId });
+    expect(history).toHaveLength(2);
+    expect(new Set(history.map((h) => h.sessionId)).size).toBe(1);
+    expect(service.chatThread({ taskId })!.session.turns.map((t) => t.text)).toEqual(["hello there", "hi", "one", "the first reply"]);
+    // And the plan for the reply is the conversation's — the same inherited settings.
+    expect(planOf({ taskId, instanceId: reply }).settings).toEqual(planOf({ taskId, instanceId: thread.instanceId }).settings);
+    service.cancelTask(taskId);
   });
 
-  it("does not move the task's status — a conversation is not a second execution", async () => {
-    const { taskId, instanceId } = await ranTask();
+  it("does not move the task's status — waiting for the next message is not a second execution", async () => {
+    const taskId = await conversation();
     const before = service.listTasks().find((t) => t.taskId === taskId)!.status;
-    await service.sendChatMessage({ taskId, instanceId, message: "hello", fake: happyRules() });
+    expect(before).toBe("completed");
+    await send(taskId, "hello");
     expect(service.listTasks().find((t) => t.taskId === taskId)!.status).toBe(before);
+    service.cancelTask(taskId);
   });
 
   it("hands over every tool the composer offers — all of them registered, none of them fatal", async () => {
-    // `gateTools` throws on a name it cannot resolve, which is the right answer for a name nobody
-    // registered and the wrong one for a wiring gap. `sendChatMessage` registered `shell` only, so
-    // ticking a file tool — offered by the very same plan — threw `not registered` and the turn never
-    // ran. Granting all three is the assertion that the two halves of the registry are both wired.
-    const { taskId, instanceId } = await ranTask();
-    const offered = planOf({ taskId, instanceId }).available.tools.map((t) => t.name);
-    const sent = await service.sendChatMessage({
-      taskId,
-      instanceId,
-      message: "have a look around",
+    // A tool the composer offers that the run cannot resolve would throw `not registered` when the
+    // message's set is handed to the run, and the reply would never be made. Granting all of them —
+    // offered by the very same plan — is the assertion that the two halves of the registry are wired.
+    const taskId = await conversation();
+    const offered = planOf({ taskId, instanceId: service.chatThread({ taskId })!.instanceId }).available.tools.map((t) => t.name);
+    await send(taskId, "have a look around", {
       overrides: {
         tools: offered,
-        // Denied outright, so the turn cannot actually reach a shell from a test — the point here is
+        // Denied outright, so the reply cannot actually reach a shell from a test — the point here is
         // that resolving the tools succeeds at all.
         permissions: { tools: Object.fromEntries(offered.map((name) => [name, "deny" as const])) },
       },
-      fake: happyRules(),
     });
-    expect(sent.failure).toBeUndefined();
+    expect(service.sessionHistory({ taskId }).at(-1)!.status).toBe("success");
+    expect(service.chatThread({ taskId })!.session.turns.at(-1)?.text).toBe("looked");
+    service.cancelTask(taskId);
   });
 
-  it("refuses an empty message rather than sending a turn that says nothing", async () => {
-    const { taskId, instanceId } = await ranTask();
-    await expect(service.sendChatMessage({ taskId, instanceId, message: "   " })).rejects.toThrow(/cannot be empty/);
+  it("refuses an empty message rather than sending a reply that says nothing", async () => {
+    const taskId = await conversation();
+    await expect(service.sendChatMessage({ taskId, instanceId: "", message: "   " })).rejects.toThrow(/cannot be empty/);
+    expect(replies(taskId)).toBe(1);
+    service.cancelTask(taskId);
   });
 });
 
 /**
- * A turn that ended badly — which is what pressing stop produces, minus the timing.
- *
- * The bug this pins was one missing field: `runChatTurn` emitted `operation.failed` without the
- * call's metrics, and `session_ref` is generated from `$.metrics.sessionRef`. So the turn named no
- * position, `stateSessions` could not see it, and the conversation's end was computed as the position
- * the failed record was ALREADY HOLDING. The next message collided with it and forked — onto a branch
- * the panel does not read, so everything sent after a stop vanished, the stopped turn went with it,
- * and the fork inherited no provider handle, so the agent started a fresh session instead of
- * resuming what it had been interrupted in the middle of.
+ * A reply that ended badly — which is what pressing stop on a transport that can only cancel
+ * produces, minus the timing. The program catches it and waits for the next message.
  */
-describe("a turn that was stopped", () => {
+describe("a reply that was stopped", { timeout: 60_000 }, () => {
+  beforeEach(() => openProject(true));
+
   it("keeps its place, so the next message continues the same conversation", async () => {
-    const { taskId, instanceId } = await ranTask();
-
-    const stopped = await service.sendChatMessage({ taskId, instanceId, message: "do the thing", fake: [{ error: "stopped" }] });
-    expect(stopped.failure).toContain("stopped");
-    // The position it ended at, which is the fact the journal has to carry for anything to find it.
-    expect(stopped.sessionRef).toBeDefined();
-
-    const after = await service.sendChatMessage({ taskId, instanceId, message: "carry on then", fake: happyRules() });
-    expect(after.failure).toBeUndefined();
-
-    // The SAME conversation, one position further on — never a fork. A fork is what a collided
-    // position produces, and it mints a session id nothing on screen is reading from.
-    const [session, seq] = [stopped.sessionRef!.slice(0, -2), Number(stopped.sessionRef!.slice(-1))];
-    expect(after.sessionRef).toBe(`${session}@${seq + 1}`);
+    const taskId = await conversation([
+      { promptIncludes: "hello there", output: "hi" },
+      { promptIncludes: "do the thing", error: "stopped" },
+      { promptIncludes: "carry on then", output: "carrying on" },
+    ]);
+    await send(taskId, "do the thing");
+    await send(taskId, "carry on then");
+    // The SAME conversation, one position further on — never a fork, and never over the stopped reply:
+    // the failed call's record keeps its seat, and the next one is the seat after it.
+    const history = service.sessionHistory({ taskId });
+    expect(history.map((h) => h.status)).toEqual(["success", "error", "success"]);
+    expect(new Set(history.map((h) => h.sessionId)).size).toBe(1);
+    expect(history.map((h) => h.seq)).toEqual([0, 1, 2]);
+    service.cancelTask(taskId);
   });
 
   it("appears in the session history, which is what the panel finds a conversation BY", async () => {
-    const { taskId, instanceId } = await ranTask();
-    await service.sendChatMessage({ taskId, instanceId, message: "the one that got stopped", fake: [{ error: "stopped" }] });
-    const chat = service.sessionHistory({ taskId }).find((h) => h.instanceId === chatInstanceIdOf(instanceId));
-    // Listed, and listed as what it was. Unlisted, its position was invisible and the next message
-    // was sent straight into it.
-    expect(chat).toBeDefined();
-    expect(chat!.status).toBe("error");
+    const taskId = await conversation([
+      { promptIncludes: "hello there", output: "hi" },
+      { promptIncludes: "the one that got stopped", error: "stopped" },
+    ]);
+    await send(taskId, "the one that got stopped");
+    const history = service.sessionHistory({ taskId });
+    // Listed, and listed as what it was — in the same conversation as the reply before it.
+    expect(history).toHaveLength(2);
+    expect(history[1]!.status).toBe("error");
+    expect(history[1]!.sessionId).toBe(history[0]!.sessionId);
+    service.cancelTask(taskId);
   });
 });
-
-/** Depth-first by instance id — the projection's tree is only navigable downward. */
-function findNode(roots: readonly InstanceNode[], id: string): InstanceNode | undefined {
-  for (const node of roots) {
-    if (node.instanceId === id) return node;
-    const found = findNode(node.children, id);
-    if (found !== undefined) return found;
-  }
-  return undefined;
-}

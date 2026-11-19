@@ -135,6 +135,8 @@ export interface HeldMoveRequest {
   /** The person already confirmed an ASK cell for this move. */
   confirmed?: true;
   by: "person" | "control";
+  /** The conversation that asked for it (`by: "control"`), by its task id. */
+  conversation?: string;
 }
 
 /** `jaira.moveAsked` — the host parked a move's input question in the task's conversation. */

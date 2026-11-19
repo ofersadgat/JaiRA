@@ -3,7 +3,7 @@
  * which of its turns the person corrected, the files that define the workflow being improved, the
  * lessons already on record, and the one place a change is WRITTEN.
  *
- * They are host functions a script imports from `$REGISTRY` — `chat/program`, `improve/lesson` and
+ * They are host functions a script imports from `$REGISTRY` — `session`, `improve/lesson` and
  * `improve/conversation` call them — and they are the whole of what an improver can touch outside
  * its own model calls. In particular a model never writes a file: it PROPOSES files, and
  * `apply_change` (JaiRA's code) decides whether each path is one a lesson may change, writes it,
@@ -17,9 +17,11 @@ export const CONVERSATION_DIGEST = "conversation_digest";
 export const WORKFLOW_SOURCE = "workflow_source";
 export const LESSONS_LIST = "lessons_list";
 export const APPLY_CHANGE = "apply_change";
+export const DECLINE_CHANGE = "decline_change";
+export const SIMULATE_CHANGE = "simulate_change";
 
 /** Every function this module registers. */
-export const IMPROVE_FUNCTIONS: readonly string[] = [CONVERSATION_DIGEST, WORKFLOW_SOURCE, LESSONS_LIST, APPLY_CHANGE];
+export const IMPROVE_FUNCTIONS: readonly string[] = [CONVERSATION_DIGEST, WORKFLOW_SOURCE, LESSONS_LIST, APPLY_CHANGE, DECLINE_CHANGE, SIMULATE_CHANGE];
 
 /** One file a change proposes: a path under a layer root, and its whole new content. */
 export interface ChangeFile {
@@ -61,12 +63,32 @@ export interface ImproveHost {
    */
   source(request: { workflow?: string; task?: string }, callerTask: string | undefined): Promise<JsonValue>;
   /** The lessons on record in a layer, newest first: each one's rule, lever, target and how often it recurred. */
-  lessons(request: { scope?: LessonScope }): Promise<JsonValue>;
+  /**
+   * The lessons on record in a layer — or, with `elsewhere`, those this machine's OTHER projects have
+   * recorded, each naming its project: what a lesson turning up in a second project is told by
+   * (decision 0029 §7).
+   */
+  lessons(request: { scope?: LessonScope; elsewhere?: boolean }): Promise<JsonValue>;
   /**
    * Write a change: refuse a path a lesson may not touch, write the rest, load what changed and
    * restore every file if it does not, then record the lesson. Answers what was written, or why not.
    */
   apply(request: { files: ChangeFile[]; lesson: LessonRecord; scope?: LessonScope }): Promise<JsonValue>;
+  /**
+   * Record that the person turned a proposed change down at its review: one more occurrence of the
+   * lesson, DECLINED, with what they said — what tells how often the improver's proposals are turned
+   * down ("Revisit when"), and tells the next proposal for it what the person did not want.
+   */
+  decline(request: { lesson: LessonRecord; scope?: LessonScope; comment?: string }): Promise<JsonValue>;
+  /**
+   * Try a change before it is offered (decision 0029 §5 step 5): fork the conversation in `context` at
+   * the message the corrected reply answered, hand the fork the proposed files — read as if written, and
+   * written nowhere — and send that message again, for one pass in a throwaway workspace, under a set
+   * that cannot write outside it, push or publish, with nobody to ask. Answers what the conversation said
+   * and did then, beside what it said the first time, and whether it took the new version; or
+   * `simulated: false` and why it could not be tried.
+   */
+  simulate(request: { files: ChangeFile[]; lesson: string; scope?: LessonScope; context: { task?: string; session?: { id: string } | null; quote?: string } }, callerTask: string | undefined): Promise<JsonValue>;
 }
 
 const PLAIN = { interactive: false, readOnly: true, memoizable: false } as const;
@@ -119,7 +141,7 @@ export function registerImproveFunctions(registry: CapabilityRegistry<WorkflowMe
       PLAIN,
     ),
   );
-  registry.functions.set(LESSONS_LIST, hostFunction(wrap((a) => host.lessons({ ...(a.scope === "shared" || a.scope === "project" ? { scope: a.scope } : {}) })), PLAIN));
+  registry.functions.set(LESSONS_LIST, hostFunction(wrap((a) => host.lessons({ ...(a.scope === "shared" || a.scope === "project" ? { scope: a.scope } : {}), ...(a.elsewhere === true ? { elsewhere: true } : {}) })), PLAIN));
   registry.functions.set(
     APPLY_CHANGE,
     hostFunction(
@@ -128,6 +150,45 @@ export function registerImproveFunctions(registry: CapabilityRegistry<WorkflowMe
         const lesson = (a.lesson ?? {}) as LessonRecord;
         if (typeof lesson.rule !== "string" || lesson.rule.trim() === "") throw new Error("apply_change needs the lesson's rule");
         return host.apply({ files, lesson, ...(a.scope === "shared" || a.scope === "project" ? { scope: a.scope } : {}) });
+      }),
+      WRITES,
+    ),
+  );
+  registry.functions.set(
+    SIMULATE_CHANGE,
+    hostFunction(
+      wrap((a) => {
+        const files = Array.isArray(a.files) ? (a.files as ChangeFile[]) : [];
+        const context = (a.context ?? {}) as { task?: unknown; session?: unknown; quote?: unknown };
+        return host.simulate(
+          {
+            files,
+            lesson: typeof a.lesson === "string" ? a.lesson : "",
+            ...(a.scope === "shared" || a.scope === "project" ? { scope: a.scope } : {}),
+            context: {
+              ...(typeof context.task === "string" ? { task: context.task } : {}),
+              ...(context.session !== undefined ? { session: context.session as { id: string } | null } : {}),
+              ...(typeof context.quote === "string" ? { quote: context.quote } : {}),
+            },
+          },
+          callerTask,
+        );
+      }),
+      // It writes nothing anybody keeps, but it runs a pass — model calls, a workspace — so it is no read.
+      WRITES,
+    ),
+  );
+  registry.functions.set(
+    DECLINE_CHANGE,
+    hostFunction(
+      wrap((a) => {
+        const lesson = (a.lesson ?? {}) as LessonRecord;
+        if (typeof lesson.rule !== "string" || lesson.rule.trim() === "") throw new Error("decline_change needs the lesson's rule");
+        return host.decline({
+          lesson,
+          ...(a.scope === "shared" || a.scope === "project" ? { scope: a.scope } : {}),
+          ...(typeof a.comment === "string" && a.comment.length > 0 ? { comment: a.comment } : {}),
+        });
       }),
       WRITES,
     ),

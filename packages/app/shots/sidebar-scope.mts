@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       [world.project, "Plan the lighthouse rota", "Here is a rota."],
       [second, "Check the tide tables", "The tables are current."],
     ] as const) {
-      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", conversation: true, inputs: { message: title }, project });
+      const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", conversation: true, inputs: { message: title }, project });
       // Placed where it was made: a project of several workspaces otherwise puts it wherever there is room.
       await app.ipc("task:start", { taskId: made.taskId, project, runOn: { project }, fake: [{ output: answer }] });
       ids[title] = made.taskId;

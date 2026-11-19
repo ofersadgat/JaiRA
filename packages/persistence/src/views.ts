@@ -61,9 +61,15 @@ export function functionRefsOf(bundle: WorkflowBundle): Set<string> {
  * 0018). The counts that reach across tasks (`controls`) are still taken over all of them.
  */
 export function taskSummaries(project: Project, only?: ReadonlySet<string>): TaskSummary[] {
+  // A simulation's fork (decision 0029 §5 step 5) is a pass an improver reads, never a task anybody works.
+  const simulations = new Set<string>();
   // Who stands under whom: a task filed beneath another, adopted by it, or made by its fan-out.
   const under = new Map<string, number>();
   for (const meta of project.tasks.list()) {
+    if (meta.simulation !== undefined) {
+      simulations.add(meta.id);
+      continue;
+    }
     const above = meta.origin?.taskId ?? meta.parentTaskId;
     if (above !== undefined) under.set(above, (under.get(above) ?? 0) + 1);
   }
@@ -76,11 +82,22 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
     }
     return currentEvents ?? undefined;
   };
-  const rows = project.runtime.list();
-  // Which of them have a call in flight: an open record (decision 0018).
+  const rows = project.runtime.list().filter((row) => !simulations.has(row.taskId));
+  // Which of them have a call in flight: an open record (decision 0018). Not a program's wait for the
+  // next message (decision 0029 §2): its `input()` holds a record open, and nothing is being answered.
   const answering = new Set(
-    (project.db.prepare(`SELECT DISTINCT task_id FROM operation_records WHERE status = 'open'`).all() as Array<{ task_id: string }>).map((r) => r.task_id),
+    (
+      project.db
+        .prepare(`SELECT DISTINCT task_id FROM operation_records WHERE status = 'open' AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input'`)
+        .all() as Array<{ task_id: string }>
+    ).map((r) => r.task_id),
   );
+  // Which wait for a message (a program's `input()`, decision 0029 §2): every park is written down.
+  const waitsForMessage = new Set(
+    (project.db.prepare(`SELECT DISTINCT task_id FROM pending_interactions WHERE component = 'input'`).all() as Array<{ task_id: string }>).map((r) => r.task_id),
+  );
+  const shownStatus = (row: { taskId: string; status: TaskStatus }): TaskStatus =>
+    idleStatusOf(project, row, { waits: waitsForMessage.has(row.taskId), answering: answering.has(row.taskId) });
   const listed = only === undefined ? rows : rows.filter((row) => only.has(row.taskId));
   const lastMessage = lastMessageTimes(project, listed.map((row) => row.taskId));
   return listed.map((row) => {
@@ -99,8 +116,9 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
     return {
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
-      status: row.status,
+      status: shownStatus(row),
       ...(answering.has(row.taskId) ? { answering: true as const } : {}),
+      ...(waitsForMessage.has(row.taskId) ? { waitsForMessage: true as const } : {}),
       ...archivedOf(row),
       workflow: meta?.workflow ?? "",
       ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
@@ -176,8 +194,42 @@ export function taskOriginOf(project: Project, row: TaskRuntimeRow, meta?: TaskM
     at: row.forkedAtSeq,
     boundary: row.forkBoundarySeq,
     boundaryAt: boundary?.created_at ?? 0,
-    label: event === undefined ? (parent === undefined ? "a task since deleted" : `event ${row.forkedAtSeq}`) : cutLabelOf(event.type, event.payload_json),
+    label:
+      event === undefined
+        ? parent === undefined
+          ? "a task since deleted"
+          : `event ${row.forkedAtSeq}`
+        : (messageAtWait(project, row.parentTaskId, row.forkedAtSeq) ?? cutLabelOf(event.type, event.payload_json)),
   };
+}
+
+/** A compiled program's `input()` children are keyed `input`, `input_1`, … (hw `scriptCompile.ts`). */
+const INPUT_CHILD = /^input(_\d+)?$/;
+
+/**
+ * A cut at one of a program conversation's waits (decision 0029 §2) — the start of an `input()`, which
+ * is where its edit points sit — in the words the thread counts in: the opening is message 1, and each
+ * wait answered with a message before this one took the next. A wait that ended otherwise (`idle`, or
+ * stepped past for a newer version) took none. `undefined` for a cut anywhere else.
+ */
+function messageAtWait(project: Project, taskId: string, seq: number): string | undefined {
+  const waits = new Set<string>();
+  let answered = 0;
+  for (const row of project.events.list(taskId)) {
+    if (row.seq > seq) break;
+    const key = (row.event as { childKey?: string }).childKey;
+    if (row.type === "instance.entered" && row.instanceId !== undefined && key !== undefined && INPUT_CHILD.test(key)) waits.add(row.instanceId);
+    if (row.seq === seq) {
+      if (row.type !== "operation.started" || row.instanceId === undefined || !waits.has(row.instanceId)) return undefined;
+      return `before message ${answered + 2}`;
+    }
+    if (row.type === "script.call.settled" && row.instanceId !== undefined && waits.has(row.instanceId)) {
+      const settled = row.event as { outcome?: string; value?: unknown };
+      const value = settled.value as { idle?: unknown } | null | undefined;
+      if (settled.outcome === "value" && value !== null && typeof value === "object" && value.idle !== true) answered += 1;
+    }
+  }
+  return undefined;
 }
 
 /** The sentence a cut point makes: what the journal was about to do there. */
@@ -843,6 +895,28 @@ export function boardView(project: Project, level?: string, options?: ViewOption
 }
 
 /** An archived task's finish and when, as a view carries it — nothing for one that is not archived. */
+/**
+ * The status a task SHOWS. A program conversation waiting for its next message (decision 0029 §2) is
+ * IDLE, as a conversation between messages always was: its run is live, but nothing works and nobody is
+ * asked, so it reads as its last reply ended — `failed` when that call failed, else `completed` — not
+ * `running`. Every other task shows its row's status. `known` is what a caller listing many tasks has
+ * read already: whether the task waits at an `input()`, and whether a call of it is being answered.
+ */
+export function idleStatusOf(project: Project, row: { taskId: string; status: TaskStatus }, known?: { waits: boolean; answering: boolean }): TaskStatus {
+  if (row.status !== "running") return row.status;
+  const waits = known?.waits ?? project.db.prepare(`SELECT 1 FROM pending_interactions WHERE task_id = ? AND component = 'input' LIMIT 1`).get(row.taskId) !== undefined;
+  if (!waits) return row.status;
+  const answering =
+    known?.answering ??
+    project.db.prepare(`SELECT 1 FROM operation_records WHERE task_id = ? AND status = 'open' AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input' LIMIT 1`).get(row.taskId) !== undefined;
+  if (answering) return row.status;
+  // A reply the person STOPPED is no failure, though a transport that can only cancel records it failed.
+  const last = project.db
+    .prepare(`SELECT status, json_extract(error_json, '$.classification') AS classification FROM operation_records WHERE task_id = ? AND json_extract(request_json, '$.kind') = 'prompt' ORDER BY started_at DESC LIMIT 1`)
+    .get(row.taskId) as { status: string; classification: string | null } | undefined;
+  return last?.status === "failed" && last.classification !== "canceled" ? "failed" : "completed";
+}
+
 export function archivedOf(row: { status: TaskStatus; archivedFrom?: TaskStatus; archivedAt?: number }): { archived?: TaskArchived } {
   return row.status === "archived" ? { archived: { from: row.archivedFrom ?? "completed", at: row.archivedAt ?? 0 } } : {};
 }
@@ -880,7 +954,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     ...(meta?.description !== undefined ? { description: meta.description } : {}),
     ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),
     workflow: meta?.workflow ?? "",
-    status: row.status,
+    status: idleStatusOf(project, row),
     ...archivedOf(row),
     ...(row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash } : {}),
     ...(row.branch !== undefined ? { branch: row.branch } : {}),
@@ -919,7 +993,8 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
  * completed one's reply (`ended_at`), else the message that started it (`started_at`): one still
  * being answered, or one that failed or was stopped. One statement for the whole list, reaching only
  * the listed tasks' records by `operation_records_scope` (task_id first); no conversation is loaded.
- * A typed turn moves no task row (`runChatMessage`), so the row's own clock cannot say this.
+ * A message a program answers after its opening moves no task row — the run stays `running` through
+ * every one — so the row's own clock cannot say this.
  */
 export function lastMessageTimes(project: Project, taskIds: readonly string[]): Map<string, number> {
   if (taskIds.length === 0) return new Map();

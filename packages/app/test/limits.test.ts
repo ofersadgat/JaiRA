@@ -1,20 +1,21 @@
 /**
  * The limits board in the app, and messages and runs waiting for an account's allowance.
  *
- * The board is remembered across a restart, it says who each account is, and a send made while the
- * account is known to be spent WAITS — deterministic, from the reading, and nothing is sent.
+ * The board is remembered across a restart and says who each account is. The waiting queue keeps a
+ * message or a run until its account's reset — sent or resumed then, or at once when asked, remembered
+ * across a restart until then, and dropped when something else has answered it.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
-import { happyRules, HUMAN_REVIEW_FUNCTION, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import type { LimitReading, PushMessage, WaitingItem } from "@jaira/shared";
-import { testHome } from "@jaira/testing";
 import { LimitsService } from "@jaira/service/limits";
 import { WaitingQueue, type WaitingHost } from "@jaira/service/waiting";
 import { LiveTurnLog } from "@jaira/service/liveTurns";
+import { initProject, type Project } from "@jaira/persistence";
+import type { FakeRule } from "@jaira/runtime";
+import { eventually, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 
 const spent = (resets = new Date(Date.now() + 3_600_000).toISOString()): LimitReading => ({
@@ -170,6 +171,74 @@ describe("the waiting queue", () => {
   });
 });
 
+describe("a message to a conversation whose account is spent (decision 0029 §2)", { timeout: 60_000 }, () => {
+  let project: string;
+  let service: AppService;
+  beforeEach(async () => {
+    shippedLayer();
+    project = mkdtempSync(join(tmpdir(), "jaira-hold-"));
+    initProject(project, testHome());
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
+    await service.open(project);
+  });
+  afterEach(async () => {
+    for (const item of service.listWaiting()) await service.actOnWaiting({ id: item.id, action: "drop" });
+    await service.close();
+    rmSync(project, { recursive: true, force: true });
+  });
+
+  const MODEL = "claude-cli/claude-sonnet-5";
+  const open = (): Project => (service as unknown as { session(): { project: Project } }).session().project;
+  const parked = (taskId: string): boolean =>
+    (service as unknown as { session(): { hub: { list(): Array<{ component: string; taskId?: string }> } } }).session().hub.list().some((r) => r.component === "input" && r.taskId === taskId);
+  const said = (taskId: string): string[] => (service.chatThread({ taskId })?.session.turns ?? []).map((t) => `${t.role}: ${t.text ?? ""}`);
+  /** The shipped conversation, opened with "one" under `rules` — its reply in, and waiting for the next message. */
+  async function talking(rules: FakeRule[]): Promise<string> {
+    const { taskId } = service.createTask({ title: "one", workflow: "session", conversation: true, inputs: { message: "one", improve: false } });
+    await service.startTask({ taskId, fake: rules as never });
+    await eventually(() => said(taskId).length >= 2 && parked(taskId), "the opening reply", 20_000);
+    return taskId;
+  }
+
+  it("waits for the reset instead of being sent, and deleting it cancels it", async () => {
+    const taskId = await talking([{ promptIncludes: "one", output: "first answer" }, { promptIncludes: "carry on", output: "carried on" }]);
+    service.limits.board.report("claude", spent());
+    const sent = await service.sendChatMessage({ taskId, instanceId: "", message: "carry on", overrides: { model: MODEL } });
+
+    expect(sent.waiting).toMatchObject({ kind: "message", state: "waiting", account: "claude", message: "carry on", retry: true });
+    expect(sent.failure).toBeUndefined();
+    // Nothing was sent: the conversation still waits for it, and says what it said.
+    expect(parked(taskId)).toBe(true);
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer"]);
+    expect(service.listWaiting({ taskId })).toHaveLength(1);
+
+    await service.actOnWaiting({ id: sent.waiting!.id, action: "drop" });
+    expect(service.listWaiting({ taskId })).toHaveLength(0);
+  });
+
+  it("is kept with 'Try again at …' when its reply is refused — and trying again answers the same wait, not a second copy", async () => {
+    const taskId = await talking([
+      { promptIncludes: "one", output: "first answer" },
+      { promptIncludes: "two", error: "you have used up your allowance", code: "usage_limit" },
+    ]);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "two" });
+    // The program caught it and waits for the next message; the message is kept, refused.
+    await eventually(() => service.listWaiting({ taskId }).length === 1 && parked(taskId), "the refused message to be kept", 20_000);
+    const [refused] = service.listWaiting({ taskId });
+    expect(refused).toMatchObject({ kind: "message", state: "refused", account: "claude", message: "two", reason: "you have used up your allowance" });
+    expect(refused!.branchAt).toBeDefined();
+    expect(open().runtime.get(taskId)?.status).toBe("running");
+
+    // The allowance is back: the same message goes again, at its own place.
+    const task = open().tasks.read(taskId);
+    open().tasks.write({ ...task, scripted: [{ promptIncludes: "one", output: "first answer" }, { promptIncludes: "two", output: "second answer" }] as never });
+    await service.actOnWaiting({ id: refused!.id, action: "sendNow" });
+    await eventually(() => said(taskId).includes("assistant: second answer") && parked(taskId), "the reply to 'two'", 20_000);
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
+    expect(service.listWaiting({ taskId })).toEqual([]);
+  });
+});
+
 describe("a context reading on the live turn", () => {
   it("lands on the last answer instead of becoming a row, and a limits reading is dropped", () => {
     const log = new LiveTurnLog();
@@ -181,49 +250,6 @@ describe("a context reading on the live turn", () => {
     const entries = log.snapshot("t")!.entries as Array<{ kind: string; context?: { used: number } }>;
     expect(entries).toHaveLength(1);
     expect(entries[0]!.context?.used).toBe(900);
-  });
-});
-
-describe("a message sent while the account is known to be spent", () => {
-  let project: string;
-  let service: AppService;
-  let pushes: PushMessage[];
-  beforeEach(async () => {
-    project = mkdtempSync(join(tmpdir(), "jaira-hold-"));
-    const paths = initProject(project, testHome());
-    writeWorkflowFiles(paths.workflowsDir, specPlanningFiles());
-    pushes = [];
-    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
-    await service.open(project);
-  });
-  afterEach(async () => {
-    for (const item of service.listWaiting()) await service.actOnWaiting({ id: item.id, action: "drop" });
-    await service.close();
-    rmSync(project, { recursive: true, force: true });
-  });
-
-  it("waits for the reset instead of being sent, and deleting it cancels it", async () => {
-    const { taskId } = service.createTask({ title: "Plan it", workflow: "feature/plan", inputs: { issue: "the issue" } });
-    await service.startTask({ taskId, fake: happyRules(), interactions: { [HUMAN_REVIEW_FUNCTION]: [{ decision: "approve" }] } });
-    const deadline = Date.now() + 8000;
-    while (!pushes.some((m) => m.type === "run:finished" && m.taskId === taskId)) {
-      if (Date.now() > deadline) throw new Error("the run did not finish");
-      await new Promise((r) => setTimeout(r, 5));
-    }
-    const instanceId = service.sessionHistory({ taskId }).at(-1)!.instanceId;
-    const before = JSON.stringify(service.taskDetail(taskId).instances);
-
-    service.limits.board.report("claude", spent());
-    const sent = await service.sendChatMessage({ taskId, instanceId, message: "carry on", overrides: { model: "claude-cli/claude-sonnet-5" }, fake: happyRules() });
-
-    expect(sent.waiting).toMatchObject({ kind: "message", state: "waiting", account: "claude", message: "carry on", retry: true });
-    expect(sent.failure).toBeUndefined();
-    // Nothing ran: no turn, no chat child.
-    expect(JSON.stringify(service.taskDetail(taskId).instances)).toBe(before);
-    expect(service.listWaiting({ taskId })).toHaveLength(1);
-
-    await service.actOnWaiting({ id: sent.waiting!.id, action: "drop" });
-    expect(service.listWaiting({ taskId })).toHaveLength(0);
   });
 });
 

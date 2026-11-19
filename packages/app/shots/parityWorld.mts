@@ -1163,7 +1163,7 @@ async function answered(app: App): Promise<void> {
 export const CONVERSATION = "explain the sync lint";
 
 /**
- * The conversation, made once in the world's project: a chat task (`chat/session`, as the Chat view
+ * The conversation, made once in the world's project: a chat task (`session`, as the Chat view
  * starts one) whose first message is its run, answered by a fake model. A no-op once it exists.
  */
 async function conversation(app: App, title = CONVERSATION): Promise<void> {
@@ -1175,7 +1175,7 @@ async function conversation(app: App, title = CONVERSATION): Promise<void> {
   const tools = title === TOOLS_CONVERSATION;
   const made = await app.ipc<{ taskId: string }>("task:create", {
     title,
-    workflow: "chat/session",
+    workflow: "session",
     inputs: { message: tools ? "Make every scrollbar the same thin rounded one." : "What does the sync lint check?" },
     project,
   });
@@ -1242,7 +1242,7 @@ async function artifactConversation(app: App): Promise<void> {
   let taskId = tasks.find((t) => t.title === ARTIFACT_CONVERSATION)?.taskId;
   if (taskId === undefined) {
     const envelope = { path: ARTIFACT_PATH, mediaType: "text/html", bytes: Buffer.byteLength(ARTIFACT_PAGE, "utf8"), uri: "", interactive: true, content: ARTIFACT_PAGE };
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: ARTIFACT_CONVERSATION, workflow: "chat/session", inputs: { message: "Sketch a lane picker I can click." }, project });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: ARTIFACT_CONVERSATION, workflow: "session", inputs: { message: "Sketch a lane picker I can click." }, project });
     taskId = made.taskId;
     envelope.uri = `artifact://${taskId}/${ARTIFACT_PATH}`;
     const fake = [

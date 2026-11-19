@@ -17,6 +17,7 @@ import { wireRemotes } from "./remoteWiring";
 import {
   hostBoard,
   hostPrune,
+  hostLessons,
   hostRunTask,
   hostTaskCancel,
   hostTaskCreate,
@@ -68,6 +69,7 @@ import {
   standaloneLoadOptions,
   workflowDigest,
   workflowLoadOptions,
+  learningMeasures,
   type Project,
   type TaskLoad,
   type WorkflowBrowser,
@@ -87,6 +89,7 @@ import {
   WORKFLOW_DESCRIPTION_PATH,
   type BoardCard,
   type BoardView,
+  type LearningMeasures,
   type JairaConfig,
   type JairaPaths,
   type ModuleApproval,
@@ -300,6 +303,10 @@ const USAGE = `usage:
   jaira changeset review [--task <taskId> | --dir <path>] [--base <rev>] [--loop]
             [--interactions <json|@file>] [--fake <json|@file>] [--project <dir>]
   jaira prune [--older-than <days>] [--apply] [--project <dir>]
+  jaira lessons [--json] [--project <dir>]
+                                      what the project has learned from corrections: each lesson's
+                                      recurrence, proposals applied and turned down, corrections per
+                                      conversation, and the conditions to revisit (decision 0029)
   jaira workflow list [--json] [--project <dir>]
   jaira workflow lint [--json] [--project <dir>]
   jaira functions list [--json] [--project <dir>]
@@ -426,6 +433,8 @@ async function dispatch(argv: string[], io: CliIo): Promise<number> {
       return cmdBoard(rest, io);
     case "prune":
       return cmdPrune(rest, io);
+    case "lessons":
+      return cmdLessons(rest, io);
     case "functions":
       return cmdFunctions(rest, io);
     case "workflow": {
@@ -1973,6 +1982,48 @@ function renderConformance(specPath: string, roots: string[], report: Conformanc
  * non-terminal tasks are never candidates — and the skipped list is printed so the
  * refusal is visible rather than silent.
  */
+async function cmdLessons(argv: string[], io: CliIo): Promise<number> {
+  const { values } = parseArgs({ args: argv, options: { project: { type: "string" }, json: { type: "boolean" } } });
+  const dir = projectDirOf(values, io);
+  return withEngine(
+    "lessons",
+    (engine) => hostLessons(engine, dir, io, renderLessons, values.json === true),
+    async () => {
+      const project = await openWithRecoveryNote(dir, io);
+      try {
+        const measures = learningMeasures(project);
+        io.stdout(values.json === true ? JSON.stringify(measures, null, 2) + "\n" : renderLessons(measures));
+        return 0;
+      } finally {
+        project.close();
+      }
+    },
+    { bridgeHost: sharedBridgeHost },
+  );
+}
+
+/** `jaira lessons`, in words: the lessons, then the totals, then what to revisit. */
+export function renderLessons(m: LearningMeasures): string {
+  const lines: string[] = [];
+  if (m.lessons.length === 0) lines.push("No lessons on record.");
+  for (const l of m.lessons) {
+    const came = l.recurred > 0 ? `, came back ${l.recurred}× after a fix${l.recurredInEffect > 0 ? ` (${l.recurredInEffect}× with it in effect)` : ""}` : "";
+    const where = l.projects.length > 1 ? `, learned in ${l.projects.join(", ")}` : "";
+    lines.push(`  ${l.status === "applied" ? "✓" : "∅"} ${l.rule}  [${l.lever} → ${l.target}, ${l.layer}]  ${l.applied} applied, ${l.declined} turned down${came}${where}`);
+  }
+  lines.push("");
+  lines.push(`Proposals: ${m.proposals.applied} applied, ${m.proposals.declined} turned down.`);
+  lines.push(`Corrections: ${m.conversations.corrections} over ${m.conversations.count} conversation(s) (${m.conversations.perConversation.toFixed(2)} each).`);
+  lines.push(`Newer versions offered to running work: ${m.handoffs.offered}; taken ${m.handoffs.adopted} (${m.handoffs.withinPass} within the pass that offered them), never taken ${m.handoffs.neverAdopted}.`);
+  if (m.promoted.length > 0) lines.push(`Learned in more than one project: ${m.promoted.map((p) => `${p.rule} (${p.projects.join(", ")})`).join("; ")}.`);
+  if (m.revisit.length > 0) {
+    lines.push("");
+    lines.push("Revisit decision 0029:");
+    for (const r of m.revisit) lines.push(`  - ${r}`);
+  }
+  return lines.join("\n") + "\n";
+}
+
 async function cmdPrune(argv: string[], io: CliIo): Promise<number> {
   const { values } = parseArgs({
     args: argv,

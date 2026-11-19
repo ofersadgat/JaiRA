@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       ? { taskId: readFileSync(kept, "utf8").trim() }
       : await app.ipc<{ taskId: string }>("task:create", {
           title: TITLE,
-          workflow: "chat/session",
+          workflow: "session",
           inputs: { message: "/design a sign-in screen for a small todo app — one artboard, a phone size" },
         });
     if (!(reuse && existsSync(kept))) {

@@ -59,16 +59,13 @@ afterEach(async () => {
 });
 
 describe("permissionSets:read", () => {
-  it("answers the nine shipped permission sets, the layers this window has, and the tools a line can name", () => {
+  it("answers the six shipped permission sets, the layers this window has, and the tools a line can name", () => {
     const view = service.readPermissionSetSettings({ project: dir });
     expect(view.records.map((r) => r.id)).toEqual([
       "ask-first",
       "auto",
-      "control/ask-first",
-      "control/auto",
-      "control/full",
-      "control/read-only",
       "full",
+      "improve/simulation",
       "read-only",
       "read-only-scratch",
     ]);
@@ -307,7 +304,7 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
     const tree = service.permissionSetTree({ project: dir, permissionSet: STACK });
     expect(tree.scopes.map((scope) => scope.scope)).toEqual(["built in", "global", "project"]);
     // The shipped conversation sets are at the top level: the scope's own sets, in no bucket.
-    expect(tree.scopes[0]!.buckets.map((bucket) => bucket.name)).toEqual(["control"]);
+    expect(tree.scopes[0]!.buckets.map((bucket) => bucket.name)).toEqual(["improve"]);
     expect(tree.scopes[0]!.sets.map((set) => [set.name, set.icon, set.inStack])).toEqual([
       ["ask-first", "ask", true],
       ["auto", "smart", false],

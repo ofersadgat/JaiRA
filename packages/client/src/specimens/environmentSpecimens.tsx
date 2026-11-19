@@ -101,7 +101,7 @@ const NOTE: PlacementNote = {
   on: { project: HERE, machineId: "m-self", label: "desk", dir: HERE },
   steps: [
     { at: T0 + 800, kind: "workspace", what: "jaira/t-1", tookMs: 400 },
-    { at: T0 + 1_200, kind: "pin", what: "chat/session", tookMs: 200 },
+    { at: T0 + 1_200, kind: "pin", what: "session", tookMs: 200 },
   ],
 };
 const MESSAGE = "Do a code review of merge request 17";

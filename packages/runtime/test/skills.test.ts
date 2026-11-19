@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecServices, InlineFamily, Operation } from "@declarative-ai/exec";
-import { createSkillTools, loadSkill, parseSkill, readInstructions, readSkills, skillNameProblem, skillsPluginDir, standingContextOf, withInstructions } from "../src/skills";
+import { createSkillTools, loadSkill, parseSkill, pinStandingContext, readInstructions, readSkills, skillNameProblem, skillsPluginDir, STANDING_KEY, standingContextOf, withInstructions } from "../src/skills";
 
 function layer(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), "jaira-layer-"));
@@ -75,6 +75,33 @@ describe("instructions", () => {
     expect((seen[1] as { system?: string }).system).toBeUndefined();
     // The opt-out key never reaches a provider.
     expect((seen[1] as { config?: Record<string, unknown> }).config).toEqual({ model: "m" });
+  });
+});
+
+describe("instructions pinned with the run (decision 0029 §9)", () => {
+  it("pins the context into every prompt call but one that opts out, and a call is told what it was pinned with", () => {
+    const states: Record<string, unknown> = {
+      a: { operation: { kind: "prompt", user: "hi", config: { model: "m" } } },
+      b: { operation: [{ kind: "prompt", user: "first" }, { kind: "function", functionRef: "f" }] },
+      title: { operation: { kind: "prompt", user: "title this", config: { instructions: false } } },
+    };
+    pinStandingContext(states, "<instructions>\nWhen it was pinned.\n</instructions>");
+    expect((states["a"] as { operation: { config: Record<string, unknown> } }).operation.config[STANDING_KEY]).toContain("When it was pinned.");
+    expect(((states["b"] as { operation: Array<{ config?: Record<string, unknown> }> }).operation[0]!.config ?? {})[STANDING_KEY]).toContain("When it was pinned.");
+    expect((states["title"] as { operation: { config: Record<string, unknown> } }).operation.config[STANDING_KEY]).toBeUndefined();
+
+    const seen: Array<Operation<InlineFamily>> = [];
+    const inner = { capabilities: {} as never, metrics: {} as never, start: (op: Operation<InlineFamily>) => (seen.push(op), {} as never) };
+    // The run was started with TODAY's instructions; the call was pinned with others, and is told those.
+    const wrapped = withInstructions("<instructions>\nToday.\n</instructions>", inner as never);
+    wrapped.start((states["a"] as { operation: Operation<InlineFamily> }).operation, {} as ExecServices);
+    wrapped.start({ kind: "prompt", user: "unpinned", config: { model: "m" } } as never, {} as ExecServices);
+    expect((seen[0] as { system?: string }).system).toContain("When it was pinned.");
+    expect((seen[0] as { system?: string }).system).not.toContain("Today.");
+    // The key is taken off: no provider sees it.
+    expect((seen[0] as { config?: Record<string, unknown> }).config).toEqual({ model: "m" });
+    // A call of a bundle pinned before this is told what its run was started with.
+    expect((seen[1] as { system?: string }).system).toContain("Today.");
   });
 });
 

@@ -27,7 +27,7 @@ It deliberately does not own:
 
 - Writing records, claiming seats, handles and cuts: [operation-record-store](operation-record-store.md).
 - The turn still streaming, and its handover to the stored record: [live-turns](live-turns.md) and [session-live-protocol](../contracts/session-live-protocol.md).
-- Where a typed message goes and the host instance it continues: `chatContextOf` and `chatPositionOf` in [chat-turns](chat-turns.md).
+- Where a message goes, the answer to its program's `input()`: `chat:send` in [chat-channels](../contracts/chat-channels.md). The host instance and position a plan or a steer reads: `chatContextOf` and `chatPositionOf` in `service.ts`.
 - The instance tree, `instanceAddresses` and the run timeline `conversationView`: [board-projection](board-projection.md).
 - Laying several conversations of one run out against a clock: the renderer's `sessionBands`, drawn by [run-conversation](../../ui/surfaces/run-conversation.md).
 
@@ -50,7 +50,7 @@ task id
                       └─ chain: walk parent and cursor to the root, rows oldest first
 ```
 
-A typed chat message is recorded on its host's session under instance `chat:<hostInstanceId>`, so a conversation continued by hand is more records on one chain. Its `operation.completed` carries no `operationId`, so `chatThread` joins its record to the journal by seat.
+A conversation's reply is a call of its run, recorded as any call is; `session` replies in one session, so a conversation is more records on one chain. A conversation recorded before 2026-11-19 may hold typed messages under instance `chat:<hostInstanceId>` on its host's session; their `operation.completed` carries no `operationId`, so `chatThread` joins such a record to the journal by seat.
 
 ## The lookup reads the data layer and answers the renderer through three channels
 

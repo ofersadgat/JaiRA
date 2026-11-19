@@ -53,6 +53,8 @@ export interface FakeRule {
   error?: string;
   /** How that failure is classified — `permanent` unless a test is about a stop (`interrupted`, `canceled`). */
   classification?: "permanent" | "canceled" | "interrupted";
+  /** The failure's own code — `usage_limit`, `credit_exhausted` — for a test of what a refusal does. */
+  code?: string;
   /** USD cost to report, so cost roll-up is exercised headlessly. */
   cost?: number;
   /**
@@ -62,6 +64,13 @@ export interface FakeRule {
    * output as the answer.
    */
   messages?: JsonValue[];
+  /**
+   * Keep the call IN FLIGHT until somebody stops it — what a test of a stop needs, since every other
+   * rule settles at once. `"interrupt"`: a transport that can end a turn early (`control.interrupt`),
+   * which settles normally with `output`. `"cancel"`: one that can only be canceled, which settles
+   * with a `canceled` failure. Either settles `canceled` when canceled.
+   */
+  hold?: "interrupt" | "cancel";
 }
 
 export function parseFakeRules(raw: unknown): FakeRule[] {
@@ -90,8 +99,8 @@ function promptTail(op: PromptOp<InlineFamily>): string {
   return at < 0 ? prompt.trim() : prompt.slice(at + marker.length).trim();
 }
 
-const failed = (reason: string, classification: "permanent" | "canceled" | "interrupted" = "permanent"): ExecResult<ResolvedValue, WorkflowMetrics> => ({
-  error: { classification, reason },
+const failed = (reason: string, classification: "permanent" | "canceled" | "interrupted" = "permanent", code?: string): ExecResult<ResolvedValue, WorkflowMetrics> => ({
+  error: { classification, reason, ...(code !== undefined ? { code } : {}) },
   metrics: { durationMs: 0, costUsd: 0, costSource: "unknown" },
 });
 
@@ -105,22 +114,38 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
   start(operation: Operation<InlineFamily>, ctx: ExecServices): ExecHandle<ResolvedValue, WorkflowMetrics> {
     const op = operation as PromptOp<InlineFamily>;
     this.calls.push(op);
+    const rule = this.ruleFor(op);
+    if (rule?.hold !== undefined && rule.output !== undefined && !(ctx.abortSignal?.aborted ?? false)) {
+      let settle!: (result: ExecResult<ResolvedValue, WorkflowMetrics>) => void;
+      const result = new Promise<ExecResult<ResolvedValue, WorkflowMetrics>>((resolve) => (settle = resolve));
+      const cancel = async (): Promise<void> => settle(failed("canceled", "canceled"));
+      ctx.abortSignal?.addEventListener("abort", () => void cancel(), { once: true });
+      return {
+        events: empty(),
+        result,
+        cancel,
+        // A transport that can end a turn early can usually take a message into it too (`send`).
+        ...(rule.hold === "interrupt" ? { control: { interrupt: async () => settle(this.execute(op, ctx)), send: async () => undefined } } : {}),
+      };
+    }
     return { events: empty(), result: Promise.resolve(this.execute(op, ctx)), cancel: async () => {} };
+  }
+
+  private ruleFor(op: PromptOp<InlineFamily>): FakeRule | undefined {
+    const model = modelOf(op);
+    const tail = promptTail(op);
+    return this.rules.find((r) => (r.model === undefined || r.model === model) && (r.promptIncludes === undefined || tail.includes(r.promptIncludes)));
   }
 
   private execute(op: PromptOp<InlineFamily>, ctx: ExecServices): ExecResult<ResolvedValue, WorkflowMetrics> {
     if (ctx.abortSignal?.aborted) return failed("aborted", "canceled");
     const model = modelOf(op);
     const tail = promptTail(op);
-    const rule = this.rules.find(
-      (r) =>
-        (r.model === undefined || r.model === model) &&
-        (r.promptIncludes === undefined || tail.includes(r.promptIncludes)),
-    );
+    const rule = this.ruleFor(op);
     if (!rule) {
       return failed(`no fake rule matched model '${model}', prompt '${tail.slice(0, 80)}'`);
     }
-    if (rule.error !== undefined) return failed(rule.error, rule.classification);
+    if (rule.error !== undefined) return failed(rule.error, rule.classification, rule.code);
     // Token counts belong to the model payload (`LlmOutput`), which stops at the
     // prompt executor — a workflow measurement is duration plus spend.
     return {

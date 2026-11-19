@@ -354,12 +354,6 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
           default: DEFAULT_CONVERSATIONS.workflow,
           description: `What the Chat view starts a conversation as. Where it is disabled, the Chat view asks which workflow to run instead. Default ${DEFAULT_CONVERSATIONS.workflow}.`,
         },
-        moved: {
-          type: "string",
-          title: "a moved task's conversation runs",
-          default: DEFAULT_CONVERSATIONS.moved,
-          description: `What a move that makes a dynamic workflow gives the task to steer it. Where it is disabled, the move asks which to use instead. Default ${DEFAULT_CONVERSATIONS.moved}.`,
-        },
       },
     },
   },

@@ -8,9 +8,8 @@
  * version 1 LOADS under version 2 and walks into a child version 1 never had.
  *
  * Every state is a gate, as in `taskMove.test.ts`: a parked gate is a state unmistakably entered,
- * and its inputs are on the request for the test to read. The conversation state is a stand-in (a
- * gate too): `chat/control` and `chat/session` ship in a later step, and the generator takes any
- * state with an operation.
+ * and its inputs are on the request for the test to read. A document holds no conversation (decision
+ * 0005, amended 2026-11-19): it is the work and the moves between it.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,7 +31,6 @@ function files(): Record<string, JsonValue> {
     operation: { kind: "function", function: "confirm_action", args: { prompt: `${name}?` } },
   });
   return {
-    "conv/standin": gate("talk"),
     "lib/first": gate("first"),
     "lib/second": gate("second", { flag: { schema: BOOLEAN } }),
     "lib/third": gate("third", { flag: { schema: BOOLEAN } }),
@@ -108,17 +106,16 @@ describe("a generated document, run", () => {
     expect((await answer()).state).toBe("first");
     await completed(source);
 
-    // The document the move needs: the conversation, what ran, and the target wired from it.
-    const made = await withProject((p) => generateDocumentVersion(p, { taskId: source, target: "lib/second", conversation: "conv/standin" }));
+    // The document the move needs: what ran, and the target wired from it.
+    const made = await withProject((p) => generateDocumentVersion(p, { taskId: source, target: "lib/second" }));
     expect(made.resolution).toBe("new");
     expect(made.generated.wires).toEqual([{ input: "flag", from: { child: "first", output: "confirmed" } }]);
     const { id: documentId, rootId } = made.document!;
 
-    // A task IN the document. Its root is the conversation; nothing is on a spine, so with nobody
-    // sending it anywhere it has its turn and finishes — the standing rules hold nothing open.
+    // A task IN the document. Its root holds no conversation and nothing is on a spine, so with nobody
+    // sending it anywhere it finishes — the standing rules hold nothing open.
     const taskId = await withProject((p) => createTask(p, { title: "In the document", workflow: rootId, documentId }).id);
     await service.startTask({ taskId });
-    expect((await answer()).state).toBe("talk");
     await completed(taskId);
     expect(await entries(taskId)).toEqual([]);
 
@@ -138,7 +135,7 @@ describe("a generated document, run", () => {
     const v1 = made.version!.snapshotHash;
     expect(await withProject((p) => p.runtime.get(taskId)!.snapshotHash)).toBe(v1);
     await expect(service.moveTask({ taskId, toState: "third" })).rejects.toThrow(/third/);
-    const next = await withProject((p) => generateDocumentVersion(p, { taskId, target: "lib/third", conversation: "conv/standin" }));
+    const next = await withProject((p) => generateDocumentVersion(p, { taskId, target: "lib/third" }));
     expect(next.resolution).toBe("augmented");
     // …nearest first: `third` is fed by `second`, the state the task last stood in.
     expect(next.generated.wires).toEqual([{ input: "flag", from: { child: "second", output: "confirmed" } }]);

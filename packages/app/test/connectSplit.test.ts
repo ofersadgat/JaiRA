@@ -42,11 +42,6 @@ function files(): Record<string, JsonValue> {
       outputs: { confirmed: { schema: { type: "boolean" } } },
       operation: { kind: "function", function: "confirm_action", args: { prompt: "piece?" } },
     },
-    "conv/standin": {
-      label: "talk",
-      outputs: { confirmed: { schema: { type: "boolean" } } },
-      operation: { kind: "function", function: "confirm_action", args: { prompt: "talk?" } },
-    },
   };
 }
 
@@ -58,7 +53,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-connect-split-"));
   writeWorkflowFiles(initProject(dir, testHome()).workflowsDir, files());
   seen.clear();
-  service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+  service = new AppService({ baseDir: testHome(), publish: () => undefined });
   await service.open(dir);
 });
 
@@ -106,10 +101,7 @@ describe("a generated split, run", () => {
     const done = await service.connectTask({ taskId: source, target: "lib/piece", fake: RULES as unknown as JsonValue });
     if (!done.ok) throw new Error(done.refusal.message);
     const parent = done.taskId!;
-    // The conversation has its turn; then the move is taken, and the mount splits.
-    const talk = await parked();
-    expect(talk.prompt).toBe("talk?");
-    service.submitInteraction(talk.requestId, { confirmed: true });
+    // The move is taken, and the mount splits — the document holds no conversation to have a turn first.
 
     const made = (): Array<{ id: string; title: string; status: string; index: number | undefined }> =>
       read((p) =>

@@ -66,7 +66,7 @@ async function main(): Promise<void> {
     const project = (projects.find((p) => same(p.project)) ?? projects.find((p) => p.kind === "user")!).project;
     console.log("projects:", projects.map((p) => `${p.kind} ${p.project}`).join(" | "), "->", project);
     const title = "A few things: quit dialog, when column, icons";
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: "A few things" }, project, conversation: true });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message: "A few things" }, project, conversation: true });
     await app.ipc("task:start", { taskId: made.taskId, project, fake: [{ output: "Done." }] });
     await app.until(says(title), "the conversation to be listed");
     await settle(1500);

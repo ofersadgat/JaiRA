@@ -53,7 +53,7 @@ export class TaskFileStore {
   /**
    * A ONE-TIME STEP over this workspace's task files (decision 0021), run at every open and writing
    * only what it has not written before. A conversation used to be known by its workflow's id
-   * (`chat/session`, `chat/control`) and is now one because the Chat view started it — `startedBy:
+   * (`chat/session` — `session` since — or `chat/control`) and is now one because the Chat view started it — `startedBy:
    * { by: "chat" }`, which every conversation made since carries. A file from before is stamped here,
    * so nothing reads the old form. Delete it with its call in `openAt` once every workspace has opened
    * (written 2026-10-26). Answers how many it stamped.
@@ -75,7 +75,7 @@ export class TaskFileStore {
       } catch {
         continue;
       }
-      if (meta === undefined || meta.startedBy !== undefined || (meta.workflow !== "chat/session" && meta.workflow !== "chat/control")) continue;
+      if (meta === undefined || meta.startedBy !== undefined || (meta.workflow !== "chat/session" && meta.workflow !== "session" && meta.workflow !== "chat/control")) continue;
       this.write({ ...meta, startedBy: { by: "chat" } });
       stamped += 1;
     }

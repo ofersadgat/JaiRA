@@ -32,7 +32,7 @@ async function main(): Promise<void> {
     await app.until(drawn, "the window to draw");
     await app.resize(1280, 860);
     const project = (await app.ipc<Array<{ project: string; kind: string }>>("project:list", {})).find((p) => p.kind === "user")!.project;
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: "Read the big file", workflow: "chat/session", inputs: { message: "Read big.txt" }, project });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: "Read the big file", workflow: "session", conversation: true, inputs: { message: "Read big.txt" }, project });
     await app.ipc("task:start", { taskId: made.taskId, project, fake: [{ output: "I read it." }] });
     await app.until(says("Read the big file"), "the conversation to be listed");
     await settle(1500);

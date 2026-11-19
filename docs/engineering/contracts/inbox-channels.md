@@ -72,7 +72,7 @@ Each list spans every open project session, session by session in the order requ
 | `command` | string | no | the tool input's `command` field |
 | `reason` | string | no | the policy's reason for escalating that command |
 | `input` | `Record<string, JsonValue>` | yes | the tool input as the model produced it |
-| `taskId` | string | no | the task whose run or chat turn asked |
+| `taskId` | string | no | the task whose run asked |
 | `project` | `ProjectRef` | yes | the project session it parked in |
 | `at` | number, epoch ms | yes | when it parked |
 

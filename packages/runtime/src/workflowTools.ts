@@ -42,6 +42,11 @@ import type {
  */
 export interface WorkflowToolCall {
   toolCallId?: string;
+  /**
+   * The instance whose call is using the tool — the engine's dispatch site (`ExecServices.scope`):
+   * what a conversation that is a PROGRAM files the work it starts under (decision 0029 §2).
+   */
+  instanceId?: string;
 }
 
 export interface WorkflowToolHost {
@@ -72,7 +77,10 @@ export function noWorkflowHost(where = "here"): WorkflowToolHost {
 }
 
 /** The call a tool is serving, as its ctx says it — see {@link WorkflowToolCall}. */
-const callOf = (ctx: ExecServices | undefined): WorkflowToolCall => (ctx?.toolCallId !== undefined ? { toolCallId: ctx.toolCallId } : {});
+const callOf = (ctx: ExecServices | undefined): WorkflowToolCall => ({
+  ...(ctx?.toolCallId !== undefined ? { toolCallId: ctx.toolCallId } : {}),
+  ...(ctx?.scope?.instanceId !== undefined ? { instanceId: ctx.scope.instanceId } : {}),
+});
 
 const record = (input: unknown): Record<string, unknown> => (input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {});
 

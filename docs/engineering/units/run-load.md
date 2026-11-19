@@ -99,7 +99,6 @@ A frontier entry is `mid-operation` when its operation started and never settled
 | A killed append cost a journal file its last line | an instance whose settle or end was on that line reads as live | none | that state is entered again on resume |
 | An op renders differently on its way out, so its request no longer hashes to the engine's key | its site is absent while `nextSite` stays above it, so the engine mints a fresh site | none | the call is made and paid for again |
 | Two resumes of one task run the releases twice | the second deletes nothing, because the first left no handle-less failed record and no failure row on a live instance | none needed | none |
-| A chat turn writes to a stopped task between the event query and the record query | its events are skipped as `chat:`, and its records sit on an instance the tree never emits | none needed | none |
 
 ## Old journals load unchanged, and nothing here migrates
 

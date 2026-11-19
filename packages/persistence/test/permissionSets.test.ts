@@ -388,16 +388,13 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     project = openProject(dir, { baseDir: testHome() });
   });
 
-  it("are listed from the built-in layer: the presets at the top level, control's own four in control/", () => {
+  it("are listed from the built-in layer: the presets at the top level, and the sandbox a simulation's pass stands under in improve/", () => {
     const listed = listPermissionSets(project.paths.roots);
     expect(listed.map((t) => t.id)).toEqual([
       "ask-first",
       "auto",
-      "control/ask-first",
-      "control/auto",
-      "control/full",
-      "control/read-only",
       "full",
+      "improve/simulation",
       "read-only",
       "read-only-scratch",
     ]);
@@ -491,14 +488,11 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         places: Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "shell", "runner:*", "script"].map((line) => [line, SHIPPED_READ_ONLY[line]])),
       },
     });
-    // `control` holds the workflow tools and NOTHING of the project: the engine resolves those
-    // eight against its registry, and a project tool is not on the list to be handed over at all.
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/control/ask-first" }));
-    const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
-    expect(control.tools).toEqual(["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"]);
-    expect(control.tools).not.toContain("shell");
-    expect(control.permissions.other).toBe("deny");
-    expect(control.permissions.tools).toMatchObject({ list_workflows: "ask", start_task: "ask", stop_task: "ask" });
+    // The workflow tools reach the engine as the rest do: on the list, resolved against its registry.
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/ask-first" }));
+    const asking = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
+    expect(asking.tools).toEqual(expect.arrayContaining(["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"]));
+    expect(asking.permissions.tools).toMatchObject({ list_workflows: "ask", start_task: "ask", stop_task: "ask" });
   });
 
   it("are READ for the composer with the layer that supplied each, a project's file winning and a `$ref` followed", () => {
@@ -509,12 +503,9 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     expect(read.map((t) => [t.id, t.layer])).toEqual([
       ["ask-first", "system"],
       ["auto", "system"],
-      ["control/ask-first", "system"],
-      ["control/auto", "system"],
-      ["control/full", "system"],
-      ["control/read-only", "system"],
       ["feature/implementation/writes-asking", "base"],
       ["full", "system"],
+      ["improve/simulation", "system"],
       ["read-only", "project"],
       ["read-only-scratch", "system"],
     ]);

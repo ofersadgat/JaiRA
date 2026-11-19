@@ -115,8 +115,8 @@ export interface ChatTurnPorts {
 export interface ChatTurnRequest {
   instance: ChatInstance;
   operation: PromptOp<InlineFamily>;
-  /** The exact position the displayed transcript ends at. */
-  position: string;
+  /** The exact position the displayed transcript ends at — absent for a call that begins a conversation of its own. */
+  position: string | undefined;
   /**
    * The turn CONTINUES one the app closed under — the same message at the same index — so the instance
    * is not entered again even at index 0: it takes the transition back into the same message.

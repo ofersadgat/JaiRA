@@ -287,6 +287,16 @@ describe("reading a lowered block back", () => {
     expect(offeredTools(back)).toEqual(["glob"]);
   });
 
+  it("keeps the shell un-offered when the list leaves it out and its mode lets something through — a composer's ticks", () => {
+    // A program's set is inherited from its root, and a message ticked only `glob`.
+    const back = permissionSetOfEnvironment(["glob"], { tools: { glob: "ask", shell: "ask", ...PERMISSION_SET_MARKERS }, subjects: { shell: "ask" } });
+    expect(back.entries["shell"]).toEqual({ kind: "tool", mode: "ask", offered: false });
+    expect(offeredTools(back)).toEqual(["glob"]);
+    // WITHHELD — it denies outright, so lowering left it off the list — it is still held, as written.
+    const withheld = permissionSetOfEnvironment(["glob"], { tools: { glob: "ask", shell: "deny", ...PERMISSION_SET_MARKERS }, subjects: { shell: "deny" } });
+    expect(withheld.entries["shell"]).toEqual({ kind: "tool", mode: "deny" });
+  });
+
   it("gives a listed tool no mode where the block gives none — a turn that declared no permission set", () => {
     expect(permissionSetOfEnvironment(["show_artifact"]).entries).toEqual({ show_artifact: { kind: "tool" } });
     expect(toolModes(permissionSetOfEnvironment(["show_artifact"]))).toEqual({});

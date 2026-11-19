@@ -31,6 +31,7 @@ import type { McpBridgeHost } from "@jaira/runtime";
 import type {
   MachinesView,
   BoardView,
+  LearningMeasures,
   CreateTaskRequest,
   ModuleApproval,
   PendingApproval,
@@ -198,6 +199,13 @@ export async function hostBoard(client: EngineClient, dir: string, level: string
   const project = await openIn(client, dir);
   const board = (await client.invoke("board:view", { project, ...(level !== undefined ? { level } : {}) })) as BoardView;
   io.stdout(asJson ? json(board) : render(board));
+  return 0;
+}
+
+export async function hostLessons(client: EngineClient, dir: string, io: EngineIo, render: (measures: LearningMeasures) => string, asJson: boolean): Promise<number> {
+  const project = await openIn(client, dir);
+  const measures = (await client.invoke("learning:measures", { project })) as LearningMeasures;
+  io.stdout(asJson ? json(measures) : render(measures));
   return 0;
 }
 

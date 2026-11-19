@@ -110,7 +110,7 @@ async function main(): Promise<void> {
 
     // The OPENING message: the run's own gate, built by the engine.
     const opening = TWO_FETCHES("https://example.com", "https://example.org");
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", inputs: { message: opening } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", inputs: { message: opening } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: AUTO } });
     await app.until(says(TITLE), "the conversation to be listed", 200);
     await app.clickText("Chat");

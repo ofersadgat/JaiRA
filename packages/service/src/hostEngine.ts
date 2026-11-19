@@ -17,6 +17,7 @@ import { listenNetwork, type NetworkListener } from "./engineNet";
 import { HOST_CHANNELS, enginePeerHandlers, serviceHandlers, type EngineControl, type Handler } from "./handlers";
 import { LAZY_OVER_REMOTE } from "./lazy";
 import type { AppService } from "./service";
+import { startScriptEndpoint, type ScriptEndpoint } from "./scriptEndpoint";
 
 export interface HostEngineOptions {
   baseDir: string;
@@ -40,6 +41,12 @@ export interface HostEngineOptions {
    * and `jaira serve` do; a command's claim does not. `port` for tests; 0 takes any free one.
    */
   network?: { port?: number };
+  /**
+   * Take reports from scripts run as plain programs (decision 0029, ruling 12; `scriptEndpoint.ts`):
+   * on unless `false`. `advertDir` is where the endpoint is advertised — declarative-ai's
+   * `$DAI_HOME/endpoints` by default.
+   */
+  scripts?: false | { advertDir?: string };
   /** Tests. */
   pipe?: string;
   port?: number;
@@ -196,6 +203,22 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
   });
   if (host === undefined) return undefined;
   const claimed = host;
+  // Where a script run as a plain program reports (decision 0029, ruling 12), beside the pipe — the
+  // engine built when the first report arrives, as for any client.
+  let scripts: ScriptEndpoint | undefined;
+  if (options.scripts !== false) {
+    try {
+      scripts = await startScriptEndpoint({
+        engine,
+        baseDir: options.baseDir,
+        version: options.version,
+        ...(typeof options.scripts === "object" && options.scripts.advertDir !== undefined ? { advertDir: options.scripts.advertDir } : {}),
+        ...(options.log !== undefined ? { log: options.log } : {}),
+      });
+    } catch (e) {
+      options.log?.("warn", `scripts run as programs cannot report to this engine: ${(e as Error).message}`);
+    }
+  }
   let net: NetworkListener | undefined;
   if (options.network !== undefined) {
     const service = engine();
@@ -219,6 +242,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
     engine,
     connection: (id) => connectionsOf().handlersFor(id),
     close: async () => {
+      await scripts?.close();
       service?.fleet?.close();
       await net?.close();
       await claimed.close();

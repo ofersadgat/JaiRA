@@ -28,11 +28,49 @@ import { isAsking } from "./stateSurfaceModel";
  */
 const isOwnTurn = (root: InstanceNode, child: InstanceNode): boolean => child.stateId === root.stateId;
 
+/** A state id with the version it ran under taken out — `session@v1a2b…/call_0` → `session/call_0`. */
+const baseOf = (stateId: string): string => stateId.replace(/@v[0-9a-f]+(?=\/|$)/g, "");
+
+/**
+ * Whether a child is part of the conversation's own PROGRAM (decision 0029 §2): a conversation written
+ * as a script runs as states under its own id — its reply `session/call_0`, its wait `session/input` —
+ * and an improved version of it as `session@v…` beneath it. None of them is a run it started; what a
+ * program starts is a task of its own.
+ */
+const isOwnProgram = (root: InstanceNode, child: InstanceNode): boolean => {
+  const own = baseOf(root.stateId);
+  const it = baseOf(child.stateId);
+  return it === own || it.startsWith(`${own}/`);
+};
+
+/** Whether the conversation is a PROGRAM — its root runs states of its own (see {@link isOwnProgram}). */
+export function isProgramConversation(instances: readonly InstanceNode[] | undefined): boolean {
+  const root = instances?.[0];
+  return root !== undefined && root.children.some((child) => child.stateId !== root.stateId && isOwnProgram(root, child));
+}
+
+/** The program's states running now, deepest first down every live branch — or the root, when none is. */
+function liveProgramLeaves(node: InstanceNode, root: InstanceNode): InstanceNode[] {
+  const live = node.children.filter((child) => !child.superseded && child.endedAt === undefined && isOwnProgram(root, child));
+  return live.length === 0 ? [node] : live.flatMap((child) => liveProgramLeaves(child, root));
+}
+
+/**
+ * Whether a program conversation is WAITING for the person's next message: all it is running is an
+ * `input()` (`input`, `input_2`, …). It is not answering then, and nothing of it is "still running".
+ */
+export function programWaiting(instances: readonly InstanceNode[] | undefined): boolean {
+  const root = instances?.[0];
+  if (root === undefined || !isProgramConversation(instances)) return false;
+  const leaves = liveProgramLeaves(root, root);
+  return leaves.every((leaf) => leaf !== root && /^input(_\d+)?$/.test(leaf.childKey ?? ""));
+}
+
 /** The runs a conversation started: its root's children that are not its own turns, oldest first. */
 export function childRunsOf(instances: readonly InstanceNode[] | undefined): InstanceNode[] {
   const root = instances?.[0];
   if (root === undefined) return [];
-  return root.children.filter((child) => !child.superseded && !isOwnTurn(root, child)).sort((a, b) => a.startedAt - b.startedAt);
+  return root.children.filter((child) => !child.superseded && !isOwnTurn(root, child) && !isOwnProgram(root, child)).sort((a, b) => a.startedAt - b.startedAt);
 }
 
 /** The run a workflow tool's outcome stands for: the newest child under the key it entered. */
@@ -54,6 +92,8 @@ export function childRunLive(instances: readonly InstanceNode[] | undefined): bo
  */
 export function openingRunAnswering(instances: readonly InstanceNode[] | undefined, running: boolean): boolean {
   if (!running) return false;
+  // A program is answering unless all it does is wait for the person's next message.
+  if (isProgramConversation(instances)) return !programWaiting(instances);
   if (childRunsOf(instances).length === 0) return true;
   return instances?.[0]?.operation?.status === "running";
 }
@@ -69,6 +109,8 @@ export function openingRunAnswering(instances: readonly InstanceNode[] | undefin
  */
 export function conversationAnswering(instances: readonly InstanceNode[] | undefined, running: boolean, producing: number): boolean {
   if (openingRunAnswering(instances, running)) return true;
+  // A program's wait holds its call open as a gate does, so the index's word is not "answering" there.
+  if (isProgramConversation(instances)) return false;
   if (!childRunLive(instances)) return producing > 0;
   const root = instances?.[0];
   return root !== undefined && root.children.some((child) => isOwnTurn(root, child) && (child.status === "running" || child.operation?.status === "running"));
@@ -79,6 +121,8 @@ export function conversationAnswering(instances: readonly InstanceNode[] | undef
  * What an armed rewind offers to wait for or to stop — a rewind cuts both off.
  */
 export function stillRunningIn(instances: readonly InstanceNode[] | undefined, running: boolean, producing: number): { agent: boolean; workflow: boolean } {
+  // What a program starts runs as a task of its own, and a rewind takes that back by itself.
+  if (isProgramConversation(instances)) return { agent: conversationAnswering(instances, running, producing), workflow: false };
   return { agent: conversationAnswering(instances, running, producing), workflow: running && !openingRunAnswering(instances, running) };
 }
 

@@ -14,7 +14,8 @@
  */
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { worktreePathFor, type JairaExecEnvironment, type TaskMeta } from "@jaira/shared";
 import { Git, NodeExec, type Exec, type ExecEnv } from "@jaira/runtime";
 import type { Project } from "./project";
@@ -180,4 +181,63 @@ export async function removeWorktree(
   }
   project.runtime.clearWorktree(taskId, Date.now());
   return { removed: true };
+}
+
+// --- A simulation's throwaway workspace (decision 0029 §5 step 5) --------------------------------
+
+/** Where a simulation's throwaway workspace for `taskId` goes: beside the project's task worktrees. */
+export function throwawayWorkspacePath(project: Project, taskId: string): string {
+  return join(project.paths.worktreesDir, "simulations", taskId);
+}
+
+/**
+ * A THROWAWAY copy of the workspace at `from` — a conversation's own, its worktree or the project
+ * directory — for a simulation's pass to work in, so what the pass writes and runs touches nothing
+ * anybody keeps. In a git repository it is a worktree on no branch at `from`'s HEAD, with `from`'s
+ * uncommitted changes and untracked files carried over, so the pass starts where the conversation
+ * stood; elsewhere it is a copy of the directory. Never `.jaira/`'s own files: the pass reads the
+ * workflow it tries through the change, not a copy. Recorded as the task's worktree, so a run there
+ * starts its shell there and {@link removeThrowawayWorkspace} finds it.
+ */
+export async function makeThrowawayWorkspace(project: Project, taskId: string, from: string, options?: WorktreeOptions): Promise<TaskWorkspace> {
+  const path = throwawayWorkspacePath(project, taskId);
+  rmSync(path, { recursive: true, force: true });
+  mkdirSync(dirname(path), { recursive: true });
+  const git = gitFor(project, from, options);
+  if (await git.isRepo()) {
+    await git.addDetachedWorktree(path, "HEAD");
+    // What the conversation changed and has not committed: tracked changes as a stash commit nothing
+    // keeps, applied in the copy; untracked files copied across.
+    const stash = await git.tryRun(["stash", "create"]);
+    if (stash !== undefined && stash.length > 0) await gitFor(project, path, options).tryRun(["stash", "apply", stash]);
+    const top = (await git.tryRun(["rev-parse", "--show-toplevel"])) ?? from;
+    const untracked = (await gitFor(project, top, options).tryRun(["ls-files", "--others", "--exclude-standard", "-z"])) ?? "";
+    for (const rel of untracked.split("\0").filter((one) => one.length > 0 && !one.startsWith(".jaira/"))) {
+      const source = join(top, rel);
+      try {
+        mkdirSync(dirname(join(path, rel)), { recursive: true });
+        cpSync(source, join(path, rel));
+      } catch {
+        // A file gone between the listing and the copy: the pass starts without it.
+      }
+    }
+    project.runtime.setWorktree(taskId, path, Date.now());
+    const treeHash = await gitFor(project, path, options).treeHash();
+    return { root: path, isWorktree: true, ...(treeHash !== undefined ? { treeHash } : {}) };
+  }
+  cpSync(from, path, { recursive: true, filter: (source) => basename(source) !== ".jaira" && basename(source) !== ".git" });
+  project.runtime.setWorktree(taskId, path, Date.now());
+  return { root: path, isWorktree: true };
+}
+
+/** Take a simulation's throwaway workspace away, and the task's record of it. */
+export async function removeThrowawayWorkspace(project: Project, taskId: string, options?: WorktreeOptions): Promise<void> {
+  const path = project.runtime.get(taskId)?.worktreePath ?? throwawayWorkspacePath(project, taskId);
+  const git = gitFor(project, project.paths.projectDir, options);
+  const repo = await git.isRepo();
+  // A worktree is git's to take away (it keeps a record of each); a copy, or what is left, is a folder.
+  if (repo && existsSync(path)) await git.tryRun(["worktree", "remove", "--force", path]);
+  rmSync(path, { recursive: true, force: true });
+  if (repo) await git.tryRun(["worktree", "prune"]);
+  if (project.runtime.get(taskId)?.worktreePath !== undefined) project.runtime.clearWorktree(taskId, Date.now());
 }

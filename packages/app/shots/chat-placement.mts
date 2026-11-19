@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
     // Neither workspace takes a run: a conversation sent to this machine waits for THIS machine.
     await app.ipc("placement:setRules", { project: first.project, order, caps: { [order[0]!]: 0, [order[1]!]: 0 } });
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", inputs: { message: MESSAGE }, project: first.project });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", conversation: true, inputs: { message: MESSAGE }, project: first.project });
     const started = await app.ipc<{ queued?: true }>("task:start", { taskId: made.taskId, project: first.project, runOn: { machine: self }, fake: [{ output: ANSWER }] });
     if (started.queued !== true) throw new Error("the conversation did not wait");
     await app.until(says(TITLE), "the waiting conversation to be listed");

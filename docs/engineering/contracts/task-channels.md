@@ -102,7 +102,7 @@ The IPC request channels the renderer invokes to create, start, stop, resume, re
 
 ### `task:fastForward` runs a task to a state ahead of it, `task:skip` goes there directly, and `task:answerYourself` takes an answer back
 
-`task:fastForward` takes `TaskFastForwardRequest` — `{taskId, target, toState, instanceId?, path?, through?, by?, inputs?, interactions?, fake?, project?}` — and answers `{taskId, controlTaskId, status: "fast-forwarding"}` ([decision 0005](../decisions/0005-connect.md) §4). It is what `task:connect` hands a forward move; no transition is handed to anybody. The task's controlling conversation is found — its own root when that is a prompt, else the nearest task above it whose root is — or GIVEN one: `chat/control` is grafted onto the task's own frozen root, a diverged document, idle. Then the task is started or resumed and its spine walks it forward. While it does, `TaskDetail.fastForward` holds the strip's content, a gate or an agent's question that parks is first offered to the conversation, and an answer at or above `autopilot.askBelow` settles it, journaled `jaira.answered`. It ends when the target is entered, a state on the way ends `error` or `timeout`, the run ends, the task is stopped, or Skip is pressed. Rejected with the reason when the task runs in another process, runs here with no conversation, or has nothing left to run.
+`task:fastForward` takes `TaskFastForwardRequest` — `{taskId, target, toState, instanceId?, path?, through?, by?, conversation?, inputs?, interactions?, fake?, project?}` — and answers `{taskId, controlTaskId?, status: "fast-forwarding"}` ([decision 0005](../decisions/0005-connect.md) §4, amended 2026-11-19). It is what `task:connect` hands a forward move; no transition is handed to anybody, and nothing is grafted onto the task. The task is started or resumed — or, running, fast-forwarded as it runs — and its spine walks it forward. `conversation` names the conversation that asked for the move (a conversation's `move_task` names itself); while it runs, `TaskDetail.fastForward` holds the strip's content, a gate or an agent's question that parks is first offered to that conversation, and an answer at or above `autopilot.askBelow` settles it, journaled `jaira.answered`. With no `conversation` — a move a person made directly — what parks is the person's. It ends when the target is entered, a state on the way ends `error` or `timeout`, the run ends, the task is stopped, or Skip is pressed. Rejected with the reason when the task runs in another process, or has nothing left to run.
 
 `task:skip` takes `{taskId, project?}` and answers `TaskMoveResult`: the fast-forward's own move, as `task:move` with `skip: true`. Rejected when the task is not being fast-forwarded.
 
@@ -303,7 +303,7 @@ A completed task's output is offered when its value validates against the slot's
 | --- | --- | --- | --- |
 | `taskId` | string | yes | the task to cut or copy |
 | `at` | number | yes | a `state_machine_events.seq` of that task, as a view was handed it in `ConversationTurn.seq` or `ChatEditPoint.seq` |
-| `message` | string | no, `task:fork` only | trimmed; non-empty makes a chat fork that sends it as the copy's next turn |
+| `message` | string | no, `task:fork` only | trimmed; non-empty sends it to the resumed copy's `input()`, as `chat:send` does; refused for a task that is not a program conversation |
 | `overrides` | `ChatSettings` | no, `task:fork` only | settings for that message |
 | `interactions` | `Record<string, JsonValue[]>` | no | scripts the resume that follows |
 | `fake` | `JsonValue` | no | scripts the resume or the message that follows |
@@ -349,7 +349,7 @@ A completed task's output is offered when its value validates against the slot's
 | A resume of a task that adopted one whose outputs no longer fit, or one that has not completed | `task '<id>' cannot continue: what '<title>' produced does not fit the child it was adopted as — <path> <reason>`, or `… cannot be resumed: it adopted '<title>', which has not completed — it continues when that does` | rewind past the mirror row, or wait |
 | A rewind, fork or delete of a running task | `task '<id>' is running — stop it before rewinding it`, `… forking it`, or `… cancel it before deleting it` | stop it first |
 | A cut the journal cannot take | `has no journal event <seq>`, `nothing in task '<id>' comes after event <seq>`, `… comes before event <seq>`, `has never run, so there is nothing to fork`, or `the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | refresh the view, rerun, or reopen the project, as the message says |
-| A chat fork whose copy has no instance that spoke | `the fork of '<id>' holds no conversation to continue`, after the copy exists | delete the copy |
+| A fork with a message of a task that is not a program conversation | `task '<id>' is not a conversation that takes messages — fork it without one`, before anything is copied | fork it without a message |
 | A bound task's worktree cannot be removed | `could not remove the task's worktree: <reason>`, with nothing deleted | fix the worktree |
 | `task:rename` with a blank title | `a task needs a title` | give a title |
 | `functions:approve` in a process without module support, or on a file it cannot read | `this process has no js/ts function support to approve into`, or `cannot approve '<file>': it could not be read` | fix the path; files before it are already approved |
@@ -378,5 +378,5 @@ A completed task's output is offered when its value validates against the slot's
 - `task:rewind` and `task:delete` of a task that adopted others clear those tasks' `origin` and `parentTaskId` where the mirror row is gone.
 - `task:resumable` has no renderer caller. The renderer reads the same plan from `task:detail`'s `resume`, present only for a startable task.
 - A rewind whose cut leaves no frontier restores the task's status and outcome without resuming, and its outputs are cleared.
-- A run fork whose resume refuses rejects the request while the copy stays. A chat fork answers the copy's id before its message is answered; a failed message is only logged.
+- A run fork whose resume refuses rejects the request while the copy stays. A fork with a message answers once the message is delivered to the copy, not when it is answered; a refused message rejects the request while the copy stays.
 - A rejection crosses IPC as its message alone, so `ApprovalRequired.pending` is read back through `functions:pending`.

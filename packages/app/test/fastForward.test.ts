@@ -2,10 +2,11 @@
  * FAST-FORWARD, with Skip (decision 0005 §4, step 7), end to end through the real service.
  *
  * A task stopped at the first state of a spine is sent to a later one. No transition is handed to
- * anybody: the task is given a conversation (grafted onto its own root) and resumed, and its spine
- * walks it forward. What makes that a fast-forward is who answers on the way — the CONTROLLING
- * CONVERSATION, through `answer_question`, each answer journaled `jaira.answered` with `settled_by: control`
- * and its confidence — and what it never touches: an approval-shaped gate stays the person's.
+ * anybody: the task is resumed, and its spine walks it forward. What makes that a fast-forward is who
+ * answers on the way — the CONVERSATION THAT ASKED FOR THE MOVE (decision 0005 §4, amended 2026-11-19),
+ * through `answer_question`, each answer journaled `jaira.answered` with `settled_by: control` and its
+ * confidence — and what it never touches: an approval-shaped gate stays the person's. A move a person
+ * made directly has no such conversation, and what comes up on the way is theirs.
  *
  * The conversation's answers are scripted (`fake`): the host asks it outside any run, as a follow-up
  * round is asked, and a headless test has to answer from the script or reach for a provider.
@@ -33,7 +34,7 @@ import { initProject, openProject, SqliteEventLog } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
-import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, LEFT_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectResult } from "@jaira/shared";
+import { ANSWERED_EVENT, FAST_FORWARD_ENDED_EVENT, FAST_FORWARD_EVENT, LEFT_EVENT, type InstanceNode, type PendingInteraction, type TaskConnectRequest, type TaskConnectResult } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 import { SkipWithdrawals } from "@jaira/service/fastForward";
@@ -78,7 +79,7 @@ function files(): Record<string, JsonValue> {
       outputs: { note: { schema: { type: "string" }, binding: ".operation.output.note" } },
       operation: { prompt: "Do the work.", output: { note: { schema: { type: "string" } } } },
     },
-    // The conversation a fast-forward grafts on — the shape `chat/control` ships as.
+    // The conversation that asks for the moves: a task of its own, which never has to run here.
     "conv/standin": {
       label: "Talk",
       inputs: { opening: { schema: { type: "string" }, description: "What the person did, in a sentence." } },
@@ -101,12 +102,16 @@ const answers = (b: { confidence: number } = { confidence: 0.86 }): JsonValue =>
 
 let dir: string;
 let service: AppService;
+/** The conversation that asks for the moves (decision 0005 §4, amended 2026-11-19). */
+let talk: string;
+/** A move the conversation asked for: it answers what comes up on the way. */
+const fromTalk = (request: TaskConnectRequest): Promise<TaskConnectResult> => service.connectTask({ ...request, by: "control", conversation: talk });
 /** Services left for dead by a simulated crash — closed at the end, never before. */
 let abandoned: AppService[] = [];
 const seen = new Set<string>();
 
 async function openService(): Promise<void> {
-  service = new AppService({ baseDir: testHome(), publish: () => undefined, connectConversation: "conv/standin" });
+  service = new AppService({ baseDir: testHome(), publish: () => undefined });
   await service.open(dir);
 }
 
@@ -115,6 +120,7 @@ beforeEach(async () => {
   writeWorkflowFiles(initProject(dir, testHome()).workflowsDir, files());
   seen.clear();
   await openService();
+  talk = service.createTask({ title: "Talk", workflow: "conv/standin", inputs: { opening: "Move it along." } }).taskId;
 });
 
 afterEach(async () => {
@@ -211,15 +217,14 @@ function setAskBelow(value: number): void {
 describe("fast-forward — the machine runs to the target, and the conversation answers on the way", () => {
   it("answers the questions for you, marks each with its confidence, never offers the approval, and ends on arrival", async () => {
     const taskId = await stoppedAtFirst();
-    const connected = ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
-    expect(connected).toMatchObject({ moved: "fast-forwarding", controlTaskId: taskId, plan: { forward: "fast-forward", move: { direction: "forward", passes: ["b", "c", "d"] } } });
-    // The task had no conversation, so it was GIVEN one — grafted onto its own root, a diverged
-    // document — and it is its own control: nothing wraps it, and nothing was said to start it.
-    expect(read((p) => p.runtime.get(taskId)?.documentId)).toMatch(/^d-/);
+    const connected = ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
+    expect(connected).toMatchObject({ moved: "fast-forwarding", controlTaskId: talk, plan: { forward: "fast-forward", move: { direction: "forward", passes: ["b", "c", "d"] } } });
+    // Nothing is given the task for it: it stays pinned as it was, and nothing was said to start it.
+    expect(read((p) => p.runtime.get(taskId)?.documentId)).toBeUndefined();
     expect(journal(taskId).some((e) => e.type === "operation.started" && e.op === "prompt")).toBe(false);
 
     // The strip's content, while it runs.
-    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", targetLabel: "e", through: ["b", "c", "d"], controlTaskId: taskId });
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", targetLabel: "e", through: ["b", "c", "d"], controlTaskId: talk });
 
     // `a` and `b` were answered for you; `c` — an approval — waits for the person, unoffered.
     const approval = await nextGate(taskId);
@@ -235,8 +240,8 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     // Each answer is on the gate it settled, with who and how sure — and where to rewind to.
     const a = nodeByKey(taskId, "a")!;
     const b = nodeByKey(taskId, "b")!;
-    expect(a.settledBy).toMatchObject({ via: "control", confidence: 0.91, byTaskId: taskId });
-    expect(b.settledBy).toMatchObject({ via: "control", confidence: 0.86, byTaskId: taskId });
+    expect(a.settledBy).toMatchObject({ via: "control", confidence: 0.91, byTaskId: talk });
+    expect(b.settledBy).toMatchObject({ via: "control", confidence: 0.86, byTaskId: talk });
     // One `jaira.answered` row each, naming the instance it settled; the rewind point is that
     // instance's ENTRY, ahead of the answer.
     expect(answeredRows(taskId).map((row) => row.instanceId)).toEqual([a.instanceId, b.instanceId]);
@@ -261,7 +266,7 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     await service.close();
     await openService();
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers({ confidence: 0.3 }) }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers({ confidence: 0.3 }) }));
     // `a` at 0.91 is answered; `b` at 0.3 is under 0.5, so it waits — as it would have.
     const b = await nextGate(taskId);
     expect(promptOf(b)).toBe("Pick for b");
@@ -277,7 +282,7 @@ describe("fast-forward — the machine runs to the target, and the conversation 
 
   it("can never be handed an approval: `answer_question` refuses `confirm_action` by component, and journals nothing", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     const approval = await nextGate(taskId);
     expect(approval.component).toBe("confirm_action");
     const host = service.workflowHostFor(undefined, taskId);
@@ -291,18 +296,18 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     expect(pendingFor(taskId).map(promptOf)).toEqual(["Publish c?"]);
   });
 
-  it("runs a RUNNING task forward when it already has its conversation — nothing is restarted", async () => {
+  it("runs a RUNNING task forward — nothing is restarted", async () => {
     const taskId = await stoppedAtFirst();
-    // First to `c`: given a conversation, `a` and `b` answered on the way, and it arrives at the approval.
-    ok(await service.connectTask({ taskId, target: "ff/c", fake: answers() }));
+    // First to `c`: `a` and `b` answered on the way, and it arrives at the approval.
+    ok(await fromTalk({ taskId, target: "ff/c", fake: answers() }));
     const approval = await nextGate(taskId);
     expect(promptOf(approval)).toBe("Publish c?");
     expect(service.taskDetail(taskId).fastForward).toBeUndefined();
     const runs = journal(taskId).filter((e) => e.type === "instance.entered" && e.parentInstanceId === undefined).length;
 
-    // Now, while it is RUNNING and speaks: on to `e`. The mode is registered on the live run.
-    const again = ok(await service.connectTask({ taskId, target: "ff/e" }));
-    expect(again).toMatchObject({ moved: "fast-forwarding", controlTaskId: taskId });
+    // Now, while it is RUNNING: on to `e`. The mode is registered on the live run.
+    const again = ok(await fromTalk({ taskId, target: "ff/e" }));
+    expect(again).toMatchObject({ moved: "fast-forwarding", controlTaskId: talk });
     expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", through: ["d"] });
     // The approval it was already asking stays the person's; answered, `d` is answered for you.
     service.submitInteraction(approval.requestId, { confirmed: true });
@@ -313,6 +318,21 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     expect(journal(taskId).filter((e) => e.type === "instance.entered" && e.parentInstanceId === undefined).length).toBe(runs);
   });
 
+  it("asks the PERSON what comes up when they made the move themselves — no conversation asked for it", async () => {
+    const taskId = await stoppedAtFirst();
+    const connected = ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    expect(connected).toMatchObject({ moved: "fast-forwarding", plan: { forward: "fast-forward" } });
+    expect(connected).not.toHaveProperty("controlTaskId");
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", through: ["b", "c", "d"] });
+    expect(service.taskDetail(taskId).fastForward).not.toHaveProperty("controlTaskId");
+    // `a` is asked of the person, not answered from the script.
+    const a = await nextGate(taskId);
+    expect(promptOf(a)).toBe("Pick for a");
+    await settle();
+    expect(answeredRows(taskId)).toEqual([]);
+    expect(pendingFor(taskId).map(promptOf)).toEqual(["Pick for a"]);
+  });
+
   it("ends when something on the way FAILS, and says nothing more for the person", async () => {
     const script: JsonValue = [
       { promptIncludes: "Pick for a", output: { answer: { decision: "go" }, confidence: 0.9 } },
@@ -321,7 +341,7 @@ describe("fast-forward — the machine runs to the target, and the conversation 
     ];
     const taskId = await stoppedAtFirst("work", script);
     // `ff/e` is mounted as `z` here: the move is to it, through `w`.
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: script }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: script }));
     await until(() => statusOf(taskId) === "failed", "the failure");
     expect(service.taskDetail(taskId).fastForward).toBeUndefined();
     expect(ended(taskId)).toContainEqual(["w", "error"]);
@@ -332,7 +352,7 @@ describe("fast-forward — the machine runs to the target, and the conversation 
 describe("Skip — the jump is decided before the interrupt, and what is between is recorded", () => {
   it("interrupts the state it is in, steps over the rest, and enters the target — never the next intermediate", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     const approval = await nextGate(taskId); // standing IN `c`, the approval, unanswered
     expect(promptOf(approval)).toBe("Publish c?");
 
@@ -364,7 +384,7 @@ describe("Skip — the jump is decided before the interrupt, and what is between
 describe("the answers survive, and can be taken back", () => {
   it("keeps settled_by across a restart, and the resumed run does not ask the answered gates again", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // parked at `c`
     const before = { a: nodeByKey(taskId, "a")!.settledBy, b: nodeByKey(taskId, "b")!.settledBy };
     expect(before.a).toBeDefined();
@@ -403,7 +423,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
 
   it("after a CRASH, Resume takes the mode up: the conversation answers what comes next, the approval is still never offered, and arrival ends it", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // parked at `c`, the approval, with `a` and `b` answered for you
     await crashAndReopen(taskId);
     expect(statusOf(taskId)).toBe("interrupted");
@@ -435,7 +455,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
 
   it("after a CLOSE, the next open resumes the run and the mode unasked — the strip shows, and Skip works", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`
     await service.close();
     seen.clear();
@@ -444,7 +464,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
     await (service as unknown as { session(): { resuming: Promise<void> } }).session().resuming;
     await until(() => pendingFor(taskId).length > 0, "the resumed run to ask again");
     expect(statusOf(taskId)).toBe("running");
-    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", controlTaskId: taskId });
+    expect(service.taskDetail(taskId).fastForward).toMatchObject({ target: "ff/e", controlTaskId: talk });
 
     const skipped = await service.skipFastForward({ taskId });
     expect(skipped.status).toBe("taking");
@@ -462,7 +482,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
     await service.close();
     await openService();
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers({ confidence: 0.3 }) }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers({ confidence: 0.3 }) }));
     // `a` is answered; `b` at 0.3 is left to the person — and that decision is a journal row.
     const b = await nextGate(taskId);
     expect(promptOf(b)).toBe("Pick for b");
@@ -470,7 +490,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
     const leftRows = (): Array<Record<string, unknown>> => rows(taskId).map((row) => row.event as unknown as Record<string, unknown>).filter((e) => e["type"] === LEFT_EVENT);
     const bNode = nodeByKey(taskId, "b")!;
     expect(leftRows()).toEqual([
-      expect.objectContaining({ kind: "interaction", under: bNode.instanceId, byTaskId: taskId, key: expect.stringContaining("Pick for b"), requestId: b.requestId }),
+      expect.objectContaining({ kind: "interaction", under: bNode.instanceId, byTaskId: talk, key: expect.stringContaining("Pick for b"), requestId: b.requestId }),
     ]);
 
     // The process dies with `b` parked. Resume parks `b` again under a NEW request id — and this time
@@ -495,7 +515,7 @@ describe("a restart RESUMES the fast-forward — and it still ends only for the 
 
   it("a STOP ends it for good: the end is written, and a later resume is an ordinary one", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`
     service.cancelTask(taskId);
     await until(() => statusOf(taskId) === "canceled", "the stop");
@@ -514,7 +534,7 @@ describe("the answers can be taken back", () => {
 
   it("'Answer it yourself' rewinds to the answer: the mode is over, and the person is asked", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`, with `a` and `b` answered for you
     const b = nodeByKey(taskId, "b")!.settledBy!;
 
@@ -539,7 +559,7 @@ describe("the drop's Undo — the fast-forward is the drop's while it runs, and 
 
   it("is offered on the way and on arrival, and is over once the target settles", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     // On the way: `a` and `b` answered for you, and the person's own answer to `c` is still the way there.
     const approval = await nextGate(taskId);
     expect(promptOf(approval)).toBe("Publish c?");
@@ -562,7 +582,7 @@ describe("the drop's Undo — the fast-forward is the drop's while it runs, and 
   it("taken back on the way: the run is stopped, the mode and its answers go with the cut, and the pin is put back", async () => {
     const taskId = await stoppedAtFirst();
     const pinned = read((p) => p.runtime.get(taskId)!);
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`, still forwarding
     expect(await service.undoConnect({ taskId })).toEqual({ taskId });
     expect(ffRows(taskId)).toEqual([]);
@@ -576,7 +596,7 @@ describe("the drop's Undo — the fast-forward is the drop's while it runs, and 
 
   it("a SKIP is a decision: the Undo is over", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`
     expect(undoable(taskId)).toBe(true);
     await service.skipFastForward({ taskId });
@@ -590,7 +610,7 @@ describe("the drop's Undo — the fast-forward is the drop's while it runs, and 
       { model: "worker", error: "the model fell over" },
     ];
     const taskId = await stoppedAtFirst("work", script);
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: script }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: script }));
     await until(() => statusOf(taskId) === "failed", "the failure");
     expect(endRow(taskId)).toMatchObject({ end: "failed" });
     expect(undoable(taskId)).toBe(true);
@@ -619,7 +639,7 @@ describe("the stale inbox — what an interrupted agent asked is withdrawn by th
 
   it("a real Skip withdraws the skipped state's asks and leaves an async sibling's standing", async () => {
     const taskId = await stoppedAtFirst();
-    ok(await service.connectTask({ taskId, target: "ff/e", fake: answers() }));
+    ok(await fromTalk({ taskId, target: "ff/e", fake: answers() }));
     await nextGate(taskId); // at `c`
     const c = nodeByKey(taskId, "c")!.instanceId;
     // What agents would have parked, each naming the instance that asked (the engine stamps it): one

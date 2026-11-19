@@ -22,11 +22,8 @@ const NUMBER: JsonValue = { type: "number" };
 const FEATURE: JsonValue = { type: "object", properties: { id: { type: "string" }, story: { type: "string" } }, required: ["id"] };
 const FEATURES: JsonValue = { type: "array", items: FEATURE };
 
-const CONVERSATION: AuthoredState = {
-  label: "Stand-in conversation",
-  outputs: { said: { schema: STRING, binding: ".operation.output.said" } },
-  operation: { kind: "prompt", prompt: "talk", model: "anthropic/claude-sonnet-5", output: { said: { schema: STRING } } },
-};
+/** What a new document's root is called: the work it was made from (no conversation since 2026-11-19). */
+const NEW = { kind: "new" as const, label: "Ran lib/product" };
 
 const surface = (id: string, inputs: Record<string, JsonValue>, outputs: Record<string, JsonValue>, optional: string[] = []): StateSurface => ({
   id,
@@ -46,12 +43,13 @@ const rulesOf = (document: AuthoredState): AuthoredState[] => document["transiti
 const mountsOf = (document: AuthoredState): Record<string, AuthoredState> => document["children"] as Record<string, AuthoredState>;
 
 describe("a new document", () => {
-  it("is the conversation state with children: what ran, mounted with what it ran with, and the target wired by schema fit", () => {
-    const result = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [product], target: surface("lib/write", { b: STRING }, { r: STRING }) });
+  it("is a root with children and nothing else: what ran, mounted with what it ran with, and the target wired by schema fit", () => {
+    const result = generateDynamicWorkflow({ base: NEW, producers: [product], target: surface("lib/write", { b: STRING }, { r: STRING }) });
     expect(result.ok).toBe(true);
     const document = result.document!;
-    // The root is a state with an OPERATION and CHILDREN, and nothing on a spine.
-    expect(document["operation"]).toEqual(CONVERSATION["operation"]);
+    // The root is a state with CHILDREN, and nothing on a spine — and no conversation (decision 0005, amended 2026-11-19).
+    expect(document["label"]).toBe("Ran lib/product");
+    expect(document["operation"]).toBeUndefined();
     expect(document["sequence"]).toEqual([]);
     expect(Object.keys(mountsOf(document))).toEqual(["product", "write"]);
     expect(mountsOf(document)["product"]).toEqual({ state: "lib/product", inputs: { a: { json: "an idea", provenance: { via: "recorded", by: "t-1" } } } });
@@ -61,7 +59,7 @@ describe("a new document", () => {
   });
 
   it("writes every rule as a standing task_move, and nothing else", () => {
-    const result = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [product], target: surface("lib/write", { b: STRING }, {}) });
+    const result = generateDynamicWorkflow({ base: NEW, producers: [product], target: surface("lib/write", { b: STRING }, {}) });
     expect(rulesOf(result.document!)).toEqual([
       { when: "on_user_event('task_move', { to_state: 'product' })", to: "product", standing: true },
       { when: "on_user_event('task_move', { to_state: 'write' })", to: "write", standing: true },
@@ -73,7 +71,7 @@ describe("a new document", () => {
 
 describe("one output, many inputs", () => {
   it("splits over a list when the target takes ONE element — held, nothing confirmed", () => {
-    const result = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [product], target: surface("lib/ux", { b: FEATURE }, {}) });
+    const result = generateDynamicWorkflow({ base: NEW, producers: [product], target: surface("lib/ux", { b: FEATURE }, {}) });
     expect(result.mount).toBe("split");
     expect(mountsOf(result.document!)["ux"]).toEqual({
       state: "lib/ux",
@@ -83,7 +81,7 @@ describe("one output, many inputs", () => {
   });
 
   it("mounts a target that takes the LIST plainly — a join. Arity decides, not a name", () => {
-    const result = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [product], target: surface("lib/plan", { b: FEATURES }, {}) });
+    const result = generateDynamicWorkflow({ base: NEW, producers: [product], target: surface("lib/plan", { b: FEATURES }, {}) });
     expect(result.mount).toBe("plain");
     expect(mountsOf(result.document!)["plan"]).toEqual({ state: "lib/plan", inputs: { b: ".children.product.output.q" } });
   });
@@ -99,7 +97,7 @@ describe("one output, many inputs", () => {
 describe("what it cannot settle", () => {
   it("is RETURNED with its schema, and nothing is generated while a required input is open", () => {
     const result = generateDynamicWorkflow({
-      base: { kind: "new", conversation: CONVERSATION },
+      base: NEW,
       producers: [product],
       target: { id: "lib/cost", inputs: { b: { schema: STRING }, c: { schema: NUMBER, description: "what it may spend" } }, outputs: {} },
     });
@@ -111,7 +109,7 @@ describe("what it cannot settle", () => {
 
   it("stores a supplied value as a literal with its provenance, and it wins over a wire", () => {
     const result = generateDynamicWorkflow({
-      base: { kind: "new", conversation: CONVERSATION },
+      base: NEW,
       producers: [product],
       target: surface("lib/cost", { b: STRING, c: NUMBER }, {}),
       supplied: { c: { value: 40, provenance: { via: "asked", by: "person" } }, b: { value: "mine", provenance: { via: "inferred", by: "control" } } },
@@ -154,7 +152,7 @@ describe("what it cannot settle", () => {
 
   it("never wires an output the producer did not record, and leaves an optional input open without blocking", () => {
     const partial: Producer = { ...product, outputs: { q: [] } };
-    const result = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [partial], target: surface("lib/t", { b: STRING }, {}, ["b"]) });
+    const result = generateDynamicWorkflow({ base: NEW, producers: [partial], target: surface("lib/t", { b: STRING }, {}, ["b"]) });
     expect(result.ok).toBe(true);
     expect(mountsOf(result.document!)["t"]).toEqual({ state: "lib/t" });
     expect(result.unsettled).toEqual([{ input: "b", schema: STRING, required: false, reason: "no-fit" }]);
@@ -162,7 +160,7 @@ describe("what it cannot settle", () => {
 });
 
 describe("augmenting", () => {
-  const first = generateDynamicWorkflow({ base: { kind: "new", conversation: CONVERSATION }, producers: [product], target: surface("lib/ux", { b: FEATURE }, { d: STRING }) }).document!;
+  const first = generateDynamicWorkflow({ base: NEW, producers: [product], target: surface("lib/ux", { b: FEATURE }, { d: STRING }) }).document!;
 
   it("appends after what is there and rewrites none of it", () => {
     const ux: Producer = { key: "ux", state: surface("lib/ux", { b: FEATURE }, { d: STRING }) };

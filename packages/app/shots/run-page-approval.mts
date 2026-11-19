@@ -40,7 +40,7 @@ async function main(): Promise<void> {
 
     // A task, read on its own run page.
     const title = "Run page approval";
-    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "chat/session", inputs: { message: "Reply with the single word: ready." } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title, workflow: "session", inputs: { message: "Reply with the single word: ready." } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: ASK_FIRST } });
     for (let i = 0; (await app.ipc<{ status: string } | null>("task:detail", { taskId: made.taskId }))?.status === "running"; i++) {
       if (i > 240) throw new Error("the opening run did not end in two minutes");

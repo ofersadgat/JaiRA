@@ -110,6 +110,12 @@ export interface WaitingItem {
   instanceId?: string;
   /** A message's text. */
   message?: string;
+  /**
+   * A message a conversation's program was answering when its reply was refused: the edit point of that
+   * message (`ChatEditPoint.at`), so trying again answers the same wait again rather than sending the
+   * message a second time after the refused one.
+   */
+  branchAt?: string;
   /** The settings a message was sent with — the composer's choices — so it goes, when it goes, as sent. */
   overrides?: ChatSettings;
   /** The account that ran out. */

@@ -24,13 +24,16 @@ import {
   type FSWatcher,
   type Dirent,
 } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
+import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath, sep } from "node:path";
 import { homedir } from "node:os";
 import { createHash, randomUUID } from "node:crypto";
 import { Ajv, type ErrorObject, type ValidateFunction } from "ajv";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { createImproveHost } from "./improveHost";
 import { versionSourceFor } from "./versionSource";
+import { passTurnsOf, sandboxedPermissionSet, SIMULATION_SET } from "./simulation";
+import type { ReportedCall, ReportedOutcome, ReportedRunInfo } from "./scriptEndpoint";
+import type { SimulationRequest } from "./improveHost";
 import {
   DirectedTransitions,
   INPUT_FUNCTION,
@@ -44,8 +47,9 @@ import {
   type LoadedInstance,
   type LoadedState,
   type WorkflowBundle,
+  type VersionSource,
 } from "@declarative-ai/hw";
-import { hostFunction, type ExecServices, type FunctionInputs, type InlineFamily, type MemoCache, type PromptOp, type RecordRef } from "@declarative-ai/exec";
+import { hostFunction, promptOp, type FunctionInputs, type InlineFamily, type MemoCache, type PromptOp, type RecordRef } from "@declarative-ai/exec";
 import type { AuthoredPermissions, ExecPolicy, PermissionDecision } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import type { FetchText } from "@declarative-ai/llm";
@@ -69,7 +73,6 @@ import {
   openConnectIntent,
   tasksWithConnects,
   currentPin,
-  ensureControlConversation,
   missingInputs,
   pinWorkflow,
   planAdoption,
@@ -202,6 +205,7 @@ import {
   EVENTS_WORKFLOW,
   callingStateOf,
   mirrorStarted,
+  unmirroredStarted,
   settleStartedMirror,
   startedTaskOf,
   PROCESS_ENDED,
@@ -219,6 +223,10 @@ import {
   touch,
   TOMBSTONE_KEEP_MS,
   commentId,
+  learningMeasures,
+  makeThrowawayWorkspace,
+  prepareOverlayModules,
+  removeThrowawayWorkspace,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -266,7 +274,6 @@ import {
   type AgentOutcomeObserver,
   checkForges,
   registerRemoteFunctions,
-  PublishAuthorizer,
   registerGitTools,
   registerSystemTools,
   type DrivingEvent,
@@ -328,8 +335,6 @@ import {
   securityFloorOf,
   grantAlwaysGrantedTools,
   nativeNamesByRoute,
-  planAgentTools,
-  withPermissionSetService,
   functionNamesOf,
   InteractionHub,
   UserEventHub,
@@ -394,7 +399,6 @@ import {
   captureNativeSession,
   foldIntoEntries,
   isEmptyCapture,
-  chatOperationOf,
   chatPlanFor,
   stateWithChatSettings,
   holdsConversation,
@@ -403,7 +407,6 @@ import {
   runChatTurn,
   withSessionLayers,
   chatInstanceIdOf,
-  CHAT_CHILD_KEY,
   type ChatSettings,
   type ChatTurnResult,
   withTurnStream,
@@ -446,6 +449,10 @@ import {
   type EventsTaskStart,
   type EventsTaskCaller,
   expandArtifactCommand,
+  makeDefinitionOverlay,
+  standardOfAnyNative,
+  withDefinitionOverlay,
+  type DefinitionOverlay,
 } from "@jaira/runtime";
 import {
   ARTIFACT_SCHEME,
@@ -512,6 +519,8 @@ import {
   parseRemoteProjectKey,
   remoteProjectKey,
   PLACED_EVENT,
+  REWOUND_EVENT,
+  STEERED_EVENT,
   machineFormOf,
   type EnvironmentMachine,
   type EnvironmentView,
@@ -563,7 +572,6 @@ import {
   validateComponentResult,
   WORKFLOW_JSON,
   unnamedRouteOf,
-  ALWAYS_GRANTED_TOOLS,
   bucketOf,
   declaresTools,
   matchPermissionSet,
@@ -613,6 +621,10 @@ import {
   isConversation,
   openingOf,
   openingTitleOf,
+  isPermissionSetMarkKey,
+  permissionSetOfEnvironment,
+  resolvePermissionSetDecl,
+  type PermissionSet,
 } from "@jaira/shared";
 import { gitIgnoredPaths } from "./gitIgnored";
 import { Diagnostics, stackDetail } from "./diagnostics";
@@ -684,7 +696,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   local: "Local server",
   embedded: "Local models",
 };
-import { ANSWERABLE_COMPONENTS, createWorkflowHost } from "./workflowHost";
+import { ANSWERABLE_COMPONENTS, createWorkflowHost, type StartChildRequest, type StartChildResult } from "./workflowHost";
 import { EventsSupervisor } from "./eventsSupervisor";
 import { arrivedAt, fastForwardView, labelOfTarget, leftKeyOf, noteEntry, SkipWithdrawals, type FastForwardRun } from "./fastForward";
 import {
@@ -739,6 +751,7 @@ import type {
   AvailabilitySnapshot,
   JairaOperationNode,
   HistorySize,
+  LearningMeasures,
   JairaSettings,
   LiveTurnSnapshot,
   PendingApproval,
@@ -824,7 +837,6 @@ import type {
   PermissionSetsView,
   WriteWorkflowRequest,
   SetWorkflowDisabledRequest,
-  ConversationChoice,
   InstanceNode,
   ChatBranch,
   ChatEditPoint,
@@ -913,6 +925,11 @@ export interface AppServiceOptions {
    */
   eventsRestartDelayMs?: number;
   /**
+   * How long a simulation's pass may run before it is stopped and read as it stands, ms (decision 0029
+   * §5 step 5). Fifteen minutes by default: one message's worth of work, with room.
+   */
+  simulationTimeoutMs?: number;
+  /**
    * The OS keychain, injected by the Electron main process.
    *
    * Injected rather than imported because `safeStorage` is Electron's and this class must stay
@@ -929,12 +946,6 @@ export interface AppServiceOptions {
   settingsSyncTimings?: { settleMs?: number; scanMs?: number; pullMs?: number };
   /** Override the shared base root. Defaults to the saved setting, then `JAIRA_HOME`, then `~/.jaira`. */
   baseDir?: string;
-  /**
-   * The conversation state a connect roots a NEW dynamic workflow in (decision 0005 §3). Absent ⇒
-   * the settings' `conversations.moved` (decision 0021); a seam here so a test can name a state that
-   * needs no model.
-   */
-  connectConversation?: string;
   /**
    * Show a file in the OS file manager, injected by the Electron main process.
    *
@@ -1381,14 +1392,11 @@ function chatTurnOf(request: JsonValue | undefined, store: SqliteSessionStore): 
  * Where a chat message comes from, when that is not simply the person typing it — never an IPC field.
  *
  *  - `by`: the app wrote it, on their behalf.
- *  - `now`: send it whatever the account's limits say.
- *  - `continuing`: it CONTINUES a turn the app closed under (`continueChatTurn`) — the turn's own
- *    operation, message index and place, re-dispatched so the store reopens the turn's record.
  */
 type ChatOrigin = {
   by?: "host";
+  /** Sent NOW — "Send now anyway", or the reset it waited for — so a spent account does not hold it again. */
   now?: boolean;
-  continuing?: { operation: PromptOp<InlineFamily>; index: number; position: string };
 };
 
 /** An approval as the renderer sees it (the hub's request, minus internals). */
@@ -1462,6 +1470,11 @@ function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: Ja
     project,
     at: request.at,
   };
+}
+
+/** Whether a bundle is a PROGRAM conversation — code that waits on `input()` (decision 0029 §2). */
+function isProgramBundle(bundle: Pick<WorkflowBundle, "states">): boolean {
+  return Object.values(bundle.states).some((state) => JSON.stringify(state.operation ?? null).includes("$rt.input("));
 }
 
 /**
@@ -2105,6 +2118,8 @@ export class AppService {
         // the first deletes the durable row — leaving it on shutdown is exactly what lets the next
         // open ask the same thing again instead of pretending it was answered.
         if (fate === "settled") session?.project.interactions.close(requestId);
+        clearTimeout(session?.idleTimers.get(requestId));
+        session?.idleTimers.delete(requestId);
         session?.requestTask.delete(requestId);
         this.requestOwner.delete(requestId);
         this.publish({ type: "interaction:resolved", requestId });
@@ -2443,26 +2458,64 @@ export class AppService {
    * (decision 0029 §6): a task of its own, saying which task started it, started at once. Answered as
    * soon as its run has started, so the caller never waits for what it started.
    */
-  private async startFromProgram(open: ProjectSession, fromTask: string, request: EventsTaskStart): Promise<{ task_id: string; error?: string }> {
-    const project = open.project;
+  private async startFromProgram(open: ProjectSession, fromTask: string, request: EventsTaskStart, caller: EventsTaskCaller): Promise<{ task_id: string; error?: string }> {
+    // A simulation's pass (decision 0029 §5 step 5) starts nothing — its improver included: it is a look
+    // at what the conversation would say now, and what it would start is no task of anybody's.
+    if (open.project.tasks.tryRead(fromTask)?.simulation !== undefined) {
+      return { task_id: "", error: `not started: '${request.workflow}' — a simulation's pass starts nothing` };
+    }
     const inputs = request.inputs ?? {};
-    const from = project.tasks.tryRead(fromTask);
-    const meta = createTask(project, {
-      title: request.title ?? request.workflow,
-      workflow: request.workflow,
-      ...(Object.keys(inputs).length > 0
-        ? { inputs, inputProvenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])) }
-        : {}),
-      startedBy: { by: "events" as const, fromTask, event: "", summary: `started by ${from?.title ?? fromTask}` },
+    // A child of the program, through the link every started task has (`startChildOf`): filed under the
+    // call that started it, and said so in the program's own words — its title.
+    const made = await this.startChildOf(open, fromTask, {
+      state: request.workflow,
+      ...(request.title !== undefined ? { title: request.title } : {}),
+      inputs: inputs as Record<string, JsonValue>,
+      provenance: Object.fromEntries(Object.keys(inputs).map((name) => [name, { via: "bound" as const }])),
+      ...(caller.instanceId !== undefined ? { instanceId: caller.instanceId } : {}),
     });
+    if (made.taskId === undefined) return { task_id: "", error: made.error };
+    return { task_id: made.taskId, ...(made.error !== undefined ? { error: made.error } : {}) };
+  }
+
+  /**
+   * `start_task` from a conversation that is a PROGRAM (decision 0029 §2): the state runs as a task of
+   * its own, the conversation's CHILD through the link every started task has — `origin.kind:
+   * "started"` at the call that started it (the reply that used the tool), and mirrored into the
+   * conversation's journal there — so it is listed, held, released, stopped and answered as one of the
+   * conversation's, and the program's own run goes on where it was. Answered once its run has started.
+   */
+  private async startChildOf(open: ProjectSession, fromTask: string, request: StartChildRequest): Promise<StartChildResult> {
+    const project = open.project;
+    // The call that started it: the one the tool names, else the conversation's latest reply.
+    const latestReply = (): string | undefined => {
+      let latest: string | undefined;
+      for (const { event } of project.events.list(fromTask)) if (event.type === "operation.started" && event.op === "prompt") latest = event.instanceId;
+      return latest;
+    };
+    const instanceId = request.instanceId ?? latestReply();
+    const at = instanceId !== undefined ? callingStateOf(project, fromTask, instanceId) : undefined;
+    if (at === undefined) return { error: "no call of this conversation is on record to start it from" };
+    const index = project.tasks.list().filter((meta) => meta.origin?.kind === "started" && meta.origin.taskId === fromTask && meta.origin.key === at.key && (meta.origin.occurrence ?? 0) === at.occurrence).length;
+    const meta = createTask(project, {
+      title: request.title ?? request.state,
+      workflow: request.state,
+      ...(Object.keys(request.inputs).length > 0 ? { inputs: request.inputs, inputProvenance: request.provenance } : {}),
+      origin: { kind: "started", taskId: fromTask, key: at.key, ...(at.occurrence !== 0 ? { occurrence: at.occurrence } : {}), index, state: { stateId: at.stateId, path: at.path } },
+    });
+    mirrorStarted(project, fromTask, at, meta);
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: fromTask });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     this.publishFor(open, { type: "store:invalidate", scope: "board" });
+    // A SCRIPTED run's children are scripted too: the same rules answer their calls, so a run started
+    // with `fake` never reaches a real model through a task it started (a test's improver, a demo's).
+    const fake = open.fakeRules.get(fromTask);
     try {
-      await this.startTask({ taskId: meta.id, project: this.refOfSession(open) });
-      this.log({ level: "info", source: "run", message: `started ${request.workflow} (${meta.id}) from ${fromTask}`, project: open.key, taskId: fromTask });
-      return { task_id: meta.id };
+      await this.startTask({ taskId: meta.id, project: this.refOfSession(open), ...(fake !== undefined ? { fake: fake as unknown as JsonValue } : {}) });
+      this.log({ level: "info", source: "run", message: `started ${request.state} (${meta.id}) from ${fromTask}`, project: open.key, taskId: fromTask });
+      return { taskId: meta.id };
     } catch (e) {
-      return { task_id: meta.id, error: (e as Error).message };
+      return { taskId: meta.id, error: (e as Error).message };
     }
   }
 
@@ -3807,7 +3860,9 @@ export class AppService {
     // should not wait on that. Each one logs its own failure. The promise is kept on the session so
     // a close that arrives while this is still going waits for it — a resume that started after
     // the close began would be a run with no session and a database on its way out.
-    session.resuming = this.resumeSuspended(session).then(() => this.finishOpenConnects(session));
+    session.resuming = this.sweepSimulations(session)
+      .then(() => this.resumeSuspended(session))
+      .then(() => this.finishOpenConnects(session));
     // Then its events task (decision 0010 §4) — after the resumes, which may already have resumed it.
     void session.resuming.then(() => this.superviseEvents(session));
     // What the conversations the app closed under were left asking — read from their records once the
@@ -4602,7 +4657,7 @@ export class AppService {
       if (!relayed) this.settingsSync?.kick();
     }
     // Work was done in a checkout somebody is looking at: what it says of itself may have moved.
-    if (message.type === "run:finished" || message.type === "chat:turnEnded" || (message.type === "engine:event" && (message.event as { type?: string }).type === "operation.completed")) {
+    if (message.type === "run:finished" || (message.type === "engine:event" && (message.event as { type?: string }).type === "operation.completed")) {
       const about = (message as { project?: string }).project;
       const session = about !== undefined && parseRemoteProjectKey(about) === undefined ? this.sessions.get(sessionKey(about)) : undefined;
       if (session !== undefined && this.workspaceGit.has(session.key)) void this.lookAtWorkspace(session, 0).catch(() => undefined);
@@ -4937,10 +4992,36 @@ export class AppService {
         createdAt: Date.now(),
       });
     }
+    // A simulation's pass (decision 0029 §5 step 5) asks nobody: where it would wait on someone, it ends,
+    // and the question is the improver's to read, never one put in front of the person.
+    if (session !== undefined && pending.taskId !== "" && session.simulations.has(pending.taskId)) return;
     this.publish({ type: "interaction:requested", pending });
+    // A wait for a message that gives up after an idle stretch (decision 0029 §6).
+    if (session !== undefined && pending.taskId !== "" && pending.component === INPUT_FUNCTION) this.armIdle(session, pending.requestId, pending.taskId, pending.inputs.idle);
     // A task being fast-forwarded asks its conversation first (decision 0005 §4). After the row and
     // the publication, so the question is exactly as durable and as visible as any other.
     if (session !== undefined && pending.taskId !== "") this.offerToControl(session, pending.taskId, { kind: "interaction", pending });
+  }
+
+  /**
+   * Answer a wait for the next message `{ idle: true }` once `idle` has passed since it first asked —
+   * `input({ idle: "4h" })`, the stretch after which a conversation is reviewed for lessons (decision
+   * 0029 §6). Counted from when the wait first ASKED, as the journal has it, not from this park: a
+   * conversation the app closed on is parked again when it opens, and the hours it sat before that
+   * count. A stretch already over when the wait parks answers it at once.
+   */
+  private armIdle(open: ProjectSession, requestId: string, taskId: string, idle: JsonValue | undefined): void {
+    const ms = idleMsOf(idle);
+    if (ms === undefined) return;
+    const since = lastInputAsked(open.project, taskId)?.at ?? Date.now();
+    clearTimeout(open.idleTimers.get(requestId));
+    const timer = setTimeout(() => {
+      open.idleTimers.delete(requestId);
+      if (this.closed || open.closing) return;
+      open.hub.submit(requestId, { idle: true });
+    }, Math.max(0, since + ms - Date.now()));
+    (timer as { unref?: () => void }).unref?.();
+    open.idleTimers.set(requestId, timer);
   }
 
   /**
@@ -5636,7 +5717,9 @@ export class AppService {
     // knowing what it does. Computed only for a task that could actually start: for anything else
     // `resumable` answers `none` off the status alone, and folding a completed task's whole journal
     // on every panel draw would be work with no reader.
-    if (!isStartableStatus(detail.status)) return detail;
+    // A conversation waiting for its next message SHOWS as its last reply ended, failed included, and
+    // its run is live all the same: nothing to resume (`idleStatusOf`).
+    if (!isStartableStatus(detail.status) || open.project.runtime.get(taskId)?.status === "running") return detail;
     return { ...detail, resume: this.resumable(taskId, project) };
   }
 
@@ -5718,6 +5801,8 @@ export class AppService {
       const running = new Set(tasks.filter((t) => t.status === "running").map((t) => t.taskId));
       const parked = new Set<string>();
       for (const request of session.hub.list()) {
+        // A conversation waiting for its next message asks nobody anything (decision 0029 §2).
+        if (request.component === INPUT_FUNCTION) continue;
         const taskId = request.taskId ?? session.requestTask.get(request.requestId);
         if (taskId !== undefined && running.has(taskId)) parked.add(taskId);
       }
@@ -5787,6 +5872,11 @@ export class AppService {
   /** The same, for a named session — what a board drawn for another project reads. */
   private browseWorkflowsIn(session: ProjectSession): WorkflowBrowser {
     return browseWorkflows(session.project);
+  }
+
+  /** What a project's learning measures (decision 0029, "Revisit when") — see "learning:measures". */
+  learningMeasures(request: { project?: string } = {}): LearningMeasures {
+    return learningMeasures(this.session(request.project).project);
   }
 
   /** Rows currently stored, for the pruning panel's "before" figure. */
@@ -6082,7 +6172,9 @@ export class AppService {
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
     const preparing = Date.now();
-    const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
+    // A simulation's fork works in its throwaway workspace (decision 0029 §5 step 5), never the conversation's.
+    const simulation = open.simulations.get(taskId);
+    const workspace = opts.workspace ?? simulation?.workspace ?? (await ensureWorkspace(project, taskId));
     const prepared = Date.now();
     // The project's setup target the workflow asks for (decision 0027), on this machine, before the
     // run: a fresh start a person made, never a resume, a reopen or one of JaiRA's own runs.
@@ -6365,10 +6457,19 @@ export class AppService {
     // plus `start_task`, so a program starts its improver without waiting for it. Every interactive run
     // has them, as a state's code reaches them by name from `$REGISTRY`.
     if (!eventsTask) {
-      registerImproveFunctions(registry, createImproveHost(project), taskId);
+      registerImproveFunctions(
+        registry,
+        createImproveHost(project, {
+          // The projects open here, besides this one — where a lesson recorded elsewhere is found (decision 0029 §7).
+          otherProjects: () => [...this.sessions.values()].filter((other) => other.kind === "user" && other !== open).map((other) => ({ name: basename(other.project.paths.projectDir), jairaDir: other.project.paths.jairaDir })),
+          // A change tried before it is offered (§5 step 5).
+          simulate: (request) => this.simulatePass(open, request),
+        }),
+        taskId,
+      );
       if (!registry.functions.has(START_TASK)) {
         registerEventsTaskFunctions(registry, {
-          startTask: (request) => this.startFromProgram(open, taskId, request),
+          startTask: (request, caller) => this.startFromProgram(open, taskId, request, caller),
           notify: (notice, caller) => this.postNotice(open, taskId, notice, caller),
         });
       }
@@ -6441,7 +6542,14 @@ export class AppService {
     // is lent above — no forge primitive, no wait on a person's gesture (decision 0010 §4).
     if (eventsTask) restrictToEventsFunctions(registry);
 
-    const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
+    // A SCRIPTED task stays scripted: the rules a run of it was started with are kept on the task, and a
+    // later start that brings none — a resume, one the app makes at open after a restart — runs on them.
+    // A conversation is a run that lives across restarts now (decision 0029 §2), and without this the
+    // first resume of a scripted one asked a real model for its title.
+    const kept = project.tasks.tryRead(taskId);
+    if (opts.fake !== undefined && kept !== undefined && JSON.stringify(kept.scripted) !== JSON.stringify(opts.fake)) project.tasks.write({ ...kept, scripted: opts.fake as JsonValue });
+    const fakeSource = opts.fake ?? kept?.scripted;
+    const fakeRules = fakeSource !== undefined ? parseFakeRules(fakeSource) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
     // A conversation still carrying its birth name is given a better one while its first turn runs.
     this.titleConversation(open, taskId, fakeRules);
@@ -6531,7 +6639,7 @@ export class AppService {
       });
       this.followUnstreamed(open, taskId, delta, workspace.root, onDelta);
     };
-    const streaming = withTurnStream(onDelta, prompt, open.liveCalls);
+    const streaming = withTurnStream(onDelta, prompt, open.liveCalls, taskId);
 
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
     // sessions whose states asked for it, and summarizing through this run's own
@@ -6541,10 +6649,12 @@ export class AppService {
     // messages, thinking, tool calls, the provider's own handle — and dropped the whole thing when the
     // process exited. Scoped to this run, so a stored transcript can be found from the task that made
     // it (`stateSessions` is the other half of that join).
-    // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what somebody typed.
+    // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what
+    // somebody typed. Except a CONVERSATION that is a program (decision 0029 §2): its reply is made with
+    // the message the person typed, passed through its `input()`, and the thread draws it as theirs.
     // The limits board rides with the stores: every call below reports what it sends and every limit
     // reading it hears (`SessionStores.limits`).
-    const recordStore = sessionStoreFor(project, { taskId }, "workflow");
+    const recordStore = sessionStoreFor(project, { taskId }, isConversation(started.meta) && isProgramBundle(started.bundle) ? undefined : "workflow");
     // A call this run continues — cut when the app closed, or by a stop — goes on from its own record.
     const session = {
       ...sessionServicesFor({ inner: recordStore }),
@@ -6590,10 +6700,24 @@ export class AppService {
      * Until a pick, every state's calls are decided under the block it was entered with.
      */
     const live: LivePermissions = { permissionSet: undefined };
+    // A PROGRAM conversation (decision 0029 §2) answers in a state below its root (a call of `session`),
+    // so the composer's set governs every call of its run, not the root's alone — and it starts on the
+    // set its first message carried, kept on the task, as a later message's reaches it through
+    // `chat:settings` before its `input()` is answered.
+    const program = isProgramBundle(started.bundle);
+    if (program) {
+      const kept = started.meta.chatSettings;
+      const picked = kept !== undefined ? this.composerPermissions(open, taskId, kept) : undefined;
+      if (picked !== undefined) {
+        live.permissionSet = picked.permissionSet;
+        live.stack = picked.stack;
+      }
+    }
+    const composerGoverns = (instanceId: string | undefined): boolean => instanceId !== undefined && (program || instanceStates.get(instanceId) === started.bundle.rootId);
     // The root's parked calls, decided again under the set the person picked while they waited. A
     // state's own block is the engine's, not held here: until a pick, nothing is decided again.
     live.judge = (call) =>
-      live.permissionSet !== undefined && call.instanceId !== undefined && instanceStates.get(call.instanceId) === started.bundle.rootId
+      live.permissionSet !== undefined && composerGoverns(call.instanceId)
         ? { policy, block: permissionsOfPermissionSet(live.permissionSet, undefined, live.stack) }
         : undefined;
     const policy: ExecPolicy = {
@@ -6608,10 +6732,20 @@ export class AppService {
         // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
         shellAt: () => this.shellAt(taskId, config.execEnvironment),
       }),
-      permissionsOf: (call, stated) =>
-        live.permissionSet === undefined || instanceStates.get(call.instanceId) !== started.bundle.rootId
-          ? stated
-          : (permissionsOfPermissionSet(live.permissionSet, undefined, live.stack) as AuthoredPermissions),
+      permissionsOf: (call, stated) => {
+        const governed = live.permissionSet !== undefined && composerGoverns(call.instanceId);
+        // A simulation's pass (decision 0029 §5 step 5): whatever its calls would be decided under, with
+        // the set that keeps it in its throwaway workspace standing over it.
+        if (simulation !== undefined) {
+          const base = governed
+            ? live.permissionSet!
+            : stated !== undefined
+              ? permissionSetOfEnvironment(Object.keys((stated as PermissionsDecl).tools ?? {}).filter((name) => !isPermissionSetMarkKey(name)), stated as PermissionsDecl)
+              : { entries: {}, other: "allow" as const };
+          return permissionsOfPermissionSet(sandboxedPermissionSet(base, simulation.sandbox), undefined, governed ? live.stack : undefined) as AuthoredPermissions;
+        }
+        return governed ? (permissionsOfPermissionSet(live.permissionSet!, undefined, live.stack) as AuthoredPermissions) : stated;
+      },
     };
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
@@ -6670,8 +6804,10 @@ export class AppService {
           // A resumed run lays back in the versions it took of the states its scripts call (decision
           // 0029 §3) before anything re-attaches — `withRunVersions`.
           bundle: withAdoptedStandIns(opts.loaded !== undefined ? withRunVersions(project, taskId, started.bundle) : started.bundle, opts.loaded),
-          // …and may take newer ones, at the calls still to come.
-          ...(eventsTask ? {} : { versions: versionSourceFor(project, started.bundle.rootId, (stateId, files) => this.log({ level: "info", source: "run", message: `a newer '${stateId}' waits for approval of ${files.join(", ")} before this run can take it`, project: open.key, taskId })) }),
+          // …and may take newer ones, at the boundaries still to come — when what it runs IS the
+          // workflow's files: a task in a document runs a version of the document, and a bundle the
+          // start was handed is nobody's file, so neither has a newer version in `workflows/`.
+          ...(eventsTask || opts.bundle !== undefined || project.runtime.get(taskId)?.documentId !== undefined ? {} : { versions: overlaidVersions(simulation?.overlay, versionSourceFor(project, started.bundle.rootId, (stateId, files) => this.log({ level: "info", source: "run", message: `a newer '${stateId}' waits for approval of ${files.join(", ")} before this run can take it`, project: open.key, taskId }), registry.functions)) }),
           inputs: started.meta.inputs ?? {},
           registry,
           prompt: streaming,
@@ -6688,7 +6824,7 @@ export class AppService {
             workspace,
             // The parent's scripted answers, if any, script the tasks it makes: a fake run's split
             // copies and mount tasks would otherwise reach for a real provider.
-            startTask: (childId, o) => this.startMadeTask(open, childId, { ...o, ...(opts.fake !== undefined ? { fake: opts.fake } : {}) }),
+            startTask: (childId, o) => this.startMadeTask(open, childId, { ...o, ...(fakeSource !== undefined ? { fake: fakeSource } : {}) }),
             waitForTask: (childId, signal) => this.waitForTask(open, childId, signal),
             cancelTask: (childId) => {
               this.cancelTaskIn(open, childId);
@@ -6727,6 +6863,12 @@ export class AppService {
                 const refused = usageRefusalOf((event as { failure?: unknown }).failure);
                 if (refused !== undefined) usageRefusal = refused;
                 if (refused?.credit === true) this.limits.creditRefused(refused.account);
+                // A conversation's reply: the program catches it and goes on, so the RUN keeps no
+                // refusal — the message it was answering does.
+                if (refused !== undefined && (event as { op?: string }).op === "prompt" && this.isProgramConversation(open, taskId)) {
+                  usageRefusal = undefined;
+                  this.keepRefusedMessage(open, taskId, refused);
+                }
               }
               this.publishFor(open, {
                 type: "engine:event",
@@ -6906,7 +7048,8 @@ export class AppService {
             project: open.key,
             taskId,
             toState: leftover.to,
-            by: leftover.by,
+            // Queued by a person or a control; a version's way down is the engine's own (decision 0029 §3).
+            by: leftover.by as "person" | "control",
             ...(leftover.skip === true ? { skip: true } : {}),
             ...(leftover.instanceId !== undefined ? { instanceId: leftover.instanceId } : {}),
             ...(leftover.inputs !== undefined ? { inputs: leftover.inputs as Record<string, JsonValue> } : {}),
@@ -7240,26 +7383,6 @@ export class AppService {
     };
   }
 
-  /**
-   * Wait for something, but not forever.
-   *
-   * Every wait on this path is a wait on a CALL, and a provider that stops answering would otherwise
-   * take the waiter with it — and the waiter is an IPC handler, so it would take the request with it
-   * too: no reply, no error, nothing to cancel. Past the bound the caller carries on and the store
-   * resolves the collision by forking, which is a worse answer than a continuation and a far better
-   * one than a request that never returns.
-   */
-  private static async within(promise: Promise<void>, ms: number): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<void>((resolve) => {
-      timer = setTimeout(resolve, ms);
-    });
-    try {
-      await Promise.race([promise, expired]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
-  }
 
   /** What one typed message is, as a request — the same shape whether it queues or goes straight in. */
   private static chatSend: {
@@ -7273,28 +7396,16 @@ export class AppService {
   };
 
   /**
-   * Send one message into the conversation an instance ran — behind the message before it.
+   * Send one message into a conversation: the answer to its program's `input()` (decision 0029 §2),
+   * which is the only way a message goes in. A conversation that is not a program answered its opening
+   * and ended, and a message to it is refused.
    *
-   * ## Why a message has to know about the one ahead of it
-   *
-   * Where a message goes is computed from where the conversation is recorded as ENDING, and a message
-   * that has been sent but has not yet been written down is invisible to that computation. So two
-   * messages sent close together both read the same end, both resolve to it, and the store answers
-   * the only way it honestly can: the second collides and branches. One conversation becomes two, the
-   * thread reads one of them, and the other message is on disk and on no screen.
-   *
-   * That window is entirely reachable now that a message can be sent mid-turn — it is the time
-   * between pressing Enter twice — and nothing that can be QUERIED closes it. The live register holds
-   * a call only while it runs, so it is silent both before the call starts and after it settles, and
-   * a waiter that consulted it in either window computed a position something else was holding.
-   *
-   * So each send takes the previous one's completion promise on the way in, synchronously, before any
-   * await — the point being that no second send can read the chain between this one reading it and
-   * joining it. What it does with that promise is {@link runChatMessage}'s business: a message that
-   * can JOIN the turn in flight does not wait for it at all.
-   *
-   * The promise is resolved in the `finally`, so a message that fails anywhere — before its call, in
-   * its call, in the journal write after it — cannot leave the ones behind it waiting.
+   * Messages are DELIVERED in the order they were sent, each after the one before it has been
+   * delivered (not answered): a send takes its place synchronously, before anything is awaited, because
+   * delivering one awaits — a newer version of the workflow, a rewind, a resume — and a later message
+   * must not answer the wait an earlier one was sent for. So two sent close together do not branch the
+   * conversation or swap: the first answers the wait, and the second finds the program working —
+   * steered into its call or held for its next `input()` ({@link answerProgramInput}).
    */
   async sendChatMessage(
     request: typeof AppService.chatSend,
@@ -7305,6 +7416,30 @@ export class AppService {
     // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
     request = { ...request, message: expandArtifactCommand(request.message) };
     const open = this.session(request.project);
+    // In line behind the message before it — taken now, before any await (see above).
+    const line = `${this.refOfSession(open)}/${request.taskId}`;
+    const ahead = this.chatDeliveries.get(line) ?? Promise.resolve();
+    let delivered!: () => void;
+    const mine = ahead.then(() => new Promise<void>((resolve) => (delivered = resolve)));
+    this.chatDeliveries.set(line, mine);
+    try {
+      await ahead;
+      return await this.deliverChatMessage(open, request, origin);
+    } finally {
+      delivered?.();
+      if (this.chatDeliveries.get(line) === mine) this.chatDeliveries.delete(line);
+    }
+  }
+
+  /** Each task's messages in the order they were sent: the last one's delivery, by session and task. */
+  private readonly chatDeliveries = new Map<string, Promise<void>>();
+
+  /** {@link sendChatMessage}, once the messages ahead of this one are delivered. */
+  private async deliverChatMessage(
+    open: ProjectSession,
+    request: typeof AppService.chatSend,
+    origin: ChatOrigin,
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     // Sent under the conversation's OWN settings — what its composer keeps on the task (`chat:settings`,
     // which every chip change goes through before anything is sent) — with what the message names over
     // them. A composer that has not read them yet says less than they do, and its message must not run
@@ -7314,25 +7449,72 @@ export class AppService {
     if (kept !== undefined) request = { ...request, overrides: { ...kept, ...(request.overrides ?? {}) } };
     // The person writing again is what lets a task they stopped use the mouse and keyboard again.
     if (origin.by !== "host") this.drivingStopped.delete(`${this.refOfSession(open)}/${request.taskId}`);
+    // The account this message spends, when its model says (a preset decides later and cannot be held
+    // here). Known to be SPENT ⇒ the message waits for the reset instead of being refused —
+    // deterministic, from the reading, never a guess. "Send now anyway" and the reset itself send with
+    // `now`, which skips this; so does an edit, which is a rewind the person asked for.
+    if (origin.now !== true && request.branchAt === undefined && this.isProgramConversation(open, request.taskId)) {
+      const account = this.messageAccountOf(open, request);
+      const reading = account !== undefined ? this.limits.board.state(account).reading : undefined;
+      if (account !== undefined && isSpent(reading)) {
+        const waiting = this.waiting.add({
+          kind: "message",
+          project: open.key,
+          taskId: request.taskId,
+          instanceId: request.instanceId,
+          message: request.message,
+          ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
+          account,
+          until: spentUntil(reading),
+          state: "waiting",
+          retry: true,
+        });
+        return { instanceId: request.instanceId, index: 0, ...PROGRAM_ANSWERED, waiting };
+      }
+    }
     // A PROGRAM's conversation (decision 0029 §2): the message is the answer to its `input()`, and the
-    // run takes it from there — its next call is a state of the run, streamed and recorded as one.
-    if (request.branchAt === undefined && origin.continuing === undefined) {
+    // run takes it from there — its next call is a state of the run, streamed and recorded as one. An
+    // EARLIER message edited is that message's state rewound to — the `input()` that took it, asking
+    // again — and the edit its answer.
+    if (request.branchAt !== undefined && this.isProgramConversation(open, request.taskId)) {
+      const point = this.chatThread({ taskId: request.taskId, ...(request.project !== undefined ? { project: request.project } : {}) })?.points.find((p) => p.at === request.branchAt);
+      if (point?.seq === undefined) throw this.refusal("run", `'${request.branchAt}' is not a message in this conversation that can be edited`);
+      await this.rewindTask({ taskId: request.taskId, at: point.seq, ...(request.project !== undefined ? { project: request.project } : {}), ...(request.fake !== undefined ? { fake: request.fake as JsonValue } : {}) });
+      const { branchAt: _edited, ...answer } = request;
+      const answered = await this.answerProgramInput(open, answer);
+      if (answered !== undefined) return answered;
+    }
+    if (request.branchAt === undefined) {
       const answered = await this.answerProgramInput(open, request);
       if (answered !== undefined) return answered;
     }
-    // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
-    const settledAhead = open.chatDone.get(request.taskId);
-    let finished = (): void => undefined;
-    const done = new Promise<void>((resolve) => {
-      finished = resolve;
-    });
-    open.chatDone.set(request.taskId, done);
-    try {
-      return await this.runChatMessage(open, request, settledAhead, origin);
-    } finally {
-      if (open.chatDone.get(request.taskId) === done) open.chatDone.delete(request.taskId);
-      finished();
+    // Only a PROGRAM takes a message (decision 0029 §2): its `input()` is where a message goes, and there
+    // is no other way in. A conversation recorded as one prompt answered its opening and ended, as a
+    // workflow of one call does (the person, 2026-11-19: "forget the old way").
+    throw this.refusal("run", "this conversation takes no more messages: it is not a program that waits for them — start a new conversation");
+  }
+
+  /**
+   * End a conversation that is a program ("chat:end"): its `input()` returns `null` (decision 0029 §2),
+   * and the program does what it does at its end — `session` reviews the whole conversation for
+   * lessons (§6). Waiting now: that wait is answered. A reply in flight: the wait after it is. A
+   * conversation the app closed on while it waited: its run starts again with the answer in hand.
+   * `ended: false` for a conversation that is not a program, or that has already ended.
+   */
+  async endConversation(request: { taskId: string; project?: string }): Promise<{ ended: boolean }> {
+    const open = this.session(request.project);
+    const taskId = request.taskId;
+    if (!this.isProgramConversation(open, taskId)) return { ended: false };
+    const live = open.hub.list().find((r) => r.component === INPUT_FUNCTION && (r.taskId ?? open.requestTask.get(r.requestId)) === taskId);
+    if (live !== undefined) return { ended: open.hub.submit(live.requestId, null) };
+    if (open.live.has(taskId)) {
+      open.hub.seed(taskId, INPUT_FUNCTION, null);
+      return { ended: true };
     }
+    const stored = open.project.interactions.forTask(taskId).find((row) => row.component === INPUT_FUNCTION);
+    if (stored === undefined) return { ended: false };
+    this.answerRecoveredInteraction(stored.requestId, null);
+    return { ended: true };
   }
 
   /**
@@ -7344,12 +7526,15 @@ export class AppService {
    *   which starts the run again with the answer in hand.
    * - Not waiting (a call in flight): steered into the call when its transport can take it, else
    *   SEEDED, so the program's next `input()` is answered at once rather than asked.
+   * - Ended ({@link endConversation}, or stopped): rewound to the wait it ended at, and answered there.
    *
-   * `undefined` when the task's run is not a program, and the message goes the ordinary way.
+   * `undefined` when the task's run is not a program, which {@link sendChatMessage} refuses.
    */
   private async answerProgramInput(
     open: ProjectSession,
     request: typeof AppService.chatSend,
+    /** Set on the second pass, after an ended conversation was rewound to its last wait. */
+    reopened = false,
   ): Promise<(ChatTurnResult & { instanceId: string; index: number; steered?: boolean }) | undefined> {
     const taskId = request.taskId;
     const answer: JsonValue = {
@@ -7363,13 +7548,61 @@ export class AppService {
     const stored = live === undefined && !running ? open.project.interactions.forTask(taskId).find((row) => row.component === INPUT_FUNCTION) : undefined;
     if (live === undefined && stored === undefined && !this.isProgramConversation(open, taskId)) return undefined;
     const at = { instanceId: request.instanceId ?? "", index: 0 };
+    // The message's TOOLS and permission set are the conversation's from now on (decision 0029 §2):
+    // kept on the task and handed to its run before the message is, so the reply is decided under them.
+    // Its model and reasoning travel in the answer itself, for the program to use.
+    const o = request.overrides;
+    if (o !== undefined && (o.tools !== undefined || o.permissions !== undefined || o.permissionSet !== undefined)) {
+      this.changeChatSettings({ taskId, overrides: o, ...(request.project !== undefined ? { project: request.project } : {}) });
+    }
     if (live !== undefined) {
-      open.hub.submit(live.requestId, answer);
+      // A lesson that changed the conversation's workflow while it waited is taken NOW, from the wait
+      // (decision 0029 §3): `input()` is the boundary every version shares, and the wait has done
+      // nothing, so the run steps past it and its newer version asks again. That one is answered —
+      // asked already, or seeded for the moment it asks — and the reply is the newer code's.
+      const run = open.live.get(taskId);
+      if (run !== undefined && (await run.directed.takeNewerVersion())) {
+        const asked = open.hub.list().find((r) => r.component === INPUT_FUNCTION && (r.taskId ?? open.requestTask.get(r.requestId)) === taskId);
+        if (asked === undefined || !open.hub.submit(asked.requestId, answer)) open.hub.seed(taskId, INPUT_FUNCTION, answer);
+        return { ...at, ...PROGRAM_ANSWERED };
+      }
+      // Answered by another message while the version was looked up: this one waits for the next `input()`.
+      if (!open.hub.submit(live.requestId, answer)) open.hub.seed(taskId, INPUT_FUNCTION, answer);
       return { ...at, ...PROGRAM_ANSWERED };
     }
     if (stored !== undefined) {
       await this.submitInteraction(stored.requestId, answer);
       return { ...at, ...PROGRAM_ANSWERED };
+    }
+    if (!running && !reopened) {
+      const status = open.project.runtime.get(taskId)?.status;
+      // CUT in the middle of a reply — the app closed or died while it was being made, or the run was
+      // stopped then — and the person writes again: the run is taken up where it was cut, so the reply
+      // is made again in its own record, at its own place, and the message it answers stays in the
+      // conversation; this one is held for the `input()` after it. Rewinding to the last wait instead
+      // would take back the message the reply was cut on.
+      if (status !== undefined && (status === "interrupted" || isTerminalStatus(status)) && endedMidReply(open.project, taskId)) {
+        open.hub.seed(taskId, INPUT_FUNCTION, answer);
+        await this.resumeTask({
+          taskId,
+          ...(request.project !== undefined ? { project: request.project } : {}),
+          ...(request.fake !== undefined ? { fake: request.fake as JsonValue } : {}),
+        });
+        return { ...at, ...PROGRAM_ANSWERED };
+      }
+      // The conversation ENDED at a wait — its `input()` answered `null`, or its run stopped there — and
+      // the person writes again: it goes on from that wait, an ordinary state rewind to there, and this
+      // message is the wait's answer. Once: the rewind leaves the run waiting there, or on its way.
+      const ended = lastInputAsked(open.project, taskId);
+      if (ended !== undefined && status !== undefined && isTerminalStatus(status)) {
+        await this.rewindTask({
+          taskId,
+          at: ended.seq,
+          ...(request.project !== undefined ? { project: request.project } : {}),
+          ...(request.fake !== undefined ? { fake: request.fake as JsonValue } : {}),
+        });
+        return this.answerProgramInput(open, request, true);
+      }
     }
     // A call is in flight: join it if its transport can, else the next `input()` takes this.
     const steer = (() => {
@@ -7383,6 +7616,7 @@ export class AppService {
       try {
         const sentAt = Date.now();
         await steer.send(request.message);
+        recordHostRow(open.project, taskId, { type: STEERED_EVENT, message: request.message });
         const joined = joinedMessageEntries(request.message, sentAt);
         this.hostCall(open, taskId, joined.live, joined.record, sentAt);
         return { ...at, ...PROGRAM_ANSWERED, steered: true };
@@ -7394,6 +7628,29 @@ export class AppService {
     return { ...at, ...PROGRAM_ANSWERED };
   }
 
+  /**
+   * The permission set a composer's settings name for a conversation, and the stack it came from —
+   * what `chat:settings` hands every live turn and run of it (decision 0023 §2.6–§2.7). `undefined` when
+   * the settings pick no tools or set at all.
+   */
+  private composerPermissions(open: ProjectSession, taskId: string, overrides: ChatSettings, project?: string): { permissionSet: LivePermissions["permissionSet"]; stack: LivePermissions["stack"] } | undefined {
+    // The conversation's states, for a composer that was RESET — what the state declares. A set that
+    // was picked needs none of it, which is what lets a pick reach an opening message whose instance
+    // the journal does not hold yet.
+    let path: ReturnType<AppService["chatContextOf"]>["path"] = [];
+    const host = this.chatHostOf(taskId, project);
+    if (host !== null) {
+      try {
+        path = this.chatContextOf(taskId, host, project).path;
+      } catch (e) {
+        if (!(e instanceof NoConversationHere)) throw e;
+      }
+    }
+    const { plan, stack } = this.withChatStack(open, chatPlanFor(path, overrides));
+    if (!declaresTools(plan.settings)) return undefined;
+    return { permissionSet: permissionSetOfSettings(plan.settings).permissionSet, stack: stack?.stack };
+  }
+
   /** Whether a task runs a program — a pinned bundle whose code calls `input()` (decision 0029 §2). */
   private isProgramConversation(open: ProjectSession, taskId: string): boolean {
     const task = open.project.runtime.get(taskId);
@@ -7401,538 +7658,10 @@ export class AppService {
     if (pinned === undefined) return false;
     try {
       const bundle = bundleFor(open.project, pinned, pinned);
-      return Object.values(bundle?.states ?? {}).some((state) => JSON.stringify(state.operation ?? null).includes("$rt.input("));
+      return bundle !== undefined && isProgramBundle(bundle);
     } catch {
       return false;
     }
-  }
-
-  /**
-   * One typed message, run — everything after its turn in the queue has come round.
-   *
-   * The child never joins the state machine — nothing binds to it and no transition fires from it —
-   * so this assembles what a prompt call needs and nothing else. Notably NOT a run: no workspace is
-   * materialized, no job is claimed, no task status moves. A conversation continued by hand is a
-   * conversation, not a second execution of the workflow.
-   */
-  private async runChatMessage(
-    open: ProjectSession,
-    request: typeof AppService.chatSend,
-    /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
-    settledAhead?: Promise<void>,
-    origin: ChatOrigin = {},
-  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
-    const project = open.project;
-    let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
-
-    // A call still taking its turn, in the conversation being read. Talking to THAT is different from
-    // starting a turn beside it: the message joins the turn already in progress and the agent answers
-    // in its own stream, so there is no child to record and no position to claim. Only some transports
-    // can do it — `sessionSteering` is declared, not discovered — and `steerOf` returns nothing at all
-    // when they cannot, which is why this is a branch rather than an attempt.
-    // An EDIT is never steering. Steering joins the turn in flight — which is the turn being
-    // replaced, or one after it — and "say this instead" is the opposite of "also say this".
-    const steer = request.branchAt === undefined && origin.continuing === undefined ? this.steerOf(open, context.position) : undefined;
-    if (steer !== undefined) {
-      try {
-        // When it was sent, not when sending returned: `send` comes back after the agent has answered it.
-        const at = Date.now();
-        await steer.send(request.message);
-        // Said in the conversation where it joined: the stream never echoes it (`joinedMessageEntries`).
-        const joined = joinedMessageEntries(request.message, at, origin.by);
-        this.hostCall(open, request.taskId, joined.live, joined.record, at);
-        return { instanceId: context.hostInstanceId, index: context.index, steered: true };
-      } catch (e) {
-        // Too late to join: the turn answered between the plan and the send ("the agent's turn has
-        // ended"), and its call is still settling. The message goes AFTER it instead, waiting below as
-        // for any call in flight — not refused, which lost the message, nor sent beside it, which ran on
-        // a branch the thread never draws (2026-11-13).
-        this.log({ level: "info", source: "run", message: `a message could not join the turn in flight, so it goes after it: ${(e as Error).message}`, project: open.key, taskId: request.taskId });
-      }
-    }
-
-    /**
-     * It cannot be steered, so this message goes AFTER whatever is in flight — which means waiting
-     * for that to land, and there are two different things it might be.
-     *
-     * A TYPED TURN ahead of this one in the queue is waited for by its own promise. The live register
-     * cannot stand in for it: a call is registered only while it runs, so between this message being
-     * let through (which happens when the turn ahead STARTS) and that turn journalling its result,
-     * the register can be empty while the position is very much taken. Asked first, and asked
-     * unconditionally, because the answer is not visible anywhere a query could find it yet.
-     */
-    if (settledAhead !== undefined) {
-      await AppService.within(settledAhead, CHAT_WAIT_MS);
-      // Re-read: the head MOVED, which is the whole reason for waiting. Sending the position computed
-      // beforehand would fork every time and defeat it.
-      context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
-    }
-    /**
-     * And a RUN's own call — the opening message of a conversation, or a workflow state being typed
-     * into mid-run. That one is not a chat turn and has no promise here, so the register is exactly
-     * the right question for it.
-     */
-    const sessionId = sessionOf(context.position);
-    if (open.liveCalls.get(sessionId) !== undefined) {
-      // BOUNDED. An unbounded await is the same promise the call is parked on, so a provider that
-      // stops answering takes this IPC handler with it — the composer sits on `busy` with no reply,
-      // no error and nothing to cancel. Past the bound we append BESIDE the call instead, which
-      // `withSessionPosition` handles by forking: a branch is a worse answer than a continuation and
-      // a much better one than a request that never returns.
-      const settled = await open.liveCalls.settle(sessionId, CHAT_WAIT_MS);
-      // Re-read, because the head MOVED — which is the entire reason for waiting. Sending the position
-      // computed before the wait would fork every time and defeat it.
-      if (settled) context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
-    }
-    // NOT refused when the state named no model. Refusing rejected exactly the case the resolution
-    // chain exists for: a state naming none is answered by the ROUTER, which is how its own run
-    // succeeded — so throwing here made a continuation refuse what the workflow does routinely, and
-    // did it while the chip above showed a model. The op carries no model and the router answers it,
-    // exactly as it answered the state.
-    //
-    // The composer's STACK is followed first (decision 0023 §2.6): everything below reads the set it
-    // comes to, and the policy is told which layer set each line (§2.7).
-    const { plan, stack: chatStack } = this.withChatStack(open, chatPlanFor(context.path, request.overrides ?? {}));
-
-    // The account this message spends, when its model says (a preset decides later and cannot be
-    // held here). Known to be SPENT ⇒ the message waits for the reset instead of being refused —
-    // deterministic, from the reading, never a guess. "Send now anyway" and the reset itself send
-    // with `now`, which skips this.
-    const heldRoute = this.chatRouteOf(open, plan, context.bundle);
-    const heldAccount = heldRoute !== undefined ? accountOfRoute(heldRoute) : undefined;
-    if (heldAccount !== undefined && origin.now !== true && request.branchAt === undefined) {
-      const reading = this.limits.board.state(heldAccount).reading;
-      if (isSpent(reading)) {
-        const waiting = this.waiting.add({
-          kind: "message",
-          project: open.key,
-          taskId: request.taskId,
-          instanceId: request.instanceId,
-          message: request.message,
-          account: heldAccount,
-          until: spentUntil(reading),
-          state: "waiting",
-          retry: true,
-        });
-        return { instanceId: context.hostInstanceId, index: context.index, waiting };
-      }
-    }
-
-    const config = project.config;
-    const secrets = this.secretResolver(open);
-    const fakeRules = request.fake !== undefined ? parseFakeRules(request.fake) : undefined;
-    const fake = fakeRules !== undefined;
-    // ONE executor, used twice. It was built twice — once for the summarizer and once for the turn —
-    // with hand-copied options and a memo cache each, so the two had to be kept in step by eye and
-    // neither could reuse the other's memo. The summarizer takes the BARE executor and the turn takes
-    // it under the session layers, which is the only difference between the two uses.
-    // The layers' instructions and skill catalog (decision 0029 §9), read as this turn starts.
-    const instructions = standingContextOf(project.paths.roots);
-    const skillPlugin = skillsPluginDir(project.paths.roots);
-    const prompt = buildPromptExecutor({
-      ...(fakeRules !== undefined ? { fakeRules } : {}),
-      ...(instructions !== undefined ? { instructions } : {}),
-      ...(skillPlugin !== undefined ? { skillPlugins: [skillPlugin] } : {}),
-      // No observer: a chat turn is not a run, so it holds no job claim for a child to hang off (see
-      // `cancelChatTurn`). Stated rather than left out, because an observer omitted by accident is
-      // exactly how the run path came to spawn unrecorded agents. An agent started from a
-      // conversation is therefore still unfindable as an orphan — worth closing, and it needs a claim
-      // to close it, not another argument here.
-      ...this.promptWiring(config, {
-        fake,
-        secrets,
-        memoCache: new SqliteMemoCache(project.db),
-        // A conversation keeps the model its first turn chose — each turn builds this executor afresh,
-        // so what it remembers is what the record says.
-        recorded: (at) => this.recordedModelAt(project, request.taskId, at),
-      }),
-      tree: this.defaultTree(config, context.bundle, fake, secrets).prompt,
-    });
-    // The workspace root is READ, never ensured: a bound task's worktree path is recorded, and
-    // `ensureWorkspace` would CREATE one — which is the one thing this path promises not to do, since
-    // a conversation is not a second execution. An unbound task, or a bound one whose worktree has
-    // been removed, falls back to the project directory, which is where its run read from anyway.
-    const recordedWorktree = project.runtime.get(request.taskId)?.worktreePath;
-    const workspaceRoot =
-      recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
-    // A message the app wrote for the person is marked so on the record's entry — see `MessageAuthor`.
-    // And the settings it was sent with, beside it — a turn the app closes under is continued with them.
-    const liveStore = sessionStoreFor(project, { taskId: request.taskId }, origin.by, (request.overrides ?? {}) as unknown as JsonValue);
-    const stores = { ...sessionServicesFor({ inner: liveStore }), limits: this.limits.position, continuation: this.continuationPorts(open, liveStore) };
-    // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
-    // otherwise be the one kind missing the agent's own session lines.
-    // The calls a tool made in this turn — `approve_tool_call` — folded into its record when it settles,
-    // INSIDE the capture below, so they are merged after it: a call made by a subagent the stream never
-    // carried is in the record only once the capture has read that subagent's file.
-    stores.records = this.withHostCallsOf(open, request.taskId, stores.records);
-    stores.records = withNativeCapture(stores.records, {
-      cwd: workspaceRoot,
-      onError: (e: Error) =>
-        this.log({
-          level: "warn",
-          source: "engine",
-          message: `native session capture failed: ${e.message}`,
-          project: open.key,
-          taskId: request.taskId,
-          ...stackDetail(e),
-        }),
-    });
-    /**
-     * The live turn, for a message somebody typed — everything `startRun` wires, wired here too.
-     *
-     * A chat turn had none of it, and the three things missing were not three conveniences:
-     *
-     *  - **Nothing streamed.** The reply appeared when the call settled, so a long answer was a
-     *    frozen box; and the run's own first message DID stream, which made the conversation appear
-     *    to lose a capability after its opening exchange.
-     *  - **Nothing was persisted while it ran.** `update` writes the accumulated turn into the
-     *    open row on a throttle, and it is also what stamps the provider's handle early. Without it
-     *    an interrupted turn's record held the error and nothing else: what the model had already
-     *    said was gone, and the next message had no handle to resume from.
-     *  - **Nothing was registered as a live call.** `liveCalls` is what `chatPlan` reads to answer
-     *    `steerable`, so a mid-turn message could never JOIN the turn — the one thing the composer's
-     *    "joins this turn" line has always promised.
-     *
-     * Composed INSIDE the session layers, as in `startRun`: by then `ctx.session` is the resolved
-     * position, so a delta names the conversation it belongs to instead of being attributed by guess.
-     */
-    // Resolved once per position and held — see the same shape in `startRun`.
-    let flushingAt: string | undefined;
-    let flushingRef: RecordRef | undefined;
-    const liveFlush = new LiveTurnFlusher(() => {
-      const snap = open.liveTurns.snapshot(request.taskId);
-      if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
-      const at = `${snap.sessionId}@${snap.seq}`;
-      if (at !== flushingAt) {
-        flushingAt = at;
-        flushingRef = liveStore.recordAt({ id: snap.sessionId, seq: snap.seq });
-      }
-      if (flushingRef === undefined) return;
-      const partial = partialRecordValue(snap);
-      if (partial !== null) liveStore.update(flushingRef, { value: partial, providerSessionId: snap.providerSessionId });
-    });
-    // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
-    open.liveFlush.set(request.taskId, () => liveFlush.flush());
-    const onDelta = (delta: Parameters<Parameters<typeof withTurnStream>[0]>[0]): void => {
-      const { n, entry } = open.liveTurns.apply(request.taskId, delta);
-      liveFlush.note();
-      this.abandonEndedAsks(open, request.taskId, entry);
-      this.publish({
-        type: "session:turn",
-        taskId: request.taskId,
-        n,
-        ...(delta.session !== undefined ? { sessionId: delta.session.id, seq: delta.session.seq } : {}),
-        ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
-        ...(delta.text !== undefined ? { text: delta.text } : {}),
-        ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
-        ...(entry !== undefined ? { entry } : {}),
-      });
-      this.followUnstreamed(open, request.taskId, delta, workspaceRoot, onDelta);
-    };
-    const streaming = withTurnStream(onDelta, prompt, open.liveCalls);
-    const executor = withSessionLayers(stores, streaming);
-
-    // JaiRA registered these and JaiRA compiled the policy, so it always knows what it is handing
-    // over — see `gateTools`. An unresolvable name throws rather than quietly running without it.
-    //
-    // BOTH registrations, exactly as `startTask` does them. `registerTools` supplies `shell` alone;
-    // the file tools come from `registerFileTools`, and with only the first of the two a reader who
-    // ticked `read_file` got `tool 'read_file' is not registered` — the loud failure that call is
-    // designed to give for a name nobody registered, raised here for a wiring gap instead.
-    const registry = newRegistry();
-    registerTools(registry, {
-      execEnv: config.execEnvironment,
-      exec: new NodeExec({ execEnv: config.execEnvironment }),
-      // Each command a terminal the conversation can watch and type into (decision 0028).
-      terminals: this.terminals.forTask(request.taskId, open.key),
-      // Each call starts where the last ended, in the shell its agent is set to (decision 0030).
-      shells: this.taskShells(open, request.taskId, config),
-    });
-    // The same artifact wiring the run used, so a file this turn writes lands where that run's files
-    // landed rather than somewhere only this conversation knows about.
-    //
-    // `workspaceRoot` is resolved above, where the session capture needed it first — the same
-    // read-never-ensure rule stated there.
-    const artifacts = artifactWiring({
-      destination: config.artifacts.destination,
-      artifactDir: config.artifacts.dir,
-      inlineMaxBytes: config.artifacts.inlineMaxBytes,
-      taskId: request.taskId,
-      workspaceRoot,
-      projectDir: project.paths.projectDir,
-      jairaDir: project.paths.jairaDir,
-    });
-    registerFileTools(registry, {
-      destination: artifacts.destination,
-      store: project.artifacts,
-      vars: artifacts.vars,
-      inlineMaxBytes: artifacts.inlineMaxBytes,
-    });
-    registerSearchTools(registry, { cwd: workspaceRoot });
-    registerWebTools(registry, {});
-    // The workflow tools (decision 0005 §3), bound to THIS conversation: a typed turn is how a
-    // person steers work, and it is the path both `chat/session` and `chat/control` are held on.
-    registerWorkflowTools(registry, this.workflowHostFor(open, request.taskId));
-    registerSkillTools(registry, project.paths.roots);
-    // The Git tools (decision 0010 §1), over the workspace this turn reads. A turn has no remote
-    // primitives, so the publish question is asked here — once per task, remembered on the session
-    // and by any row the task's review already pushed.
-    registerGitTools(
-      registry,
-      workspaceGitHost({
-        taskId: request.taskId,
-        workspaceRoot,
-        exec: new NodeExec({ execEnv: config.execEnvironment }),
-        execEnv: config.execEnvironment,
-        integrations: config.integrations,
-        secrets,
-        ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
-        publishing: new PublishAuthorizer({
-          publish: config.functions.review_artifacts.publish,
-          ...(fake ? {} : { confirmPublish: (asked: PublishRequest) => this.askToPublish(open, request.taskId, asked) }),
-          grantProject: () => this.grantPublish(open),
-          answered: () => open.publishGranted.has(request.taskId) || project.remotes.forTask(request.taskId).some((row) => row.pushedHead !== undefined),
-          onGranted: () => open.publishGranted.add(request.taskId),
-        }),
-        events: this.toolEventWaits(open, request.taskId),
-        modelOf: (ctx) => this.modelOfCall(project, request.taskId, ctx),
-        artifacts: centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }),
-      }),
-    );
-    registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, request.taskId) });
-    // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
-    // amended 2026-09-22) — in a typed turn as in a run. The functions get a registry of their own:
-    // this turn's holds tools, and a function is none.
-    const functionRegistry = newRegistry();
-    const approve = this.approverWithFunctions(open, request.taskId, this.permissionFunctionsFor(open, request.taskId, functionRegistry, prompt), {
-      state: context.stateId,
-    });
-    /**
-     * The project policy with THIS message's per-tool modes folded into its baseline.
-     *
-     * Two consumers, and the fold is for the second. `gateTools` reads the authored modes directly,
-     * so JaiRA's own tools are gated either way. But a DELEGATED agent reads `ctx.policy.baseline.tools`
-     * to build its deny floor — the set of tools it is never even offered — and that read goes to the
-     * project baseline, which knows nothing about what was picked in the composer. Unfolded, a tool
-     * set to `deny` here was still handed to the agent, refused only once it tried to call it.
-     *
-     * The message's own choice wins over the project's: it is the narrower, later statement.
-     */
-    //
-    // ONE map is read for all of it (decision 0007): the message's permission set, or the lowered list and
-    // `permissions` block a state's own declaration arrives as, read back into one.
-    const { permissionSet } = permissionSetOfSettings(plan.settings);
-    const policy: ExecPolicy = compilePolicy(projectPolicy(config), {
-      execEnv: config.execEnvironment,
-      ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
-      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
-      askAboveBytes: config.artifacts.askAboveBytes,
-      permissionSet,
-      ...(chatStack !== undefined ? { stack: chatStack.stack } : {}),
-      grants: open.approvals.grants(request.taskId),
-      // What the configured servers' tools count as (decision 0019, ruling 5).
-      mcp: config.mcp,
-      // A call a rule refused is a step under the call, as a function's verdict is.
-      onRefused: (refused) => this.recordRuleRefusal(open, request.taskId, refused),
-      // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
-      shellAt: () => this.shellAt(request.taskId, config.execEnvironment),
-    });
-    // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
-    // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
-    // own, and what makes it answerable is the ask-rule `withAgentPermissionSet` writes at the executor
-    // plus the gate below, asked about the native by its standard name. Wrapping it here as well
-    // would build a tool nothing would ever call.
-    const wiring = planAgentTools(permissionSet);
-    // What this turn decides its calls under: the message's own set, until the person picks another
-    // in the composer while it runs (`chat:settings`) — the gate and every wrapped tool read it at
-    // each call. Held for the length of the turn (`whileChatting`).
-    const live: LivePermissions = {
-      permissionSet: declaresTools(plan.settings) ? permissionSet : undefined,
-      ...(chatStack !== undefined ? { stack: chatStack.stack } : {}),
-    };
-    const turnSession = sessionOf(context.position);
-    const { tools, gate, authored } = gateTools({
-      registry,
-      // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
-      // the plan is not what runs and its injections must not be wrapped. The always-granted set is
-      // the exception, and has to be: a conversation with no tools at all is exactly the one that
-      // reaches for a mockup, and a state with no `tools` key declares none.
-      names: declaresTools(plan.settings) ? wiring.inject : [...ALWAYS_GRANTED_TOOLS],
-      sessionId: sessionOf(context.position),
-      policy,
-      approve,
-      // The permission set, when the message declares one — the composer's map, or a state's lowered block
-      // read back — as it stands at each call. `authored` goes either way, for its `scopes`: where a tool
-      // may act is not part of a permission set.
-      permissionSet: () => live.permissionSet,
-      // And the stack it was composed from, which moves with it (`chat:settings`).
-      stack: () => live.stack,
-      ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
-      // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
-      ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
-    });
-    // This turn's parked calls — the gate's, and a function's question (asked with no session) — are
-    // decided again under the block as it stands when the permissions change while they wait.
-    live.judge = (call) => (call.sessionId === turnSession || call.sessionId === "" ? { policy, block: authored() } : undefined);
-
-    // A CONTINUATION is the cut turn's own message, at its own place — the same call, so its record is
-    // reopened and carried on (`withContinuation`); the note it continues with is the layer's to send.
-    const { operation } =
-      origin.continuing !== undefined ? { operation: origin.continuing.operation } : chatOperationOf(plan, { message: request.message, session: { id: context.position } });
-    // A new message moves the conversation past whatever a cut turn of it was waiting on — the person
-    // went on instead of answering — and the "for this run" answers it was given come back with it.
-    if (origin.continuing === undefined) this.dropRecoveredAsks(open, (r) => r.taskId === request.taskId);
-    this.restoreGrants(open, request.taskId);
-    const recorder = project.events.recorder(request.taskId);
-    /** Push ordering for this turn's journal events — the renderer's own `seq`, as a run supplies. */
-    let chatSeq = 0;
-    /**
-     * What "stop" reaches — see {@link cancelChatTurn}.
-     *
-     * Registered against the TASK, and only for the duration of the turn. An abort lands in
-     * `runChatTurn` as an ordinary failure with `classification: "canceled"`, so the journal records
-     * a canceled turn rather than a hole: the message stays, and whatever the model had said by then
-     * is what the transcript keeps.
-     */
-    const abort = new AbortController();
-    // ADDED, never replacing. A turn already in flight here is a turn somebody is still waiting for
-    // an answer to — the message being sent now joined it, or is queued behind it — and the previous
-    // spelling aborted it on the way past, so a follow-up question killed the reply it was following
-    // up on. See `ProjectSession.chatTurns`.
-    const turns = open.chatTurns.get(request.taskId) ?? new Set<AbortController>();
-    turns.add(abort);
-    open.chatTurns.set(request.taskId, turns);
-    const result = await this.whileChatting(open, request.taskId, abort, liveFlush, live, () =>
-      runChatTurn(
-      {
-        executor,
-        sessions: stores.sessions,
-        /**
-         * Journalled, then TEED to the renderer — the same shape `startRun` gives its own events.
-         *
-         * A chat turn published nothing, which mattered once it started streaming: the renderer drops
-         * its live tail on `operation.completed`/`operation.failed` and had no other signal, so the
-         * tail would have stayed on screen beside the settled record it is a copy of. Main's own copy
-         * goes first, for the reason stated in `startRun`: the stored view holds it by then.
-         */
-        record: (event, atMs) => {
-          recorder.record(event, atMs);
-          if (event.type === "operation.completed" || event.type === "operation.failed") {
-            open.liveTurns.clear(request.taskId);
-            open.unstreamed.stop(request.taskId);
-          }
-          this.publishFor(open, {
-            type: "engine:event",
-            taskId: request.taskId,
-            seq: ++chatSeq,
-            at: atMs,
-            event: event as unknown as JsonValue,
-          });
-        },
-        /**
-         * Everything the call needs that is not the session — and three of the four were missing.
-         *
-         * `tools` alone gated JaiRA's own three and nothing else, which is only half the surface when
-         * the route is a delegated agent. Such an agent arrives with its OWN tools and enforces them
-         * through the two seams below, so a turn that supplied neither ran `claude-cli`'s built-in
-         * Bash and Write with no approval prompt and no deny floor — while the composer above it
-         * displayed a permission posture that had no bearing on them.
-         *
-         *  - `gate` is the full decision — profile, mode, `smart`, then the human — over the agent's
-         *    OWN tools, which no wrapper here can reach. It is what makes the four modes mean the
-         *    same thing on an agent route as on a plain model one.
-         *  - `approve` is the older, thinner seam an adapter falls back to, and what the gate itself
-         *    escalates to. Absent, an un-gated adapter builds no callback at all.
-         *  - `policy` is where an adapter reads its deny floor — the tools it is not offered in the
-         *    first place. Folded with this message's choices above.
-         *  - `workspace` is what `shell` and the file tools resolve paths against, so without it a
-         *    command ran in whatever directory the app was launched from. The run's own root — read,
-         *    never ensured (see above).
-         */
-        services: withPermissionSetService(
-          {
-          tools,
-          gate,
-          workspace: { root: workspaceRoot },
-          policy,
-          approve,
-          // A chat turn can reach an agent that asks — same question channel as a run's.
-          askUser: open.questions.asker({ taskId: request.taskId }),
-          // The same signal a run hands its calls. Without it there was nothing between "sent" and
-          // "the provider is done", however long that took.
-          abortSignal: abort.signal,
-          } as ExecServices,
-          // The permission set ITSELF, for the agent executor that ends up answering: what it removes, keeps
-          // and asks about is its own declaration applied to this map (decision 0007 §3). Only when
-          // the message declared tools — otherwise the state's declaration stands and says nothing.
-          declaresTools(plan.settings) ? permissionSet : undefined,
-        ),
-      },
-      {
-        instance: {
-          // Derived, never allocated: stable per host instance, so the second message reopens the
-          // same node instead of entering a sibling that would supersede the first. Keyed on the
-          // HOST rather than on whatever was clicked, so two composites under one speaking state
-          // continue the same conversation instead of minting a chat child each.
-          instanceId: chatInstanceIdOf(context.hostInstanceId),
-          parentInstanceId: context.hostInstanceId,
-          stateId: context.stateId,
-          childKey: CHAT_CHILD_KEY,
-          index: origin.continuing?.index ?? context.index,
-        },
-        operation,
-        position: origin.continuing?.position ?? context.position,
-        ...(origin.continuing !== undefined ? { continuing: true } : {}),
-      },
-      ),
-    );
-    // `task`, not `tasks`. The renderer refreshes the conversation and the session views on `task`
-    // and only the task LIST on `tasks` — so the plural left the reply invisible: the box cleared,
-    // the turn ran, and the panel above stayed byte-identical until something unrelated invalidated.
-    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
-    // Refused because the account ran out: the message is kept with "Try again at …", which starts the
-    // way the `limits.retryOnReset` setting says.
-    if (result.failureCode === USAGE_LIMIT_CODE && request.branchAt === undefined && origin.continuing === undefined) {
-      const account = heldAccount ?? "claude";
-      const until =
-        result.retryAfterMs !== undefined ? new Date(Date.now() + result.retryAfterMs).toISOString() : spentUntil(this.limits.board.state(account).reading);
-      const waiting = this.waiting.add({
-        kind: "message",
-        project: open.key,
-        taskId: request.taskId,
-        instanceId: request.instanceId,
-        message: request.message,
-        ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
-        account,
-        until,
-        state: "refused",
-        retry: project.config.limits.retryOnReset,
-        ...(result.failure !== undefined ? { reason: result.failure } : {}),
-      });
-      return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index, waiting };
-    }
-    // Refused because the key's balance is empty: kept as refused, with no "Try again at …" — there
-    // is no reset — and the account marked, so the composer turns red until a call goes through.
-    const creditAccount = result.failureRoute !== undefined ? accountOfRoute(result.failureRoute) : heldAccount;
-    if (result.failureCode === CREDIT_EXHAUSTED_CODE && request.branchAt === undefined && origin.continuing === undefined && creditAccount !== undefined) {
-      this.limits.creditRefused(creditAccount);
-      const waiting = this.waiting.add({
-        kind: "message",
-        project: open.key,
-        taskId: request.taskId,
-        instanceId: request.instanceId,
-        message: request.message,
-        ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
-        account: creditAccount,
-        until: null,
-        state: "refused",
-        retry: false,
-        credit: true,
-        ...(result.failure !== undefined ? { reason: result.failure } : {}),
-      });
-      return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index, waiting };
-    }
-    return { ...result, instanceId: chatInstanceIdOf(context.hostInstanceId), index: context.index };
   }
 
   /**
@@ -7956,11 +7685,72 @@ export class AppService {
     }
   }
 
+  /**
+   * The account a message to this conversation spends, when that can be said before it is sent — the
+   * route its settings name, over the conversation's (`chatRouteOf`). `undefined` for a preset, which
+   * decides later, and for a conversation whose states cannot be read.
+   */
+  private messageAccountOf(open: ProjectSession, request: typeof AppService.chatSend): string | undefined {
+    try {
+      const context = this.chatContextOf(request.taskId, request.instanceId, request.project);
+      const { plan } = this.withChatStack(open, chatPlanFor(context.path, request.overrides ?? {}));
+      const route = this.chatRouteOf(open, plan, context.bundle);
+      return route !== undefined ? accountOfRoute(route) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * A conversation's reply refused because its account ran out (decision 0029 §2): the program caught it
+   * and waits for the next message, and the message it was answering is kept with "Try again at …" —
+   * at its own edit point, so trying again answers the same wait again (`branchAt`). A key whose
+   * balance is empty is kept refused, with no reset to try again at.
+   */
+  private keepRefusedMessage(open: ProjectSession, taskId: string, refused: UsageRefusal): void {
+    const project = open.project.paths.projectDir;
+    const thread = (() => {
+      try {
+        return this.chatThread({ taskId, project });
+      } catch {
+        return null;
+      }
+    })();
+    const point = thread?.points.at(-1);
+    const text = point !== undefined ? thread?.session.turns[point.turn]?.text : undefined;
+    if (point === undefined || text === undefined) return;
+    // Once per message: a program may make more than one call for it, and each refused says the same.
+    if (this.waiting.list({ project: open.key, taskId }).some((item) => item.branchAt === point.at)) return;
+    const kept = open.project.tasks.tryRead(taskId)?.chatSettings;
+    this.waiting.add({
+      kind: "message",
+      project: open.key,
+      taskId,
+      instanceId: "",
+      message: text,
+      branchAt: point.at,
+      ...(kept !== undefined ? { overrides: kept } : {}),
+      account: refused.account,
+      until: refused.until,
+      state: "refused",
+      retry: refused.credit === true ? false : open.project.config.limits.retryOnReset,
+      reason: refused.reason,
+      ...(refused.credit === true ? { credit: true as const } : {}),
+    });
+  }
+
   /** A waiting message's time has come (or "Send now anyway" was pressed): send it as typed. */
   private async sendWaitingMessage(item: WaitingItem): Promise<void> {
     if (item.instanceId === undefined || item.message === undefined) return;
     await this.sendChatMessage(
-      { taskId: item.taskId, instanceId: item.instanceId, message: item.message, project: item.project, ...(item.overrides !== undefined ? { overrides: item.overrides } : {}) },
+      {
+        taskId: item.taskId,
+        instanceId: item.instanceId,
+        message: item.message,
+        project: item.project,
+        ...(item.overrides !== undefined ? { overrides: item.overrides } : {}),
+        ...(item.branchAt !== undefined ? { branchAt: item.branchAt } : {}),
+      },
       { now: true },
     );
   }
@@ -7992,86 +7782,30 @@ export class AppService {
   }
 
   /**
-   * Run a turn with its stop registered, and give back everything the turn held however it ends.
+   * Stop the reply a conversation is making ("chat:cancel") — the call in flight, never the program.
    *
-   * THIS turn's controller leaves the set and the others stay: a thread can have two turns in flight,
-   * and removing the task's whole entry would disarm the stop button for the one still going.
-   *
-   * The flusher is disposed on the same path, and it has to be on a path that runs even when the turn
-   * throws: a pending timer keeps a handle open and would fire against a record that has settled.
-   * The live tail is cleared as a BACKSTOP — the settle event clears it first in the ordinary case,
-   * and a turn that failed before reaching one would otherwise leave a tail on screen forever. Only
-   * once nothing is left in flight, or a settling turn would take a live one's tail off the screen.
-   *
-   * The turn's permission set is held where `chat:settings` reaches it for the same length of time.
-   */
-  private async whileChatting<T>(
-    open: ProjectSession,
-    taskId: string,
-    abort: AbortController,
-    liveFlush: LiveTurnFlusher,
-    live: LivePermissions,
-    run: () => Promise<T>,
-  ): Promise<T> {
-    const release = this.holdPermissions(open, taskId, live);
-    // Settled as the LAST thing below, so whoever waits on it finds the turn wholly ended.
-    let settle!: () => void;
-    const ended = new Promise<void>((resolve) => (settle = resolve));
-    const ends = open.chatTurnEnds.get(taskId) ?? new Set<Promise<unknown>>();
-    ends.add(ended);
-    open.chatTurnEnds.set(taskId, ends);
-    try {
-      return await run();
-    } finally {
-      release();
-      const turns = open.chatTurns.get(taskId);
-      turns?.delete(abort);
-      if (turns?.size === 0) open.chatTurns.delete(taskId);
-      liveFlush.dispose();
-      if (!open.chatTurns.has(taskId)) {
-        this.abandonAsksOfTask(open, taskId);
-        open.liveTurns.clear(taskId);
-        open.unstreamed.stop(taskId);
-        open.liveFlush.delete(taskId);
-        open.approvals.unseed(taskId);
-        open.questions.unseed(taskId);
-        this.publishFor(open, { type: "chat:turnEnded", taskId });
-      }
-      ends.delete(ended);
-      if (ends.size === 0 && open.chatTurnEnds.get(taskId) === ends) open.chatTurnEnds.delete(taskId);
-      settle();
-    }
-  }
-
-  /**
-   * Stop the turn a conversation is taking.
-   *
-   * `task:cancel` cannot do this and should not learn how: a chat turn is not a run, so there is no
-   * job to release and no task row to settle — cancelling the TASK of a conversation that has been
-   * idle for an hour would mark a finished run interrupted for the sake of a message nobody sent.
-   *
-   * `false` means there was nothing to stop, which is an answer rather than a fault: the turn may
-   * have landed between the button being shown and being pressed.
-   *
-   * EVERY turn this conversation has going, because that is what the button says. A thread can have
-   * two in flight — a message sent mid-turn joins the one already running, and a queued one starts
-   * its own — and a stop that reached only one of them would leave the agent working under a
-   * composer that had just told the person it had stopped.
+   * `task:cancel` stops the program; this stops what it is saying now, and the program goes on to wait
+   * for the next message. `false` means there was nothing to stop, which is an answer rather than a
+   * fault: the reply may have landed between the button being shown and being pressed. EVERY call it
+   * has going, because that is what the button says.
    */
   cancelChatTurn(request: { taskId: string; project?: string }): { canceled: boolean } {
     const open = this.session(request.project);
-    const turns = open.chatTurns.get(request.taskId);
-    if (turns === undefined || turns.size === 0) return { canceled: false };
-    // What it had said by now, written down BEFORE it is stopped — while the record is still open and
-    // a partial can still reach it. See `ProjectSession.liveFlush`.
-    // What it was asking, answered as stopped — in the record, so the next open does not ask it again —
-    // without shutting the gate: the next message must be free to ask.
-    open.approvals.denyFor(request.taskId);
-    this.stopQuestions(open, request.taskId);
-    open.liveFlush.get(request.taskId)?.();
-    for (const abort of turns) abort.abort();
-    open.chatTurns.delete(request.taskId);
-    return { canceled: true };
+    // A PROGRAM's reply is a call of its run (decision 0029 §2), and stopping it stops that call — never
+    // the program, which goes on to wait for the next message: ended early where the transport can end
+    // a turn (it settles with what it said), else canceled, a failure the program catches.
+    {
+      const calls = open.liveCalls.ofTask(request.taskId);
+      if (calls.length === 0) return { canceled: false };
+      open.approvals.denyFor(request.taskId);
+      this.stopQuestions(open, request.taskId);
+      open.liveFlush.get(request.taskId)?.();
+      for (const call of calls) {
+        const interrupt = call.control?.interrupt;
+        void (interrupt !== undefined ? interrupt.call(call.control) : call.cancel()).catch(() => undefined);
+      }
+      return { canceled: true };
+    }
   }
 
   // --- terminals (decision 0028) ---------------------------------------------
@@ -8191,7 +7925,7 @@ export class AppService {
         continue;
       }
       const open = this.shellOwners.get(taskId);
-      const running = open !== undefined && (open.live.has(taskId) || (open.chatTurns.get(taskId)?.size ?? 0) > 0);
+      const running = open !== undefined && open.live.has(taskId);
       const verdict = idleShellVerdict({ running, quietSince: seen.since, now, listens: listensOnAPort(processTreeOf(pid)) });
       if (verdict !== undefined) {
         this.shellCpu.delete(shell);
@@ -8252,24 +7986,11 @@ export class AppService {
     this.keepChatSettings(open, request.taskId, request.overrides);
     const held = open.livePermissions.get(request.taskId);
     if (held === undefined || held.size === 0) return { changed: 0 };
-    // The conversation's states, for a composer that was RESET — what the state declares. A set that
-    // was picked needs none of it, which is what lets a pick reach an opening message whose instance
-    // the journal does not hold yet.
-    let path: ReturnType<AppService["chatContextOf"]>["path"] = [];
-    const host = this.chatHostOf(request.taskId, request.project);
-    if (host !== null) {
-      try {
-        path = this.chatContextOf(request.taskId, host, request.project).path;
-      } catch (e) {
-        if (!(e instanceof NoConversationHere)) throw e;
-      }
-    }
-    const { plan, stack } = this.withChatStack(open, chatPlanFor(path, request.overrides));
-    const permissionSet = declaresTools(plan.settings) ? permissionSetOfSettings(plan.settings).permissionSet : undefined;
+    const picked = this.composerPermissions(open, request.taskId, request.overrides, request.project);
     // The stack moves with the set: the rows of the next call name the layers of the stack picked.
     for (const live of held) {
-      live.permissionSet = permissionSet;
-      live.stack = permissionSet !== undefined ? stack?.stack : undefined;
+      live.permissionSet = picked?.permissionSet;
+      live.stack = picked?.stack;
     }
     // What waits on the person was asked under the old stack: decided again under this one.
     void open.approvals.rejudge(request.taskId);
@@ -8378,8 +8099,26 @@ export class AppService {
     // a document's task a drop made has only the document, having never loaded at all.
     const pinned = task !== undefined ? currentPin(project, task)?.snapshotHash : undefined;
     if (pinned === undefined) throw new NoConversationHere(`task '${taskId}' has never run`);
-    const bundle = bundleFor(project, pinned, pinned);
-    if (bundle === undefined) throw this.refusal("run", `the snapshot for task ${taskId} is missing`);
+    const pinnedBundle = bundleFor(project, pinned, pinned);
+    if (pinnedBundle === undefined) throw this.refusal("run", `the snapshot for task ${taskId} is missing`);
+    // With the versions it took (decision 0029 §3): a state it entered under a versioned id is one of those.
+    const bundle = withRunVersions(project, taskId, pinnedBundle);
+
+    const program = this.programConversationOf(open, taskId, projectKey);
+    if (program === null) throw new NoConversationHere(`task '${taskId}' has not replied yet`);
+    if (program !== undefined) {
+      // An edit is a rewind and an answer (`chatSend`), never a turn sent at a position.
+      if (branchAt !== undefined) throw new NoConversationHere("an earlier message of a program conversation is edited by rewinding to it, not by a turn at its place");
+      return {
+        bundle,
+        hostInstanceId: program.root,
+        // The reply's state, whose settings a message runs under; the root above it.
+        stateId: program.stateId,
+        path: [bundle.states[program.stateId], bundle.states[bundle.rootId]],
+        position: program.position,
+        index: 0,
+      };
+    }
 
     const { events, atMs } = eventsOf(project.events.list(taskId));
     const tree = projectRun(events, undefined, atMs);
@@ -8532,10 +8271,24 @@ export class AppService {
     const seqOfSeat = new Map<string, number>();
     /** The run's own entry — the first instance the task entered. A cut there leaves nothing. */
     let runEntered: number | undefined;
+    // A PROGRAM's message (decision 0029 §2) begins where its `input()` ASKED for it: that state
+    // entered, its call not yet made. A cut there is an ordinary state rewind — the run stands waiting
+    // for that message again, as a crash just after the entry would leave it — and the answer the
+    // call settled goes with the call. Every later reply's records take that place; the opening
+    // message's is the run's own entry.
+    const program = this.programConversationOf(open, request.taskId, request.project) !== undefined;
+    /** Inputs entered and not yet asking — each asks with its first call. */
+    const inputs = new Set<string>();
+    let asked: number | undefined;
     for (const row of project.events.list(request.taskId)) {
       if (row.instanceId === undefined) continue;
       if (row.type === "instance.entered" && runEntered === undefined) runEntered = row.seq;
-      if (row.type === "instance.entered" || row.type === "transition.taken") turnStarts.set(row.instanceId, row.seq);
+      if (program) {
+        const key = (row.event as { childKey?: string }).childKey;
+        if (row.type === "instance.entered" && key !== undefined && INPUT_CHILD.test(key)) inputs.add(row.instanceId);
+        else if (row.type === "instance.entered") turnStarts.set(row.instanceId, asked ?? runEntered!);
+        else if (row.type === "operation.started" && inputs.delete(row.instanceId)) asked = row.seq;
+      } else if (row.type === "instance.entered" || row.type === "transition.taken") turnStarts.set(row.instanceId, row.seq);
       if (row.type !== "operation.dispatched" && row.type !== "operation.completed" && row.type !== "operation.failed") continue;
       const start = turnStarts.get(row.instanceId);
       if (start === undefined) continue;
@@ -8648,6 +8401,33 @@ export class AppService {
     };
   }
 
+  /** The person's messages in a conversation from the point `seq` cuts at, oldest first — what a rewind there takes back. */
+  private messagesFrom(taskId: string, seq: number, project?: string): string[] {
+    let thread: ChatThreadView | null;
+    try {
+      thread = this.chatThread({ taskId, ...(project !== undefined ? { project } : {}) });
+    } catch {
+      return [];
+    }
+    const point = thread?.points.find((p) => p.seq === seq);
+    const from = point?.turn ?? (thread?.opening?.seq === seq ? thread.opening.turn : undefined);
+    if (thread === null || from === undefined) return [];
+    return thread.session.turns.slice(from).filter((turn) => turn.role === "user" && turn.by === undefined && typeof turn.text === "string" && turn.text.length > 0).map((turn) => turn.text!);
+  }
+
+  /** Stop and delete the tasks `taskId`'s calls started, whose calls a rewind took back (decision 0029 §2). */
+  private async takeBackStarted(session: ProjectSession, taskId: string, started: readonly string[], project?: string): Promise<void> {
+    for (const id of started) {
+      const running = session.live.get(id);
+      if (running !== undefined) {
+        this.cancelTaskIn(session, id);
+        await running.done;
+      }
+      await this.deleteTask(id, project);
+      this.log({ level: "info", source: "run", message: `rewound ${taskId} past the call that started ${id}: it was stopped and deleted`, project: session.key, taskId });
+    }
+  }
+
   /**
    * The messages that never reached a conversation (`ChatThreadView.unsent`): of a task's calls, oldest
    * first, the prompts after the last one that landed in the thread that failed without landing.
@@ -8705,15 +8485,13 @@ export class AppService {
     if (live === undefined && session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw this.refusal("run", `task '${taskId}' is running in another process — stop it there before rewinding it`);
     }
-    const turns = [...(session.chatTurnEnds.get(taskId) ?? [])];
-    if (request.stop === false && (live !== undefined || turns.length > 0)) return { taskId, busy: true };
+    // A PROGRAM conversation's run is live for as long as the conversation is (decision 0029 §2); while it
+    // only waits for the next message, with no call in flight, nothing is running that a rewind would cut off.
+    const waitingProgram = live !== undefined && this.isProgramConversation(session, taskId) && session.liveCalls.ofTask(taskId).length === 0;
+    if (request.stop === false && live !== undefined && !waitingProgram) return { taskId, busy: true };
     if (live !== undefined) {
       this.cancelTaskIn(session, taskId);
       await live.done;
-    }
-    if (turns.length > 0) {
-      this.cancelChatTurn({ taskId, ...(request.project !== undefined ? { project: request.project } : {}) });
-      await Promise.all(turns);
     }
     const before = session.project.runtime.get(taskId);
     if (before === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
@@ -8730,6 +8508,8 @@ export class AppService {
     const meta = session.project.tasks.read(taskId);
     const kept = session.project.events.list(taskId).some((row) => row.type === "instance.entered" && row.seq < request.at);
     if (isConversation(meta) && !kept) {
+      // …and what its calls STARTED goes with them (decision 0029 §2), as with any cut past those calls.
+      await this.takeBackStarted(session, taskId, session.project.tasks.list().filter((t) => t.origin?.kind === "started" && t.origin.taskId === taskId).map((t) => t.id), request.project);
       await this.deleteTask(taskId, request.project);
       this.log({ level: "info", source: "run", message: `rewound ${taskId} to before its opening message: the conversation was deleted`, project: session.key, taskId });
       return { taskId, deleted: true };
@@ -8737,10 +8517,19 @@ export class AppService {
     // A reopening of the FINISHED task that the cut takes away: what it cleared is what the task goes
     // back to (`hostRows.ts`). Read before the cut, which deletes the row that says so.
     const reopened = reopenedAfter(session.project, taskId, request.at);
+    // What the person takes back — their messages past the point — kept for the improver after the cut,
+    // which deletes them (decision 0029 §8).
+    const taken = isConversation(meta) ? this.messagesFrom(taskId, request.at, request.project) : [];
     const cut = cutTaskJournal(session.project, taskId, request.at);
+    if (taken.length > 0) recordHostRow(session.project, taskId, { type: REWOUND_EVENT, taken });
     // Rewinding past a mirror row UN-ADOPTS (decision 0005 §2): the task that stood for that child
     // goes back to being its own, and the parent runs the child itself from here.
     releaseUnmirroredAdoptions(session.project, taskId);
+    // What a cut call STARTED goes with it (decision 0029 §2): a program conversation's `start_task`
+    // made a task of its own, filed under the call, and taking the call back takes that task back —
+    // stopped and deleted, as a cut takes back what a message did in the conversation's own run. Not
+    // the events task's: what an automation started is the project's work, whatever its journal says.
+    if (meta.system === undefined) await this.takeBackStarted(session, taskId, unmirroredStarted(session.project, taskId), request.project);
     // A rewind is a person taking the work back. A fast-forward whose END the cut deleted — or that a
     // process left open — is ended here, or the resume below would take it up again.
     if (openFastForward(session.project, taskId) !== undefined) noteFastForwardEnd(session.project, taskId, "stopped", "the task was rewound");
@@ -8780,9 +8569,9 @@ export class AppService {
    * A second task that shares everything up to a point ("task:fork") — see `cut.ts`.
    *
    * A run fork resumes at once: there is nothing to type, and the fork's first act is the
-   * machine's. A chat fork (with a message) stands as its parent does and takes the message as its
-   * next turn — sent, not awaited, so the caller gets the new conversation to open while the turn
-   * is answered into it, exactly as a `chat:send` into an open conversation is watched.
+   * machine's. A conversation's fork (with a message) stands where that message's `input()` asked,
+   * and takes the message as its answer — awaited until it is DELIVERED, as a `chat:send` is, so the
+   * caller gets the new conversation to open while the reply is made into it.
    */
   async forkTask(request: {
     taskId: string;
@@ -8795,11 +8584,17 @@ export class AppService {
   }): Promise<{ taskId: string }> {
     const session = this.session(request.project);
     const { taskId } = request;
-    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+    // A PROGRAM conversation (decision 0029 §2) is always running — it waits for the next message —
+    // and what is forked is its past, which does not move while it waits: forked at a message, the
+    // copy stands where that message's `input()` asked for it, and takes the new message as its answer.
+    const program = this.isProgramConversation(session, taskId);
+    if (!program && (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined)) {
       throw this.refusal("run", `task '${taskId}' is running — stop it before forking it`);
     }
     const message = request.message?.trim();
-    const fork = copyTaskPrefix(session.project, taskId, request.at, { standing: message !== undefined && message !== "" ? "asIs" : "startable" });
+    // A message goes to a program's `input()`, and nowhere else (decision 0029 §2).
+    if (message !== undefined && message !== "" && !program) throw this.refusal("run", `task '${taskId}' is not a conversation that takes messages — fork it without one`);
+    const fork = copyTaskPrefix(session.project, taskId, request.at, { standing: "startable", ...(program ? { ofLiveTask: true } : {}) });
     this.log({
       level: "info",
       source: "run",
@@ -8808,35 +8603,457 @@ export class AppService {
       taskId: fork.taskId,
     });
     this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
-    if (message === undefined || message === "") {
-      return this.resumeTask({
+    if (program) {
+      await this.resumeTask({
         taskId: fork.taskId,
         ...(request.project !== undefined ? { project: request.project } : {}),
         ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
         ...(request.fake !== undefined ? { fake: request.fake } : {}),
       });
+      if (message !== undefined && message !== "") {
+        if (request.overrides !== undefined) this.keepChatSettings(session, fork.taskId, request.overrides);
+        await this.sendChatMessage({
+          taskId: fork.taskId,
+          instanceId: "",
+          message,
+          ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
+          ...(request.project !== undefined ? { project: request.project } : {}),
+        });
+      }
+      return { taskId: fork.taskId };
     }
-    const host = this.chatHostOf(fork.taskId, request.project);
-    if (host === null) throw this.refusal("run", `the fork of '${taskId}' holds no conversation to continue`);
-    // The composer that sent it is the new conversation's from here — see `TaskMeta.chatSettings`.
-    if (request.overrides !== undefined) this.keepChatSettings(session, fork.taskId, request.overrides);
-    void this.sendChatMessage({
+    return this.resumeTask({
       taskId: fork.taskId,
-      instanceId: host,
-      message,
-      ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
       ...(request.project !== undefined ? { project: request.project } : {}),
+      ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
       ...(request.fake !== undefined ? { fake: request.fake } : {}),
-    }).catch((e: unknown) => {
-      this.log({
-        level: "error",
-        source: "run",
-        message: `the fork's first message failed: ${e instanceof Error ? e.message : String(e)}`,
-        project: session.key,
-        taskId: fork.taskId,
-      });
     });
-    return { taskId: fork.taskId };
+  }
+
+  /**
+   * A SIMULATION's pass (decision 0029 §5 step 5) — what `simulate_change` answers an improver with.
+   *
+   * The conversation is forked at the message whose reply the person corrected, and that message is
+   * sent to the fork again — one pass of the conversation as it would answer now. The fork:
+   *
+   * - reads the proposed files as if they were written (`definitionOverlay.ts`), its run and every load
+   *   made for it, and nobody else's — so at that message's `input()` it is offered the change as a newer
+   *   version of itself, and takes it if a running conversation could (§3); a proposed script runs
+   *   unapproved, since it runs only here (the person, 2026-11-19: "Yes, sandboxed");
+   * - works in a throwaway copy of the conversation's workspace, under the set that keeps it there and
+   *   never pushes, merges or publishes ({@link SIMULATION_SET}) standing over its own;
+   * - has nobody to ask: what would be asked is refused, saying so; and it starts nothing, its improver
+   *   included (`startFromProgram`).
+   *
+   * The pass ends where the conversation would next wait on someone — its next `input()`, or a gate —
+   * or when its run ends. Answered with what it said and did, beside what the conversation said the
+   * first time; the fork, its workspace and its run are gone before the answer is.
+   */
+  private async simulatePass(open: ProjectSession, request: SimulationRequest): Promise<JsonValue> {
+    const project = open.project;
+    const ref = this.refOfSession(open);
+    const taskId = request.task;
+    const refuse = (reason: string): JsonValue => ({ simulated: false, reason });
+    if (!this.isProgramConversation(open, taskId)) return refuse("the conversation does not run as a program, so it has no message to fork at");
+    const thread = this.chatThread({ taskId, project: ref });
+    if (thread === null) return refuse("the conversation has no messages yet");
+    const turns = thread.session.turns;
+    // The messages the conversation was sent: each reply on its chain was made with one — the person's,
+    // or one the app sent for them.
+    const people = turns.flatMap((turn, index) => (turn.role === "user" && typeof turn.text === "string" && turn.text.length > 0 ? [{ index, text: turn.text }] : []));
+    // Each of the person's messages is answered by one reply on the conversation's chain, so the replies
+    // up to the position say how many messages it had — the last of them the correction. Or, named by
+    // the person's words in it, the last message that says them.
+    const quoted = request.quote !== undefined && request.quote.trim().length > 0 ? people.map((one) => one.text.includes(request.quote!.trim())).lastIndexOf(true) : -1;
+    const at = quoted >= 0 ? quoted : Math.min(people.length, request.position !== undefined ? this.repliesAt(open, taskId, request.position) : people.length) - 1;
+    if (at < 0) return refuse("the correction is not a message of this conversation");
+    if (at === 0) return refuse("the correction was the conversation's first message: no reply came before it to try again");
+    const problem = people[at - 1]!;
+    const before = passTurnsOf(turns.slice(problem.index + 1, people[at]!.index));
+    // Where the fork is cut: before the message whose reply was corrected. The opening message is the
+    // run's own input, which nothing is kept before — that pass is a fresh run of the conversation.
+    const fresh = thread.opening !== undefined && thread.opening.turn === problem.index;
+    const point = fresh ? undefined : thread.points.find((p) => p.turn === problem.index)?.seq;
+    if (!fresh && point === undefined) return refuse("the message whose reply was corrected cannot be forked at");
+
+    const overlay = makeDefinitionOverlay(`simulation:${randomUUID()}`, Object.fromEntries(request.files.map((file) => [join(request.root, file.path), file.content])));
+    await prepareOverlayModules(overlay);
+    const meta = project.tasks.read(taskId);
+    const title = `Simulation: ${meta.title}`;
+    const forkId = fresh
+      ? createTask(project, {
+          title,
+          workflow: meta.workflow,
+          ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
+          ...(meta.chatSettings !== undefined ? { chatSettings: meta.chatSettings } : {}),
+          ...(meta.startedBy !== undefined ? { startedBy: meta.startedBy } : {}),
+          parentTaskId: taskId,
+        }).id
+      : copyTaskPrefix(project, taskId, point!, { standing: "startable", ofLiveTask: true, title, branch: null }).taskId;
+    project.tasks.write({ ...project.tasks.read(forkId), simulation: { of: taskId, lesson: request.lesson } });
+    const fake = meta.scripted !== undefined ? { fake: meta.scripted } : {};
+    const unattend = open.approvals.unattend(forkId, "a simulation is trying a change to this conversation, and nobody is there to ask");
+    this.log({ level: "info", source: "run", message: `simulating a change to ${taskId} as ${forkId}: ${request.files.map((file) => file.path).join(", ")}`, project: open.key, taskId });
+    try {
+      const recorded = project.runtime.get(taskId)?.worktreePath;
+      const workspace = await makeThrowawayWorkspace(project, forkId, recorded !== undefined && existsSync(recorded) ? recorded : project.paths.projectDir);
+      const issues: PermissionSetIssue[] = [];
+      const sandbox = withDefinitionOverlay(overlay, () => resolvePermissionSetDecl(SIMULATION_SET, this.permissionSetReaderOf(project.paths), "", issues)) ?? {};
+      open.simulations.set(forkId, { overlay, workspace, sandbox });
+      const deadline = Date.now() + (this.options.simulationTimeoutMs ?? 15 * 60_000);
+      const ended = await withDefinitionOverlay(overlay, async () => {
+        if (fresh) {
+          await this.startTask({ taskId: forkId, project: ref, ...fake });
+          return this.untilParked(open, forkId, deadline, new Set());
+        }
+        await this.resumeTask({ taskId: forkId, project: ref, ...fake });
+        const waiting = await this.untilParked(open, forkId, deadline, new Set());
+        if (waiting.kind !== "asking" || waiting.component !== INPUT_FUNCTION) return waiting;
+        await this.sendChatMessage({ taskId: forkId, instanceId: "", message: problem.text, project: ref, ...fake } as typeof AppService.chatSend, { by: "host" });
+        return this.untilParked(open, forkId, deadline, new Set([waiting.requestId]));
+      });
+      // The fork's thread is the conversation's up to the message sent again, which stands where it did —
+      // as the new version put it to the model, which may not be in the person's words.
+      const after = this.chatThread({ taskId: forkId, project: ref })?.session.turns ?? [];
+      // Whether the pass ran the change: a fresh run pinned it at its start; a fork took it at the wait.
+      const versions = project.events.list(forkId).flatMap(({ event }) => {
+        const row = event as unknown as { type: string; version?: string; reason?: string };
+        return row.type === "version.adopted" || row.type === "version.declined" ? [row] : [];
+      });
+      const lastVersion = versions.at(-1);
+      const version = fresh
+        ? { taken: true, kind: "taken" }
+        : lastVersion?.type === "version.adopted"
+          ? { taken: true, kind: "taken", version: lastVersion.version ?? null }
+          : lastVersion?.type === "version.declined"
+            ? { taken: false, kind: "declined", reason: `the running conversation could not take the new version: ${lastVersion.reason ?? "no reason given"}` }
+            : { taken: false, kind: "unchanged", reason: "the change does not change the conversation's own workflow, so the pass ran it as it was" };
+      return {
+        simulated: true,
+        message: problem.text,
+        before: before as unknown as JsonValue,
+        after: passTurnsOf(after.slice(problem.index + 1)) as unknown as JsonValue,
+        version,
+        ended: ended.kind === "asking" ? (ended.component === INPUT_FUNCTION ? "waiting for the next message" : `asking a person (${ended.component})`) : ended.kind === "ended" ? `ended (${project.runtime.get(forkId)?.status ?? "gone"})` : "stopped: it ran past its time",
+        ...(issues.length > 0 ? { issues: issues.map((issue) => issue.message) } : {}),
+      } as unknown as JsonValue;
+    } finally {
+      unattend();
+      const running = open.live.get(forkId);
+      if (running !== undefined) {
+        this.cancelTaskIn(open, forkId);
+        await running.done.catch(() => undefined);
+      }
+      open.simulations.delete(forkId);
+      await removeThrowawayWorkspace(project, forkId).catch((e: unknown) => this.log({ level: "warn", source: "run", message: `could not remove a simulation's workspace: ${(e as Error).message}`, project: open.key, taskId: forkId }));
+      await this.deleteTask(forkId, ref).catch((e: unknown) => this.log({ level: "warn", source: "run", message: `could not delete a simulation's fork: ${(e as Error).message}`, project: open.key, taskId: forkId }));
+    }
+  }
+
+  /**
+   * Until a task's run waits on someone — a request it parked that is not one of `seen` — or ends, or
+   * `deadline` passes. What a simulation's pass is measured by.
+   */
+  private async untilParked(
+    open: ProjectSession,
+    taskId: string,
+    deadline: number,
+    seen: ReadonlySet<string>,
+  ): Promise<{ kind: "asking"; requestId: string; component: string } | { kind: "ended" } | { kind: "timeout" }> {
+    for (;;) {
+      const asked = open.hub.list().find((r) => (r.taskId ?? open.requestTask.get(r.requestId)) === taskId && !seen.has(r.requestId));
+      if (asked !== undefined) return { kind: "asking", requestId: asked.requestId, component: asked.component };
+      if (!open.live.has(taskId)) return { kind: "ended" };
+      if (Date.now() > deadline || this.closed || open.closing) return { kind: "timeout" };
+      await new Promise((resolve) => setTimeout(resolve, 40));
+    }
+  }
+
+  /** How many replies a conversation's chain holds as of a position on it — one per message answered. */
+  private repliesAt(open: ProjectSession, taskId: string, position: string): number {
+    try {
+      return sessionStoreFor(open.project, { taskId }).transcript(position).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * A simulation the last process was in the middle of when it ended (decision 0029 §5 step 5): its
+   * fork and its throwaway workspace are taken away before anything is resumed, since the pass it was
+   * making is nobody's to finish.
+   */
+  private async sweepSimulations(session: ProjectSession): Promise<void> {
+    for (const meta of session.project.tasks.list()) {
+      if (meta.simulation === undefined) continue;
+      try {
+        await removeThrowawayWorkspace(session.project, meta.id);
+        await this.deleteTask(meta.id, this.refOfSession(session));
+      } catch (e) {
+        this.log({ level: "warn", source: "run", message: `could not take away a simulation left from the last run: ${(e as Error).message}`, project: session.key, taskId: meta.id });
+      }
+    }
+  }
+
+  // --- Scripts run as plain programs, reported here (decision 0029, ruling 12) ------------------------
+
+  /**
+   * The runs a script endpoint is reporting (`scriptEndpoint.ts`), by task id: the session the task is
+   * in, its root and the calls begun, where each of the script's conversations stands here, and the
+   * permission set its agents' tool uses are decided under.
+   */
+  private readonly reportedRuns = new Map<
+    string,
+    {
+      open: ProjectSession;
+      taskId: string;
+      root: string;
+      workflow: string;
+      cwd: string;
+      next: number;
+      seq: number;
+      calls: Map<string, { call: ReportedCall; index: number; startedAt: number }>;
+      /** The script's own name for a position (`s1@2`) → this store's. */
+      sessions: Map<string, string>;
+      permissionSet: PermissionSet;
+    }
+  >();
+
+  /**
+   * A script run as a plain program begins reporting here: a task of its own in the project it runs in,
+   * named by the script's `meta` (or its file), running for as long as the program reports. Refused for
+   * a directory in no project, and the program runs unreported.
+   */
+  async reportedRunBegin(run: ReportedRunInfo): Promise<{ run: string }> {
+    if (typeof run?.file !== "string" || typeof run.cwd !== "string") throw new Error("a reported run names its script and the directory it runs in");
+    const dir = this.projectDirOf(run.cwd) ?? this.projectDirOf(dirname(run.file));
+    if (dir === undefined) throw new Error(`no JaiRA project at ${run.cwd}`);
+    await this.open(dir, { remember: false });
+    const open = this.session(dir);
+    const project = open.project;
+    const args = Array.isArray(run.args) ? run.args : [];
+    const name = typeof run.meta?.name === "string" && run.meta.name.trim().length > 0 ? run.meta.name : basename(run.file).replace(/\.[^.]+$/, "");
+    const workflow = this.reportedWorkflowOf(project, run.file);
+    const made = createTask(project, { title: name, workflow, ...(args.length > 0 ? { inputs: { args: args as JsonValue } } : {}) });
+    project.tasks.write({ ...project.tasks.read(made.id), reported: { file: run.file, pid: typeof run.pid === "number" ? run.pid : 0, cwd: run.cwd } });
+    project.runtime.setStatus(made.id, "running", Date.now());
+    const state = {
+      open,
+      taskId: made.id,
+      root: randomUUID(),
+      workflow,
+      cwd: run.cwd,
+      next: 0,
+      seq: 0,
+      calls: new Map<string, { call: ReportedCall; index: number; startedAt: number }>(),
+      sessions: new Map<string, string>(),
+      permissionSet: this.reportedPermissionSet(open, run.meta?.environment),
+    };
+    this.reportedRuns.set(made.id, state);
+    this.reportedEvent(state, { type: "instance.entered", instanceId: state.root, stateId: workflow, inputs: { args: args as JsonValue } } as unknown as EngineEvent);
+    this.log({ level: "info", source: "run", message: `a script run as a program reports here: ${run.file} (pid ${run.pid})`, project: open.key, taskId: made.id });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    return { run: made.id };
+  }
+
+  /** A reported call has begun: written down when it settles, at the place it began in the run. */
+  reportedCallStarted(runId: string, call: ReportedCall): void {
+    const state = this.reportedRuns.get(runId);
+    if (state === undefined || typeof call?.id !== "string") return;
+    state.calls.set(call.id, { call, index: state.next++, startedAt: Date.now() });
+  }
+
+  /**
+   * A reported call has ended: written into the task as any call of a run is — a step of its own, its
+   * record in the conversation it continued (`runChatTurn` over this project's session store), what it
+   * answered and what it cost — through a transport that answers with what the program was answered.
+   * Nothing is sent to a model here: the program made the call.
+   */
+  async reportedCallSettled(runId: string, id: string, outcome: ReportedOutcome): Promise<void> {
+    const state = this.reportedRuns.get(runId);
+    if (state === undefined || this.reportedRunStopped(state)) return;
+    const begun = state.calls.get(id) ?? { call: { id, kind: "llm" as const, prompt: "" }, index: state.next++, startedAt: Date.now() };
+    state.calls.delete(id);
+    const { call } = begun;
+    const project = state.open.project;
+    const config = project.config;
+    const secrets = this.secretResolver(state.open);
+    const cost = typeof outcome.costUsd === "number" ? { cost: outcome.costUsd } : {};
+    const rule: FakeRule = typeof outcome.error === "string" ? { error: outcome.error, ...cost } : { output: (outcome.value ?? null) as JsonValue, ...cost };
+    const transport = buildPromptExecutor({
+      fakeRules: [rule],
+      ...this.promptWiring(config, { fake: true, secrets }),
+      tree: this.defaultTree(config, { rootId: state.workflow, states: {} }, true, secrets, false).prompt,
+    });
+    const stores = sessionServicesFor({ inner: sessionStoreFor(project, { taskId: state.taskId }) });
+    const schema = call.schema !== undefined && call.schema !== null && JSON.stringify(call.schema) !== '{"type":"string"}' ? (call.schema as Record<string, JsonValue>) : { type: "string" };
+    const operation = promptOp({
+      ...(typeof call.system === "string" ? { system: call.system } : {}),
+      user: call.prompt,
+      config: { model: call.model ?? (call.kind === "agent" ? "agent/default" : "reported") },
+      output: { name: "value", schema: schema as never },
+    });
+    const position = typeof call.session === "string" ? state.sessions.get(call.session) : undefined;
+    let first = true;
+    const result = await runChatTurn(
+      {
+        executor: withSessionLayers(stores, transport),
+        sessions: stores.sessions,
+        record: (event, at) => this.reportedEvent(state, event, at),
+        // Begun when the program began it; ended now.
+        now: () => (first ? ((first = false), begun.startedAt) : Date.now()),
+      },
+      {
+        instance: { instanceId: randomUUID(), parentInstanceId: state.root, stateId: `${state.workflow}/call_${begun.index}`, childKey: `call_${begun.index}`, index: 0 },
+        operation,
+        position,
+      },
+    );
+    if (typeof outcome.session === "string" && result.sessionRef !== undefined) state.sessions.set(outcome.session, result.sessionRef);
+  }
+
+  /**
+   * A tool an agent of a reported run wants to use, decided here (ruling 12: the run is GATED here): under
+   * the permission set the script declares (its `meta.environment.tools`, else `ask-first`), by the gate a
+   * run's calls answer to — its lines, its functions, and the person, asked on the task like any run's.
+   */
+  async reportedApprove(runId: string, _id: string, request: { toolName: string; input: JsonValue }): Promise<{ allow: boolean; reason?: string }> {
+    const state = this.reportedRuns.get(runId);
+    if (state === undefined) return { allow: false, reason: "the run is not reporting here" };
+    if (this.reportedRunStopped(state)) return { allow: false, reason: "the run was stopped in JaiRA" };
+    const open = state.open;
+    const config = open.project.config;
+    const secrets = this.secretResolver(open);
+    const prompt = buildPromptExecutor({ ...this.promptWiring(config, { fake: false, secrets }), tree: this.defaultTree(config, { rootId: state.workflow, states: {} }, false, secrets, false).prompt });
+    const policy: ExecPolicy = compilePolicy(projectPolicy(config), {
+      execEnv: config.execEnvironment,
+      ...(scopeFloorOf(config) !== undefined ? { scopes: scopeFloorOf(config)! } : {}),
+      workspaceRoot: state.cwd,
+      askAboveBytes: config.artifacts.askAboveBytes,
+      permissionSet: state.permissionSet,
+      grants: open.approvals.grants(state.taskId),
+      mcp: config.mcp,
+    });
+    const approve = this.approverWithFunctions(open, state.taskId, this.permissionFunctionsFor(open, state.taskId, newRegistry(), prompt), { state: state.workflow });
+    const { gate } = gateTools({ registry: newRegistry(), names: [], sessionId: `reported:${state.taskId}`, policy, approve, permissionSet: () => state.permissionSet, workspaceRoot: state.cwd });
+    if (gate === undefined) return { allow: false, reason: "no gate decides this run's tools" };
+    // The agent's own name for the tool (`Bash`) is the standard tool it is (`shell`).
+    const verdict = await gate.check({ name: standardOfAnyNative(request.toolName) ?? request.toolName }, (request.input ?? {}) as FunctionInputs);
+    return verdict.allow ? { allow: true } : { allow: false, ...(verdict.reason !== undefined ? { reason: verdict.reason } : {}) };
+  }
+
+  /** A phase, a log line, an `input()` answered, a script called: said in the task's log. */
+  reportedNote(runId: string, note: Record<string, JsonValue>): void {
+    const state = this.reportedRuns.get(runId);
+    if (state === undefined) return;
+    const kind = String(note["kind"] ?? "note");
+    const message =
+      kind === "phase"
+        ? `▸ ${String(note["title"] ?? "")}`
+        : kind === "log"
+          ? String(note["message"] ?? "")
+          : kind === "input"
+            ? `${String(note["prompt"] ?? ">")} ${note["answer"] === null ? "(no more input)" : JSON.stringify(note["answer"])}`
+            : kind === "workflow"
+              ? `called ${String(note["script"] ?? "")} (${String(note["version"] ?? "")})${note["newer"] === true ? ", a newer version" : ""}`
+              : JSON.stringify(note);
+    this.log({ level: "info", source: "run", message, project: state.open.key, taskId: state.taskId });
+  }
+
+  /**
+   * A reported run has ended: as it said — its value, or its error — or, when the program went away
+   * without saying, interrupted. Not resumable either way.
+   */
+  reportedRunEnd(runId: string, outcome: { value: JsonValue } | { error: string } | { gone: true }): void {
+    const state = this.reportedRuns.get(runId);
+    if (state === undefined) return;
+    this.reportedRuns.delete(runId);
+    const project = state.open.project;
+    if (this.reportedRunStopped(state)) return;
+    const now = Date.now();
+    if ("gone" in outcome) {
+      this.reportedEvent(state, { type: "instance.terminated", instanceId: state.root, stateId: state.workflow, outcome: "canceled", failure: { classification: "interrupted", reason: "the program that reported it went away" } } as unknown as EngineEvent);
+      project.runtime.endTask(state.taskId, "interrupted", now);
+      project.runtime.setStatus(state.taskId, "interrupted", now);
+    } else if ("error" in outcome) {
+      const failure = { classification: "permanent" as const, reason: outcome.error };
+      this.reportedEvent(state, { type: "instance.terminated", instanceId: state.root, stateId: state.workflow, outcome: "error", failure } as unknown as EngineEvent);
+      finishTaskRun(project, state.taskId, "failed", { failure });
+    } else {
+      this.reportedEvent(state, { type: "instance.terminated", instanceId: state.root, stateId: state.workflow, outcome: "success" } as unknown as EngineEvent);
+      finishTaskRun(project, state.taskId, "completed", { outputs: { value: outcome.value } });
+    }
+    this.publishFor(state.open, { type: "store:invalidate", scope: "tasks" });
+  }
+
+  /** Whether a person stopped a reported run here — its row ended while the program still reports. */
+  private reportedRunStopped(state: { open: ProjectSession; taskId: string }): boolean {
+    const status = state.open.project.runtime.get(state.taskId)?.status;
+    return status === undefined || isTerminalStatus(status);
+  }
+
+  /** Journal one of a reported run's events, and tell the window, as a run's are. */
+  private reportedEvent(state: { open: ProjectSession; taskId: string; seq: number }, event: EngineEvent, at: number = Date.now()): void {
+    state.open.project.events.recorder(state.taskId).record(event, at);
+    this.publishFor(state.open, { type: "engine:event", taskId: state.taskId, seq: ++state.seq, at, event: event as unknown as JsonValue });
+  }
+
+  /** The permission set a reported run's agents are decided under: its script's declared one, else `ask-first`. */
+  private reportedPermissionSet(open: ProjectSession, environment: JsonValue | undefined): PermissionSet {
+    const declared = environment !== null && typeof environment === "object" && !Array.isArray(environment) ? (environment as { tools?: unknown }).tools : undefined;
+    const issues: PermissionSetIssue[] = [];
+    const decl = resolvePermissionSetDecl(declared ?? "$/permission-sets/ask-first", this.permissionSetReaderOf(open.project.paths), "", issues);
+    return parsePermissionSet(decl ?? {}).permissionSet;
+  }
+
+  /** The project a directory is in: the nearest one up that holds `.jaira/` — never the shared root itself. */
+  private projectDirOf(start: string): string | undefined {
+    let dir = resolvePath(start);
+    for (;;) {
+      const jaira = join(dir, ".jaira");
+      if (existsSync(jaira) && resolvePath(jaira) !== resolvePath(this.baseDir)) return dir;
+      const parent = dirname(dir);
+      if (parent === dir) return undefined;
+      dir = parent;
+    }
+  }
+
+  /** What a reported script's task names as its workflow: its state id when a layer holds it, else its path in the project. */
+  private reportedWorkflowOf(project: Project, file: string): string {
+    const abs = resolvePath(file);
+    for (const root of project.paths.roots) {
+      const workflows = resolvePath(join(root, "workflows"));
+      if (abs.startsWith(`${workflows}${sep}`)) return relative(workflows, abs).split(sep).join("/").replace(/\.[^./]+$/, "");
+    }
+    const inProject = relative(project.paths.projectDir, abs);
+    return (inProject.startsWith("..") ? abs : inProject).split(sep).join("/").replace(/\.[^./]+$/, "");
+  }
+
+  /**
+   * A PROGRAM conversation's place (decision 0029 §2) — `undefined` for a task that runs no program,
+   * `null` for one that has not replied yet.
+   *
+   * No one state holds it: each message's reply is a call of its own, and the conversation is the chain
+   * they extend — the session the run's FIRST reply began, which every later reply continues (a fork
+   * of it is still it). Addressed by the run's root; it stands where its newest reply on that chain
+   * ended, under that reply's state.
+   */
+  private programConversationOf(open: ProjectSession, taskId: string, projectKey?: string): { root: string; position: string; stateId: string } | null | undefined {
+    if (!this.isProgramConversation(open, taskId)) return undefined;
+    const history = this.sessionHistory({ taskId, ...(projectKey !== undefined ? { project: projectKey } : {}) });
+    const first = history[0];
+    if (first === undefined) return null;
+    const chain = new Set([first.sessionId]);
+    let last = first;
+    for (const row of history) {
+      if (row.branch !== undefined && chain.has(row.branch.parent)) chain.add(row.sessionId);
+      if (chain.has(row.sessionId)) last = row;
+    }
+    const root =
+      open.project.runtime.get(taskId)?.rootInstanceId ??
+      open.project.events.list(taskId).find((row) => row.type === "instance.entered" && (row.event as { parentInstanceId?: string }).parentInstanceId === undefined)?.instanceId;
+    if (root === undefined) return null;
+    return { root, position: `${last.sessionId}@${last.seq + 1}`, stateId: last.stateId };
   }
 
   /**
@@ -8849,6 +9066,9 @@ export class AppService {
    * host, which is the distinction `chatContextOf` also draws.
    */
   private chatHostOf(taskId: string, projectKey?: string): string | null {
+    // A PROGRAM's conversation is held by no one state (decision 0029 §2): it is addressed by its run.
+    const program = this.programConversationOf(this.session(projectKey), taskId, projectKey);
+    if (program !== undefined) return program === null ? null : program.root;
     const history = this.sessionHistory({ taskId, project: projectKey });
     const host = history.find((h) => !isChatInstance(h.instanceId));
     if (host !== undefined) return host.instanceId;
@@ -8958,6 +9178,10 @@ export class AppService {
     const row = open.project.runtime.get(taskId);
     if (row === undefined) throw this.refusal("run", `cannot resume unknown task '${taskId}'`, at);
     if (row.status === "running") throw this.refusal("run", `task '${taskId}' is already running`, at);
+    // Its program was the process that reported it (ruling 12): nothing here can take it up again.
+    if (open.project.tasks.tryRead(taskId)?.reported !== undefined) {
+      throw this.refusal("run", `task '${taskId}' was a script running as a program, reported here, and cannot be resumed — run the script again`, at);
+    }
     if (!isStartableStatus(row.status)) {
       throw this.refusal("run", `task '${taskId}' is ${row.status} and cannot be resumed — run it again instead`, at);
     }
@@ -9157,10 +9381,6 @@ export class AppService {
     const project = open.project;
     const result = await connectTaskIn(project, { ...request, project: open.dir }, {
       check: this.valueCheck(),
-      // What a move that makes a dynamic workflow gives the task to steer it, by the settings (decision
-      // 0021) — and, where that one is disabled, what else could.
-      conversation: this.options.connectConversation ?? conversationWorkflowOf(project.config, "moved"),
-      conversations: () => this.conversationChoices(open),
       offered: (taskId) =>
         open.userEvents
           .list()
@@ -9365,16 +9585,15 @@ export class AppService {
    * task is started or resumed and its own spine walks it into the target. What makes it a
    * fast-forward is the MODE this registers:
    *
-   *  - **the controlling conversation answers what comes up** (`offerToControl`), through the same
-   *    `answer_question` the tool is, each answer marked and a rewind point — and never an approval;
+   *  - **the conversation that asked for the move answers what comes up** (`offerToControl`), through
+   *    the same `answer_question` the tool is, each answer marked and a rewind point — and never an
+   *    approval. A move a person made directly has none, and what comes up is theirs (decision 0005
+   *    §4, amended 2026-11-19: "The conversation that asked for the move");
    *  - **Skip is showing** in the strip (`skipFastForward`);
    *  - **it ends on arrival** (`fastForwardSaw`), or on the run ending any other way.
    *
-   * A task with no conversation is given one first, because the conversation is what answers on the
-   * way — see `ensureControlConversation` for why that is a graft onto the task's own root and not a
-   * wrapper around it. A task that is RUNNING with no conversation is refused: its engine holds the
-   * version it loaded, and the graft is one it cannot see. Pause it, then move it — the same answer
-   * a new transition gets.
+   * Nothing is given the task for it: no conversation is grafted onto it, so a RUNNING task is
+   * fast-forwarded as it runs.
    */
   async fastForwardTask(request: TaskFastForwardRequest): Promise<TaskFastForwardResult> {
     const open = this.session(request.project);
@@ -9389,11 +9608,12 @@ export class AppService {
     const blocked = this.fastForwardBlocked(open, taskId);
     if (blocked !== undefined) throw this.refusal("run", blocked, at);
     const plan = live ? undefined : this.resumable(taskId, open.dir);
-    const controlTaskId = await this.controlOf(open, taskId);
+    // The conversation that asked for the move, while it is still there to answer.
+    const controlTaskId = request.conversation !== undefined && project.tasks.tryRead(request.conversation) !== undefined ? request.conversation : undefined;
     const through = request.through ?? [];
     const run: FastForwardRun = {
       taskId,
-      controlTaskId,
+      ...(controlTaskId !== undefined ? { controlTaskId } : {}),
       target: request.target,
       targetLabel: labelOfTarget(request.target, request.path !== undefined && request.path.length > 0 ? request.path[request.path.length - 1]! : request.toState),
       to: request.toState,
@@ -9412,7 +9632,7 @@ export class AppService {
     open.fastForwards.set(taskId, run);
     // Journaled, so a restart takes the mode up again rather than ending it (`hostModes.ts`).
     noteFastForwardStart(project, run);
-    this.log({ level: "info", source: "run", message: `fast-forwarding ${taskId} to '${request.target}' through ${through.length === 0 ? "nothing" : through.join(", ")}, answered by ${controlTaskId}`, ...at });
+    this.log({ level: "info", source: "run", message: `fast-forwarding ${taskId} to '${request.target}' through ${through.length === 0 ? "nothing" : through.join(", ")}, ${controlTaskId !== undefined ? `answered by ${controlTaskId}` : "what comes up on the way is yours"}`, ...at });
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
     try {
       if (live) {
@@ -9427,51 +9647,7 @@ export class AppService {
       this.endFastForward(open, taskId, "failed", (e as Error).message);
       throw e;
     }
-    return { taskId, controlTaskId, status: "fast-forwarding" };
-  }
-
-  /**
-   * The conversation that answers for this task on the way: the task's own root when it speaks, else
-   * the nearest task above it whose root does — a dynamic workflow's conversation over what it
-   * adopted or started — else one grafted onto the task (see {@link fastForwardTask}).
-   */
-  private async controlOf(open: ProjectSession, taskId: string): Promise<string> {
-    const found = this.speakingControlOf(open, taskId);
-    if (found !== undefined) return found;
-    const conversation = this.options.connectConversation ?? conversationWorkflowOf(open.project.config, "moved");
-    // A disabled one is not given to a task (decision 0021). A drop asks for another; this has no one to ask.
-    const off = disabledRefusalOf(open.project, conversation, "moved");
-    if (off !== undefined) throw this.refusal("run", `${off} It is the conversation a fast-forward answers through — choose another in Settings → Runs → Conversations.`);
-    await ensureControlConversation(open.project, { taskId, conversation });
-    return taskId;
-  }
-
-  /** The enabled workflows that can be a conversation (decision 0021) — what is offered in place of a disabled one. */
-  private conversationChoices(open: ProjectSession): ConversationChoice[] {
-    return this.browseWorkflowsIn(open)
-      .workflows.filter((entry) => entry.conversationInput !== undefined && entry.disabled !== true && entry.loadError === undefined)
-      .map((entry) => ({ stateId: entry.rootId, ...(entry.label !== undefined ? { label: entry.label } : {}) }));
-  }
-
-  /** The task's own root when it speaks, else the nearest task above it whose root does. Nothing is written. */
-  private speakingControlOf(open: ProjectSession, taskId: string): string | undefined {
-    const project = open.project;
-    const speaks = (id: string): boolean => {
-      const row = project.runtime.get(id);
-      if (row === undefined || (row.snapshotHash === undefined && row.documentId === undefined)) return false;
-      try {
-        const bundle = loadPinnedBundle(project, row);
-        return holdsConversation(bundle.states[bundle.rootId]);
-      } catch {
-        return false;
-      }
-    };
-    const visited = new Set<string>();
-    for (let id: string | undefined = taskId; id !== undefined && !visited.has(id); id = project.tasks.tryRead(id)?.parentTaskId) {
-      visited.add(id);
-      if (speaks(id)) return id;
-    }
-    return undefined;
+    return { taskId, ...(controlTaskId !== undefined ? { controlTaskId } : {}), status: "fast-forwarding" };
   }
 
   /**
@@ -9479,8 +9655,6 @@ export class AppService {
    * so a hover says it before a drop does.
    *
    *  - running in another process: move it there;
-   *  - running HERE with no conversation: its engine holds the version it loaded, and the graft that
-   *    would give it one is a version it cannot see — pause it, then move it;
    *  - not running, with nothing left to run: the machine has nowhere to walk.
    */
   private fastForwardBlocked(open: ProjectSession, taskId: string): string | undefined {
@@ -9489,11 +9663,7 @@ export class AppService {
     if (row === undefined) return `unknown task '${taskId}'`;
     const live = open.live.has(taskId);
     if (!live && (row.status === "running" || row.status === "stopping")) return `'${title}' is ${row.status} in another process — move it there`;
-    if (live) {
-      return this.speakingControlOf(open, taskId) === undefined
-        ? `'${title}' is running and has no conversation to answer what comes up on the way — pause it, then move it, or say skip to go there directly`
-        : undefined;
-    }
+    if (live) return undefined;
     const plan = this.resumable(taskId, open.dir);
     if (plan.kind === "none") return `'${title}' has nothing left to run on the way there${plan.blocked !== undefined ? ` (${plan.blocked})` : ""} — say skip to go there directly`;
     return undefined;
@@ -9627,7 +9797,8 @@ export class AppService {
     what: { kind: "interaction"; pending: PendingInteraction } | { kind: "question"; request: QuestionRequest },
   ): void {
     const run = open.fastForwards.get(taskId);
-    if (run === undefined || run.end !== undefined) return;
+    // No conversation asked for this move: what comes up is the person's, as in any run.
+    if (run === undefined || run.end !== undefined || run.controlTaskId === undefined) return;
     const requestId = what.kind === "interaction" ? what.pending.requestId : what.request.requestId;
     if (run.seen.has(requestId)) return;
     run.seen.add(requestId);
@@ -9678,7 +9849,7 @@ export class AppService {
       kind: what.kind,
       ...(identity.under !== undefined ? { under: identity.under } : {}),
       key: identity.key,
-      byTaskId: run.controlTaskId,
+      byTaskId: run.controlTaskId ?? "",
       reason: why,
     });
     this.log({ level, source: "run", message: `left ${requestId} to you (${run.taskId}): ${why}`, project: open.key, taskId: run.taskId, ...detail });
@@ -9701,12 +9872,15 @@ export class AppService {
   ): Promise<void> {
     const project = open.project;
     const taskId = run.taskId;
+    // Offered only where a conversation asked for the move (`offerToControl`).
+    const control = run.controlTaskId;
+    if (control === undefined) return;
     const requestId = what.kind === "interaction" ? what.pending.requestId : what.request.requestId;
     const ask: AutopilotAsk =
       what.kind === "interaction"
         ? { kind: "interaction", component: what.pending.component, ...(what.pending.config !== undefined ? { config: what.pending.config } : {}), inputs: what.pending.inputs }
         : { kind: "question", questions: what.request.questions as unknown as JsonValue };
-    const fakeRules = open.fakeRules.get(taskId) ?? open.fakeRules.get(run.controlTaskId);
+    const fakeRules = open.fakeRules.get(taskId) ?? open.fakeRules.get(control);
     const fake = fakeRules !== undefined;
     const secrets = this.secretResolver(open);
     const prompt = buildPromptExecutor({
@@ -9718,7 +9892,7 @@ export class AppService {
       title: project.tasks.tryRead(taskId)?.title ?? taskId,
       target: run.target,
       ...(run.at !== undefined ? { at: run.at } : {}),
-      said: this.controlSaid(open, run.controlTaskId),
+      said: this.controlSaid(open, control),
     });
     const result = await prompt.start(op, autopilotServices()).result;
     if ("error" in result) throw new Error(result.error.reason);
@@ -9729,7 +9903,7 @@ export class AppService {
     if (reply.confidence < threshold) return leave(`the conversation is ${reply.confidence} sure, under autopilot.askBelow ${threshold}`);
     // Arrived, skipped or stopped while the model was thinking: the question is the person's now.
     if (run.end !== undefined) return;
-    const host = this.workflowHostFor(open, run.controlTaskId);
+    const host = this.workflowHostFor(open, control);
     const answered =
       what.kind === "interaction"
         ? host.answer({ request: requestId, value: reply.answer, confidence: reply.confidence })
@@ -9815,6 +9989,7 @@ export class AppService {
       project: open.project,
       projectRef: open.dir,
       taskId,
+      forwarding: () => [...open.fastForwards.values()].filter((run) => run.controlTaskId === taskId && run.end === undefined).map((run) => run.taskId),
       connect: (request) => this.connectTask(request),
       move: (request) => this.moveTask(request),
       isLive: (id) => open.live.has(id),
@@ -9843,6 +10018,8 @@ export class AppService {
         this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
         this.publishFor(open, { type: "store:invalidate", scope: "board" });
       },
+      isProgram: () => this.isProgramConversation(open, taskId),
+      startChild: (request) => this.startChildOf(open, taskId, request),
     });
   }
 
@@ -10252,21 +10429,21 @@ export class AppService {
    *
    * Refused while the task runs anywhere: a live run in this process holds an engine over the
    * journal being deleted, and one in another process is found the same way cancel finds it, by the
-   * job table's heartbeat. A conversation's turn is no run, so that test passes it by: it is stopped
-   * and waited out here, as a rewind does, or the agent would go on working — and asking — in a task
-   * that is gone. The worktree goes FIRST and with `force` — the renderer has already asked the human,
+   * job table's heartbeat. A CONVERSATION is the exception: its program runs for as long as the
+   * conversation is open (decision 0029 §2), so deleting one from the Chat list stops it and waits it
+   * out here, as a rewind does — or its agent would go on working, and asking, in a task that is gone.
+   * The worktree goes FIRST and with `force` — the renderer has already asked the human,
    * and this is the one caller for whom "uncommitted work" is not a reason to stop — so a failure to
    * remove it leaves the task intact and reportable rather than rows gone and a worktree orphaned.
    */
   async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
     const session = this.session(project);
-    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+    const live = session.live.get(taskId);
+    if (live !== undefined && this.isProgramConversation(session, taskId)) {
+      this.cancelTaskIn(session, taskId);
+      await live.done;
+    } else if (live !== undefined || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw this.refusal("run", `task '${taskId}' is running — cancel it before deleting it`);
-    }
-    const turns = [...(session.chatTurnEnds.get(taskId) ?? [])];
-    if (turns.length > 0) {
-      this.cancelChatTurn({ taskId, ...(project !== undefined ? { project } : {}) });
-      await Promise.all(turns);
     }
     if (session.project.runtime.get(taskId)?.worktreePath !== undefined) {
       const result = await removeWorktree(session.project, taskId, { force: true });
@@ -10706,10 +10883,15 @@ export class AppService {
   pendingInteractions(): PendingInteraction[] {
     // A conversation waiting for its next message is idle, not asking anything (decision 0029 §2): its
     // `input()` is answered from the composer, never from the list of what waits on the person.
-    const live = [...this.sessions.values()].flatMap((s) => s.hub.list().filter((request) => request.component !== INPUT_FUNCTION).map((request) => this.pendingOf(request)));
+    const live = [...this.sessions.values()].flatMap((s) =>
+      s.hub
+        .list()
+        .filter((request) => request.component !== INPUT_FUNCTION && !s.simulations.has(request.taskId ?? s.requestTask.get(request.requestId) ?? ""))
+        .map((request) => this.pendingOf(request)),
+    );
     const seen = new Set(live.map((p) => p.requestId));
     const stored = [...this.sessions.entries()].flatMap(([key, s]) =>
-      this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId) && row.component !== INPUT_FUNCTION),
+      this.storedInteractionsOf(key, s).filter((row) => !seen.has(row.requestId) && row.component !== INPUT_FUNCTION && !s.simulations.has(row.taskId)),
     );
     return [...[...live, ...stored], ...(this.federation.pendingOf("interaction") as unknown as PendingInteraction[]), ...this.offlineInteractions()];
   }
@@ -11061,15 +11243,6 @@ export class AppService {
     }
   }
 
-  /** What is left waiting when a conversation's last turn has ended and no run holds it: nothing can use the answer. */
-  private abandonAsksOfTask(session: ProjectSession, taskId: string): void {
-    if (session.closing || session.live.has(taskId)) return;
-    this.abandonQuestions(session, taskId);
-    for (const [requestId, call] of [...session.approvalCalls]) {
-      if (call.taskId === taskId) session.approvals.abandon(requestId);
-    }
-  }
-
   /**
    * The questions a task's agent left, of `calls` if given, answered as abandoned in the record beside
    * each, then let go of. Without the entry the question would read, after the next restart, as one the
@@ -11242,7 +11415,8 @@ export class AppService {
     // The events task has a supervisor of its own that does this and then resumes it (`EventsSupervisor`).
     const events = eventsTaskOf(project)?.id;
     for (const row of project.runtime.list()) {
-      if (row.status !== "running" || session.live.has(row.taskId) || row.taskId === events) continue;
+      // A run a program is reporting here (ruling 12) runs in that program, under no claim of this process.
+      if (row.status !== "running" || session.live.has(row.taskId) || row.taskId === events || this.reportedRuns.has(row.taskId)) continue;
       const claim = project.jobs.liveRunJob(row.taskId, now);
       if (claim === undefined) {
         recovered.push(...project.runtime.recoverInterrupted(now, isLive, row.taskId));
@@ -11282,7 +11456,7 @@ export class AppService {
     const project = session.project;
     const out: RecoveredAsk[] = [];
     for (const row of project.runtime.list()) {
-      if (row.archivedFrom !== undefined || session.live.has(row.taskId) || (session.chatTurns.get(row.taskId)?.size ?? 0) > 0) continue;
+      if (row.archivedFrom !== undefined || session.live.has(row.taskId)) continue;
       const store = sessionStoreFor(project, { taskId: row.taskId });
       for (const cut of store.cutAtEnd()) {
         const chat = chatTurnOf(cut.request, store);
@@ -11440,7 +11614,12 @@ export class AppService {
     // waiting on it will ask again, live.
     this.dropRecoveredAsks(session, (r) => r.recordId === recordId);
     session.continuationNotes.set(recordId, note);
-    const started = recovered.chat !== undefined ? this.continueChatTurn(session, recovered, note) : this.resumeTask({ taskId, project: session.dir });
+    // A turn of a conversation recorded as one prompt has nowhere to go on (decision 0029 §2): only a run does.
+    if (recovered.chat !== undefined) {
+      session.continuationNotes.delete(recordId);
+      throw this.refusal("run", "this conversation takes no more messages: it is not a program that waits for them — start a new conversation");
+    }
+    const started = this.resumeTask({ taskId, project: session.dir });
     void started.catch((e: unknown) => {
       session.continuationNotes.delete(recordId);
       this.log({
@@ -11452,28 +11631,6 @@ export class AppService {
         ...stackDetail(e),
       });
     });
-  }
-
-  /**
-   * Continue a chat turn the app closed under: the same message at the same place — so the store reopens
-   * the turn's own record and the continuation layer carries it on — sent with the note.
-   */
-  private continueChatTurn(session: ProjectSession, recovered: RecoveredAsk, note: string): Promise<unknown> {
-    const chat = recovered.chat!;
-    // A scripted conversation goes on scripted (the same rules a run of the task was given).
-    const fake = session.fakeRules.get(recovered.taskId);
-    return this.sendChatMessage(
-      {
-        taskId: recovered.taskId,
-        instanceId: chat.hostInstanceId,
-        message: note,
-        project: session.dir,
-        // The settings the cut message was sent with — its tools, their modes, its model — not today's defaults.
-        ...(chat.overrides !== undefined ? { overrides: chat.overrides } : {}),
-        ...(fake !== undefined ? { fake } : {}),
-      },
-      { ...(chat.openingBy === "host" ? { by: "host" as const } : {}), now: true, continuing: { operation: chat.operation, index: chat.index, position: chat.position } },
-    );
   }
 
   /**
@@ -13032,16 +13189,19 @@ export class AppService {
    */
   writeWorkflow(request: WriteWorkflowRequest): WorkflowSource {
     this.writable(request.layer, request.project);
-    try {
-      JSON.parse(request.text);
-    } catch (e) {
-      throw this.refusal("file", `not valid JSON: ${(e as Error).message}`);
-    }
     const file = this.workflowFile(request.stateId, request.layer, request.project);
+    // A JSON state is parsed first; a script is code, and the lint says what is wrong with it.
+    if (file.endsWith(".json")) {
+      try {
+        JSON.parse(request.text);
+      } catch (e) {
+        throw this.refusal("file", `not valid JSON: ${(e as Error).message}`);
+      }
+    }
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, request.text.endsWith("\n") ? request.text : `${request.text}\n`, "utf8");
     this.publish({ type: "store:invalidate", scope: "workflows" });
-    this.noteSyncWrite(request.layer, `workflows/${request.stateId}.json`);
+    this.noteSyncWrite(request.layer, `workflows/${request.stateId}${extname(file)}`);
     return { stateId: request.stateId, layer: request.layer, file, text: request.text, exists: true };
   }
 
@@ -13061,7 +13221,8 @@ export class AppService {
     this.writable(request.toLayer, request.project);
     if (request.copy !== true) this.writable(request.layer);
     const from = this.workflowFile(request.stateId, request.layer, request.project);
-    const to = this.workflowFile(request.to, request.toLayer, request.project);
+    // The copy is the same kind of file as what it copies: a script copied up is a script.
+    const to = this.workflowFile(request.to, request.toLayer, request.project, extname(from));
     if (!existsSync(from)) throw this.refusal("file", `'${request.stateId}' does not exist in the ${request.layer} layer`);
     if (from === to) throw this.refusal("file", "the source and destination are the same file");
     if (existsSync(to)) throw this.refusal("file", `'${request.to}' already exists in the ${request.toLayer} layer`);
@@ -13126,6 +13287,9 @@ export class AppService {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, text, "utf8");
     };
+    if (existsSync(file) && !file.endsWith(".json")) {
+      throw this.refusal("file", `'${stateId}' is a ${extname(file).slice(1)} file in the ${layer} layer; switch it off in a layer above it, which follows it with a file of its own`);
+    }
     if (request.disabled) {
       write(existsSync(file) ? withDisabledText(readFileSync(file, "utf8"), true) : follow(true));
     } else {
@@ -13144,7 +13308,7 @@ export class AppService {
       }
     }
     this.publish({ type: "store:invalidate", scope: "workflows" });
-    this.noteSyncWrite(layer, `workflows/${stateId}.json`);
+    this.noteSyncWrite(layer, `workflows/${stateId}${extname(file)}`);
     const exists = existsSync(file);
     return { stateId, layer, file, text: exists ? readFileSync(file, "utf8") : "", exists };
   }
@@ -15589,14 +15753,24 @@ export class AppService {
    * than the input. An absolute `rel` is its own escape: on Windows, a file on another drive has no
    * relative path from the root, so `relative` hands back the absolute one — no `..` in sight.
    */
-  private workflowFile(stateId: string, layer: WorkflowLayer, project?: string): string {
+  private workflowFile(stateId: string, layer: WorkflowLayer, project?: string, ext?: string): string {
     const root = this.layerWorkflowsDir(layer, project);
-    const file = resolvePath(root, `${stateId}.json`);
-    const rel = relative(root, file);
-    if (rel.startsWith("..") || rel.length === 0 || isAbsolute(rel) || resolvePath(root, rel) !== file) {
-      throw this.refusal("file", `'${stateId}' does not name a state inside the ${layer} workflows directory`);
+    const at = (one: string): string => {
+      const file = resolvePath(root, `${stateId}${one}`);
+      const rel = relative(root, file);
+      if (rel.startsWith("..") || rel.length === 0 || isAbsolute(rel) || resolvePath(root, rel) !== file) {
+        throw this.refusal("file", `'${stateId}' does not name a state inside the ${layer} workflows directory`);
+      }
+      return file;
+    };
+    if (ext !== undefined) return at(ext);
+    // The file the layer HOLDS for the state, whichever kind it is — a workflow script is a state like
+    // any other (decision 0029 §2) — and a new one is JSON.
+    for (const one of WORKFLOW_FILE_EXTENSIONS) {
+      const file = at(one);
+      if (existsSync(file)) return file;
     }
-    return file;
+    return at(".json");
   }
 
   /**
@@ -15724,7 +15898,6 @@ export class AppService {
     let turns = 0;
     for (const session of this.sessions.values()) {
       runs += session.live.size - session.parkedRuns().size;
-      for (const set of session.chatTurns.values()) turns += set.size;
     }
     return { runs, turns };
   }
@@ -15743,8 +15916,7 @@ export class AppService {
     const work: RunningWork[] = [];
     for (const session of this.sessions.values()) {
       const parked = session.parkedRuns();
-      const turning = [...session.chatTurns].filter(([, set]) => set.size > 0).map(([taskId]) => taskId);
-      for (const taskId of new Set([...session.live.keys(), ...turning])) {
+      for (const taskId of session.live.keys()) {
         const kind = session.live.has(taskId) ? "run" : "turn";
         const waiting = this.asksPerson(session, taskId)
           ? "person"
@@ -15831,6 +16003,9 @@ export class AppService {
  * reports all of it, because a message someone typed and pressed Enter on deserves a reason.
  */
 class NoConversationHere extends Error {}
+
+/** The kinds of file a state is, in the order a layer's copy is looked for: JSON first, a script last. */
+const WORKFLOW_FILE_EXTENSIONS = [".json", ".yaml", ".yml", ".ts"] as const;
 
 type SecretTargetOf = SetSecretRequest["target"];
 
@@ -16250,17 +16425,6 @@ function runMetricsOf(metrics: unknown): RunMetrics | undefined {
 }
 
 /**
- * How long a typed message waits behind a call that cannot be steered.
- *
- * Two minutes is longer than most turns and shorter than a person's patience for a box that has
- * stopped responding. The bound exists at all because the wait is on the CALL's own promise, so
- * without one a stalled provider hangs the IPC handler and the composer sits on `busy` forever with
- * nothing to cancel. Past it the message is appended beside the running call and forks — a branch,
- * which is a real answer, rather than silence, which is not.
- */
-const CHAT_WAIT_MS = 120_000;
-
-/**
  * How many directory entries `findFiles` will look at before giving up and saying so.
  *
  * Generous for a repository, cheap for a keystroke: the walk is synchronous on the main thread, and
@@ -16439,4 +16603,69 @@ function usageRefusalOf(failure: unknown): UsageRefusal | undefined {
   const until = resetsAt ?? (typeof f.retryAfterMs === "number" ? new Date(Date.now() + f.retryAfterMs).toISOString() : null);
   const route = typeof f.detail?.limits?.route === "string" ? f.detail.limits.route : "claude-cli";
   return { account: accountOfRoute(route), until, reason: typeof f.reason === "string" ? f.reason : "the account has no usage left" };
+}
+
+/** A compiled program's `input()` children are keyed `input`, `input_1`, … (`scriptCompile.ts`). */
+const INPUT_CHILD = /^input(_\d+)?$/;
+
+/**
+ * Where a program's LATEST `input()` asked: the journal position of its call's start, and when (decision
+ * 0029 §2) — the wait the conversation stands at, or, for one that ended, the wait whose `null` ended it.
+ * The first start of that state counts, not one a resume made again. `undefined` for a run with none.
+ */
+function lastInputAsked(project: Project, taskId: string): { seq: number; at: number } | undefined {
+  let entered: string | undefined;
+  let asked: { seq: number; at: number } | undefined;
+  for (const row of project.events.list(taskId)) {
+    if (row.instanceId === undefined) continue;
+    const key = (row.event as { childKey?: string }).childKey;
+    if (row.type === "instance.entered" && key !== undefined && INPUT_CHILD.test(key)) {
+      entered = row.instanceId;
+      asked = undefined;
+    } else if (row.type === "operation.started" && row.instanceId === entered && asked === undefined) {
+      asked = { seq: row.seq, at: row.createdAt };
+    }
+  }
+  return asked;
+}
+
+/**
+ * Whether a program's run stopped in the middle of a REPLY (decision 0029 §2): its latest `input()` was
+ * answered with a message — or it never reached one, so the opening reply was the one going — and it
+ * reached no wait after. A run that stopped AT a wait, or ended on the `null` that ends it, did not.
+ */
+function endedMidReply(project: Project, taskId: string): boolean {
+  let input: string | undefined;
+  let answered = false;
+  for (const row of project.events.list(taskId)) {
+    if (row.instanceId === undefined) continue;
+    const key = (row.event as { childKey?: string }).childKey;
+    if (row.type === "instance.entered" && key !== undefined && INPUT_CHILD.test(key)) {
+      input = row.instanceId;
+      answered = false;
+    } else if (row.type === "script.call.settled" && row.instanceId === input) {
+      const settled = row.event as { outcome?: string; value?: unknown };
+      const value = settled.value as { idle?: unknown } | null | undefined;
+      answered = settled.outcome === "value" && value !== null && typeof value === "object" && value.idle !== true;
+    }
+  }
+  return input === undefined || answered;
+}
+
+/** `input({ idle })` in milliseconds: seconds as a number, or a number with `ms`, `s`, `m`, `h` or `d`. */
+function idleMsOf(idle: JsonValue | undefined): number | undefined {
+  if (typeof idle === "number") return Number.isFinite(idle) && idle >= 0 ? idle * 1000 : undefined;
+  if (typeof idle !== "string") return undefined;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)?\s*$/.exec(idle);
+  if (m === null) return undefined;
+  const unit = { ms: 1, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 }[(m[2] ?? "s") as "ms" | "s" | "m" | "h" | "d"];
+  return Number(m[1]) * unit;
+}
+
+/**
+ * A run's version source, asked through a simulation's proposed files when the run is one (decision
+ * 0029 §5 step 5) — so the newer version it is offered is the change being tried, whoever asks.
+ */
+function overlaidVersions(overlay: DefinitionOverlay | undefined, source: VersionSource): VersionSource {
+  return overlay === undefined ? source : (stateId, current) => withDefinitionOverlay(overlay, () => source(stateId, current));
 }

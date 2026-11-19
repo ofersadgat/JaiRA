@@ -103,6 +103,7 @@ export interface GitRead {
  */
 export interface GitLifecycle {
   addWorktree(worktreePath: string, branch: string, startPoint?: string): Promise<void>;
+  addDetachedWorktree(worktreePath: string, startPoint?: string): Promise<void>;
   removeWorktree(worktreePath: string, options?: { force?: boolean }): Promise<void>;
   pruneWorktrees(): Promise<void>;
   listWorktrees(): Promise<WorktreeEntry[]>;
@@ -253,6 +254,14 @@ export class Git implements GitRead, GitLifecycle {
       ? ["worktree", "add", target, branch]
       : ["worktree", "add", "-b", branch, target, ...(startPoint !== undefined ? [startPoint] : [])];
     await this.run(args);
+  }
+
+  /**
+   * Add a worktree at `worktreePath` on no branch — HEAD detached at `startPoint` — for a copy nothing is
+   * ever committed from (a simulation's throwaway workspace, decision 0029 §5 step 5).
+   */
+  async addDetachedWorktree(worktreePath: string, startPoint = "HEAD"): Promise<void> {
+    await this.run(["worktree", "add", "--detach", this.path(worktreePath), startPoint]);
   }
 
   /**

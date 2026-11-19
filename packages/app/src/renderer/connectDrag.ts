@@ -20,7 +20,7 @@
  * 2026-09-22): a column the task cannot reach from where it stands does not light and says why; a
  * column whose move ASKS first (a working task sent back, or into another workflow) lights and says
  * the drop will ask — the board puts that question in front of the commit; and a target lacking
- * inputs says they will be asked in the task's own conversation.
+ * inputs says they will be asked of the person, on the task.
  *
  * No React and no DOM, so both halves — the memo and the words — are tested as plain functions.
  */
@@ -188,7 +188,7 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
         !result.ok
           ? [{ b: passes.join(" → ") }, passes.length === 1 ? " lies between" : " lie between"]
           : fastForward
-            ? ["runs ", { b: passes.join(" → ") }, " on the way, the conversation answering what comes up"]
+            ? ["runs ", { b: passes.join(" → ") }, " on the way — what comes up is yours to answer"]
             : ["steps over ", { b: passes.join(" → ") }, ", recorded as skipped"],
       );
     }
@@ -219,21 +219,19 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
   for (const input of plan.inputs) {
     if (input.via === "wire" && input.from !== undefined) facts.push([{ b: input.name }, input.each === "split" ? " takes one element of " : " comes from ", { b: input.from }]);
   }
-  // What the move will ASK for in this task's own conversation, after what the workflow binds.
-  if (result.ok) for (const input of plan.question ?? []) facts.push([{ b: input.name }, " will be asked in this task's conversation", ...(input.description !== undefined ? [` — ${input.description}`] : [])]);
+  // What the move will ASK for, on the task, after what the workflow binds.
+  if (result.ok) for (const input of plan.question ?? []) facts.push([{ b: input.name }, " will be asked on this task", ...(input.description !== undefined ? [` — ${input.description}`] : [])]);
   if (plan.asks.length > 0) facts.push([{ b: count(plan.asks.length, "input") }, " can be given afterwards"]);
   if (plan.branch !== undefined) facts.push(["works on branch ", { b: plan.branch }]);
 
   if (!result.ok) {
     const missing = result.refusal.missing ?? [];
     for (const input of missing) facts.push([{ b: input.name }, ` is required and unbound — ${input.reason}`]);
-    // A forward move the app cannot run says why in its own words — a running task with no
-    // conversation, nothing left to run — which is exactly what a hover should say.
+    // A forward move the app cannot run says why in its own words — another process holds it, or
+    // nothing is left to run — which is exactly what a hover should say.
     const refused = missing.length > 0 ? `${count(missing.length, "required input")} would not be bound.` : result.refusal.message;
     return { kind: KIND[plan.resolution], say, facts, refused };
   }
-  // What would steer it is disabled (decision 0021): the drop asks which to use, in the column.
-  if (plan.chooseConversation !== undefined) return { kind: KIND[plan.resolution], say, facts, drop: "Drop, then choose what steers it" };
   // The move table's ASK cells: the drop still commits, once the person has said yes to this.
   const judgement = plan.judgement;
   if (judgement?.confirm !== undefined) {
@@ -245,7 +243,7 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
       ...(judgement.sentence !== undefined ? { confirm: judgement.sentence } : {}),
     };
   }
-  if ((plan.question ?? []).length > 0) drop = `${drop}, then answer in its conversation`;
+  if ((plan.question ?? []).length > 0) drop = `${drop}, then answer what it asks`;
   return { kind: KIND[plan.resolution], say, facts, drop };
 }
 

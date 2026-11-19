@@ -16,8 +16,8 @@
  * A session holds the project's tools AND the workflow tools, so the four top-level files grew eight
  * entries the four functions had never seen. The frozen functions are therefore held to the tools
  * they were written about — the nine a conversation had then — and the eight new ones are held to a
- * rule instead: **a top-level `<name>` gives a workflow tool whatever `control/<name>` gives it**.
- * One bucket, said twice, is one bucket that can drift; this is the assertion that it has not.
+ * table instead ({@link WORKFLOW_MODES}): what the control conversation's own sets gave them, until
+ * there was no control conversation (decision 0005, amended 2026-11-19).
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { READ_ONLY_PRESET_TOOLS, SMART_MODE, type PermissionSetMode } from "../src/operationVocabulary";
 import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
-import { heldTools, linePlaces, offeredTools, parsePermissionSet, toolImplementations, toolModes, type PermissionSet } from "../src/permissionSets";
+import { heldTools, isPermissionSetInstructionKey, linePlaces, offeredTools, parsePermissionSet, toolImplementations, toolModes, type PermissionSet } from "../src/permissionSets";
 import { resolvePlace } from "../src/places";
 import { composePermissionSetLayers } from "../src/permissionLayers";
 
@@ -57,8 +57,16 @@ const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: 
   { id: "full", file: "full", modeFor: () => "allow" },
 ];
 
-/** The workflow tools (decision 0005 §3) — all of what `control` holds, and part of every top-level set. */
+/** The workflow tools (decision 0005 §3) — part of every top-level set. */
 const WORKFLOW_TOOLS = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
+
+/** What each top-level set gives the workflow tools: one word for all eight, or — read-only — look and never steer. */
+const WORKFLOW_MODES: Record<string, Record<string, PermissionSetMode>> = {
+  "ask-first": Object.fromEntries(WORKFLOW_TOOLS.map((name) => [name, "ask"])),
+  auto: Object.fromEntries(WORKFLOW_TOOLS.map((name) => [name, SMART_MODE])),
+  full: Object.fromEntries(WORKFLOW_TOOLS.map((name) => [name, "allow"])),
+  "read-only": Object.fromEntries(WORKFLOW_TOOLS.map((name) => [name, name === "list_workflows" || name === "list_tasks" ? "allow" : "deny"])),
+};
 
 /**
  * The Git tools (decision 0010 §1), with the decision's table of modes — not the frozen functions':
@@ -121,13 +129,12 @@ const PRESET_TOOLS = CONVERSATION_TOOLS.filter((name) => !WORKFLOW_TOOLS.include
 describe("the top level is the four presets, written down, and read-only-scratch", () => {
   it.each(FROZEN_PRESETS)("$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
     const { permissionSet, issues } = parsePermissionSet(shipped(file));
-    const control = parsePermissionSet(shipped(`control/${file}`)).permissionSet;
     expect(issues).toEqual([]);
-    // The map the preset wrote for the tools it knew, `control`'s own answer for the workflow
-    // tools, and decision 0010's table for the Git tools.
+    // The map the preset wrote for the tools it knew, the table's answer for the workflow tools, and
+    // decision 0010's table for the Git tools.
     expect(projectModes(permissionSet)).toEqual({
       ...Object.fromEntries(PRESET_TOOLS.map((name) => [name, modeFor(name)])),
-      ...toolModes(control),
+      ...WORKFLOW_MODES[file],
       ...Object.fromEntries(Object.entries(TABLED).map(([name, modes]) => [name, modes[file]!])),
     });
     // Every line is HELD — a preset never unticked anything, and a permission set's line is its tick —
@@ -158,43 +165,15 @@ describe("the top level is the four presets, written down, and read-only-scratch
   });
 });
 
-describe("control has its OWN versions of the same names", () => {
-  it("ships the same four names — not read-only-scratch, which differs only in file tools a control conversation never holds", () => {
-    const chat = topLevel().filter((file) => file !== "read-only-scratch.json");
-    expect(readdirSync(join(PERMISSION_SETS, "control")).sort()).toEqual(chat.sort());
-  });
-
-  it.each(["ask-first", "read-only", "auto", "full"])("control/%s holds ONLY the task and workflow tools, and refuses everything else", (name) => {
-    const { permissionSet, issues } = parsePermissionSet(shipped(`control/${name}`));
-    // No warning either: the eight names are in the standard list, or each would be dropped as unknown.
-    expect(issues).toEqual([]);
-    expect(Object.keys(permissionSet.entries).sort()).toEqual([...WORKFLOW_TOOLS].sort());
-    expect(permissionSet.other).toBe("deny");
-  });
-
-  it("holds them and HANDS THEM OVER: they are named, and served since step 6", () => {
-    const { permissionSet } = parsePermissionSet(shipped("control/full"));
-    expect(heldTools(permissionSet).sort()).toEqual([...WORKFLOW_TOOLS].sort());
-    // What lowering writes into the engine's `tools` list, and what an agent plan calls held. It was
-    // empty while the eight carried `unserved`; deleting that mark was the whole of serving them.
-    expect(offeredTools(permissionSet).sort()).toEqual([...WORKFLOW_TOOLS].sort());
+describe("the workflow tools", () => {
+  it("are held and HANDED OVER by the top-level sets: named, and served since step 6", () => {
+    const { permissionSet } = parsePermissionSet(shipped("full"));
     for (const name of WORKFLOW_TOOLS) {
+      expect(heldTools(permissionSet)).toContain(name);
+      expect(offeredTools(permissionSet)).toContain(name);
       expect(TOOL_SPEC_BY_NAME.get(name)).toMatchObject({ category: "tasks" });
       expect(TOOL_SPEC_BY_NAME.get(name)!.unserved).toBeUndefined();
     }
-  });
-
-  it("read-only may look and may not steer", () => {
-    expect(toolModes(parsePermissionSet(shipped("control/read-only")).permissionSet)).toEqual({
-      list_workflows: "allow",
-      list_tasks: "allow",
-      start_task: "deny",
-      move_task: "deny",
-      answer_question: "deny",
-      hold_task: "deny",
-      release_task: "deny",
-      stop_task: "deny",
-    });
   });
 });
 
@@ -205,14 +184,6 @@ describe("the Git tools (decision 0010 §1)", () => {
 
   it("leave CI to the ci category (decision 0016)", () => {
     expect(TOOL_SPECS.filter((spec) => spec.category === "ci").map((spec) => spec.name)).toEqual(Object.keys(CI_TOOLS));
-  });
-
-  it("are not offered by control, whose `other` refuses them", () => {
-    for (const name of ["ask-first", "read-only", "auto", "full"]) {
-      const { permissionSet } = parsePermissionSet(shipped(`control/${name}`));
-      for (const tool of Object.keys(FORGE_TOOLS)) expect(permissionSet.entries[tool], `control/${name}: ${tool}`).toBeUndefined();
-      expect(permissionSet.other).toBe("deny");
-    }
   });
 
   it("sit after the web tools in every top-level file, the CI tools after them, as the menu draws them", () => {
@@ -232,6 +203,8 @@ describe("every shipped permission set", () => {
       {
         const map = shipped(bucket === "." ? file.replace(/.json$/, "") : `${bucket}/${file.replace(/.json$/, "")}`) as Record<string, unknown>;
         for (const [subject, mode] of Object.entries(map)) {
+          // What a file says about itself — its description, its icon — is no line.
+          if (isPermissionSetInstructionKey(subject)) continue;
           // A plain string, or a map of places (decision 0023 §7.1) — and none says `unavailable`, which
           // is a statement about a layer below.
           expect(typeof mode === "string" || (typeof mode === "object" && mode !== null), `${bucket}/${file}: ${subject}`).toBe(true);

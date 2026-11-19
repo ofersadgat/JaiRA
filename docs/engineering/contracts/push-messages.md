@@ -30,7 +30,7 @@ Main sends with `webContents.send(PUSH_CHANNEL, message)` through the `publish` 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `engine:event` `taskId` | string | yes | the task whose journal recorded the event |
-| `engine:event` `seq` | number | yes | this push's order within one run or one typed turn, from 1; not the journal's `seq` |
+| `engine:event` `seq` | number | yes | this push's order within one run, a reported script's run included, from 1; not the journal's `seq` |
 | `engine:event` `at` | epoch ms | yes | the time handed to the journal's `record` |
 | `engine:event` `event` | JSON | yes | the journaled event verbatim, per [journal-events](journal-events.md), or `{type: "artifact.failed", name, reason}` when a returned artifact could not be placed after a run |
 | `engine:event` `project` | string | no | the project directory, set for journaled events |
@@ -47,7 +47,7 @@ Main sends with `webContents.send(PUSH_CHANNEL, message)` through the `publish` 
 | --- | --- |
 | `tasks` | a project opens having recovered tasks; a native-session recovery folds something; a task is created, renamed, rerun, deleted, rewound or forked; a run starts or ends; a fan-out host makes or changes tasks; a cancel sets a live run `stopping` or ends a task that is not running; history is pruned |
 | `board` | a run journals any event, once per event; a task is renamed or deleted; history is pruned |
-| `task` | a run ends; a typed turn ends; history is pruned, once per pruned task |
+| `task` | a run ends; history is pruned, once per pruned task |
 | `workflows` | the workflows watcher fires, after a 150 ms debounce; configuration is written; executors are probed; a workflow is written, moved or deleted; a file is written, created, renamed or deleted; a description sync's changeset review run completes |
 | `config` | configuration is written |
 | `availability` | an availability pass lands |
@@ -103,8 +103,8 @@ The pending shapes are [inbox-channels](inbox-channels.md).
 - Inbox pushes carry the project inside `pending`, and `userEvent:requested` carries none. `session:turn` is published bare, and the store filters it by `taskId` alone.
 - The store drops a `store:invalidate` whose `project` differs from the window's, except that `tasks` still refreshes the project list, shared tasks and every conversation, `board` refreshes the project list while the Tasks view is showing, and `task` refreshes the selected task when its project is the one stamped. `engine:event` and `run:finished` are applied whatever their project.
 - A `task` invalidation is handled without reading `taskId`: the store refreshes whichever task is selected.
-- `board` fires once per journaled event of a run, so a consumer that refetches on it pays per event. A typed turn publishes no `board`.
-- `engine:event.seq` restarts at 1 for every run and every typed turn; order across them is not comparable.
+- `board` fires once per journaled event of a run, so a consumer that refetches on it pays per event. A reported script's run publishes no `board` for its events.
+- `engine:event.seq` restarts at 1 for every run; order across runs is not comparable.
 - The fan-out host's journal rows are recorded without the tee and are never pushed.
 - `frame:contextMenu` is sent straight from `index.ts`, without the check that the renderer has loaded.
 - `interaction:resolved` fires when a gate is abandoned at close, although its durable row survives and the next open asks it again.

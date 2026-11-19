@@ -1358,6 +1358,11 @@ export interface TaskSummary {
    * conversation, which answers its fourth message as a `completed` task.
    */
   answering?: true;
+  /**
+   * A conversation that is a program, waiting at its `input()` for the person's next message (decision
+   * 0029 §2) — one the Chat list can End (`chat:end`).
+   */
+  waitsForMessage?: true;
   /** Set when {@link status} is `archived`. */
   archived?: TaskArchived;
   workflow: string;
@@ -1991,4 +1996,44 @@ export interface JobOutputChunk {
   chunk: string;
   dropped: number;
   createdAt: number;
+}
+
+// --- learning (decision 0029) ------------------------------------------------------------------
+
+/** One lesson, measured. */
+export interface MeasuredLesson {
+  file: string;
+  layer: "project" | "shared";
+  rule: string;
+  lever: string;
+  target: string;
+  status: string;
+  /** Every time it turned up. */
+  occurrences: number;
+  applied: number;
+  declined: number;
+  /** The times it turned up again after a change of it was applied. */
+  recurred: number;
+  /** …of which, the times that change was in effect where it turned up. */
+  recurredInEffect: number;
+  structural: boolean;
+  /** The projects it turned up in, by name. */
+  projects: string[];
+}
+
+export interface LearningMeasures {
+  lessons: MeasuredLesson[];
+  /** The improver's proposals the person reviewed: applied, and turned down. */
+  proposals: { applied: number; declined: number };
+  /** Corrections per conversation — the lessons' occurrences, by the conversation they turned up in. */
+  conversations: { count: number; corrections: number; perConversation: number; byConversation: Array<{ task: string; title?: string; corrections: number }> };
+  /** Lessons in the Shared layer that more than one project has learned (§7). */
+  promoted: Array<{ rule: string; projects: string[] }>;
+  /**
+   * Newer versions offered to running work (§3): how many a run took, how many it took within the pass
+   * that first offered them (before the conversation's next message), and how many it never took.
+   */
+  handoffs: { offered: number; adopted: number; withinPass: number; neverAdopted: number; declines: number };
+  /** The decision's "Revisit when" conditions these numbers show, in words. Empty when none. */
+  revisit: string[];
 }

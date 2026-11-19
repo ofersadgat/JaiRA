@@ -43,7 +43,7 @@ It deliberately does not own:
 - Layer `data`, package `@jaira/persistence`. It calls the connection, `blobStore.ts`, `messagesOfRecord` and the `ConversationLog` it is constructed with.
 - Upstream seams: `SessionStore` and `RecordStore` from `@declarative-ai/exec`, reached by the engine through `sessionServicesFor({inner})` in `@jaira/runtime`, whose `withRecord` and `withSessionPosition` call `append`, `finish`, `positionOf`, `fork` and `resolve`; `MemoCache`, used by an executor's `memoize` step in `executorStack.ts`.
 - Constructed through `sessionStoreFor(project, {taskId})`, which attaches the conversation file log when that concern is file-backed. A store built with `new SqliteSessionStore(db, scope)` writes the table only.
-- The app hands every run and chat turn a `SqliteMemoCache` over the project database. `jaira` hands none, so a `memoize` step is skipped there.
+- The app hands every run a `SqliteMemoCache` over the project database. `jaira` hands none, so a `memoize` step is skipped there.
 
 ## The table is the truth for records, and the conversation file is its export once conversations are file-backed
 
@@ -80,10 +80,10 @@ It deliberately does not own:
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
 | The process is killed mid-call | the row stays `open` with its question and last flushed partial, and the record keeps the provider handle `update` stamped | `recoverInterrupted` settles it `interrupted` at the next open when its task was `running`; the app folds the agent's own session file in when a handle exists; a re-dispatch reopens the row | the interrupted turn shows what it had streamed |
-| The process is killed mid-way through a chat turn | the task was never `running`; `recoverUnsettledCalls` settles the open record `interrupted` at the next open | none needed | the partial turn stays, read as interrupted |
+| The process is killed while a call's record is open under a task that is not `running` | `recoverUnsettledCalls` settles the open record `interrupted` at the next open | none needed | the partial turn stays, read as interrupted |
 | A CUT call (`interrupted`, or `failed` and `canceled`) that had said something is re-dispatched | the reopen keeps every finished entry and drops the half-written tail; the result carries `carried: n`, and every flush and the settle write after those `n` entries; `noteContinuation` adds the note the continuation is made with (`by: "host"`) to them, and the settle drops what the call SENT (the note, a system frame) rather than writing it twice ([0007](../decisions/0007-permissionSets.md), amended 2026-10-21) | none needed | one turn: what was said before the cut, the note, what was said after |
 | A call that FAILED is re-dispatched | it is a retry: reopened with nothing carried | none needed | the turn starts over |
-| Two live calls want one seat, including a chat turn in the app beside a `jaira` resume of the same task | the claim index refuses the second, whatever `storage.conversations` says; `withSessionPosition` forks once and runs the call on the branch, and a second refusal fails the call | none needed | the later call's turn continues on a branch |
+| Two live calls want one seat | the claim index refuses the second, whatever `storage.conversations` says; `withSessionPosition` forks once and runs the call on the branch, and a second refusal fails the call | none needed | the later call's turn continues on a branch |
 | A reopened record finds its seat taken while it was dead | the reopen's update hits the claim index and raises `PositionTaken` | the call forks | the turn continues on a branch |
 | A call is retried with the same scoped id | the row is reopened rather than a second row inserted | none needed | one turn, not two |
 | A reader reads a record while its call streams | each write is one statement, so the reader sees a whole partial with status `open`, and `bySession` and replayed history leave it out | none needed | the turn so far shows as in progress |

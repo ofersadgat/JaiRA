@@ -1145,8 +1145,12 @@ export function permissionSetOfEnvironment(
       if (held === undefined) {
         entries[subject] = { kind: "tool", mode, offered: false };
       } else {
-        const { offered: _offered, ...entry } = held;
-        entries[subject] = { ...entry, mode };
+        const { offered, ...entry } = held;
+        const restored = { ...entry, mode } as PermissionSetEntry;
+        // Off the list because it is WITHHELD — it denies outright — the entry is still held, as written.
+        // Off it because the tools picked leave it out (a composer's ticks), it is not offered: a mode
+        // the set writes for it does not tick it again.
+        entries[subject] = offered === false && !deniesOutright(restored) ? { ...restored, offered: false } : restored;
       }
       continue;
     }

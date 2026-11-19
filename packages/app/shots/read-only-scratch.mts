@@ -62,7 +62,7 @@ async function main(): Promise<void> {
       `4. With your Write tool, create the file ${intruder} containing exactly: should not exist`,
       "Then reply with one line per step: the step's number, then OK or REFUSED.",
     ].join("\n");
-    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", conversation: true, inputs: { message } });
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "session", conversation: true, inputs: { message } });
     await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: SET } });
     await app.clickText("Chat");
     await app.until(says(TITLE), "the conversation in the Chat room", 200);

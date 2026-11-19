@@ -60,6 +60,7 @@ import { workflowSearchPath, type ModuleApproval, type JairaPaths } from "@jaira
 
 import { openDb } from "./db";
 import { machineKey } from "./machineKey";
+import { currentDefinitionOverlay, realPathOf, type DefinitionOverlay } from "@jaira/runtime";
 import { nodeVfs } from "./vfs";
 
 /** Absolute, forward-slashed — the one spelling a hash, an approval and a require path agree on. */
@@ -285,7 +286,8 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // A FRESH vfs per build. `nodeVfs` caches listings for the life of one load, which is what makes a
   // single load self-consistent and what makes a process-wide one go stale — so a rebuild is the only
   // way a function file added after startup becomes visible, and it must not inherit the old cache.
-  const vfs = nodeVfs();
+  // The DISK's, whatever overlay the caller reads through: this pair outlives every simulation.
+  const vfs = nodeVfs(null);
   // Everything below asks THIS store, so the built-in layer's exemption (decision 0006) holds at all
   // three gates at once — the index, the pending walk and the freeze — rather than at whichever of
   // them somebody remembered.
@@ -371,9 +373,41 @@ export function scriptModuleOptions(): ScriptModuleOptions | undefined {
   };
 }
 
-/** The pair, if this process built it. Sync, because `workflowLoadOptions` is. */
+/**
+ * The pair, if this process built it. Sync, because `workflowLoadOptions` is. Inside a simulation's run
+ * (`definitionOverlay.ts`), the pair built over its proposed files ({@link prepareOverlayModules}).
+ */
 export function userModules(): UserModules | undefined {
+  const overlay = currentDefinitionOverlay();
+  if (overlay?.modules !== undefined) return overlay.modules as UserModules;
   return current;
+}
+
+/**
+ * The module pair a simulation runs under (decision 0029 §5 step 5): this process's, reading through the
+ * proposed files, and TRUSTING them — a proposed script, and a module the change writes, compile and
+ * run without a person's approval, because the simulation runs them in a throwaway workspace under a
+ * permission set that cannot write outside it, push or publish (the person, 2026-11-19: "Yes,
+ * sandboxed"). Every other file is approved as it always is. Kept on the overlay, so only a load made
+ * under it sees it.
+ */
+export async function prepareOverlayModules(overlay: DefinitionOverlay): Promise<void> {
+  const base = current;
+  if (base === undefined) return;
+  const vfs = nodeVfs(overlay);
+  const proposed = (file: string): boolean => overlay.files.has(realPathOf(file));
+  const approvals: Approvals = { ...base.approvals, approved: (file) => (proposed(file) ? currentHashOf(vfs, file) : base.approvals.approved(file)) };
+  const approved = (file: string): boolean => {
+    const stored = approvals.approved(file);
+    if (stored === undefined) return false;
+    const actual = currentHashOf(vfs, file);
+    return actual !== undefined && actual === stored;
+  };
+  const cache: NonNullable<Parameters<typeof createSymbolIndex>[0]["cache"]> = new Map();
+  const symbols = await createSymbolIndex({ vfs, approved, cache });
+  const openSymbols = await createSymbolIndex({ vfs, cache });
+  const userFunctions = await createUserFunctions({ vfs, requirePath: base.requirePath });
+  overlay.modules = { ...base, symbols, openSymbols, userFunctions, approvals, vfs, approved } satisfies UserModules;
 }
 
 /**

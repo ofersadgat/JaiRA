@@ -62,5 +62,5 @@ siblings: [engineering/contracts/sqlite-schema, engineering/contracts/host-tool-
 - `agentSpawn` calls `onExit` twice with code -1 for a binary that cannot launch, once from `error` and once from `close`. An implementation must make the second call harmless, as `JobStore.end` does by updating only rows with no `ended_at`.
 - On POSIX an agent killed by a signal reaches `onExit` with code 0 and a null signal, because `agentSpawn` reports `code ?? 0`.
 - `NodeExec` never reports a `cwd` for a WSL command, while `agentSpawn` reports the host path, so one run's rows mix both.
-- Only children given an observer call it. A chat turn's agents and commands, probes, and git run by `gitFor` start with none.
+- Only children given an observer call it. Probes, and git run by `gitFor`, start with none. A conversation's agents and commands are its run's, observed as a run's are.
 - An exit reported on `close` follows the end of both streams, so no chunk arrives after it.

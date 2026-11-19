@@ -3160,6 +3160,18 @@ export function useApp() {
         }
       },
       /**
+       * End a conversation that is a program (decision 0029 §2): its `input()` returns `null`, and it
+       * does what it does at its end — `session` is reviewed for lessons. See "chat:end".
+       */
+      endConversation: async (taskId: string, project?: string) => {
+        try {
+          await invoke("chat:end", { taskId, ...(project !== undefined ? { project } : {}) });
+          await refreshTasks();
+        } catch (e) {
+          fail(e);
+        }
+      },
+      /**
        * Run a task again. The response's task id is the one that actually started — a finished
        * task reruns as a fresh copy (see "task:rerun") — so the selection follows it: the card the
        * user is now watching is the run that is happening, not the record it was made from.
@@ -3395,7 +3407,7 @@ export function useApp() {
         // shared one (`runTargetOf`'s rule for base-layer workflows).
         const project = ref.current.at ?? SHARED_SESSION;
         try {
-          // Nothing is installed first (decision 0006): `chat/session` ships in the built-in layer, the
+          // Nothing is installed first (decision 0006): `session` ships in the built-in layer, the
           // last of every project's search path, so it resolves on an empty window, under a
           // repointed shared root and under a read-only one alike. A copy of it in `~/.jaira` or in
           // the project still wins, which is what an override is.

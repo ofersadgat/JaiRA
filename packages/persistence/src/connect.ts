@@ -74,10 +74,8 @@ import type {
   ConnectMissingInput,
   ConnectMove,
   ConnectPlan,
-  ConversationChoice,
   ConnectRefusal,
   ConnectUndo,
-  InputProvenance,
   TaskAdoptRequest,
   TaskAdoptResult,
   TaskConnectRequest,
@@ -124,24 +122,12 @@ import { workflowLoadOptions } from "./workflowRefs";
 
 const log = createLogger("jaira.persistence.connect");
 
-/**
- * THE conversation a dynamic workflow's root is, when a MOVE makes one: `chat/control` — holding only
- * the task and workflow tools (decision 0005 §3, shipped in the built-in layer by step 6).
- *
- * Never what a conversation's own `start` uses: a `chat/session` that starts work keeps its own root,
- * and stays a session.
- */
-export const CONNECT_CONVERSATION = "chat/control";
 
 /** What the host lends a connect: its validator, its engine, and what only a running process knows. */
 export interface ConnectHost {
   /** The run's own validator — adoption's schema fit, and whether a conversation input takes a string. */
   check?: ValueCheck;
   functions?: ReadonlyMap<string, FunctionCapabilities>;
-  /** The conversation state a new document is rooted in. Absent ⇒ {@link CONNECT_CONVERSATION}. */
-  conversation?: string;
-  /** The enabled workflows that can be a conversation — offered when {@link conversation} is disabled (decision 0021). */
-  conversations?: () => ConversationChoice[];
   /** The `to_state`s transitions of this task are waiting on right now (`on_user_event`). */
   offered?: (taskId: string) => readonly string[];
   /** Whether an engine is running this task — here, or in another process. */
@@ -244,6 +230,7 @@ async function askFor(
   const move: HeldMoveRequest = {
     target: request.target,
     by: request.by ?? "person",
+    ...(request.conversation !== undefined ? { conversation: request.conversation } : {}),
     ...(request.workflow !== undefined ? { workflow: request.workflow } : {}),
     ...(at.path !== undefined ? { path: [...at.path] } : request.path !== undefined ? { path: [...request.path] } : {}),
     ...(skipOf(request) ? { skip: true } : {}),
@@ -591,45 +578,6 @@ export function candidatesFor(project: Project, browser: WorkflowBrowser, ran: s
 // connect
 // ---------------------------------------------------------------------------------------------------
 
-/** What the person did, in a sentence — what a conversation made by a move is opened with. */
-function moveSentence(title: string, target: string): string {
-  return `"${title}" was moved to ${target}.`;
-}
-
-/**
- * The inputs of a new document's ROOT — the conversation state's own.
- *
- * Filled by schema, never by name (§0): a required input that takes a string is given the sentence
- * that says what happened, which is what a conversation made by a move is opened with. Anything
- * else required is returned as missing.
- */
-function conversationInputs(
-  project: Project,
-  conversation: string,
-  sentence: string,
-  check: ValueCheck | undefined,
-): { inputs: Record<string, JsonValue>; provenance: Record<string, InputProvenance>; missing: ConnectMissingInput[] } {
-  const inputs: Record<string, JsonValue> = {};
-  const provenance: Record<string, InputProvenance> = {};
-  const missing: ConnectMissingInput[] = [];
-  const doc = workflowLoadOptions(project.paths, { path: project.config.workflows.path }).loadState?.(conversation);
-  const declared = doc !== null && typeof doc === "object" && !Array.isArray(doc) ? (doc as { inputs?: unknown }).inputs : undefined;
-  if (declared === null || typeof declared !== "object" || Array.isArray(declared)) return { inputs, provenance, missing };
-  for (const [name, raw] of Object.entries(declared as Record<string, unknown>)) {
-    const slot = (raw !== null && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as { schema?: JsonValue; optional?: unknown; default?: unknown; binding?: unknown; description?: unknown };
-    if (slot.optional === true || slot.default !== undefined || slot.binding !== undefined) continue;
-    const schema = slot.schema ?? {};
-    const takesText = check !== undefined ? check(schema, sentence) === undefined : (schema as { type?: unknown }).type === undefined || (schema as { type?: unknown }).type === "string";
-    if (takesText) {
-      inputs[name] = sentence;
-      provenance[name] = { via: "bound" };
-    } else {
-      missing.push({ state: conversation, name, schema, ...(typeof slot.description === "string" ? { description: slot.description } : {}), reason: "the conversation that controls the new workflow requires it, and a move supplies only what happened, in words" });
-    }
-  }
-  return { inputs, provenance, missing };
-}
-
 /** A connect's request as its intent keeps it — what the steps are carried out with. */
 type Asked = ConnectIntent["request"];
 
@@ -645,10 +593,10 @@ function fastForwardRefusal(move: ConnectMove): ConnectRefusal {
     message:
       move.passes.length > 0
         ? `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, past ${move.passes.map((p) => `'${p}'`).join(", ")}. ` +
-          `Running the states between (fast-forward) needs a conversation to answer what comes up on the way, and there is none here — ` +
+          `Running the states between (fast-forward) needs JaiRA's engine to run them, and there is none here — ` +
           `say skip to go there directly, which records ${move.passes.length === 1 ? "it" : "them"} as skipped`
         : `'${[move.to, ...move.path].join("/")}' is ahead of where the task stands, through what the workflow decides on the way. ` +
-          `Running there (fast-forward) needs a conversation to answer what comes up, and there is none here — say skip to go there directly`,
+          `Running there (fast-forward) needs JaiRA's engine to run it, and there is none here — say skip to go there directly`,
   };
 }
 
@@ -662,6 +610,8 @@ function fastForwardRequest(request: Asked, taskId: string, target: string, move
     ...(move.path.length > 0 ? { path: [...move.path] } : {}),
     ...(move.passes.length > 0 ? { through: [...move.passes] } : {}),
     by: request.by ?? "person",
+    // Who answers what the states on the way ask: the conversation that asked for the move, if one did.
+    ...(request.conversation !== undefined ? { conversation: request.conversation } : {}),
     ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
     ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
     ...(request.fake !== undefined ? { fake: request.fake } : {}),
@@ -900,16 +850,11 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       message: `'${meta.title}' is running, and no workflow relates '${own}' to '${target}': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it`,
     });
   }
-  const conversation = request.conversation ?? host.conversation ?? CONNECT_CONVERSATION;
-  // One the person picked for this move is held to the same rule as a target: a disabled one is refused.
-  const pickedOff = request.conversation !== undefined ? disabledRefusalOf(project, request.conversation, "moved") : undefined;
-  if (pickedOff !== undefined) return refused(dryRun, { code: "disabled", message: pickedOff });
   const suppliedLiterals = generatorSupplied(request.supplied);
   const generate = (dry: boolean): Promise<GenerateVersionResult> =>
     generateDocumentVersion(project, {
       taskId,
       target,
-      conversation,
       ...(suppliedLiterals !== undefined ? { supplied: suppliedLiterals } : {}),
       ...(host.functions !== undefined ? { functions: host.functions } : {}),
       ...(dry ? { dryRun: true } : {}),
@@ -936,13 +881,6 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
     judgement: elsewhere,
   });
   const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
-  // The workflow that would steer it is switched off (decision 0021): the move asks which to use, in the
-  // box it confirms in — a dry run says so, and the drop comes back with the pick.
-  if (request.conversation === undefined && disabledRefusalOf(project, conversation) !== undefined) {
-    const plan: ConnectPlan = { ...planOf(wouldStandIn), chooseConversation: { disabled: conversation, choices: host.conversations?.() ?? [] } };
-    if (dryRun) return { ok: true, dryRun, plan, ...(modification !== "new" ? { taskId } : {}) };
-    return refused(false, { code: "conversation", message: `'${conversation}', which a move gives a task to steer it, is disabled — choose another` }, plan);
-  }
   const confirm = unconfirmed(request, elsewhere, planOf(wouldStandIn));
   if (confirm !== undefined) return confirm;
   if (!generated.ok) {
@@ -955,10 +893,6 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       return askFor(request, host, { title: meta.title, plan, missing, optional });
     }
     return refused(dryRun, { code: "inputs-missing", message: `a move of '${meta.title}' to '${target}' leaves required inputs unbound: ${missingSentence(missing)}`, missing }, planOf(wouldStandIn));
-  }
-  const opening = modification === "new" ? conversationInputs(project, conversation, moveSentence(meta.title, target), host.check) : undefined;
-  if (opening !== undefined && opening.missing.length > 0) {
-    return refused(dryRun, { code: "inputs-missing", message: `the conversation '${conversation}' cannot be opened by a move: ${missingSentence(opening.missing)}`, missing: opening.missing }, planOf(wouldStandIn));
   }
   const sourceKey = Object.entries(generated.additions.children).find(([, mount]) => sourceStateId(String(mount["state"])) === own)?.[0];
   if (dryRun) return { ok: true, dryRun, plan: { ...planOf(wouldStandIn), ...(modification === "new" ? { adoptedAs: sourceKey ?? Object.keys(generated.additions.children)[0] ?? generated.targetKey } : {}) }, ...(modification !== "new" ? { taskId } : {}) };
@@ -977,15 +911,15 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
     return begin(project, request, host, {
       plan: planOf(meta.workflow),
       before,
-      steps: [{ kind: "document", conversation }, ...suppliedStep("task", { to: TARGET_KEY }, literalNames), { kind: "move", on: "task", move }],
+      steps: [{ kind: "document" }, ...suppliedStep("task", { to: TARGET_KEY }, literalNames), { kind: "move", on: "task", move }],
     });
   }
   return begin(project, request, host, {
     plan: planOf(`${DYNAMIC_ROOT_PREFIX}…`),
     before,
     steps: [
-      { kind: "document", conversation },
-      { kind: "parent", title: meta.title, ...(Object.keys(opening!.inputs).length > 0 ? { inputs: opening!.inputs, provenance: opening!.provenance } : {}) },
+      { kind: "document" },
+      { kind: "parent", title: meta.title },
       { kind: "adopt", intoParent: true, ...(sourceKey !== undefined ? { childKey: sourceKey } : {}), start: false },
       ...suppliedStep("parent", { to: TARGET_KEY }, literalNames),
       { kind: "move", on: "parent", move },
@@ -1278,7 +1212,6 @@ async function runStep(
         made = await generateDocumentVersion(project, {
           taskId,
           target,
-          conversation: step.conversation,
           ...(suppliedLiterals !== undefined ? { supplied: suppliedLiterals } : {}),
           ...(host.functions !== undefined ? { functions: host.functions } : {}),
         });

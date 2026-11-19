@@ -133,6 +133,8 @@ export interface ChatSurface {
   startSettings?: ChatSettings | undefined;
   onRename: (taskId: string, title: string, project?: string) => void;
   onDelete: (taskIds: readonly string[], project?: string) => void;
+  /** End a conversation that waits for its next message (`TaskSummary.waitsForMessage`) — "chat:end". */
+  onEnd: (taskId: string, project?: string) => void;
   /** Stop the RUN — what the first message is. Later messages are turns, and `chat:cancel` stops those. */
   onCancelRun: (taskId: string, project?: string) => void;
   /**
@@ -256,6 +258,7 @@ export function chatSurfaceOf(
     startSettings: state.chat.settings,
     onRename: actions.renameTask,
     onDelete: actions.deleteTasks,
+    onEnd: actions.endConversation,
     onCancelRun: actions.cancelTask,
     onRewind: actions.rewindConversation,
     onFork: actions.forkConversation,

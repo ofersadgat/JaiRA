@@ -106,6 +106,26 @@ export interface TaskMeta {
    * Written by `chat:settings` and when a conversation starts with settings; absent ⇒ nothing picked.
    */
   chatSettings?: ChatSettings;
+  /**
+   * The scripted answers (`fake` rules) a run of this task was started with — a test's, a demo's — kept
+   * so every later start of it, a resume after a restart included, is answered the same way and never
+   * reaches a model. Absent for a task that runs on real models.
+   */
+  scripted?: JsonValue;
+  /**
+   * A SIMULATION (decision 0029 §5 step 5): a fork of a conversation made to try a change an improver
+   * proposed before anybody has agreed to it — one pass, under the proposed files, in a throwaway
+   * workspace, with nobody to ask. Never listed; deleted when the pass is read, and at the next open if
+   * the process ended first.
+   */
+  simulation?: { of: string; lesson: string };
+  /**
+   * A run a script made as a PLAIN PROGRAM and reported here (decision 0029, ruling 12): its calls were
+   * made by that process, under the keys of its own environment, and reported as it went — what it said,
+   * and each tool an agent wanted, which was decided here. It cannot be resumed or run again from here:
+   * its program is the process that reported it.
+   */
+  reported?: { file: string; pid: number; cwd: string };
   createdAt: string; // ISO 8601
 }
 
@@ -270,17 +290,11 @@ export function parseTaskMeta(raw: unknown, expectedId?: string): TaskMeta {
  * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
  * `ask-first`.
  */
-export const CHAT_SESSION = "chat/session";
-/**
- * What a task gets when a person MOVES it and the move makes a dynamic workflow: the conversation
- * that steers that work, holding the task and workflow tools and nothing of the project. Never
- * started from the Chat view, and never what a session turns into.
- */
-export const CHAT_CONTROL = "chat/control";
+export const CHAT_SESSION = "session";
 
 /**
  * What a conversation was opened with: the one text input its workflow takes (decision 0021) — `message`
- * for `chat/session`, whatever another workflow calls it. `null` when the inputs hold no single text.
+ * for `session`, whatever another workflow calls it. `null` when the inputs hold no single text.
  */
 export function openingOf(inputs: Readonly<Record<string, JsonValue>> | undefined): string | null {
   const texts = Object.values(inputs ?? {}).filter((value): value is string => typeof value === "string");
@@ -305,14 +319,14 @@ export function openingTitleOf(message: string): string {
   return line.length <= 60 ? line : `${line.slice(0, 57).trimEnd()}…`;
 }
 
-/** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
+/** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): the work a move connected, as children. */
 export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
 
 /**
  * True for a task the Chat view owns — one the Chat view STARTED, whatever workflow it runs (decision
- * 0021), or one running a dynamic workflow, which IS a conversation: a row in the Chat list and not a
- * column of its own.
+ * 0021). A dynamic workflow is not one (since 2026-11-19): it records how work was moved, and holds no
+ * conversation of its own.
  */
 export function isConversation(task: { workflow: string; startedBy?: TaskStartedBy | undefined }): boolean {
-  return task.startedBy?.by === "chat" || task.workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX);
+  return task.startedBy?.by === "chat";
 }

@@ -41,7 +41,6 @@ const leaf = (label: string, inputs: Record<string, unknown>, outputs: Record<st
 });
 
 const FILES: Record<string, unknown> = {
-  "chat/standin": leaf("Conversation", {}, { said: STRING }),
   "lib/product": leaf("Product", { idea: STRING }, { brief: STRING }),
   "lib/review": leaf("Review", { brief: STRING }, { verdict: STRING }),
 };
@@ -82,7 +81,6 @@ async function finishedProduct(taskId = "t-product"): Promise<string> {
 function hostFor(moves: TaskMoveRequest[], failAt?: { kind: string; how: "throw" | "refuse" }): ConnectHost {
   let failed = false;
   return {
-    conversation: "chat/standin",
     adopt: async (request) => {
       if (failAt?.kind === "adopt" && failAt.how === "refuse" && !failed) {
         failed = true;

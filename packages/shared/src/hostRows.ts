@@ -30,8 +30,8 @@ export const FAST_FORWARD_EVENT = "jaira.fastForward";
 
 export interface FastForwardEvent {
   type: typeof FAST_FORWARD_EVENT;
-  /** The conversation answering on the way, by its task. */
-  controlTaskId: string;
+  /** The conversation answering on the way, by its task — the one that asked for the move, when one did. */
+  controlTaskId?: string;
   /** The target state id. */
   target: string;
   targetLabel: string;
@@ -161,6 +161,29 @@ export const PLACED_EVENT = "jaira.placed";
 export interface PlacedEvent {
   type: typeof PLACED_EVENT;
   note: PlacementNote;
+}
+
+/**
+ * A conversation was REWOUND past messages the person had typed (decision 0029 §8): what they took back,
+ * kept after the cut that deleted them — a signal the improver reads, since the cut leaves no other trace.
+ */
+export const REWOUND_EVENT = "jaira.rewound";
+
+export interface RewoundEvent {
+  type: typeof REWOUND_EVENT;
+  /** The person's messages the rewind took back, oldest first. */
+  taken: string[];
+}
+
+/**
+ * A message the person sent INTO a reply still being made (decision 0029 §8): it redirected the turn
+ * rather than waiting for it.
+ */
+export const STEERED_EVENT = "jaira.steered";
+
+export interface SteeredEvent {
+  type: typeof STEERED_EVENT;
+  message: string;
 }
 
 /** Canonical JSON: keys sorted at every depth, so one value is one string whatever built it. */
