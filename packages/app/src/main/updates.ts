@@ -15,6 +15,9 @@
  *    databases, and only then calls {@link UpdateManager.installNow}.
  *  - **macOS without a Developer ID** cannot install an update (Squirrel.Mac checks the signature), so
  *    such a build still checks, and offers the release page instead of a download (`manual`).
+ *  - **macOS with one** installs through Squirrel.Mac ({@link SquirrelPort}), which must have taken the
+ *    update before the app may end: a download is done only once it has, and a restart is Squirrel's
+ *    to end.
  *
  * electron-updater is reached through {@link UpdaterPort}, so all of the above is tested without it.
  */
@@ -34,6 +37,19 @@ export interface UpdaterPort {
   on(event: "download-progress", listener: (progress: { percent: number }) => void): unknown;
 }
 
+/**
+ * macOS's installer, Squirrel.Mac: Electron's own `autoUpdater`. electron-updater downloads the zip and
+ * then hands it to Squirrel through a server inside this process, and only when its
+ * `autoInstallOnAppQuit` is on; Squirrel unpacks it, checks that it is signed as this app is, and starts
+ * ShipIt, which installs it as soon as the app has ended. `update-downloaded` says all that is done.
+ * Until then the update is only in this process, and ending the process loses it (2026-11-20: a signed
+ * nightly quit to install, came back as the same version, and ShipIt had never started).
+ */
+export interface SquirrelPort {
+  on(event: "update-downloaded", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+}
+
 export interface UpdateInfoLike {
   version: string;
   releaseDate?: string;
@@ -48,6 +64,11 @@ export interface UpdateManagerOptions {
   disabledReason?: string;
   /** The platform cannot install by itself: offer the release page. */
   manual?: boolean;
+  /** macOS signed with a Developer ID: Squirrel.Mac installs, and must take the update first. */
+  squirrel?: SquirrelPort;
+  /** How long a download waits for Squirrel to take it, and a restart for Squirrel to end the app. */
+  squirrelTakeMs?: number;
+  squirrelRestartMs?: number;
   /** The release page of a version. */
   releaseUrl: (version: string) => string;
   /** Every change of state, for the window. */
@@ -75,6 +96,10 @@ export type RestartAnswer = UpdateRestartAnswer;
 
 export const FIRST_CHECK_MS = 15_000;
 export const CHECK_INTERVAL_MS = 60 * 60 * 1000;
+/** Squirrel copies and unpacks the whole zip, a few seconds; minutes means it never will. */
+export const SQUIRREL_TAKE_MS = 5 * 60 * 1000;
+/** Squirrel tells ShipIt to start the app again and ends it, at once; past this the quit goes on without it. */
+export const SQUIRREL_RESTART_MS = 15_000;
 
 /** electron-updater names stable's feed `latest`. */
 const feedChannel = (channel: UpdateChannel): string => (channel === "nightly" ? "nightly" : "latest");
@@ -107,11 +132,50 @@ export class UpdateManager {
     const port = options.port;
     if (port !== undefined) {
       port.autoDownload = false;
-      port.autoInstallOnAppQuit = false;
+      // Elsewhere `installOnQuit` runs the installer. On macOS this is what has electron-updater hand the
+      // download to Squirrel at once, and Squirrel's ShipIt then installs it at whatever quit comes.
+      port.autoInstallOnAppQuit = options.squirrel !== undefined;
       port.on("download-progress", (progress) => {
         if (this.state.status === "downloading") this.set({ ...this.state, percent: Math.round(progress.percent) });
       });
     }
+    options.squirrel?.on("update-downloaded", () => this.squirrelTook?.());
+    options.squirrel?.on("error", (error) => this.squirrelFailed?.(error));
+  }
+
+  /** What Squirrel's next `update-downloaded` or `error` is waited for by, if anything. */
+  private squirrelTook: (() => void) | undefined;
+  private squirrelFailed: ((error: Error) => void) | undefined;
+
+  /**
+   * Squirrel's word that it has the update and ShipIt is waiting for the app to end. Asked before the
+   * download starts, since Squirrel may answer before the download's own promise settles; `stop` stops
+   * listening, for a download that failed first.
+   */
+  private squirrelTakes(): { taken: Promise<void>; stop: () => void } {
+    if (this.options.squirrel === undefined) return { taken: Promise.resolve(), stop: () => undefined };
+    let stop = (): void => undefined;
+    const taken = new Promise<void>((resolve, reject) => {
+      stop = () => {
+        clearTimeout(timer);
+        this.squirrelTook = undefined;
+        this.squirrelFailed = undefined;
+      };
+      const timer = setTimeout(() => {
+        stop();
+        reject(new Error("macOS's updater did not take the downloaded update"));
+      }, this.options.squirrelTakeMs ?? SQUIRREL_TAKE_MS);
+      timer.unref?.();
+      this.squirrelTook = () => {
+        stop();
+        resolve();
+      };
+      this.squirrelFailed = (error) => {
+        stop();
+        reject(error);
+      };
+    });
+    return { taken, stop };
   }
 
   current(): UpdateState {
@@ -192,16 +256,22 @@ export class UpdateManager {
     }
   }
 
-  /** Download what `check` found. A manual platform downloads nothing; the window opens the page. */
+  /**
+   * Download what `check` found. A manual platform downloads nothing; the window opens the page. On
+   * macOS it is downloaded only once Squirrel has taken it ({@link SquirrelPort}).
+   */
   async download(): Promise<UpdateState> {
     const port = this.options.port;
     if (port === undefined || this.state.status !== "available" || this.state.manual === true) return this.state;
     this.set({ ...this.state, status: "downloading", percent: 0 });
+    const squirrel = this.squirrelTakes();
     try {
-      await port.downloadUpdate();
+      // Both at once, so a failure of either is the download's and neither is left unheard.
+      await Promise.all([squirrel.taken, port.downloadUpdate()]);
       const { percent: _p, ...rest } = this.state;
       this.set({ ...rest, status: "downloaded" });
     } catch (e) {
+      squirrel.stop();
       const message = e instanceof Error ? e.message : String(e);
       this.options.log?.("warn", "update download failed", { message });
       const { percent: _p, ...rest } = this.state;
@@ -314,12 +384,34 @@ export class UpdateManager {
    * Called at the end of every quit, after runs have drained and the databases closed: a downloaded
    * update installs. It starts the app again only when the quit was a restart asked for here; any
    * other quit installs silently and the update is simply there at the next start.
+   *
+   * It resolves when the caller may end the process. On macOS ShipIt is already waiting for the app to
+   * end and installs it then, so a plain quit simply ends; a restart has Squirrel tell ShipIt to start
+   * the app again, and Squirrel ends the app itself once it has — ended sooner, ShipIt would install and
+   * start nothing. Only if Squirrel fails, or has not ended the app in time, does the quit go on.
    */
-  installOnQuit(): void {
+  installOnQuit(): Promise<void> {
     this.stopWaiting();
-    if (!this.canInstall()) return;
+    if (!this.canInstall()) return Promise.resolve();
     this.options.log?.("info", `installing update ${this.state.available?.version ?? ""}${this.relaunch ? " and restarting" : " on quit"}`);
-    this.options.port?.quitAndInstall(true, this.relaunch);
+    if (this.options.squirrel === undefined) {
+      this.options.port?.quitAndInstall(true, this.relaunch);
+      return Promise.resolve();
+    }
+    if (!this.relaunch) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const goOn = (): void => {
+        clearTimeout(timer);
+        this.squirrelFailed = undefined;
+        resolve();
+      };
+      const timer = setTimeout(goOn, this.options.squirrelRestartMs ?? SQUIRREL_RESTART_MS);
+      this.squirrelFailed = (error) => {
+        this.options.log?.("warn", "macOS's updater could not restart JaiRA: the update installs as it closes", { message: error.message });
+        goOn();
+      };
+      this.options.port?.quitAndInstall(true, true);
+    });
   }
 
   /** Hide the notice for this version; a newer one shows again. */

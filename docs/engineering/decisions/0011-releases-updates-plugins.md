@@ -690,3 +690,38 @@ the Developer ID, timestamped, under the hardened runtime, with no `get-task-all
 and the smoke launch passed. `spctl` refused it only as `Unnotarized Developer ID`. The prepare step was run
 with stand-in values: every secret, no password, and one missing. Not yet seen: notarization, which needs
 the App Store Connect key only GitHub has, and a release run.
+
+## Amended 2026-11-20: a signed mac build installs its update only once Squirrel has it
+
+The first signed nightly (`0.1.1-nightly.20261120.6`, which Gatekeeper accepts as a notarized Developer
+ID, so notarization has now been seen) found `.7`, downloaded it, and quit to install it, twice. Each time
+it came back as `.6`, or not at all. The zip was in electron-updater's cache, but
+`~/Library/Caches/com.mistlabs.jaira.ShipIt` was empty, with no ShipIt log: Squirrel.Mac had never
+started its installer.
+
+- **Why.** On macOS electron-updater only downloads. It then hands the zip to Squirrel.Mac (Electron's
+  own `autoUpdater`) through a server inside the app's process. Squirrel copies it, unpacks it, checks
+  that it is signed as the running app is, and starts ShipIt, which installs it once the app has ended.
+  electron-updater hands it over at once only with `autoInstallOnAppQuit` on, which §4's "never
+  automatic" had turned off on every platform. With it off, `quitAndInstall` only starts that handover
+  and returns, and the `app.quit()` after it (as built in §4) ended the process, its server and Squirrel
+  mid-copy.
+- **The download includes the handover.** On a signed mac build (`SquirrelPort`, `updates.ts`),
+  `autoInstallOnAppQuit` is on, and an update is `downloaded` only once Squirrel says
+  `update-downloaded`. Squirrel's `error` fails the download, and so does no word from it in five
+  minutes. Nothing more happens without the person: the handover is a local copy of what their click
+  downloaded.
+- **A quit is ShipIt's.** Once Squirrel has the update, ShipIt installs it as the app ends, so a plain
+  quit just ends. A restart calls `quitAndInstall`, which tells ShipIt to start the app again, and
+  Squirrel ends the app itself. `installOnQuit()` now returns a promise that `desktop.ts` waits on before
+  its own `app.quit()`. On a mac restart it settles only if Squirrel fails, or has not ended the app in 15
+  seconds, and then ShipIt still installs without restarting. Windows and Linux are unchanged.
+- **One consequence.** Once a mac update is downloaded, ShipIt installs it at the next quit even if the
+  track is switched in between. Nothing in Electron can withdraw it.
+- **Moving past it.** The fix is in the build being updated, so every signed mac build before the first
+  one carrying it cannot install an update. They are moved past by hand once, as unsigned builds were.
+
+Verified: `app/test/updates.test.ts`, "updates on macOS", against a stand-in for Squirrel. Six of its
+eight cases fail on the manager as it was. Not yet seen: a real signed install through Squirrel and
+ShipIt. A local test app was built to show it, but signing it needs the Developer ID's key in the login
+keychain, and macOS asks the person each time.

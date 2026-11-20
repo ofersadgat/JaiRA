@@ -7,7 +7,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import type { UpdateState } from "@jaira/shared";
-import { UpdateManager, type UpdateInfoLike, type UpdateManagerOptions, type UpdaterPort } from "../src/main/updates";
+import { UpdateManager, type SquirrelPort, type UpdateInfoLike, type UpdateManagerOptions, type UpdaterPort } from "../src/main/updates";
 
 class FakeUpdater implements UpdaterPort {
   channel: string | null = null;
@@ -21,6 +21,7 @@ class FakeUpdater implements UpdaterPort {
   downloads = 0;
   installs: Array<[boolean | undefined, boolean | undefined]> = [];
   failNext: Error | undefined;
+  downloadFails: Error | undefined;
   private progress: ((p: { percent: number }) => void) | undefined;
 
   async checkForUpdates(): Promise<{ updateInfo: UpdateInfoLike; isUpdateAvailable?: boolean } | null> {
@@ -36,6 +37,7 @@ class FakeUpdater implements UpdaterPort {
 
   async downloadUpdate(): Promise<unknown> {
     this.downloads += 1;
+    if (this.downloadFails !== undefined) throw this.downloadFails;
     this.progress?.({ percent: 42.4 });
     return [];
   }
@@ -50,7 +52,44 @@ class FakeUpdater implements UpdaterPort {
   }
 }
 
-type Extra = Partial<Pick<UpdateManagerOptions, "manual" | "busy" | "quit" | "suspendForUpdate" | "pollMs" | "dismissed" | "saveDismissed">>;
+/** Squirrel.Mac as electron's `autoUpdater` is to it: `take` is its `update-downloaded`, `fail` its `error`. */
+class FakeSquirrel implements SquirrelPort {
+  private readonly took: Array<() => void> = [];
+  private readonly failed: Array<(error: Error) => void> = [];
+
+  on(event: "update-downloaded", listener: () => void): unknown;
+  on(event: "error", listener: (error: Error) => void): unknown;
+  on(event: "update-downloaded" | "error", listener: (() => void) | ((error: Error) => void)): unknown {
+    if (event === "update-downloaded") this.took.push(listener as () => void);
+    else this.failed.push(listener as (error: Error) => void);
+    return this;
+  }
+
+  take(): void {
+    for (const listener of this.took) listener();
+  }
+
+  fail(error: Error): void {
+    for (const listener of this.failed) listener(error);
+  }
+}
+
+type Extra = Partial<
+  Pick<UpdateManagerOptions, "manual" | "busy" | "quit" | "suspendForUpdate" | "pollMs" | "dismissed" | "saveDismissed" | "squirrel" | "squirrelTakeMs" | "squirrelRestartMs">
+>;
+
+/** A signed mac build with 0.2.0 found, not yet downloaded. */
+async function onMac(extra: Extra = {}): Promise<{ updates: UpdateManager; port: FakeUpdater; squirrel: FakeSquirrel }> {
+  const port = new FakeUpdater();
+  port.feed = { latest: { version: "0.2.0" } };
+  const squirrel = new FakeSquirrel();
+  const { updates } = manager("0.1.0", port, { squirrel, ...extra });
+  await updates.check();
+  return { updates, port, squirrel };
+}
+
+/** Let the promises that are already settled run on. */
+const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 /** A manager with 0.2.0 found and downloaded. */
 async function downloaded(extra: Extra = {}): Promise<{ updates: UpdateManager; port: FakeUpdater }> {
@@ -287,5 +326,114 @@ describe("updates", () => {
     const { updates } = manager("0.1.0", port);
     await Promise.all([updates.check(), updates.check()]);
     expect(port.checks).toHaveLength(1);
+  });
+});
+
+/**
+ * macOS signed with a Developer ID: Squirrel.Mac installs, and has the update only once it says so
+ * (2026-11-20: a signed nightly quit to install before Squirrel had it, and came back unchanged).
+ */
+describe("updates on macOS", () => {
+  it("has electron-updater hand each download to Squirrel, still downloading only when asked", () => {
+    const port = new FakeUpdater();
+    manager("0.1.0", port, { squirrel: new FakeSquirrel() });
+    expect(port.autoInstallOnAppQuit).toBe(true);
+    expect(port.autoDownload).toBe(false);
+  });
+
+  it("is downloaded only once Squirrel has taken it, so a quit before then installs nothing", async () => {
+    let quits = 0;
+    const { updates, port, squirrel } = await onMac({ busy: () => ({ runs: 0, turns: 0 }), quit: () => (quits += 1) });
+    const downloading = updates.download();
+    await settle();
+    expect(port.downloads).toBe(1);
+    expect(updates.current().status).toBe("downloading");
+    expect(updates.canInstall()).toBe(false);
+    expect(await updates.restart("now")).toEqual({ installing: false });
+    await updates.installOnQuit();
+    expect(port.installs).toEqual([]);
+    expect(quits).toBe(0);
+    squirrel.take();
+    expect(await downloading).toMatchObject({ status: "downloaded" });
+    expect(updates.canInstall()).toBe(true);
+  });
+
+  it("a quit that is not a restart leaves the install to ShipIt and ends at once", async () => {
+    const { updates, port, squirrel } = await onMac();
+    const downloading = updates.download();
+    squirrel.take();
+    await downloading;
+    await updates.installOnQuit();
+    expect(port.installs).toEqual([]);
+  });
+
+  it("a restart is Squirrel's to end; the quit goes on only once it has not in time", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updates, port, squirrel } = await onMac({ busy: () => ({ runs: 0, turns: 0 }), squirrelRestartMs: 1000 });
+      const downloading = updates.download();
+      squirrel.take();
+      await downloading;
+      expect(await updates.restart("now")).toEqual({ installing: true });
+      let settled = false;
+      void updates.installOnQuit().then(() => (settled = true));
+      expect(port.installs).toEqual([[true, true]]);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(settled).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a restart Squirrel cannot make goes on with the quit at once", async () => {
+    const { updates, squirrel } = await onMac({ busy: () => ({ runs: 0, turns: 0 }), squirrelRestartMs: 60_000 });
+    const downloading = updates.download();
+    squirrel.take();
+    await downloading;
+    await updates.restart("now");
+    const quitting = updates.installOnQuit();
+    squirrel.fail(new Error("Could not locate update bundle"));
+    await quitting;
+  });
+
+  it("Squirrel's failure is the download's", async () => {
+    const { updates, squirrel } = await onMac();
+    const downloading = updates.download();
+    squirrel.fail(new Error("Code signature at URL file:///… did not pass validation"));
+    expect(await downloading).toMatchObject({ status: "error", error: "Code signature at URL file:///… did not pass validation" });
+    expect(updates.canInstall()).toBe(false);
+  });
+
+  it("a Squirrel that never takes it fails the download", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updates } = await onMac({ squirrelTakeMs: 1000 });
+      const downloading = updates.download();
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(await downloading).toMatchObject({ status: "error", error: "macOS's updater did not take the downloaded update" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a download that failed stops waiting for Squirrel, so the next one waits afresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const { updates, port, squirrel } = await onMac({ squirrelTakeMs: 1000 });
+      port.downloadFails = new Error("net::ERR_CONNECTION_RESET");
+      expect(await updates.download()).toMatchObject({ status: "error", error: "net::ERR_CONNECTION_RESET" });
+      await vi.advanceTimersByTimeAsync(500);
+      port.downloadFails = undefined;
+      await updates.check();
+      const downloading = updates.download();
+      // The first wait would have ended here, and with it this one's.
+      await vi.advanceTimersByTimeAsync(600);
+      squirrel.take();
+      expect(await downloading).toMatchObject({ status: "downloaded" });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

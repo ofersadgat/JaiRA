@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, powerMonitor, protocol, shell, type IpcMainInvokeEvent } from "electron";
+import { app, autoUpdater as squirrelUpdater, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, powerMonitor, protocol, shell, type IpcMainInvokeEvent } from "electron";
 import { isProject } from "@jaira/persistence";
 import {
   ARTIFACT_SCHEME,
@@ -55,7 +55,7 @@ import {
   type HostChannel,
   type HostedEngine,
 } from "@jaira/service";
-import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
+import { UpdateManager, type RestartChoice, type SquirrelPort, type UpdaterPort } from "./updates";
 import { QuitGuard } from "./quitGuard";
 import { nativeQuitWords } from "../renderer/quitModel";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
@@ -387,12 +387,16 @@ const updates = (() => {
       debug: () => undefined,
     };
   }
+  const mac = process.platform === "darwin";
+  const macSigned = mac && buildInfo().macSigned === true;
   return new UpdateManager({
     version: app.getVersion(),
     ...(disabledReason === undefined ? { port: autoUpdater as unknown as UpdaterPort } : { disabledReason }),
-    // Squirrel.Mac installs only an app signed with a Developer ID; until there is one (0011 §2), a mac
-    // build checks and points at the release page.
-    manual: process.platform === "darwin" && buildInfo().macSigned !== true,
+    // Squirrel.Mac installs only an app signed with a Developer ID; a mac build without one (0011 §2)
+    // checks and points at the release page. One with it installs through Squirrel, Electron's own
+    // `autoUpdater`, which has to take each update before the app may end (`SquirrelPort`).
+    manual: mac && !macSigned,
+    ...(disabledReason === undefined && macSigned ? { squirrel: squirrelUpdater as unknown as SquirrelPort } : {}),
     releaseUrl: releasePageOf,
     publish: (state) => {
       pushToWindow({ type: "update:changed", state });
@@ -1502,8 +1506,8 @@ app.on("before-quit", (event) => {
     // pressed or the app is otherwise closed, the update happens on restart"): the runs have drained and
     // the databases are closed before anything replaces the app. It starts the app again only when the
     // quit was "Restart to update". `quitAndInstall` quits too; the `app.quit()` after it is what still
-    // ends the process if the installer could not be started.
-    updates.installOnQuit();
-    app.quit();
+    // ends the process if the installer could not be started. On macOS a restart is Squirrel's to end,
+    // and `installOnQuit` settles only if it cannot.
+    void updates.installOnQuit().finally(() => app.quit());
   });
 });
