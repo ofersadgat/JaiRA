@@ -17,3 +17,5 @@ export * from "./plan";
 export * from "./run";
 export * from "./version";
 export * from "./tool";
+export * from "./chain";
+export * from "./shellEnv";

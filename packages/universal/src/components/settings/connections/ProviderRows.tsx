@@ -1,4 +1,6 @@
-import { useContext, useState, type JSX } from "react";
+import { useContext, useRef, useState, type JSX } from "react";
+import { View as RNView } from "react-native";
+import type { FloatRect } from "@jaira/ui/floatPlace";
 import { View } from "@tamagui/core";
 import {
   BUILTIN_GENERIC_AGENTS,
@@ -6,6 +8,7 @@ import {
   SECRET_TARGET_LABELS,
   type AgentAccount,
   type EmbeddedWeightsReport,
+  type InstallWay,
   type LocalServerProbe,
   type ProbeResult,
   type SecretTarget,
@@ -53,6 +56,12 @@ import { Switch } from "../controls";
 import { ActionSlot, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { CardActions, Chevron, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMark, LogoutButton, Problem, RowHead, Say, SmallButton, SplitAddBox, Spin, Tag, WaitingBox, Who, Wide, AddBox } from "./Row";
 import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
+import { WaysMenu, waysOfMenu } from "./Shelf";
+import { Icon } from "../../panel/Icon";
+import { useTokens } from "../../../tokens";
+
+/** A row button's face, as `Probe.tsx`'s `RowButton` draws it. */
+const ROW_FONT = { voice: "app", scale: 11.5 / 12.5 } as const;
 
 /**
  * The provider rows of Connections: one row per model API and local model, closed to a line as an
@@ -431,11 +440,17 @@ export function InstallPanel({
   running: boolean;
   busy: boolean;
   locked: boolean;
-  onInstall: (method: InstallPanelRow["method"]) => void;
+  onInstall: (way: InstallWay | undefined) => void;
   onCancel: () => void;
   onUse: (path: string) => void;
 }): JSX.Element {
   const last = useColumn();
+  const t = useTokens();
+  // A row whose next step has more than one way opens them, step by step, from its ›.
+  const [menu, setMenu] = useState<{ anchor: FloatRect; row: InstallPanelRow } | null>(null);
+  const arrows = useRef(new Map<string, RNView | null>());
+  const openWays = (row: InstallPanelRow): void =>
+    arrows.current.get(row.key)?.measureInWindow((x, y, w, h) => setMenu({ anchor: { left: x, top: y, right: x + w, bottom: y + h }, row }));
   return (
     <ProbeList>
       <ProbeHead
@@ -450,23 +465,52 @@ export function InstallPanel({
           weights
           name={row.name}
           at={
-            <Txt spec={{ voice: "data", scale: 11 / 12 }} numberOfLines={1} {...({ title: row.at } as object)}>
+            <Txt spec={row.words === true ? { voice: "app", scale: 11 / 12.5 } : { voice: "data", scale: 11 / 12 }} numberOfLines={1} {...({ title: row.at } as object)}>
               {row.at}
             </Txt>
           }
           nameWidth={130}
           last={last}
           end={
-            <RowButton
-              disabled={row.path !== undefined ? locked : busy || running}
-              title={row.title}
-              onPress={() => (row.path !== undefined ? onUse(row.path) : onInstall(row.method))}
-            >
-              {row.button}
-            </RowButton>
+            <View flexDirection="row" alignItems="center" gap={6}>
+              {row.elevated === true ? <Tag tone="warn">asks for your password</Tag> : null}
+              {row.menu?.sub !== undefined ? (
+                // One button with its customizing joined to it, as a shelf tile's Install and ▾ are.
+                <RNView ref={(el) => void arrows.current.set(row.key, el)} collapsable={false} style={{ flexDirection: "row" }}>
+                  <Button kind="ghost" font={ROW_FONT} disabled={busy || running} title={row.title} onPress={() => onInstall(row.choice ?? row.method)} borderTopRightRadius={0} borderBottomRightRadius={0}>
+                    {row.button}
+                  </Button>
+                  <Button
+                    kind="ghost"
+                    label={`customize how ${row.name} installs`}
+                    title="customize: choose the way for each step"
+                    {...({ "aria-haspopup": "menu", "aria-expanded": menu?.row.key === row.key } as object)}
+                    disabled={busy || running}
+                    onPress={() => openWays(row)}
+                    paddingHorizontal={5}
+                    marginLeft={-1}
+                    borderTopLeftRadius={0}
+                    borderBottomLeftRadius={0}
+                  >
+                    <Icon name="chevron" size={11} color={String(t.v("text"))} />
+                  </Button>
+                </RNView>
+              ) : (
+                <RowButton
+                  disabled={row.path !== undefined ? locked : busy || running}
+                  title={row.title}
+                  onPress={() => (row.path !== undefined ? onUse(row.path) : onInstall(row.choice ?? row.method))}
+                >
+                  {row.button}
+                </RowButton>
+              )}
+            </View>
           }
         />
       ))}
+      {menu !== null && menu.row.menu?.sub !== undefined ? (
+        <WaysMenu anchor={menu.anchor} title={`Customize how ${menu.row.name} is installed`} items={waysOfMenu(menu.row.menu.sub, onInstall)} busy={busy || running} onClose={() => setMenu(null)} />
+      ) : null}
     </ProbeList>
   );
 }

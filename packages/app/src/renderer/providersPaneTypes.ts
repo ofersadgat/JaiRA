@@ -3,7 +3,7 @@
  * (`packages/universal/src/components/settings/connections/ProviderRows.tsx`) takes. A type only.
  */
 import type {
-  AgentInstallMethod,
+  InstallWay,
   ConfigLayer,
   ConfigView,
   ExecutorInfo,
@@ -54,8 +54,8 @@ export interface ProvidersPaneProps {
   installing: ReadonlySet<string>;
   /** What each agent's install or update pressed here printed, by agent — until its row's Hide. */
   installLogs: Readonly<Record<string, InstallLog>>;
-  /** Install an agent the way named, or — none named — update it the way it was installed. */
-  onInstall: (name: string, method?: AgentInstallMethod) => void;
+  /** Install an agent the way named or by a path through its install menu, or — none named — update it the way it was installed. */
+  onInstall: (name: string, way?: InstallWay) => void;
   onCancelInstall: (name: string) => void;
   /** Put an install's output away. */
   onHideInstallLog: (name: string) => void;

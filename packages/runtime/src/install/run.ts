@@ -51,12 +51,13 @@ export type PlanRun = { ok: true; stdout: string; stderr: string } | { ok: false
 export async function runPlan(chosen: InstallPlan, options: InstallRunOptions, verb: "install" | "update"): Promise<PlanRun> {
   const say = sayTo(options.onOutput);
   say(`$ ${chosen.display}\n`);
+  // Passed into WSL or a container it would be this machine's; there, its own PATH is the right one.
+  const env = inGuest(options) ? undefined : withTerminal(chosen.env, options.deps);
   let result;
   try {
     result = await options.exec.run(chosen.file, chosen.args, {
       ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
-      // Passed into WSL or a container it would be this machine's; there, its own PATH is the right one.
-      ...(chosen.env !== undefined && !inGuest(options) ? { env: chosen.env } : {}),
+      ...(env !== undefined ? { env } : {}),
       ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
       timeoutMs: options.timeoutMs ?? INSTALL_TIMEOUT_MS,
       stdin: "",
@@ -102,6 +103,23 @@ export async function runInstall(pkg: ToolPackage, command: string, method: Inst
   const after = await look();
   const now = after?.found;
   return now !== undefined && !now.broken ? { ok: true, path: now.path, onPath: now.onPath } : { ok: true };
+}
+
+/**
+ * An installer's environment with what the person's own terminal has that this app has not: the
+ * variables its profile sets (`NVM_DIR`, `FNM_DIR` — so a version manager works in the person's folders,
+ * not its defaults) and, after this app's, the folders on its PATH. On Windows the PATH is left: a
+ * program found off it is run by its path.
+ */
+function withTerminal(env: Record<string, string> | undefined, deps: InstallLookup["deps"]): Record<string, string> | undefined {
+  const shell = deps.shell;
+  if (shell === undefined) return env;
+  const merged: Record<string, string> = { ...shell.vars, ...(env ?? {}) };
+  if (deps.platform !== "win32" && shell.pathDirs.length > 0) {
+    const base = (env?.["PATH"] ?? process.env["PATH"] ?? "").split(":").filter((dir) => dir.length > 0);
+    merged["PATH"] = [...base, ...shell.pathDirs.filter((dir) => !base.includes(dir))].join(":");
+  }
+  return Object.keys(merged).length > 0 ? merged : undefined;
 }
 
 /** The last line that says something — stderr's, when there is one, since that is where an error goes. */

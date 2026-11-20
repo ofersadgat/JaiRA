@@ -26,8 +26,8 @@ import type {
   ProbeResult,
   SecretTarget,
   SignInOutcome,
-  AgentInstallMethod,
   AgentInstallOutcome,
+  AgentInstallRequest,
   GitCliName,
 } from "./executors";
 import type { ForgeBranch, ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
@@ -2343,12 +2343,14 @@ export interface IpcContract {
   "executor:signOut": { request: { name: string }; response: SignInOutcome };
   /**
    * Install an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode) the way named — one of its probe's
-   * `install.install` — or, with no way named, update it the way it was installed (its probe's
-   * `install.update`; a broken install is reinstalled). Main decides the command from what is on the
-   * machine; the request never carries one. Answers when the installer exits — a download, so a minute
-   * or more — with where the binary is now, and a fresh availability check follows it.
+   * `install.install` — or by the path of keys `choice` names through its probe's `install.choices`,
+   * each step in turn (Node.js, then npm's install of the agent); with neither, update it the way it was
+   * installed (its probe's `install.update`; a broken install is reinstalled). Main decides each command
+   * from what is on the machine when that step starts; the request never carries one. Answers when the
+   * last installer exits — a download, so a minute or more — with where the binary is now, and a fresh
+   * availability check follows it.
    */
-  "executor:install": { request: { name: string; method?: AgentInstallMethod }; response: AgentInstallOutcome };
+  "executor:install": { request: { name: string } & AgentInstallRequest; response: AgentInstallOutcome };
   /** Give up on an install or update still running: the installer is killed. */
   "executor:cancelInstall": { request: { name: string }; response: void };
   /**
@@ -2358,7 +2360,7 @@ export interface IpcContract {
    * availability check follows. Apple's Command Line Tools install in a window of their own, so that way
    * answers once git is there (or on Cancel).
    */
-  "gitCli:install": { request: { name: GitCliName; method?: AgentInstallMethod }; response: AgentInstallOutcome };
+  "gitCli:install": { request: { name: GitCliName } & AgentInstallRequest; response: AgentInstallOutcome };
   /** Give up on a git program's install still running: the installer is killed, or the wait for Apple's ends. */
   "gitCli:cancelInstall": { request: { name: GitCliName }; response: void };
   /**

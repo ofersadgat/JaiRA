@@ -102,7 +102,7 @@ describe("a version manager the machine already keeps the tool with", () => {
     const facts = installFactsOf("node", NODE, deps);
     expect(installOriginOf(facts.found!.real, NODE)?.method).toBe("nvm");
     const [first] = toolPlans(NODE, facts, { version: "22" });
-    expect(first).toMatchObject({ method: "nvm", file: "/bin/bash", args: ["-lc", `source ${NVM}/nvm.sh && nvm install 22`], display: "nvm install 22", pinned: true, lands: [`${NVM}/versions/node/v22*/bin`] });
+    expect(first).toMatchObject({ method: "nvm", file: "/bin/bash", args: ["-lc", `export NVM_DIR=${NVM}; mkdir -p "$NVM_DIR" && source ${NVM}/nvm.sh && nvm install 22`], display: "nvm install 22", pinned: true, lands: [`${NVM}/versions/node/v22*/bin`] });
     expect(toolPlans(NODE, facts, { version: "lts" })[0]?.display).toBe("nvm install --lts");
   });
 

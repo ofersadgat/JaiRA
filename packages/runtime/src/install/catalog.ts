@@ -58,9 +58,10 @@ export interface ToolPackage {
   stubs?: readonly RegExp[];
   /**
    * Its npm package, which Bun and pnpm install too; `also` are the names it shipped under before,
-   * read when classifying an install so an old one updates as the package it is.
+   * read when classifying an install so an old one updates as the package it is. `node` is the oldest
+   * Node.js it runs on (its `engines.node`): an older one is updated before npm installs it.
    */
-  npm?: { name: string; also?: readonly string[] };
+  npm?: { name: string; also?: readonly string[]; node?: string };
   /** Its Homebrew package: a cask (macOS only) or a formula (macOS and Linux), by the name `brew install` takes. */
   brew?: { name: string; cask: boolean };
   /** Its WinGet package id. */
@@ -86,7 +87,25 @@ export interface ToolPackage {
    * its), and the binary's own updater — absent where there is none, and the script is run again.
    * `versioned` is the script given a version (`{version}`); `sudo` that it asks for root itself.
    */
-  native?: { posix?: string; windows?: string; paths: readonly RegExp[]; update?: readonly string[]; versioned?: { posix?: string; windows?: string }; sudo?: boolean };
+  native?: {
+    posix?: string;
+    windows?: string;
+    /** On a Mac, where it differs from `posix`. */
+    darwin?: string;
+    /** How a script of several lines is shown — the command a person would recognise for it. */
+    shown?: { posix?: string; darwin?: string };
+    paths: readonly RegExp[];
+    update?: readonly string[];
+    versioned?: { posix?: string; windows?: string };
+    sudo?: boolean;
+    /**
+     * The script asks for an administrator's password in the system's own window (macOS's, polkit's) —
+     * on these systems: what it writes is the machine's, and nobody could answer sudo here.
+     */
+    elevated?: readonly ("darwin" | "linux")[];
+    /** On a Mac, only Apple silicon's: Homebrew no longer installs on an Intel one. */
+    darwinArm64Only?: boolean;
+  };
   /** Packages each installer names for a version, where it has them. */
   versioned?: Partial<Record<"homebrew" | "winget" | "chocolatey" | "apt" | "dnf", VersionedName>>;
   /** The version managers that keep it, the most preferred first, and the name each knows it by when not its {@link name}. */
@@ -188,6 +207,8 @@ export const TOOL_PACKAGES: Readonly<Record<string, ToolPackage>> = {
     scoop: "nodejs",
     apt: ["nodejs"],
     dnf: ["nodejs"],
+    // Its own installer's, which WinGet, Chocolatey and nodejs.org's MSI all run.
+    dirs: { windows: ["%ProgramFiles%\\nodejs"] },
     // node@20 is disabled; node@26 is `node`'s own alias (installs it, and links opt/node@26).
     versioned: { homebrew: { name: "node@{major}", known: ["22", "24", "26"] } },
     managers: NODE_MANAGERS,
@@ -197,7 +218,7 @@ export const TOOL_PACKAGES: Readonly<Record<string, ToolPackage>> = {
   pnpm: {
     binary: "pnpm",
     name: "pnpm",
-    npm: { name: "pnpm" },
+    npm: { name: "pnpm", node: ">=18" },
     brew: { name: "pnpm", cask: false },
     winget: "pnpm.pnpm",
     choco: "pnpm",
@@ -410,9 +431,72 @@ export const TOOL_PACKAGES: Readonly<Record<string, ToolPackage>> = {
     binary: "devcontainer",
     name: "devcontainer",
     title: "the Dev Containers CLI",
-    npm: { name: "@devcontainers/cli" },
+    npm: { name: "@devcontainers/cli", node: ">=20" },
     brew: { name: "devcontainer", cask: false },
     order: ["npm", "homebrew"],
+  },
+  // The installers a multi-step install may put here first (`chain.ts`): Homebrew, and the Node.js version
+  // managers that install from nothing — checked 2026-11-19 against their repositories and scripts.
+  homebrew: {
+    binary: "brew",
+    name: "homebrew",
+    title: "Homebrew",
+    native: {
+      // Homebrew's own signed, notarized package (Apple silicon, macOS 15 and later): fetched as the person,
+      // Gatekeeper asked whether it is a notarized installer, and only `installer` run as root — in macOS's
+      // own password window. Its postinstall gives /opt/homebrew to the person at the console.
+      darwin: [
+        "set -e",
+        'd=$(mktemp -d); trap \'rm -rf "$d"\' EXIT',
+        'curl -fL --progress-bar -o "$d/Homebrew.pkg" https://github.com/Homebrew/brew/releases/latest/download/Homebrew.pkg',
+        'spctl --assess --type install -v "$d/Homebrew.pkg"',
+        '/usr/bin/osascript -e "do shell script \\"/usr/sbin/installer -pkg \'$d/Homebrew.pkg\' -target /\\" with prompt \\"JaiRA is installing Homebrew.\\" with administrator privileges"',
+      ].join("\n"),
+      // install.sh refuses root, and needs sudo only for a prefix it cannot write: polkit makes the prefix
+      // the person's first, in the desktop's window, and the script runs as them.
+      posix: [
+        "set -e",
+        'pkexec sh -c \'mkdir -p /home/linuxbrew/.linuxbrew && chown -R "$1": /home/linuxbrew\' sh "$(id -un)"',
+        'NONINTERACTIVE=1 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"',
+      ].join("\n"),
+      shown: { darwin: "installer -pkg Homebrew.pkg -target / (as administrator)", posix: '/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' },
+      paths: [/^\/opt\/homebrew\/(bin\/brew|Library\/)/, /^\/home\/linuxbrew\/\.linuxbrew\//],
+      update: ["update"],
+      elevated: ["darwin", "linux"],
+      darwinArm64Only: true,
+    },
+    dirs: { posix: ["/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin"] },
+    order: ["native"],
+  },
+  fnm: {
+    binary: "fnm",
+    name: "fnm",
+    brew: { name: "fnm", cask: false },
+    winget: "Schniz.fnm",
+    choco: "fnm",
+    scoop: "fnm",
+    // Its script sets up the person's shell (zsh's .zshrc, bash's .bashrc — .profile on a Mac — or fish's);
+    // on a Mac it defers to Homebrew unless forced, and its own folder is then ~/Library/Application Support/fnm.
+    native: {
+      posix: "curl -fsSL https://fnm.vercel.app/install | bash",
+      darwin: "curl -fsSL https://fnm.vercel.app/install | bash -s -- --force-install",
+      paths: [/\/fnm\/fnm$/, /\/\.fnm\/fnm$/],
+    },
+    dirs: { posix: ["~/.local/share/fnm", "~/Library/Application Support/fnm", "~/.fnm"] },
+    // The script on a Mac is deprecated for the formula, which is first where Homebrew is.
+    order: ["homebrew", "native", "winget", "scoop", "chocolatey"],
+  },
+  nvm: {
+    binary: "nvm",
+    name: "nvm",
+    // A shell function, not a program: its script writes ~/.nvm and sources it from the person's profile —
+    // which it only edits when the file is there, and a fresh Mac's zsh has no .zshrc yet.
+    native: {
+      posix: '[ "${SHELL##*/}" = zsh ] && touch "${ZDOTDIR:-$HOME}/.zshrc"; curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash',
+      shown: { posix: "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.41.0/install.sh | bash" },
+      paths: [/\/\.nvm\//],
+    },
+    order: ["native"],
   },
   just: {
     binary: "just",

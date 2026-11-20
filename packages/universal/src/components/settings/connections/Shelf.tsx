@@ -1,8 +1,8 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { AgentInstall } from "@jaira/shared/browser";
-import { shelfTileOf, type InstallPanelRow } from "@jaira/ui/connectionsModel";
+import type { AgentInstall, InstallWay } from "@jaira/shared/browser";
+import { shelfTileOf, type InstallMenuRow } from "@jaira/ui/connectionsModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { Press, Txt, edge, lengthToken } from "../../../primitives";
 import { useTokens } from "../../../tokens";
@@ -32,8 +32,17 @@ import { SmallButton, Spin, Tag } from "./Row";
  *   the ways             a float under ▾ (`MenuLayer`, `Float`): 400 wide, padding 5, --panel, 1px
  *                        --line, radius 8, --lift; its title app 600 11/12.5 --dim, padding 5 10 4; a way
  *                        padding 7 10, radius 6, hovered --tint-accent: its name app 600 12.5/12.5 and
- *                        its tag, over what it runs in the data face 11/12 --dim; after a --line, the
- *                        one more thing a tile offers
+ *                        its tags, over what it runs in the data face 11/12 --dim (what it does, where
+ *                        that is words — "installs fnm, then Node.js" — app 11/12.5 --dim), and what
+ *                        comes after it ("then …") under that at 11/12.5 --dim; after a --line, the one
+ *                        more thing a tile offers
+ *   customizing a way    a way whose next step has more than one way is still one row, lit as one,
+ *                        ending in a chevron pointing right (12, --dim; open, --accent beside
+ *                        `customize` app 11/12.5 --accent), centred in a strip 6 in on each side, padding
+ *                        right 4. Hovering the row, or pressing the chevron, opens those ways in a float
+ *                        of their own to its right (340 wide, as the first) — and so on, a float a step.
+ *                        Pressing the row runs it and the recommended way of each step after; a way
+ *                        chosen in a float to the right runs the ways chosen to reach it
  *   what a tile opened   a card (radius 12, 1px --line, --panel), padding 13 16, gap 10: a head (the
  *                        name, app 600, and Done) over what it holds
  */
@@ -43,9 +52,33 @@ export interface TileWay {
   key: string;
   name: string;
   at?: string | undefined;
+  /** `at` is words, not a command: drawn in the app's face. */
+  atWords?: boolean | undefined;
+  /** What comes after it, by default: "then npm install -g …". */
+  then?: string | undefined;
   tag?: string | undefined;
+  /** It asks for an administrator's password, in the system's own window. */
+  elevated?: boolean | undefined;
   title?: string | undefined;
   onPress: () => void;
+  /** The ways to take the step after it, behind its arrow. */
+  sub?: TileWay[] | undefined;
+}
+
+/** An install menu's rows as ways under ▾, each pressed to install by its path. */
+export function waysOfMenu(rows: readonly InstallMenuRow[], onInstall: (way: InstallWay) => void): TileWay[] {
+  return rows.map((row) => ({
+    key: row.key,
+    name: row.name,
+    at: row.at,
+    atWords: row.words,
+    then: row.then,
+    ...(row.recommended ? { tag: "recommended" } : {}),
+    elevated: row.elevated,
+    title: row.title,
+    onPress: () => onInstall(row.way),
+    ...(row.sub !== undefined ? { sub: waysOfMenu(row.sub, onInstall) } : {}),
+  }));
 }
 
 /** The shelf: its head, its tiles, and what a tile opened across it. */
@@ -157,8 +190,12 @@ export function Tile({
   );
 }
 
-/** A tile's ways, each with what it runs, and the one more thing it offers after a line. */
-function WaysMenu({
+/**
+ * A tile's ways, each with what it runs, and the one more thing it offers after a line — and, for a
+ * way whose next step has more than one way, a float of those to its right, opened by hovering the way
+ * or pressing its ›: a float a step.
+ */
+export function WaysMenu({
   anchor,
   title,
   items,
@@ -178,13 +215,26 @@ function WaysMenu({
   const t = useTokens();
   // 400 wide, or the window's width less a margin on a phone.
   const window = useWindowDimensions();
+  // The floats open to the right, a step each: where each hangs from, and its ways.
+  const [steps, setSteps] = useState<Array<{ from: FloatRect; key: string; items: TileWay[] }>>([]);
+  const rows = useRef(new Map<string, RNView | null>());
+  /** Open the ways after `way`, at `depth` (the float it is in), closing any further right. */
+  const openAfter = (depth: number, way: TileWay, id: string): void => {
+    const sub = way.sub;
+    if (sub === undefined) {
+      setSteps((open) => (open.length > depth ? open.slice(0, depth) : open));
+      return;
+    }
+    rows.current.get(id)?.measureInWindow((x, y, w, h) => setSteps((open) => [...open.slice(0, depth), { from: { left: x, top: y, right: x + w, bottom: y + h }, key: id, items: sub }]));
+  };
+  const press = (onPress: () => void): void => {
+    onClose();
+    onPress();
+  };
   const item = (key: string, onPress: () => void, disabled: boolean, children: ReactNode, separator = false, title?: string): JSX.Element => (
     <Press
       key={key}
-      onPress={() => {
-        onClose();
-        onPress();
-      }}
+      onPress={() => press(onPress)}
       disabled={disabled}
       {...((isWeb ? { role: "menuitem" } : {}) as object)}
       {...(title !== undefined ? ({ title } as object) : {})}
@@ -201,42 +251,72 @@ function WaysMenu({
       {children}
     </Press>
   );
+  const wayRow = (way: TileWay, depth: number): JSX.Element => {
+    const id = `${depth}:${way.key}`;
+    const open = steps[depth]?.key === id;
+    // One row: pressed, it installs; its chevron — part of it, lit with it — opens the ways to customize
+    // the step after, as hovering it does.
+    return (
+      <View key={way.key} {...((isWeb ? { onMouseEnter: () => openAfter(depth, way, id) } : {}) as object)}>
+        <RNView ref={(el) => void rows.current.set(id, el)} collapsable={false}>
+          <Press
+            onPress={() => press(way.onPress)}
+            disabled={busy}
+            {...((isWeb ? { role: "menuitem" } : {}) as object)}
+            {...(way.sub !== undefined ? ({ "aria-haspopup": "menu", "aria-expanded": open } as object) : {})}
+            {...(way.title !== undefined ? ({ title: way.title } as object) : {})}
+            flexDirection="row"
+            alignItems="center"
+            gap={8}
+            paddingVertical={7}
+            paddingLeft={10}
+            paddingRight={way.sub !== undefined ? 4 : 10}
+            borderRadius={6}
+            {...(busy ? { opacity: 0.5 } : {})}
+            box={({ hovered }) => ({ backgroundColor: (hovered || open) && !busy ? t.v("tint-accent") : "transparent" })}
+          >
+            <View flexDirection="column" alignItems="flex-start" gap={2} flexGrow={1} flexShrink={1} minWidth={0}>
+              <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
+                <Txt spec={{ voice: "app", scale: 1, weight: 600 }}>{way.name}</Txt>
+                {way.tag !== undefined ? <Tag tone="accent">{way.tag}</Tag> : null}
+                {way.elevated === true ? <Tag tone="warn">asks for your password</Tag> : null}
+              </View>
+              {way.at !== undefined ? <Txt spec={way.atWords === true ? { voice: "app", scale: 11 / 12.5, color: "dim" } : { voice: "data", scale: 11 / 12, color: "dim" }}>{way.at}</Txt> : null}
+              {way.then !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{way.then}</Txt> : null}
+            </View>
+            {way.sub !== undefined ? (
+              <Press
+                onPress={() => openAfter(depth, way, id)}
+                label={`customize ${way.name}`}
+                title="customize: choose the way for each step"
+                fill={false}
+                alignSelf="stretch"
+                flexDirection="row"
+                alignItems="center"
+                gap={4}
+                paddingHorizontal={6}
+                borderRadius={5}
+                box={({ hovered }) => ({ backgroundColor: hovered ? t.v("tint-accent") : "transparent" })}
+              >
+                {open ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "accent" }}>customize</Txt> : null}
+                <Icon name="chevron" size={12} color={String(t.v(open ? "accent" : "dim"))} box={{ transform: [{ rotate: "-90deg" }] }} />
+              </Press>
+            ) : null}
+          </Press>
+        </RNView>
+      </View>
+    );
+  };
+  const panel = { padding: 5, backgroundColor: t.v("panel") as never, borderRadius: 8, ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object), ...({ boxShadow: t.v("lift") } as object) };
   return (
     <MenuLayer onClose={onClose}>
-      <Float
-        anchor={anchor}
-        side="below"
-        align="start"
-        width={Math.min(400, window.width - 16)}
-        flexDirection="column"
-        padding={5}
-        backgroundColor={t.v("panel") as never}
-        borderRadius={8}
-        {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
-        {...({ boxShadow: t.v("lift") } as object)}
-        role="menu"
-      >
+      <Float anchor={anchor} side="below" align="start" width={Math.min(400, window.width - 16)} flexDirection="column" {...panel} role="menu">
         {items.length > 0 ? (
           <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "dim" }} paddingTop={5} paddingHorizontal={10} paddingBottom={4}>
             {title}
           </Txt>
         ) : null}
-        {items.map((way) =>
-          item(
-            way.key,
-            way.onPress,
-            busy,
-            <>
-              <View flexDirection="row" alignItems="center" gap={8}>
-                <Txt spec={{ voice: "app", scale: 1, weight: 600 }}>{way.name}</Txt>
-                {way.tag !== undefined ? <Tag tone="accent">{way.tag}</Tag> : null}
-              </View>
-              {way.at !== undefined ? <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>{way.at}</Txt> : null}
-            </>,
-            false,
-            way.title,
-          ),
-        )}
+        {items.map((way) => wayRow(way, 0))}
         {items.length > 0 && more !== undefined ? <View height={0} marginTop={4} marginHorizontal={6} {...(edge(t, { top: 1 }) as object)} /> : null}
         {more !== undefined ? item("more", more.onPress, false, <Txt spec={{ voice: "app", scale: 1 }}>{more.label}</Txt>, items.length > 0) : null}
         {items.length === 0 && more === undefined && none !== undefined ? (
@@ -245,6 +325,11 @@ function WaysMenu({
           </Txt>
         ) : null}
       </Float>
+      {steps.map((step, i) => (
+        <Float key={step.key} anchor={step.from} side="right" align="start" width={Math.min(340, window.width - 16)} flexDirection="column" {...panel} role="menu">
+          {step.items.map((way) => wayRow(way, i + 1))}
+        </Float>
+      ))}
     </MenuLayer>
   );
 }
@@ -271,12 +356,13 @@ export function InstallTile({
   running: boolean;
   busy: boolean;
   chosen: boolean;
-  onInstall: (way: InstallPanelRow["method"]) => void;
+  onInstall: (way: InstallWay | undefined) => void;
   onCancel: () => void;
   onSettings?: (() => void) | undefined;
 }): JSX.Element {
-  const { sub, ways } = shelfTileOf(install);
+  const { sub, ways, menu } = shelfTileOf(install);
   const first = ways[0];
+  const wayOf = (row: (typeof ways)[number]): InstallWay | undefined => row.choice ?? row.method;
   return (
     <Tile
       brand={brand}
@@ -288,13 +374,16 @@ export function InstallTile({
         label: first !== undefined || onSettings === undefined ? "Install" : "Set its command",
         ...(first !== undefined ? { title: first.title } : {}),
         disabled: first !== undefined ? busy : onSettings === undefined,
-        onPress: () => (first !== undefined ? onInstall(first.method) : onSettings?.()),
+        onPress: () => (first !== undefined ? onInstall(wayOf(first)) : onSettings?.()),
       }}
       ways={{
         label: `ways to install ${title}`,
         title: `Install ${title} with`,
         busy,
-        items: ways.map((way, i) => ({ key: way.key, name: way.name, at: way.at, title: way.title, ...(i === 0 && ways.length > 1 ? { tag: "recommended" } : {}), onPress: () => onInstall(way.method) })),
+        items:
+          menu !== undefined
+            ? waysOfMenu(menu, onInstall)
+            : ways.map((way, i) => ({ key: way.key, name: way.name, at: way.at, title: way.title, ...(i === 0 && ways.length > 1 ? { tag: "recommended" } : {}), onPress: () => onInstall(wayOf(way)) })),
         ...(onSettings !== undefined ? { more: { label: "It is installed elsewhere — set its command…", onPress: onSettings } } : { none: "Nothing on this machine installs it." }),
       }}
     />

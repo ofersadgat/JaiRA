@@ -1,6 +1,6 @@
 import { useContext, useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
-import { GIT_CLI_NAMES, type AgentInstallMethod, type GitCliName, type ProbeResult } from "@jaira/shared/browser";
+import { GIT_CLI_NAMES, type GitCliName, type InstallWay, type ProbeResult } from "@jaira/shared/browser";
 import { GIT_CLI_TITLES, agentLineOf, gitCliActionOf, gitCliPanelOf, gitCliPlaceOf, providerSayState, providerState, updateOf } from "@jaira/ui/connectionsModel";
 import type { InstallLog } from "@jaira/ui/installLog";
 import { Hint } from "../bits";
@@ -45,7 +45,7 @@ export function GitRows({
   /** What each install pressed here printed, by program — until its Hide. */
   logs: Readonly<Partial<Record<GitCliName, InstallLog>>>;
   busy: boolean;
-  onInstall: (name: GitCliName, method?: AgentInstallMethod) => void;
+  onInstall: (name: GitCliName, way?: InstallWay) => void;
   onCancel: (name: GitCliName) => void;
   onHideLog: (name: GitCliName) => void;
 }): JSX.Element | null {
@@ -116,7 +116,7 @@ function GitCliRow({
   running: boolean;
   log: InstallLog | undefined;
   busy: boolean;
-  onInstall: (method?: AgentInstallMethod) => void;
+  onInstall: (way?: InstallWay) => void;
   onCancel: () => void;
   onHideLog: () => void;
 }): JSX.Element {
@@ -135,7 +135,7 @@ function GitCliRow({
   const action = gitCliActionOf(probe);
   const waiting = running ? { words: install?.install?.[0]?.method === "command-line-tools" ? "finish in Apple's installer" : "installing…", onCancel } : undefined;
 
-  const slot = open || action === undefined ? null : <ActionSlot action={action} waiting={waiting} disabled={busy || running} onPress={() => onInstall(action.kind === "install" ? action.method : undefined)} />;
+  const slot = open || action === undefined ? null : <ActionSlot action={action} waiting={waiting} disabled={busy || running} onPress={() => onInstall(action.kind === "install" ? (action.choice ?? action.method) : undefined)} />;
 
   return (
     <ConnRow

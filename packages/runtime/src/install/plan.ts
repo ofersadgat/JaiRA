@@ -75,6 +75,8 @@ export interface InstallPlan {
   env?: Record<string, string>;
   /** It runs as root through sudo, or asks sudo itself: it needs a password where sudo would ask for one. */
   sudo?: boolean;
+  /** It asks for an administrator's password in the system's own window (macOS's, polkit's) — never through JaiRA. */
+  elevated?: boolean;
   /** It names the version wanted (a versioned package, a version flag, a version manager) rather than installing the latest. */
   pinned?: boolean;
   /**
@@ -94,7 +96,7 @@ function withDirOnPath(file: string, platform: string): Record<string, string> |
   return { PATH: [dir, ...(process.env["PATH"] ?? "").split(":").filter((one) => one.length > 0 && one !== dir)].join(":") };
 }
 
-function plan(method: InstallMethod, via: string, file: string, args: string[], display: string, platform: string, extra: Pick<InstallPlan, "sudo" | "pinned" | "lands"> = {}): InstallPlan {
+function plan(method: InstallMethod, via: string, file: string, args: string[], display: string, platform: string, extra: Pick<InstallPlan, "sudo" | "elevated" | "pinned" | "lands"> = {}): InstallPlan {
   const env = withDirOnPath(file, platform);
   return {
     method,
@@ -104,9 +106,49 @@ function plan(method: InstallMethod, via: string, file: string, args: string[], 
     args,
     ...(env !== undefined ? { env } : {}),
     ...(extra.sudo === true ? { sudo: true } : {}),
+    ...(extra.elevated === true ? { elevated: true } : {}),
     ...(extra.pinned === true ? { pinned: true } : {}),
     ...(extra.lands !== undefined && extra.lands.length > 0 ? { lands: extra.lands } : {}),
   };
+}
+
+/**
+ * The line a version manager needs in the person's shell profile for their terminals to have what it
+ * installs — fnm's env, mise's activation — added once, by the program's own path (a Homebrew fnm is not
+ * on a Finder app's PATH, nor perhaps on the profile's before the line), unless the profile has one:
+ * fnm's script writes its own. zsh's `.zshrc`, bash's `.bashrc` (a Mac's login `.bash_profile`, or
+ * `.profile`), fish's `conf.d`; another shell is left as it is.
+ */
+function profileLine(manager: "fnm" | "mise", tool: string): string {
+  const program = shq(tool);
+  const zsh = manager === "fnm" ? `eval "$(${program} env --use-on-cd --shell zsh)"` : `eval "$(${program} activate zsh)"`;
+  const bashLine = manager === "fnm" ? `eval "$(${program} env --use-on-cd --shell bash)"` : `eval "$(${program} activate bash)"`;
+  const fish = manager === "fnm" ? `${program} env --use-on-cd --shell fish | source` : `${program} activate fish | source`;
+  const marker = manager === "fnm" ? "fnm env" : "mise activate";
+  return [
+    `case "\${SHELL##*/}" in`,
+    `zsh) rc="\${ZDOTDIR:-$HOME}/.zshrc"; line=${shq(zsh)} ;;`,
+    `bash) rc="$HOME/.bashrc"; if [ "$(uname)" = Darwin ]; then rc="$HOME/.bash_profile"; [ -f "$rc" ] || rc="$HOME/.profile"; fi; line=${shq(bashLine)} ;;`,
+    `fish) rc="$HOME/.config/fish/conf.d/${manager}.fish"; line=${shq(fish)} ;;`,
+    `*) rc="" ;;`,
+    `esac;`,
+    `if [ -n "$rc" ] && ! grep -qs ${shq(marker)} "$rc"; then mkdir -p "$(dirname "$rc")" && printf '\\n# ${manager}, set up by JaiRA\\n%s\\n' "$line" >> "$rc"; fi; true`,
+  ].join(" ");
+}
+
+/** PowerShell that adds a folder to the person's own PATH, in the registry, once — for terminals opened after. */
+function WINDOWS_PATH_ADD(dir: string): string {
+  return [
+    `$p = "${dir}"`,
+    `$u = [string][Environment]::GetEnvironmentVariable('Path', 'User')`,
+    `if (-not (($u -split ';') -contains $p)) { [Environment]::SetEnvironmentVariable('Path', ((@($u.TrimEnd(';'), $p) | Where-Object { $_ }) -join ';'), 'User') }`,
+    `exit 0`,
+  ].join("; ");
+}
+
+/** A word for PowerShell, quoted. */
+function psq(word: string): string {
+  return `'${word.replace(/'/g, "''")}'`;
 }
 
 /** A word for `sh`, quoted when it needs to be. */
@@ -144,23 +186,30 @@ function nativeInstall(pkg: ToolPackage, facts: InstallFacts, want: VersionWant 
   const asked = want.pin ?? (want.channel !== undefined && want.channel !== "latest" && want.channel !== "lts" ? want.channel : undefined);
   const windows = facts.platform === "win32";
   const versioned = asked !== undefined ? (windows ? native.versioned?.windows : native.versioned?.posix)?.replace("{version}", asked) : undefined;
-  const extra = { ...(native.sudo === true ? { sudo: true } : {}), ...(versioned !== undefined ? { pinned: true } : {}) };
+  // A script that asks for a password in the system's window: on Linux, polkit's, which needs a desktop.
+  if (native.darwinArm64Only === true && facts.platform === "darwin" && facts.arch !== undefined && facts.arch !== "arm64") return undefined;
+  const elevated = facts.platform !== "win32" && native.elevated?.includes(facts.platform) === true;
+  if (elevated && facts.platform === "linux" && facts.tools.pkexec === undefined) return undefined;
+  const extra = { ...(native.sudo === true ? { sudo: true } : {}), ...(elevated ? { elevated: true } : {}), ...(versioned !== undefined ? { pinned: true } : {}) };
   if (windows) {
     const script = versioned ?? native.windows;
     if (script === undefined) return undefined;
     return plan("native", INSTALL_VIA.native, facts.tools.powershell ?? "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], script, facts.platform, extra);
   }
-  const script = versioned ?? native.posix;
+  const script = versioned ?? (facts.platform === "darwin" ? (native.darwin ?? native.posix) : native.posix);
   if (script === undefined || facts.tools.curl === undefined) return undefined;
-  return plan("native", INSTALL_VIA.native, facts.tools.bash ?? "bash", ["-c", script], script, facts.platform, extra);
+  // A script of several lines is shown as the command a person would recognise for it.
+  const display = versioned === undefined ? (facts.platform === "darwin" ? (native.shown?.darwin ?? native.shown?.posix) : native.shown?.posix) : undefined;
+  return plan("native", INSTALL_VIA.native, facts.tools.bash ?? "bash", ["-c", script], display ?? script, facts.platform, extra);
 }
 
 /**
  * Which program runs an installer: the one the install itself names (`own`, when it is there), else
- * the one found. On Windows the bare name, since the `.cmd` shim resolution needs a name to look up.
+ * the one found. On Windows the bare name, since the `.cmd` shim resolution needs a name to look up —
+ * unless it was found only where this app's PATH does not reach (installed a step before): its path.
  */
 function program(facts: InstallFacts, tool: InstallTool, own?: string): string | undefined {
-  if (facts.platform === "win32") return facts.tools[tool] !== undefined ? tool : own;
+  if (facts.platform === "win32") return facts.tools[tool] !== undefined ? (facts.offPath?.includes(tool) === true ? facts.tools[tool] : tool) : own;
   return own !== undefined && (facts.has?.(own) ?? true) ? own : facts.tools[tool];
 }
 
@@ -272,7 +321,7 @@ function wingetInstall(facts: InstallFacts, id: string, version?: string, pinned
 function systemPlan(kind: "apt" | "dnf", pkg: ToolPackage, facts: InstallFacts, want: VersionWant): InstallPlan | undefined {
   if (facts.platform !== "linux") return undefined;
   const tool = kind === "apt" ? facts.tools["apt-get"] : facts.tools.dnf;
-  if (tool === undefined || (facts.root !== true && facts.tools.sudo === undefined)) return undefined;
+  if (tool === undefined || (facts.root !== true && facts.tools.sudo === undefined && facts.tools.pkexec === undefined)) return undefined;
   const versioned = versionedName(pkg.versioned?.[kind], want.pin);
   const base = versioned !== undefined ? [versioned] : (pkg[kind] ?? []);
   if (base.length === 0) return undefined;
@@ -282,14 +331,19 @@ function systemPlan(kind: "apt" | "dnf", pkg: ToolPackage, facts: InstallFacts, 
   const command = kind === "apt" ? ["env", "DEBIAN_FRONTEND=noninteractive", tool, "install", "-y", ...names] : [tool, "install", "-y", ...names];
   const extra = { ...(versioned !== undefined ? { pinned: true } : {}) };
   if (facts.root === true) return plan(kind, INSTALL_VIA[kind], command[0]!, command.slice(1), shown, facts.platform, extra);
+  // On a desktop, polkit asks for the password in its own window; elsewhere `sudo -n`, which fails
+  // rather than ask where nobody can answer.
+  if (facts.tools.pkexec !== undefined) return plan(kind, INSTALL_VIA[kind], facts.tools.pkexec, command, `sudo ${shown}`, facts.platform, { ...extra, elevated: true });
   return plan(kind, INSTALL_VIA[kind], facts.tools.sudo!, ["-n", ...command], `sudo ${shown}`, facts.platform, { ...extra, sudo: true });
 }
 
 /**
  * A version manager installing the version wanted — it installs beside what it already has, and
  * changes no default: the installed one is found where the manager keeps it ({@link InstallPlan.lands}).
+ * With `makeDefault` (Node.js installed for an agent that needs it) it is made the default too, so the
+ * person's own shell has it as well — where the manager has a default to make.
  */
-function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFacts, want: VersionWant): InstallPlan | undefined {
+export function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFacts, want: VersionWant, makeDefault = false): InstallPlan | undefined {
   const tool = facts.tools[manager];
   if (tool === undefined) return undefined;
   const { platform } = facts;
@@ -301,12 +355,28 @@ function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFa
   const pinned = { pinned: pin !== undefined || (want.channel !== undefined && want.channel !== "latest") };
   switch (manager) {
     case "nvm": {
-      if (windows) return undefined;
-      // A shell function, defined by sourcing nvm.sh — which sets NVM_DIR to its own folder.
+      if (windows) {
+        // nvm-windows: a program, not a function. `use` points %NVM_SYMLINK% at the version — every
+        // terminal's Node — and asks Windows for the rights to, in Windows' own prompt.
+        const arg = pin ?? (want.channel === "lts" ? "lts" : "latest");
+        const use = makeDefault ? `; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; & ${psq(tool)} use ${arg}` : "";
+        const script = `& ${psq(tool)} install ${arg}${use}; exit $LASTEXITCODE`;
+        return plan("nvm", INSTALL_VIA.nvm, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", script], `nvm install ${arg}${makeDefault ? ` && nvm use ${arg}` : ""}`, platform, {
+          ...pinned,
+          lands: ["%NVM_SYMLINK%", `%NVM_HOME%\\v${glob}*`],
+        });
+      }
+      // A shell function, defined by sourcing nvm.sh — which takes NVM_DIR as its own folder when it is
+      // not set. Homebrew's nvm.sh is in Homebrew's folder and keeps its versions in ~/.nvm, as its
+      // caveat has the person's profile say; one the person's terminal names is theirs.
+      const nvmDir = facts.env?.["NVM_DIR"] ?? (/\/(opt|Cellar)\/nvm\//.test(tool) ? posix.join(facts.home, ".nvm") : posix.dirname(tool));
       const arg = pin ?? (want.channel === "lts" ? "--lts" : "node");
-      return plan("nvm", INSTALL_VIA.nvm, bash, ["-lc", `source ${shq(tool)} && nvm install ${arg}`], `nvm install ${arg}`, platform, {
+      const alias = pin ?? (want.channel === "lts" ? "lts/*" : "node");
+      const then = makeDefault ? ` && nvm alias default ${shq(alias)}` : "";
+      const script = `export NVM_DIR=${shq(nvmDir)}; mkdir -p "$NVM_DIR" && source ${shq(tool)} && nvm install ${arg}${then}`;
+      return plan("nvm", INSTALL_VIA.nvm, bash, ["-lc", script], `nvm install ${arg}${then}`, platform, {
         ...pinned,
-        lands: [`${posix.dirname(tool)}/versions/node/v${glob}*/bin`],
+        lands: [`${nvmDir}/versions/node/v${glob}*/bin`],
       });
     }
     case "fnm": {
@@ -314,11 +384,29 @@ function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFa
       const lands = windows
         ? [`%FNM_DIR%\\node-versions\\v${glob}*\\installation`, `%APPDATA%\\fnm\\node-versions\\v${glob}*\\installation`]
         : [`$FNM_DIR/node-versions/v${glob}*/installation/bin`, `~/.local/share/fnm/node-versions/v${glob}*/installation/bin`, `~/Library/Application Support/fnm/node-versions/v${glob}*/installation/bin`];
+      if (makeDefault) {
+        // `--lts` names what it installed `lts-latest`; `--latest`, `latest-…`: the version, by `fnm current`'s alias.
+        const alias = pin ?? (want.channel === "lts" ? "lts-latest" : "latest");
+        const display = `fnm install ${arg} && fnm default ${alias}`;
+        if (windows) {
+          // A terminal has fnm's Node only once fnm's env is in its profile; its default's folder — a
+          // junction fnm repoints at each `fnm default` — on the person's PATH serves every one of them.
+          const script = [
+            `& ${psq(tool)} install ${arg}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`,
+            `& ${psq(tool)} default ${alias}; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }`,
+            WINDOWS_PATH_ADD("$(if ($env:FNM_DIR) { $env:FNM_DIR } else { Join-Path $env:APPDATA 'fnm' })\\aliases\\default"),
+          ].join("; ");
+          return plan("fnm", INSTALL_VIA.fnm, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", script], `${display}, and its default on your PATH`, platform, { ...pinned, lands });
+        }
+        const script = `${shq(tool)} install ${arg} && ${shq(tool)} default ${shq(alias)} && ${profileLine("fnm", tool)}`;
+        return plan("fnm", INSTALL_VIA.fnm, bash, ["-c", script], `${display}, and fnm's env in your shell's profile`, platform, { ...pinned, lands });
+      }
       return plan("fnm", INSTALL_VIA.fnm, tool, ["install", arg], `fnm install ${arg}`, platform, { ...pinned, lands });
     }
     case "volta": {
-      // `fetch`, not `install`: install would make it the person's default everywhere.
+      // `fetch`, not `install`: install would make it the person's default everywhere — unless that is wanted.
       const spec = `${name}@${pin ?? (want.channel === "lts" ? "lts" : "latest")}`;
+      if (makeDefault) return plan("volta", INSTALL_VIA.volta, tool, ["install", spec], `volta install ${spec}`, platform, { ...pinned, lands: windows ? ["%LOCALAPPDATA%\\Volta\\bin"] : ["$VOLTA_HOME/bin", "~/.volta/bin"] });
       const lands = windows ? [`%LOCALAPPDATA%\\Volta\\tools\\image\\${name}\\${glob}*`] : [`$VOLTA_HOME/tools/image/${name}/${glob}*/bin`, `~/.volta/tools/image/${name}/${glob}*/bin`];
       return plan("volta", INSTALL_VIA.volta, tool, ["fetch", spec], `volta fetch ${spec}`, platform, { ...pinned, lands });
     }
@@ -327,6 +415,10 @@ function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFa
       const lands = windows
         ? [`%LOCALAPPDATA%\\mise\\installs\\${name}\\${glob}*`, `%LOCALAPPDATA%\\mise\\installs\\${name}\\${glob}*\\bin`]
         : [`$MISE_DATA_DIR/installs/${name}/${glob}*/bin`, `~/.local/share/mise/installs/${name}/${glob}*/bin`];
+      // `use -g` installs it and makes it the global one, in mise's own config — which a terminal reads
+      // once mise is activated in its profile, which mise's own script leaves to the person.
+      if (makeDefault && !windows) return plan("mise", INSTALL_VIA.mise, bash, ["-c", `${shq(tool)} use -g ${shq(spec)} && ${profileLine("mise", tool)}`], `mise use -g ${spec}, and mise's activation in your shell's profile`, platform, { ...pinned, lands });
+      if (makeDefault) return plan("mise", INSTALL_VIA.mise, tool, ["use", "-g", spec], `mise use -g ${spec}`, platform, { ...pinned, lands });
       return plan("mise", INSTALL_VIA.mise, tool, ["install", spec], `mise install ${spec}`, platform, { ...pinned, lands });
     }
     case "asdf": {
@@ -390,7 +482,7 @@ function managerPlan(manager: VersionManager, pkg: ToolPackage, facts: InstallFa
 }
 
 /** The ways to install a tool from here, in its vendor's order ({@link ToolPackage.order}), each for the version wanted where it can name it. */
-function installPlans(pkg: ToolPackage, facts: InstallFacts, want: VersionWant = { any: true }): InstallPlan[] {
+export function installPlans(pkg: ToolPackage, facts: InstallFacts, want: VersionWant = { any: true }): InstallPlan[] {
   const { platform } = facts;
   const pin = want.pin;
   const way = (method: InstallMethod): InstallPlan | undefined => {
@@ -460,7 +552,7 @@ export function planOf(pkg: ToolPackage, facts: InstallFacts): { origin?: Instal
  * manager's install, a versioned formula, `npm i -g name@22`, a pinned WinGet or Chocolatey upgrade.
  * With nothing pinned, the update.
  */
-function originPlan(pkg: ToolPackage, facts: InstallFacts, origin: InstallOrigin, want: VersionWant): InstallPlan | undefined {
+export function originPlan(pkg: ToolPackage, facts: InstallFacts, origin: InstallOrigin, want: VersionWant): InstallPlan | undefined {
   const pin = want.pin;
   if (isVersionManager(origin.method)) return managerPlan(origin.method, pkg, facts, want);
   if (pin === undefined && want.channel === undefined) return updatePlan(pkg, facts, origin);

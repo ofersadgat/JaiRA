@@ -263,7 +263,7 @@ import {
   installAgent,
   installGitCli,
   probeGitCli,
-  nodeInstallDeps,
+  machineInstallDeps,
   agentPackageOf,
   type InstallDeps,
   signInAgent,
@@ -685,7 +685,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { downAgentsOf, EXECUTOR_TITLES, GIT_CLI_NAMES, type AgentInstallMethod, type AgentInstallOutcome, type GitCliName, type InstallTarget, type MachinesView } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES, GIT_CLI_NAMES, type AgentInstallMethod, type AgentInstallOutcome, type AgentInstallRequest, type GitCliName, type InstallTarget, type MachinesView } from "@jaira/shared";
 import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
@@ -12290,11 +12290,13 @@ export class AppService {
     if (name !== undefined && wanted.length === 0) throw this.refusal("config", `unknown executor '${name}'`);
     const exec = new NodeExec({ execEnv: config.execEnvironment });
     const secrets = this.secretResolver();
+    const deps = await this.installDeps();
     const results = await Promise.all(
       wanted.map(async (info) =>
         withSignInRefusal(
           info,
-          await probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets, install: this.options.installDeps ?? nodeInstallDeps() }),
+          // A test's stand-in machine is looked at, and this process's PATH left alone.
+          await probeExecutor(info, { exec, execEnv: config.execEnvironment, secrets, install: deps, ...(this.options.installDeps === undefined ? { reach: appendToPath } : {}) }),
           this.signInRefusals.get(info.name),
         ),
       ),
@@ -12443,15 +12445,25 @@ export class AppService {
     }
   }
 
+  /**
+   * The machine the installs look at: a test's stand-in, or this one as the person's own terminal sees
+   * it — the variables and PATH their shell profile sets, asked once (`loginShellEnv`), so an nvm or fnm
+   * set up only in `.zshrc` is found by an app opened from the Finder.
+   */
+  private installDeps(): Promise<InstallDeps> {
+    return this.options.installDeps !== undefined ? Promise.resolve(this.options.installDeps) : machineInstallDeps(new NodeExec());
+  }
+
   /** Installs and updates still running, by agent — what Cancel aborts. */
   private readonly installs = new Map<string, AbortController>();
 
   /**
-   * Install an agent the way named (`method`), or update it the way it was installed (none named), and
-   * re-check once the installer exits. Which command runs is decided from what is on this machine —
-   * the request names a way, never a command. One at a time per agent.
+   * Install an agent the way named (`method`) or by the path chosen through its install menu (`choice`:
+   * Node.js, then npm), or update it the way it was installed (neither named), and re-check once the
+   * last installer exits. Which command runs is decided from what is on this machine when each step
+   * starts — the request names a way or a path, never a command. One at a time per agent.
    */
-  async installExecutor(name: string, method?: AgentInstallMethod): Promise<AgentInstallOutcome> {
+  async installExecutor(name: string, request: AgentInstallRequest | AgentInstallMethod = {}): Promise<AgentInstallOutcome> {
     const info = this.listExecutors().find((candidate) => candidate.name === name);
     if (info === undefined) throw this.refusal("config", `unknown executor '${name}'`);
     if (agentPackageOf(info) === undefined) throw this.refusal("config", `JaiRA does not know how to install '${name}'`);
@@ -12461,15 +12473,15 @@ export class AppService {
     this.installs.set(name, controller);
     const output = this.installOutput({ kind: "agent", name });
     try {
-      const outcome = await installAgent(info, method, {
+      const outcome = await installAgent(info, request, {
         exec: new NodeExec({ execEnv: config.execEnvironment }),
         execEnv: config.execEnvironment,
-        deps: this.options.installDeps ?? nodeInstallDeps(),
+        deps: await this.installDeps(),
         abortSignal: controller.signal,
         onOutput: output.say,
       });
       if (outcome.ok) output.say(INSTALLED_CHECKING);
-      return outcome;
+      return this.options.installDeps === undefined ? reachedBesideNode(outcome, config.execEnvironment) : outcome;
     } finally {
       output.end();
       this.installs.delete(name);
@@ -12523,9 +12535,10 @@ export class AppService {
     const exec = new NodeExec({ execEnv: config.execEnvironment });
     // A test's stand-in machine is looked at, and this process's PATH left alone.
     const reach = this.options.installDeps === undefined ? { reach: appendToPath } : {};
+    const deps = await this.installDeps();
     const results = await Promise.all(
       GIT_CLI_NAMES.map((name) =>
-        probeGitCli(name, { exec, execEnv: config.execEnvironment, deps: this.options.installDeps ?? nodeInstallDeps(), ...reach }).catch(
+        probeGitCli(name, { exec, execEnv: config.execEnvironment, deps, ...reach }).catch(
           (e: unknown): ProbeResult => ({ name, status: "not-checked", detail: `could not be checked: ${(e as Error).message}` }),
         ),
       ),
@@ -12543,8 +12556,8 @@ export class AppService {
   /** Installs and updates of the git programs still running — what Cancel aborts. */
   private readonly gitCliInstalls = new Map<GitCliName, AbortController>();
 
-  /** Install a git program the way named, or update it the way it was installed; re-checked once it exits. */
-  async installGitCli(name: GitCliName, method?: AgentInstallMethod): Promise<AgentInstallOutcome> {
+  /** Install a git program the way named or by the path chosen, or update it the way it was installed; re-checked once it exits. */
+  async installGitCli(name: GitCliName, request: AgentInstallRequest | AgentInstallMethod = {}): Promise<AgentInstallOutcome> {
     if (!GIT_CLI_NAMES.includes(name)) throw this.refusal("config", `JaiRA does not know how to install '${name}'`);
     if (this.gitCliInstalls.has(name)) return { ok: false, reason: `${name} is already being installed` };
     const config = this.effectiveConfig();
@@ -12552,10 +12565,10 @@ export class AppService {
     this.gitCliInstalls.set(name, controller);
     const output = this.installOutput({ kind: "gitCli", name });
     try {
-      const outcome = await installGitCli(name, method, {
+      const outcome = await installGitCli(name, request, {
         exec: new NodeExec({ execEnv: config.execEnvironment }),
         execEnv: config.execEnvironment,
-        deps: this.options.installDeps ?? nodeInstallDeps(),
+        deps: await this.installDeps(),
         abortSignal: controller.signal,
         onOutput: output.say,
       });
@@ -16602,6 +16615,20 @@ function appendToPath(dir: string): void {
   if (dirs.some((one) => same(one, dir))) return;
   process.env[key] = [...dirs, dir].join(sep);
   PATH_ADDED.add(dir);
+}
+
+/**
+ * An agent npm installed beside its own Node.js (fnm's, nvm's) in a folder this app's PATH does not
+ * reach is made reachable there, rather than pointed at: it is a script that folder's `node` runs, and
+ * a path to it alone would not find that node. The check does the same each time it looks.
+ */
+function reachedBesideNode(outcome: AgentInstallOutcome, execEnv: JairaExecEnvironment): AgentInstallOutcome {
+  // "windows" is this machine itself, whatever it runs; WSL is not.
+  if (!outcome.ok || outcome.onPath !== false || outcome.path === undefined || execEnv !== "windows") return outcome;
+  const dir = dirname(outcome.path);
+  if (!existsSync(join(dir, process.platform === "win32" ? "node.exe" : "node"))) return outcome;
+  appendToPath(dir);
+  return { ...outcome, onPath: true };
 }
 
 /** The folders {@link appendToPath} added — the PATH is the process's, so this is too. */

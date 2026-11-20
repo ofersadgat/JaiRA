@@ -13,8 +13,22 @@
  * presses the button, and what runs is decided from what was found — the window only names the agent
  * and the way.
  */
-import type { AgentInstall, AgentInstallCommand, AgentInstallMethod, AgentInstallOutcome, ExecutorInfo, ExecutorKind } from "@jaira/shared";
-import { isAgentInstallMethod, planOf, runInstall, type AgentPackage, type InstallFacts, type InstallPlan, type InstallRunOptions } from "./install";
+import { EXECUTOR_TITLES, type AgentInstall, type AgentInstallCommand, type AgentInstallMethod, type AgentInstallOutcome, type AgentInstallRequest, type ExecutorInfo, type ExecutorKind, type InstallChoice } from "@jaira/shared";
+import {
+  gatherChainFacts,
+  installChoicesOf,
+  isAgentInstallMethod,
+  planOf,
+  runChoice,
+  runInstall,
+  shownChoices,
+  type AgentPackage,
+  type ChainRunHooks,
+  type InstallFacts,
+  type InstallLookup,
+  type InstallPlan,
+  type InstallRunOptions,
+} from "./install";
 import { onMachine } from "./paths";
 
 /**
@@ -23,7 +37,8 @@ import { onMachine } from "./paths";
  *  - Claude Code: Anthropic recommends its native installer, which updates itself (`claude update` asks
  *    now); a Homebrew cask (`claude-code`, or `claude-code@latest`), WinGet and npm besides.
  *  - Codex: npm, and a Homebrew cask.
- *  - Gemini CLI: npm, and a Homebrew formula.
+ *  - Gemini CLI: npm. Homebrew's formula is deprecated — it is behind npm, and is disabled on 2026-12-18
+ *    for Antigravity CLI — so it is not offered.
  *  - Muse Code (Meta): its install script, which puts a self-updating launcher in `~/.local/bin`, and
  *    a Homebrew cask. No npm package, and no Windows build (WSL2 is the way there).
  *  - OpenCode: its install script (`~/.opencode/bin`, updated by `opencode upgrade`), npm (`@opencode/cli`
@@ -34,14 +49,15 @@ import { onMachine } from "./paths";
  *
  * On Windows, beside the vendors' own ways (checked 2026-11-17): WinGet has Claude Code (Anthropic's docs
  * name it), Codex and OpenCode v2; Chocolatey has Claude Code and Codex, and Scoop's main bucket all
- * three — community packages, kept current, offered after the vendor's. Chocolatey's `claude` and
+ * three — community packages, kept current, offered after the vendor's. Each npm package names the
+ * oldest Node.js it runs on (its `engines.node`, read 2026-11-19). Chocolatey's `claude` and
  * Scoop's extras `claude` are Claude's desktop app; Chocolatey's `gemini-cli` is months behind, and its
  * `opencode` is v1. None of them is offered.
  */
 export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
   claude: {
     binary: "claude",
-    npm: { name: "@anthropic-ai/claude-code" },
+    npm: { name: "@anthropic-ai/claude-code", node: ">=22" },
     brew: { name: "claude-code", cask: true },
     winget: "Anthropic.ClaudeCode",
     choco: "claude-code",
@@ -56,7 +72,7 @@ export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
   },
   codex: {
     binary: "codex",
-    npm: { name: "@openai/codex" },
+    npm: { name: "@openai/codex", node: ">=16" },
     brew: { name: "codex", cask: true },
     winget: "OpenAI.Codex",
     choco: "codex",
@@ -65,9 +81,8 @@ export const AGENT_PACKAGES: Readonly<Record<string, AgentPackage>> = {
   },
   gemini: {
     binary: "gemini",
-    npm: { name: "@google/gemini-cli" },
-    brew: { name: "gemini-cli", cask: false },
-    order: ["npm", "homebrew"],
+    npm: { name: "@google/gemini-cli", node: ">=20" },
+    order: ["npm"],
   },
   muse: {
     binary: "muse",
@@ -120,6 +135,25 @@ export function agentInstallOf(pkg: AgentPackage, facts: InstallFacts): AgentIns
   };
 }
 
+/**
+ * The install menu for a package that is not installed here — or is, but broken, with nothing to mend
+ * it: each way, and the rows for what a way needs first (Node.js for npm, Homebrew for a formula), as
+ * `chain.ts` builds them. Undefined when installed, or when nothing here could install it at all.
+ */
+export async function installChoicesFor(pkg: AgentPackage, title: string, command: string, facts: InstallFacts, lookup: InstallLookup): Promise<InstallChoice[] | undefined> {
+  const found = facts.found;
+  if (found !== undefined && (!found.broken || planOf(pkg, facts).update !== undefined)) return undefined;
+  const chain = await gatherChainFacts(lookup);
+  if (chain === undefined) return undefined;
+  const shown = shownChoices(installChoicesOf(pkg, title, command, facts, chain), (step) => (step.pkg === pkg ? facts : chain.machine));
+  return shown.length > 0 ? shown : undefined;
+}
+
+/** What an agent is called in a sentence: its row's title, else its name. */
+export function agentTitleOf(info: ExecutorInfo): string {
+  return EXECUTOR_TITLES[info.name] ?? info.name;
+}
+
 /** The built-in kinds that drive one agent's binary, and which. */
 export const PACKAGE_OF_KIND: Partial<Record<ExecutorKind, string>> = { cli: "claude", codex: "codex" };
 
@@ -137,13 +171,18 @@ export function agentPackageOf(info: ExecutorInfo): AgentPackage | undefined {
 }
 
 /**
- * Install an agent the way named, or — with no way named — update it the way it was installed (a
- * broken one is reinstalled). Only a way the facts offer is run: the request names a way, never a
- * command. Answers when the installer exits, with where the binary is now.
+ * Install an agent the way named, or by the path chosen through its install menu (each step in turn:
+ * Node.js, then npm's install of it), or — with neither — update it the way it was installed (a broken
+ * one is reinstalled). Only a way the facts offer is run: the request names a way or a path, never a
+ * command. Answers when the last installer exits, with where the binary is now.
  */
-export async function installAgent(info: ExecutorInfo, method: AgentInstallMethod | undefined, options: InstallRunOptions): Promise<AgentInstallOutcome> {
+export async function installAgent(info: ExecutorInfo, request: AgentInstallRequest | AgentInstallMethod | undefined, options: InstallRunOptions, hooks: ChainRunHooks = {}): Promise<AgentInstallOutcome> {
   const pkg = agentPackageOf(info);
   if (pkg === undefined) return { ok: false, reason: `JaiRA does not know how to install ${info.name}` };
+  const asked: AgentInstallRequest = typeof request === "string" ? { method: request } : (request ?? {});
   // An agent is the machine's: never installed into a workspace's container (decision 0027).
-  return runInstall(pkg, info.command ?? pkg.binary, method, onMachine(options));
+  const machine = onMachine(options);
+  const command = info.command ?? pkg.binary;
+  if (asked.choice !== undefined && asked.choice.length > 0) return runChoice(pkg, agentTitleOf(info), command, asked.choice, machine, hooks);
+  return runInstall(pkg, command, asked.method, machine);
 }

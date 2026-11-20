@@ -11,7 +11,7 @@
 import { resolve } from "node:path";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import type { AgentInstallMethod, GitCliName, HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
+import type { AgentInstallRequest, GitCliName, HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
@@ -290,9 +290,9 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
     "executor:cancelSignIn": ((request: { name: string }) => service.cancelSignIn(request.name)) as Handler,
     "executor:signOut": ((request: { name: string }) => service.signOutExecutor(request.name)) as Handler,
-    "executor:install": ((request: { name: string; method?: AgentInstallMethod }) => service.installExecutor(request.name, request.method)) as Handler,
+    "executor:install": ((request: { name: string } & AgentInstallRequest) => service.installExecutor(request.name, installRequestOf(request))) as Handler,
     "executor:cancelInstall": ((request: { name: string }) => service.cancelInstall(request.name)) as Handler,
-    "gitCli:install": ((request: { name: GitCliName; method?: AgentInstallMethod }) => service.installGitCli(request.name, request.method)) as Handler,
+    "gitCli:install": ((request: { name: GitCliName } & AgentInstallRequest) => service.installGitCli(request.name, installRequestOf(request))) as Handler,
     "gitCli:cancelInstall": ((request: { name: GitCliName }) => service.cancelGitCliInstall(request.name)) as Handler,
     "forge:signIn": ((request: { connection: string }) => service.signInForge(request.connection)) as Handler,
     "forge:cancelSignIn": ((request: { connection: string }) => service.cancelForgeSignIn(request.connection)) as Handler,
@@ -420,5 +420,13 @@ export function enginePeerHandlers(service: AppService, control: EngineControl):
       return typeof served.body === "string" ? served : { ...served, body: served.body.toString("base64"), base64: true };
     }) as Handler,
     "engine:restore": (() => service.restore()) as Handler,
+  };
+}
+
+/** What an install request names — a way, or a path of menu keys — and nothing else it carries. */
+function installRequestOf(request: AgentInstallRequest): AgentInstallRequest {
+  return {
+    ...(request.method !== undefined ? { method: request.method } : {}),
+    ...(Array.isArray(request.choice) ? { choice: request.choice.filter((key): key is string => typeof key === "string").slice(0, 8) } : {}),
   };
 }

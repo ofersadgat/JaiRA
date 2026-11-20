@@ -30,7 +30,8 @@ function managerPaths(manager: VersionManager, pkg: ToolPackage): readonly RegEx
   const binary = pkg.binary.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   switch (manager) {
     case "nvm":
-      return [/\/\.?nvm\/versions\/node\/[^/]+\/bin\/[^/]+$/];
+      // nvm's versions, or nvm-windows' (`%NVM_HOME%\\v22.11.0\\node.exe`).
+      return [/\/\.?nvm\/versions\/node\/[^/]+\/bin\/[^/]+$/, /\/nvm\/v\d[^/]*\/[^/]+$/i];
     case "fnm":
       return [/\/fnm\/node-versions\/[^/]+\/installation\/bin\/[^/]+$/, /\/fnm_multishells\/[^/]+\/bin\/[^/]+$/, /\/fnm\/aliases\/[^/]+\/bin\/[^/]+$/];
     case "volta":

@@ -9,6 +9,7 @@ import { posix, win32 } from "node:path";
 import type { Exec } from "../exec";
 import { isContainerEnv, isWslEnv, type ExecEnv } from "../paths";
 import { VERSION_MANAGERS, type ToolPackage, type VersionManager } from "./catalog";
+import { knownShellEnv, loginShellEnv, type ShellEnv } from "./shellEnv";
 import { compareVersions, versionParts } from "./version";
 
 /** The binary as found. */
@@ -42,6 +43,7 @@ export type InstallTool =
   | "apt-get"
   | "dnf"
   | "sudo"
+  | "pkexec"
   | "pkg-config"
   | VersionManager;
 
@@ -51,10 +53,20 @@ export interface InstallFacts {
   home: string;
   found?: FoundBinary;
   tools: Partial<Record<InstallTool, string>>;
+  /**
+   * The installers found only in a usual place, which this app's PATH does not reach — one installed
+   * a step before (npm, by the Node.js that step put under fnm), or since the app started. On Windows
+   * one is run by its path, since a bare name is looked up on that PATH.
+   */
+  offPath?: readonly InstallTool[];
   /** Is there a program at this path? Absent (inside WSL) is taken as yes — the run says otherwise. */
   has?: (path: string) => boolean;
   /** Running as root: a system package manager needs no sudo. */
   root?: boolean;
+  /** The processor, as Node names it (`arm64`, `x64`) — where it is known: not inside WSL. */
+  arch?: string;
+  /** The variables a version manager is run by (`NVM_DIR`, `FNM_DIR`), the person's terminal's where this app has none. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The file system and environment, as the lookups below need them — injected so a test is a table. */
@@ -76,16 +88,46 @@ export interface InstallDeps {
   readDir?: (path: string) => readonly string[] | undefined;
   /** This process runs as root. */
   root?: boolean;
+  /** The processor, as Node names it. */
+  arch?: string;
+  /**
+   * What the person's own terminal has that this app has not ({@link loginShellEnv}): the folders on its
+   * PATH that this app's lacks — looked in before the installers' usual places, though a program there
+   * is not reached by the bare command from here — and the variables its profile sets (`NVM_DIR`), which
+   * the installers are run with.
+   */
+  shell?: { pathDirs: readonly string[]; vars: Readonly<Record<string, string>> };
 }
 
-/** This process's machine. */
+/** What a terminal's environment adds to this app's: the folders and variables this app has not. */
+export function shellAdds(shell: ShellEnv | undefined, env: Readonly<Record<string, string | undefined>>, pathDirs: readonly string[], platform: NodeJS.Platform): InstallDeps["shell"] {
+  if (shell === undefined) return undefined;
+  const same = (a: string, b: string): boolean => (platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b);
+  const dirs = shell.pathDirs.filter((dir) => !pathDirs.some((one) => same(one, dir)));
+  const vars = Object.fromEntries(Object.entries(shell.vars).filter(([name, value]) => name !== "PATH" && (env[name] === undefined || env[name] === "") && value.length > 0));
+  return dirs.length > 0 || Object.keys(vars).length > 0 ? { pathDirs: dirs, vars } : undefined;
+}
+
+/**
+ * This process's machine as the person's own terminal sees it: {@link nodeInstallDeps} once the
+ * terminal's environment has been asked (once per process; later calls do not wait).
+ */
+export async function machineInstallDeps(exec: Exec): Promise<InstallDeps> {
+  await loginShellEnv(exec);
+  return nodeInstallDeps();
+}
+
+/** This process's machine — with what the person's terminal adds, once {@link loginShellEnv} has answered. */
 export function nodeInstallDeps(): InstallDeps {
   const platform = process.platform;
+  const pathDirs = (process.env["PATH"] ?? "").split(platform === "win32" ? ";" : ":").filter((dir) => dir.length > 0);
+  const shell = shellAdds(knownShellEnv(), process.env, pathDirs, platform);
   return {
     platform,
     home: homedir(),
-    pathDirs: (process.env["PATH"] ?? "").split(platform === "win32" ? ";" : ":").filter((dir) => dir.length > 0),
-    env: process.env,
+    pathDirs,
+    env: shell !== undefined ? { ...shell.vars, ...process.env } : process.env,
+    ...(shell !== undefined ? { shell } : {}),
     lexists: (path) => {
       try {
         lstatSync(path);
@@ -123,6 +165,7 @@ export function nodeInstallDeps(): InstallDeps {
       }
     },
     root: typeof process.getuid === "function" && process.getuid() === 0,
+    arch: process.arch,
   };
 }
 
@@ -158,10 +201,52 @@ function usualDirSpecs(platform: InstallFacts["platform"]): readonly string[] {
   return ["~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "~/.bun/bin", "~/.npm-global/bin"];
 }
 
+/**
+ * Where Node.js's own programs are when no PATH says — npm beside the node it came with, and an agent
+ * npm installed globally beside them both: the version managers' defaults, and Node's own installer's
+ * folder on Windows. nvm has no default folder of its own: its versions, newest first.
+ */
+const NODE_DIRS: { posix: readonly string[]; windows: readonly string[] } = {
+  posix: [
+    "$FNM_DIR/aliases/default/bin",
+    "$XDG_DATA_HOME/fnm/aliases/default/bin",
+    "~/.local/share/fnm/aliases/default/bin",
+    "~/Library/Application Support/fnm/aliases/default/bin",
+    "~/.fnm/aliases/default/bin",
+    "$NVM_DIR/versions/node/*/bin",
+    "~/.nvm/versions/node/*/bin",
+    "$XDG_CONFIG_HOME/nvm/versions/node/*/bin",
+    "~/.config/nvm/versions/node/*/bin",
+    "$VOLTA_HOME/bin",
+    "~/.volta/bin",
+    "$MISE_DATA_DIR/shims",
+    "$XDG_DATA_HOME/mise/shims",
+    "~/.local/share/mise/shims",
+    // fnm with versions and no default made: the newest of them.
+    "$FNM_DIR/node-versions/*/installation/bin",
+    "$XDG_DATA_HOME/fnm/node-versions/*/installation/bin",
+    "~/.local/share/fnm/node-versions/*/installation/bin",
+    "~/Library/Application Support/fnm/node-versions/*/installation/bin",
+  ],
+  windows: [
+    "%NVM_SYMLINK%",
+    "%ProgramFiles%\\nodejs",
+    "%FNM_DIR%\\aliases\\default",
+    "%APPDATA%\\fnm\\aliases\\default",
+    "%LOCALAPPDATA%\\Volta\\bin",
+    "%LOCALAPPDATA%\\mise\\shims",
+    "%FNM_DIR%\\node-versions\\*\\installation",
+    "%APPDATA%\\fnm\\node-versions\\*\\installation",
+  ],
+};
+
 /** Where a version manager puts the programs it keeps on the PATH — its shims, or its default's folder. */
 const MANAGER_DIRS: Readonly<Record<VersionManager, { posix?: readonly string[]; windows?: readonly string[] }>> = {
-  nvm: { posix: ["$NVM_DIR/versions/node/*/bin", "~/.nvm/versions/node/*/bin"] },
-  fnm: { posix: ["~/.local/share/fnm/aliases/default/bin", "~/Library/Application Support/fnm/aliases/default/bin"], windows: ["%APPDATA%\\fnm\\aliases\\default"] },
+  nvm: { posix: ["$NVM_DIR/versions/node/*/bin", "~/.nvm/versions/node/*/bin", "~/.config/nvm/versions/node/*/bin"], windows: ["%NVM_SYMLINK%", "%NVM_HOME%\\v*"] },
+  fnm: {
+    posix: ["$FNM_DIR/aliases/default/bin", "$XDG_DATA_HOME/fnm/aliases/default/bin", "~/.local/share/fnm/aliases/default/bin", "~/Library/Application Support/fnm/aliases/default/bin", "~/.fnm/aliases/default/bin"],
+    windows: ["%FNM_DIR%\\aliases\\default", "%APPDATA%\\fnm\\aliases\\default"],
+  },
   volta: { posix: ["$VOLTA_HOME/bin", "~/.volta/bin"], windows: ["%LOCALAPPDATA%\\Volta\\bin"] },
   mise: { posix: ["$MISE_DATA_DIR/shims", "~/.local/share/mise/shims"], windows: ["%LOCALAPPDATA%\\mise\\shims"] },
   asdf: { posix: ["$ASDF_DATA_DIR/shims", "~/.asdf/shims"] },
@@ -177,9 +262,9 @@ const MANAGER_DIRS: Readonly<Record<VersionManager, { posix?: readonly string[];
  * lookup asks for the installers an agent's always did, and the rest only where its package names
  * them — a library's pkg-config, a language's version managers, Linux's apt and dnf.
  */
-const INSTALL_TOOLS: Readonly<Record<InstallTool, { on: readonly InstallFacts["platform"][]; dirs?: readonly string[]; files?: readonly string[] }>> = {
+const INSTALL_TOOLS: Readonly<Record<InstallTool, { on: readonly InstallFacts["platform"][]; dirs?: readonly string[]; windowsDirs?: readonly string[]; files?: readonly string[] }>> = {
   brew: { on: ["darwin", "linux"] },
-  npm: { on: ["darwin", "linux", "win32"] },
+  npm: { on: ["darwin", "linux", "win32"], dirs: NODE_DIRS.posix, windowsDirs: NODE_DIRS.windows },
   bun: { on: ["darwin", "linux", "win32"] },
   pnpm: { on: ["darwin", "linux", "win32"] },
   winget: { on: ["win32"] },
@@ -192,10 +277,26 @@ const INSTALL_TOOLS: Readonly<Record<InstallTool, { on: readonly InstallFacts["p
   "apt-get": { on: ["linux"] },
   dnf: { on: ["linux"] },
   sudo: { on: ["darwin", "linux"] },
+  // polkit's: a password asked in the desktop's own window. Only on a desktop, and never inside WSL or a container.
+  pkexec: { on: ["linux"] },
   "pkg-config": { on: ["darwin", "linux"] },
-  // nvm is a shell function, defined by sourcing this file.
-  nvm: { on: ["darwin", "linux"], files: ["$NVM_DIR/nvm.sh", "~/.nvm/nvm.sh", "$XDG_CONFIG_HOME/nvm/nvm.sh", "~/.config/nvm/nvm.sh"] },
-  fnm: { on: ["darwin", "linux", "win32"], dirs: ["~/.local/share/fnm", "~/.fnm"] },
+  // nvm is a shell function, defined by sourcing this file — its own script's, or Homebrew's formula's,
+  // whose NVM_DIR is ~/.nvm whatever folder nvm.sh is in. On Windows, nvm-windows: a program of its own.
+  nvm: {
+    on: ["darwin", "linux", "win32"],
+    files: [
+      "$NVM_DIR/nvm.sh",
+      "~/.nvm/nvm.sh",
+      "$XDG_CONFIG_HOME/nvm/nvm.sh",
+      "~/.config/nvm/nvm.sh",
+      "/opt/homebrew/opt/nvm/nvm.sh",
+      "/usr/local/opt/nvm/nvm.sh",
+      "/home/linuxbrew/.linuxbrew/opt/nvm/nvm.sh",
+    ],
+    windowsDirs: ["%NVM_HOME%", "%APPDATA%\\nvm"],
+  },
+  // fnm's script puts it in its data folder; cargo, in cargo's.
+  fnm: { on: ["darwin", "linux", "win32"], dirs: ["$FNM_DIR", "$XDG_DATA_HOME/fnm", "~/.local/share/fnm", "~/Library/Application Support/fnm", "~/.fnm", "$CARGO_HOME/bin", "~/.cargo/bin"], windowsDirs: ["%FNM_DIR%", "%LOCALAPPDATA%\\fnm"] },
   volta: { on: ["darwin", "linux", "win32"], dirs: ["~/.volta/bin"] },
   mise: { on: ["darwin", "linux", "win32"] },
   asdf: { on: ["darwin", "linux"], dirs: ["~/.asdf/bin"] },
@@ -216,6 +317,7 @@ export function toolsFor(pkg: ToolPackage | undefined): InstallTool[] {
   if (pkg.apt !== undefined || pkg.versioned?.apt !== undefined || pkg.order.includes("apt")) wanted.add("apt-get").add("sudo");
   if (pkg.dnf !== undefined || pkg.versioned?.dnf !== undefined || pkg.order.includes("dnf")) wanted.add("dnf").add("sudo");
   if (pkg.native?.sudo === true) wanted.add("sudo");
+  if (pkg.native?.elevated?.includes("linux") === true || wanted.has("apt-get") || wanted.has("dnf")) wanted.add("pkexec");
   if (pkg.pkgConfig !== undefined) wanted.add("pkg-config");
   for (const manager of pkg.managers ?? []) wanted.add(manager);
   return [...wanted];
@@ -284,7 +386,9 @@ export function packageDirs(pkg: ToolPackage | undefined, deps: InstallDeps): st
   const windows = deps.platform === "win32";
   const own = windows ? pkg.dirs?.windows : pkg.dirs?.posix;
   const managed = (pkg.managers ?? []).flatMap((manager) => (windows ? MANAGER_DIRS[manager].windows : MANAGER_DIRS[manager].posix) ?? []);
-  return [...expandAll(own, deps), ...expandAll(managed, deps)];
+  // A package npm installs globally lands beside the node it was installed with.
+  const node = pkg.npm !== undefined ? (windows ? NODE_DIRS.windows : NODE_DIRS.posix) : [];
+  return [...expandAll(own, deps), ...expandAll(managed, deps), ...expandAll(node, deps)];
 }
 
 /** The names a command may have on disk: itself, and on Windows each runnable extension. */
@@ -320,7 +424,8 @@ export function locateBinary(command: string, deps: InstallDeps, options: Locate
     broken ??= { path: candidate, real: target !== undefined ? path.resolve(path.dirname(candidate), target) : candidate, onPath, broken: true };
     return undefined;
   };
-  const usual = [...expandAll(usualDirSpecs(platformOf(deps)), deps), ...(options.dirs ?? [])];
+  // The person's terminal's PATH first: where their shell finds it, though this app's PATH does not.
+  const usual = [...(deps.shell?.pathDirs ?? []), ...expandAll(usualDirSpecs(platformOf(deps)), deps), ...(options.dirs ?? [])];
   // A configured path is what runs, so "on the PATH" is beside the point: it is reached.
   const searches: Array<{ dirs: readonly string[]; onPath: boolean }> = named
     ? [{ dirs: [""], onPath: true }]
@@ -341,20 +446,30 @@ export function locateBinary(command: string, deps: InstallDeps, options: Locate
 
 /** The installers this machine has of those named, found as the tool is (PATH first, then the usual places). */
 export function locateTools(deps: InstallDeps, names: readonly InstallTool[] = Object.keys(INSTALL_TOOLS) as InstallTool[]): Partial<Record<InstallTool, string>> {
+  return locateToolsWhere(deps, names).tools;
+}
+
+/** {@link locateTools}, with the ones found only off the PATH named. */
+function locateToolsWhere(deps: InstallDeps, names: readonly InstallTool[]): { tools: Partial<Record<InstallTool, string>>; offPath: InstallTool[] } {
   const platform = platformOf(deps);
   const tools: Partial<Record<InstallTool, string>> = {};
+  const offPath: InstallTool[] = [];
   for (const name of names) {
     const spec = INSTALL_TOOLS[name];
     if (!spec.on.includes(platform)) continue;
-    if (spec.files !== undefined) {
+    // polkit asks in a window: there must be a desktop to draw it on.
+    if (name === "pkexec" && !deps.env["DISPLAY"] && !deps.env["WAYLAND_DISPLAY"]) continue;
+    if (spec.files !== undefined && platform !== "win32") {
       const file = expandAll(spec.files, deps).find((one) => deps.isFile(one));
       if (file !== undefined) tools[name] = file;
       continue;
     }
-    const found = locateBinary(name, deps, { dirs: expandAll(spec.dirs, deps) });
-    if (found !== undefined && !found.broken) tools[name] = found.path;
+    const found = locateBinary(name, deps, { dirs: expandAll(platform === "win32" ? (spec.windowsDirs ?? spec.dirs) : spec.dirs, deps) });
+    if (found === undefined || found.broken) continue;
+    tools[name] = found.path;
+    if (!found.onPath) offPath.push(name);
   }
-  return tools;
+  return { tools, offPath };
 }
 
 /**
@@ -384,13 +499,17 @@ function isStub(pkg: ToolPackage, real: string): boolean {
 export function installFactsOf(command: string, pkg: ToolPackage, deps: InstallDeps, options: { skip?: (real: string) => boolean } = {}): InstallFacts {
   const skip = (real: string): boolean => isStub(pkg, real) || options.skip?.(real) === true;
   const found = locateBinary(command, deps, { dirs: packageDirs(pkg, deps), skip });
+  const { tools, offPath } = locateToolsWhere(deps, toolsFor(pkg));
   return {
     platform: platformOf(deps),
     home: deps.home,
     ...(found !== undefined ? { found: shimPackage(found, pkg, deps) } : {}),
-    tools: locateTools(deps, toolsFor(pkg)),
+    tools,
+    ...(offPath.length > 0 ? { offPath } : {}),
     has: deps.isFile,
     ...(deps.root === true ? { root: true } : {}),
+    ...(deps.arch !== undefined ? { arch: deps.arch } : {}),
+    env: deps.env,
   };
 }
 
@@ -413,8 +532,14 @@ function shDir(spec: string): string {
  */
 export function wslFactsScript(pkg: ToolPackage | undefined): string {
   const linux = (specs: readonly string[] | undefined): string[] => (specs ?? []).map(shDir);
-  const dirs = [...linux(usualDirSpecs("linux")), ...linux(pkg?.dirs?.posix), ...(pkg?.managers ?? []).flatMap((manager) => linux(MANAGER_DIRS[manager].posix))];
-  const tools = toolsFor(pkg).filter((name) => INSTALL_TOOLS[name].on.includes("linux"));
+  const dirs = [
+    ...linux(usualDirSpecs("linux")),
+    ...linux(pkg?.dirs?.posix),
+    ...(pkg?.managers ?? []).flatMap((manager) => linux(MANAGER_DIRS[manager].posix)),
+    ...(pkg?.npm !== undefined ? linux(NODE_DIRS.posix) : []),
+  ];
+  // polkit's window is a desktop's: none inside WSL or a container.
+  const tools = toolsFor(pkg).filter((name) => INSTALL_TOOLS[name].on.includes("linux") && name !== "pkexec");
   const plain = tools.filter((name) => INSTALL_TOOLS[name].files === undefined && INSTALL_TOOLS[name].dirs === undefined);
   const lines = [
     'n="$1"',

@@ -11,11 +11,12 @@
  * runs anything called git, and a check never opens that window.
  */
 import { posix, win32 } from "node:path";
-import type { AgentInstallMethod, AgentInstallOutcome, GitCliName, ProbeResult } from "@jaira/shared";
-import { agentInstallOf } from "./agentInstall";
+import type { AgentInstallMethod, AgentInstallOutcome, AgentInstallRequest, GitCliName, ProbeResult } from "@jaira/shared";
+import { agentInstallOf, installChoicesFor } from "./agentInstall";
 import {
   GIT_CLI_PACKAGES,
   gatherInstallFacts,
+  runChoice,
   runInstall,
   versionLineOf,
   waitForAppleInstall,
@@ -39,6 +40,9 @@ export interface GitCliCheckOptions extends InstallLookup {
 
 const VERSION_TIMEOUT_MS = 10_000;
 
+/** What the program is called in a menu's step. */
+const TITLES: Record<GitCliName, string> = { git: "Git", gh: "GitHub CLI", glab: "GitLab CLI" };
+
 /** What the program is called in a sentence. */
 const SPOKEN: Record<GitCliName, string> = { git: "git", gh: "gh (GitHub CLI)", glab: "glab (GitLab CLI)" };
 
@@ -61,7 +65,9 @@ export async function probeGitCli(name: GitCliName, given: GitCliCheckOptions): 
     facts = (await gitCliFacts(name, options))?.facts ?? facts;
   }
 
-  const install = agentInstallOf(pkg, facts);
+  const listed = agentInstallOf(pkg, facts);
+  const choices = await installChoicesFor(pkg, TITLES[name], pkg.binary, facts, options);
+  const install = choices !== undefined ? { ...listed, choices } : listed;
   const found = facts.found;
   if (found === undefined) {
     return {
@@ -132,9 +138,17 @@ function missingFix(name: GitCliName, facts: InstallFacts, installable: boolean)
  * Tools install in a window of their own — `xcode-select --install` only asks for it — so that way
  * answers once git is there, on Cancel, or after an hour.
  */
-export async function installGitCli(name: GitCliName, method: AgentInstallMethod | undefined, given: InstallRunOptions & { wait?: AppleWait }): Promise<AgentInstallOutcome> {
+export async function installGitCli(name: GitCliName, request: AgentInstallRequest | AgentInstallMethod | undefined, given: InstallRunOptions & { wait?: AppleWait }): Promise<AgentInstallOutcome> {
   const options = onMachine(given);
   const pkg = GIT_CLI_PACKAGES[name];
+  const asked: AgentInstallRequest = typeof request === "string" ? { method: request } : (request ?? {});
+  if (asked.choice !== undefined && asked.choice.length > 0) {
+    // A step that installs the program itself looks for it past Apple's placeholder, as a check does.
+    return runChoice(pkg, TITLES[name], pkg.binary, asked.choice, options, {
+      facts: async (step) => (step.pkg === pkg ? (await gitCliFacts(name, options))?.facts : gatherInstallFacts(step.command, step.pkg, options)),
+    });
+  }
+  const method = asked.method;
   return runInstall(pkg, pkg.binary, method, options, {
     facts: async () => (await gitCliFacts(name, options))?.facts,
     afterRun: async (chosen) => (chosen.method === "command-line-tools" ? waitForAppleInstall(pkg, pkg.binary, options, options.wait) : undefined),

@@ -198,7 +198,7 @@ describe("ensureTool", () => {
     expect(said).toEqual(["$ nvm install 22\n", "Downloading and installing node v22.11.0...\n"]);
     const runs = exec.calls.filter((call) => call.file === "/bin/bash");
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ args: ["-lc", `source ${NVM}/nvm.sh && nvm install 22`], stdin: "" });
+    expect(runs[0]).toMatchObject({ args: ["-lc", `export NVM_DIR=${NVM}; mkdir -p "$NVM_DIR" && source ${NVM}/nvm.sh && nvm install 22`], stdin: "" });
   });
 
   it("installs a keg-only versioned formula and finds it in Homebrew's opt folder", async () => {

@@ -20,7 +20,7 @@
  * the failure this whole surface exists to prevent.
  */
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, posix, win32 } from "node:path";
 import {
   BUILTIN_EXECUTORS,
   EXECUTOR_KINDS,
@@ -39,8 +39,8 @@ import {
   type SecretOrigin,
 } from "@jaira/shared";
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK } from "./agents";
-import { agentInstallOf, agentPackageOf } from "./agentInstall";
-import { gatherInstallFacts, type InstallDeps } from "./install";
+import { agentInstallOf, agentPackageOf, agentTitleOf, installChoicesFor } from "./agentInstall";
+import { gatherInstallFacts, inGuest, installOriginOf, type AgentPackage, type InstallDeps, type InstallFacts, type InstallLookup } from "./install";
 import { SIGN_IN_COMMANDS, signInCommand } from "./agentOutcome";
 import { AGENT_GENERIC_CLI, bridgesOnly } from "./genericAgent";
 import type { Exec } from "./exec";
@@ -173,6 +173,28 @@ export interface ProbeOptions {
    * `sh` inside WSL), and only a caller that will offer the install asks for it.
    */
   install?: InstallDeps;
+  /**
+   * Make a folder reachable by the bare command from here on — for an agent npm installed beside its
+   * own Node.js (under fnm or nvm) in a folder this app's PATH does not reach: it is run by that node,
+   * which only the folder's being on the PATH finds. Not inside WSL or a container.
+   */
+  reach?: (dir: string) => void;
+}
+
+/**
+ * An agent npm installed beside its own Node.js — in a version manager's Node folder, which this app's
+ * PATH does not reach — made reachable: it is a script that folder's `node` runs, which a saved path
+ * alone would not find. The folder added, when one was.
+ */
+function reachBesideNode(pkg: AgentPackage, facts: InstallFacts, lookup: InstallLookup, reach: ((dir: string) => void) | undefined): string | undefined {
+  const found = facts.found;
+  if (reach === undefined || found === undefined || found.broken || found.onPath || inGuest(lookup) || pkg.npm === undefined) return undefined;
+  if (installOriginOf(found.real, pkg)?.method !== "npm") return undefined;
+  const path = facts.platform === "win32" ? win32 : posix;
+  const dir = path.dirname(found.path);
+  if (!lookup.deps.isFile(path.join(dir, facts.platform === "win32" ? "node.exe" : "node"))) return undefined;
+  reach(dir);
+  return dir;
 }
 
 /** The package the `claude-code` runtime drives in process. */
@@ -266,8 +288,13 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
   // Where the binary is and how it got there, for an agent JaiRA can install — asked beside the
   // version, since a missing binary's row offers the install and a present one's the update.
   const pkg = options.install !== undefined ? agentPackageOf(info) : undefined;
-  const facts = pkg !== undefined ? await gatherInstallFacts(info.command, pkg, { exec: options.exec, deps: options.install!, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) }) : undefined;
-  const install = pkg !== undefined && facts !== undefined ? agentInstallOf(pkg, facts) : undefined;
+  const lookup = { exec: options.exec, deps: options.install!, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) };
+  let facts = pkg !== undefined ? await gatherInstallFacts(info.command, pkg, lookup) : undefined;
+  const reached = pkg !== undefined && facts !== undefined ? reachBesideNode(pkg, facts, lookup, options.reach) : undefined;
+  if (pkg !== undefined && reached !== undefined) facts = (await gatherInstallFacts(info.command, pkg, { ...lookup, deps: { ...lookup.deps, pathDirs: [...lookup.deps.pathDirs, reached] } })) ?? facts;
+  const listed = pkg !== undefined && facts !== undefined ? agentInstallOf(pkg, facts) : undefined;
+  const choices = pkg !== undefined && facts !== undefined ? await installChoicesFor(pkg, agentTitleOf(info), info.command, facts, lookup) : undefined;
+  const install = listed !== undefined ? { ...listed, ...(choices !== undefined ? { choices } : {}) } : undefined;
   const withInstall = install !== undefined ? { install } : {};
 
   const missing =

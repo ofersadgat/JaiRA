@@ -9,7 +9,7 @@ import type { InstallDeps } from "../src/install";
 export type Files = Record<string, "file" | { link: string }>;
 
 /** A file system as a table: a path is a file, or a link to another path (which may be gone). Folders are what paths are under. */
-export function fakeFs(options: { platform?: NodeJS.Platform; home?: string; path: string[]; files: Files; env?: Record<string, string>; root?: boolean }): InstallDeps {
+export function fakeFs(options: { platform?: NodeJS.Platform; home?: string; path: string[]; files: Files; env?: Record<string, string>; root?: boolean; arch?: string }): InstallDeps {
   const platform = options.platform ?? "darwin";
   const path = platform === "win32" ? win32 : posix;
   const resolve = (p: string, depth = 0): string | undefined => {
@@ -36,6 +36,7 @@ export function fakeFs(options: { platform?: NodeJS.Platform; home?: string; pat
       return names.size > 0 ? [...names] : undefined;
     },
     ...(options.root === true ? { root: true } : {}),
+    ...(options.arch !== undefined ? { arch: options.arch } : {}),
   };
 }
 

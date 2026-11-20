@@ -96,7 +96,8 @@ import {
   SHARED_SESSION,
   WORKFLOW_JSON,
   parseRemoteProjectKey,
-  type AgentInstallMethod,
+  installRequestOf,
+  type InstallWay,
   type GitCliName,
   type InstallTarget,
   type WritingTool,
@@ -4324,19 +4325,20 @@ export function useApp() {
       },
 
       /**
-       * Install an agent the way named, or (none named) update it the way it was installed; the row
-       * waits until the installer exits. Main has re-checked by the time it answers. An install that
-       * lands where this app's PATH does not reach would leave the bare command failing, so the agent
-       * is pointed at the binary — in the person's own layer, since a path is this machine's.
+       * Install an agent the way named — or by a path through its install menu, step by step — or (none
+       * named) update it the way it was installed; the row waits until the last installer exits. Main
+       * has re-checked by the time it answers. An install that lands where this app's PATH does not
+       * reach would leave the bare command failing, so the agent is pointed at the binary — in the
+       * person's own layer, since a path is this machine's.
        */
-      installAgent: async (name: string, method?: AgentInstallMethod) => {
+      installAgent: async (name: string, way?: InstallWay) => {
         if (ref.current.installing.includes(name)) return;
         const key = installLogKey({ kind: "agent", name });
         // The log starts empty: the service's first push is the command it runs.
-        patch({ installing: [...ref.current.installing, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: method === undefined } }, error: null });
+        patch({ installing: [...ref.current.installing, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: way === undefined } }, error: null });
         let outcome: InstallLog["outcome"];
         try {
-          const answered = await invoke("executor:install", { name, ...(method !== undefined ? { method } : {}) });
+          const answered = await invoke("executor:install", { name, ...installRequestOf(way) });
           // Why it failed is said in the log, under the row — a cancel too, as the person's own doing.
           outcome = answered.ok ? { ok: true } : { ok: false, reason: answered.reason };
           if (answered.ok && answered.onPath === false && answered.path !== undefined) await actionsRef.current.useAgentCommand(name, answered.path);
@@ -4364,13 +4366,13 @@ export function useApp() {
        * an agent's: the row waits until the installer exits — for Apple's Command Line Tools, until git
        * is there — and main has re-checked by the time it answers.
        */
-      installGitCli: async (name: GitCliName, method?: AgentInstallMethod) => {
+      installGitCli: async (name: GitCliName, way?: InstallWay) => {
         if (ref.current.installingGitClis.includes(name)) return;
         const key = installLogKey({ kind: "gitCli", name });
-        patch({ installingGitClis: [...ref.current.installingGitClis, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: method === undefined } }, error: null });
+        patch({ installingGitClis: [...ref.current.installingGitClis, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: way === undefined } }, error: null });
         let outcome: InstallLog["outcome"];
         try {
-          const answered = await invoke("gitCli:install", { name, ...(method !== undefined ? { method } : {}) });
+          const answered = await invoke("gitCli:install", { name, ...installRequestOf(way) });
           outcome = answered.ok ? { ok: true } : { ok: false, reason: answered.reason };
           applyAvailability(patch, await invoke("availability:read", undefined));
         } catch (e) {

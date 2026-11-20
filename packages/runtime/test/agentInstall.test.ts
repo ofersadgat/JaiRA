@@ -242,9 +242,9 @@ describe("Gemini, Muse Code and OpenCode", () => {
   const machine = (files: Record<string, "file" | { link: string }>, platform: NodeJS.Platform = "darwin") =>
     fakeFs({ platform, path: ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"], files: { ...SYSTEM, "/opt/homebrew/bin/brew": "file", "/usr/local/bin/npm": "file", ...files } });
 
-  it("installs Gemini with npm or its Homebrew FORMULA — which Linux has too — and updates the formula by name", () => {
-    expect(agentInstallOf(GEMINI, installFactsOf("gemini", GEMINI, machine({}))).install?.map((one) => one.display)).toEqual(["npm install -g @google/gemini-cli", "brew install gemini-cli"]);
-    expect(agentInstallOf(GEMINI, installFactsOf("gemini", GEMINI, machine({}, "linux"))).install?.map((one) => one.method)).toEqual(["npm", "homebrew"]);
+  it("installs Gemini with npm alone — Homebrew's formula is deprecated — and still updates one the formula installed, by name", () => {
+    expect(agentInstallOf(GEMINI, installFactsOf("gemini", GEMINI, machine({}))).install?.map((one) => one.display)).toEqual(["npm install -g @google/gemini-cli"]);
+    expect(agentInstallOf(GEMINI, installFactsOf("gemini", GEMINI, machine({}, "linux"))).install?.map((one) => one.method)).toEqual(["npm"]);
     const installed = machine({ "/opt/homebrew/bin/gemini": { link: "../Cellar/gemini-cli/0.63.0/bin/gemini" }, "/opt/homebrew/Cellar/gemini-cli/0.63.0/bin/gemini": "file" });
     expect(planOf(GEMINI, installFactsOf("gemini", GEMINI, installed)).update).toMatchObject({ file: "/opt/homebrew/bin/brew", args: ["upgrade", "gemini-cli"] });
   });

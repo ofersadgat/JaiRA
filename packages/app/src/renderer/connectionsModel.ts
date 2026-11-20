@@ -21,6 +21,8 @@ import {
   type AgentAccount,
   type AgentInstall,
   type AgentInstallMethod,
+  type InstallChoice,
+  type InstallWay,
   type ConfigLayer,
   type ConfigView,
   type EmbeddedWeightsReport,
@@ -137,8 +139,16 @@ export interface InstallPanelRow {
   at: string;
   button: string;
   title: string;
-  /** Install this way; absent with `path` absent is the update (here, the reinstall). */
+  /** Install this way; absent with `path` and `choice` absent is the update (here, the reinstall). */
   method?: AgentInstallMethod;
+  /** Install by this path through the install menu: this row's step, then the recommended way on. */
+  choice?: readonly string[];
+  /** The row as the cascading menu draws it — for its arrow, where the next step has more than one way. */
+  menu?: InstallMenuRow;
+  /** A step on its way asks for an administrator's password in the system's own window. */
+  elevated?: boolean;
+  /** `at` begins with words, not a command (`by fnm — or choose`): drawn in the app's face. */
+  words?: boolean;
   /** Use this path as the agent's command. */
   path?: string;
 }
@@ -151,14 +161,29 @@ export interface InstallPanelRow {
  */
 export function installPanelOf(install: AgentInstall | undefined): { head: string; right: string; rows: InstallPanelRow[] } | undefined {
   if (install === undefined) return undefined;
+  // The menu, where the check built one: a row a step, with what comes after it and the arrow to choose.
+  const menu = install.choices !== undefined ? installMenuOf(install.choices) : undefined;
   const ways = (verb: string): InstallPanelRow[] =>
-    (install.install ?? []).map((one) => ({ key: one.method, name: INSTALLED_WITH[one.method], at: one.display, button: verb, title: `runs ${one.display}`, method: one.method }));
+    menu !== undefined
+      ? menu.map((row) => ({
+          key: row.key,
+          name: row.name,
+          at: row.then !== undefined ? `${row.at}, ${row.then}` : row.at,
+          button: verb,
+          title: row.title,
+          ...(row.words ? { words: true } : {}),
+          ...(typeof row.way === "string" ? { method: row.way } : { choice: row.way }),
+          ...(row.sub !== undefined ? { menu: row } : {}),
+          ...(row.elevated ? { elevated: true } : {}),
+        }))
+      : (install.install ?? []).map((one) => ({ key: one.method, name: INSTALLED_WITH[one.method], at: one.display, button: verb, title: `runs ${one.display}`, method: one.method }));
+  const count = menu?.length ?? install.install?.length ?? 0;
   if (install.broken === true) {
     if (install.update !== undefined) {
       const one = install.update;
       return { head: `What is left of an install — ${install.path ?? "its link"} points at nothing`, right: "", rows: [{ key: "reinstall", name: INSTALLED_WITH[one.method], at: one.display, button: "Reinstall", title: `runs ${one.display}` }] };
     }
-    return { head: "What is left of an install. Install it again with:", right: install.install !== undefined && install.install.length > 1 ? "the first is recommended" : "", rows: ways("Install") };
+    return { head: "What is left of an install. Install it again with:", right: count > 1 ? "the first is recommended" : "", rows: ways("Install") };
   }
   if (install.path !== undefined && install.onPath === false) {
     return {
@@ -168,10 +193,84 @@ export function installPanelOf(install: AgentInstall | undefined): { head: strin
     };
   }
   if (install.path !== undefined) return undefined;
-  if (install.install === undefined || install.install.length === 0) {
+  if (count === 0) {
     return { head: "Not installed — and none of the ways it is installed is on this machine", right: "", rows: [] };
   }
-  return { head: "Not installed here. Install it with:", right: install.install.length > 1 ? "the first is recommended" : "", rows: ways("Install") };
+  return { head: "Not installed here. Install it with:", right: count > 1 ? "the first is recommended" : "", rows: ways("Install") };
+}
+
+/**
+ * One row of a cascading install menu, as drawn: one step — what it runs, then what comes after it by
+ * default — with the choices for the step after behind its arrow when there are several.
+ */
+export interface InstallMenuRow {
+  key: string;
+  /** The keys from the top of the menu to this row. */
+  path: readonly string[];
+  /**
+   * What pressing it asks for: the way itself for a row that is one of the agent's own ways and all
+   * there is to it — installed as it always was — else the path to it, run step by step.
+   */
+  way: InstallWay;
+  name: string;
+  /** What this step does: its command, or — where it installs its own installer first — "installs fnm, then Node.js". */
+  at: string;
+  /** `at` is words, not a command: drawn in the app's face, not the data face. */
+  words: boolean;
+  /** What comes after it by default, where something does: "then npm install -g @google/gemini-cli". */
+  then?: string;
+  /** Some step on its way asks for an administrator's password, in the system's own window. */
+  elevated: boolean;
+  /** Every command it runs, in order, by the recommended way at each step after. */
+  title: string;
+  recommended: boolean;
+  /** The choices for the step after, when there are more than one — drawn behind an arrow. */
+  sub?: InstallMenuRow[];
+}
+
+/** The commands a choice runs, then the recommended choice's after it, to the end. */
+function defaultPathOf(choice: InstallChoice): InstallChoice["steps"] {
+  const steps = [...choice.steps];
+  for (let next = choice.next?.[0]; next !== undefined; next = next.next?.[0]) steps.push(...next.steps);
+  return steps;
+}
+
+/** What one row says it does. */
+function rowAt(choice: InstallChoice): string {
+  if (choice.steps.length === 1) return choice.steps[0]!.display;
+  if (choice.steps.length > 1) return `installs ${choice.steps.map((step) => step.title).join(", then ")}`;
+  // A row that groups the ways to get something: by the recommended one, the others behind its chevron.
+  const first = choice.next?.[0];
+  return first !== undefined ? `by ${first.name}` : "";
+}
+
+/**
+ * The install menu as rows: each choice a row that runs its step and then the recommended way on;
+ * its arrow, where the next step has more than one way, opens those.
+ */
+export function installMenuOf(choices: readonly InstallChoice[] | undefined, path: readonly string[] = []): InstallMenuRow[] {
+  return (choices ?? []).map((choice, i) => {
+    const here = [...path, choice.key];
+    const steps = defaultPathOf(choice);
+    const next = choice.next ?? [];
+    // A grouping row's "then" is what its recommended way goes on to; a step's, the step after it.
+    const after = choice.steps.length === 0 ? (next[0]?.next ?? []) : next;
+    const then = after[0] !== undefined ? (after[0].steps.length === 1 ? after[0].steps[0]!.display : rowAt(after[0])) : undefined;
+    const alone = path.length === 0 && next.length === 0 && choice.steps.length === 1 && choice.key in INSTALLED_WITH;
+    return {
+      key: choice.key,
+      path: here,
+      way: alone ? (choice.key as AgentInstallMethod) : here,
+      name: alone ? INSTALLED_WITH[choice.key as AgentInstallMethod] : choice.name,
+      at: rowAt(choice),
+      words: choice.steps.length !== 1,
+      ...(then !== undefined && then !== "" ? { then: `then ${then}` } : {}),
+      elevated: steps.some((step) => step.elevated === true),
+      title: `runs ${steps.map((step) => step.display).join(", then ")}`,
+      recommended: i === 0 && (choices?.length ?? 0) > 1,
+      ...(next.length > 1 ? { sub: installMenuOf(next, here) } : {}),
+    };
+  });
 }
 
 /** What the version line says of an agent that runs: how it was installed, and its Update — or nothing. */
@@ -193,8 +292,17 @@ export function agentPlaceOf(probe: ProbeResult | undefined): "row" | "shelf" {
 }
 
 /** A shelf tile's line under its name, and the ways to install it — the recommended one first. */
-export function shelfTileOf(install: AgentInstall | undefined): { sub: string; ways: InstallPanelRow[] } {
-  const ways = (installPanelOf(install)?.rows ?? []).filter((row) => row.method !== undefined);
+export function shelfTileOf(install: AgentInstall | undefined): { sub: string; ways: InstallPanelRow[]; menu?: InstallMenuRow[] } {
+  const ways = (installPanelOf(install)?.rows ?? []).filter((row) => row.method !== undefined || row.choice !== undefined);
+  if (install?.choices !== undefined) {
+    const menu = installMenuOf(install.choices);
+    const first = install.choices[0];
+    const steps = first !== undefined ? defaultPathOf(first) : [];
+    // What the recommended way takes: the things it installs before the program itself, if any.
+    const before = steps.slice(0, -1).map((step) => step.title);
+    const sub = first === undefined ? "nothing here installs it" : before.length > 0 ? `installs ${before.join(" and ")} first` : `installs with ${steps[0]?.via ?? first.name}`;
+    return { sub, ways, menu };
+  }
   const first = install?.install?.[0];
   return { sub: first !== undefined ? `installs with ${first.via}` : "nothing here installs it", ways };
 }
@@ -230,8 +338,8 @@ export function gitCliPanelOf(install: AgentInstall | undefined): ReturnType<typ
 export function gitCliActionOf(probe: ProbeResult | undefined): AgentAction | undefined {
   if (probe === undefined || probe.status !== "failed") return undefined;
   const fix = gitCliPanelOf(probe.install)?.rows[0];
-  if (fix === undefined || fix.method === undefined) return undefined;
-  return { kind: "install", label: fix.button, title: fix.title, method: fix.method };
+  if (fix === undefined || (fix.method === undefined && fix.choice === undefined)) return undefined;
+  return { kind: "install", label: fix.button, title: fix.title, ...(fix.method !== undefined ? { method: fix.method } : {}), ...(fix.choice !== undefined ? { choice: fix.choice } : {}) };
 }
 
 /**
@@ -251,7 +359,7 @@ export function agentLineOf(probe: ProbeResult | undefined, state: ProviderState
 
 /** The one button a closed agent row carries beside its switch: what would make it work. */
 export type AgentAction =
-  | { kind: "install"; label: string; title: string; method?: AgentInstallMethod; path?: string }
+  | { kind: "install"; label: string; title: string; method?: AgentInstallMethod; choice?: readonly string[]; path?: string }
   | { kind: "sign-in"; label: string; title: string }
   | { kind: "add-key"; label: string; title: string };
 
@@ -264,7 +372,7 @@ export function agentActionOf(spec: ProviderSpec, probe: ProbeResult | undefined
   if (probe === undefined || state === "off" || state === "unchecked") return undefined;
   const fix = installPanelOf(install)?.rows[0];
   if (fix !== undefined) {
-    return { kind: "install", label: fix.button, title: fix.title, ...(fix.method !== undefined ? { method: fix.method } : {}), ...(fix.path !== undefined ? { path: fix.path } : {}) };
+    return { kind: "install", label: fix.button, title: fix.title, ...(fix.method !== undefined ? { method: fix.method } : {}), ...(fix.choice !== undefined ? { choice: fix.choice } : {}), ...(fix.path !== undefined ? { path: fix.path } : {}) };
   }
   if (probe.accounts?.some((account) => account.refused !== undefined) === true) return { kind: "sign-in", label: "Sign in again", title: "opens the sign-in page" };
   if (state === "needs-sign-in" && probe.accounts !== undefined) return { kind: "sign-in", label: probe.lapsed === true ? "Sign in again" : "Sign in", title: "opens the sign-in page" };

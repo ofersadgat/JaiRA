@@ -100,7 +100,7 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
   const act = (one: AgentAction): void => {
     if (one.kind === "install") {
       if (one.path !== undefined) onUseCommand(spec.id, one.path);
-      else onInstall(spec.id, one.method);
+      else onInstall(spec.id, one.choice ?? one.method);
     } else if (one.kind === "sign-in") {
       onSignIn(spec.id);
     } else {

@@ -269,6 +269,36 @@ export interface AgentInstallCommand {
   display: string;
 }
 
+/**
+ * One command of an install that takes more than one, as shown before it runs: what it installs, the
+ * way, and the command as a person would type it. `elevated` asks for an administrator's password in
+ * the system's own window (macOS's, polkit's on Linux, Windows' UAC) — JaiRA never sees it.
+ */
+export interface InstallStepShown {
+  /** What this step installs: "fnm", "Node.js", "Homebrew", "Gemini CLI". */
+  title: string;
+  via: string;
+  display: string;
+  elevated?: boolean;
+}
+
+/**
+ * One row of an install menu. A row is one step: it runs its `steps` (one command — or a few, where
+ * what it installs needs its own installer first: "fnm — installs fnm, then Node.js") and then the
+ * first of `next`, whose others are the other ways to take the step after. A row with no steps only
+ * groups the ways to get something the install needs ("Node.js"). Pressed, a row runs to the end by
+ * the first of each `next`; chosen through its arrows, by the path chosen.
+ */
+export interface InstallChoice {
+  /** Unique among its siblings; a path of keys from the top names one way through ({@link AgentInstall.choices}). */
+  key: string;
+  /** What the row says: "Node.js", "fnm", "npm", "Homebrew". */
+  name: string;
+  steps: InstallStepShown[];
+  /** The ways to take the step after this one, the recommended first; absent at the last step. */
+  next?: InstallChoice[];
+}
+
 /** Where an agent's binary is, how it was installed, and what installs or updates it. */
 export interface AgentInstall {
   /** The binary as found — on the PATH, or in a usual place for its installer. */
@@ -286,6 +316,28 @@ export interface AgentInstall {
   update?: AgentInstallCommand;
   /** Not installed: the ways to install it from here, the recommended one first. */
   install?: AgentInstallCommand[];
+  /**
+   * Not installed: the install menu, step by step — each way {@link install} lists, and, where a way
+   * needs something this machine has not got (npm without Node.js, a formula without Homebrew), a row
+   * for that thing whose arrows choose how to get it and then what comes after. The recommended first.
+   * An install request names a path of keys through it ({@link AgentInstallRequest.choice}).
+   */
+  choices?: InstallChoice[];
+}
+
+/** What an install asks for: a way (`method`), or a path of {@link InstallChoice} keys — never a command. */
+export interface AgentInstallRequest {
+  method?: AgentInstallMethod;
+  choice?: string[];
+}
+
+/** How an install is asked for from a row or a menu: a way, or a path of keys through the install menu. */
+export type InstallWay = AgentInstallMethod | readonly string[];
+
+/** The request an install sends for a way: none (the update), the way, or the path through the menu. */
+export function installRequestOf(way: InstallWay | undefined): AgentInstallRequest {
+  if (way === undefined) return {};
+  return typeof way === "string" ? { method: way as AgentInstallMethod } : { choice: [...way] };
 }
 
 /**
