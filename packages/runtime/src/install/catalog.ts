@@ -93,16 +93,16 @@ export interface ToolPackage {
     /** On a Mac, where it differs from `posix`. */
     darwin?: string;
     /** How a script of several lines is shown — the command a person would recognise for it. */
-    shown?: { posix?: string; darwin?: string };
+    shown?: { posix?: string; darwin?: string; windows?: string };
     paths: readonly RegExp[];
     update?: readonly string[];
     versioned?: { posix?: string; windows?: string };
     sudo?: boolean;
     /**
-     * The script asks for an administrator's password in the system's own window (macOS's, polkit's) —
-     * on these systems: what it writes is the machine's, and nobody could answer sudo here.
+     * The script asks for an administrator's rights in the system's own window (macOS's, polkit's,
+     * Windows' UAC) — on these systems: what it writes is the machine's, and nobody could answer sudo here.
      */
-    elevated?: readonly ("darwin" | "linux")[];
+    elevated?: readonly ("darwin" | "linux" | "win32")[];
     /** On a Mac, only Apple silicon's: Homebrew no longer installs on an Intel one. */
     darwinArm64Only?: boolean;
   };
@@ -113,6 +113,16 @@ export interface ToolPackage {
   managedAs?: Partial<Record<VersionManager, string>>;
   /** The ways it is offered when it is not installed, in the vendor's order of recommendation. */
   order: readonly InstallMethod[];
+}
+
+/**
+ * A PowerShell script run as administrator: Windows asks the person in its own prompt (UAC), and the
+ * script waits for it, answering with its exit code. The script goes as `-EncodedCommand`, so no
+ * quote in it meets the command line's.
+ */
+function elevatedPowerShell(script: string): string {
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  return `$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${encoded}' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
 }
 
 /** An agent's package — the same shape, kept under the name `agentInstall.ts` gave it. */
@@ -466,6 +476,45 @@ export const TOOL_PACKAGES: Readonly<Record<string, ToolPackage>> = {
       darwinArm64Only: true,
     },
     dirs: { posix: ["/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin"] },
+    order: ["native"],
+  },
+  // Windows' installers, which a multi-step install may put here first (`chain.ts`) — checked 2026-11-19
+  // against learn.microsoft.com/windows/package-manager/winget and chocolatey.org/install.
+  winget: {
+    binary: "winget",
+    name: "winget",
+    title: "WinGet",
+    native: {
+      // WinGet is App Installer's, which Windows ships but registers for a person only once the Store has
+      // updated it after their first sign-in: asked to now, as Microsoft's page says. Where App Installer
+      // is not there at all (Windows Server, LTSC, a sandbox), Microsoft's own module installs it and
+      // what it needs, for this person — so no rights are asked for.
+      windows: [
+        "$ProgressPreference = 'SilentlyContinue'",
+        "$w = Join-Path $env:LOCALAPPDATA 'Microsoft\\WindowsApps\\winget.exe'",
+        "try { Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe -ErrorAction Stop } catch { Write-Output $_.Exception.Message }",
+        "if (-not (Test-Path $w)) { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072; Install-PackageProvider -Name NuGet -Force -Scope CurrentUser | Out-Null; Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery -Scope CurrentUser | Out-Null; Repair-WinGetPackageManager -Latest -Force }",
+        "if (-not (Test-Path $w)) { Write-Error 'WinGet is still not here'; exit 1 }",
+      ].join("; "),
+      shown: { windows: "Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe, else Repair-WinGetPackageManager" },
+      paths: [/\/Microsoft\/WindowsApps\/winget\.exe$/i],
+    },
+    order: ["native"],
+  },
+  chocolatey: {
+    binary: "choco",
+    name: "chocolatey",
+    title: "Chocolatey",
+    native: {
+      // Chocolatey's own script, which installs into %ProgramData% and so runs as administrator: PowerShell
+      // asks Windows for the rights — the person answers Windows' own prompt — and waits for it.
+      windows: elevatedPowerShell(
+        "Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))",
+      ),
+      shown: { windows: "iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1')) (as administrator)" },
+      paths: [/\/chocolatey\/(bin\/)?choco\.exe$/i],
+      elevated: ["win32"],
+    },
     order: ["native"],
   },
   fnm: {

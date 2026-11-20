@@ -189,6 +189,8 @@ function usualDirSpecs(platform: InstallFacts["platform"]): readonly string[] {
       "~\\.local\\bin",
       "%APPDATA%\\npm",
       "%LOCALAPPDATA%\\Microsoft\\WinGet\\Links",
+      // WinGet itself, an app execution alias Windows puts here once App Installer is registered.
+      "%LOCALAPPDATA%\\Microsoft\\WindowsApps",
       // WinGet's machine-wide links; Chocolatey's shims; Scoop's, the person's and the machine-wide.
       "%ProgramFiles%\\WinGet\\Links",
       "%ChocolateyInstall%\\bin",
@@ -391,6 +393,23 @@ export function packageDirs(pkg: ToolPackage | undefined, deps: InstallDeps): st
   return [...expandAll(own, deps), ...expandAll(managed, deps), ...expandAll(node, deps)];
 }
 
+/**
+ * Whether a program in Windows' `WindowsApps` folder is one to run: there, a Store app's programs
+ * (WinGet's `winget.exe`) are app execution aliases — links Windows starts the app through, which
+ * neither `stat` nor `realpath` can follow, so read as anything else they are missing or dangling.
+ * One is the program when the app it hands over to is a program of the same name; Windows' own
+ * `python.exe`, which hands over to a redirector that opens the Store, is not. Undefined for a path
+ * anywhere else.
+ */
+function appAlias(candidate: string, deps: InstallDeps): boolean | undefined {
+  if (deps.platform !== "win32" || !/[\\/]Microsoft[\\/]WindowsApps[\\/][^\\/]+$/i.test(candidate)) return undefined;
+  const target = deps.readlink(candidate);
+  // A program copied there, or an alias this Node.js cannot read: it is there, so it is run.
+  if (target === undefined) return true;
+  const name = (one: string): string => one.replace(/^.*[\\/]/, "").toLowerCase();
+  return name(target) === name(candidate);
+}
+
 /** The names a command may have on disk: itself, and on Windows each runnable extension. */
 function namesOf(command: string, platform: string): string[] {
   if (platform !== "win32" || /\.[a-z0-9]+$/i.test(command)) return [command];
@@ -415,6 +434,8 @@ export function locateBinary(command: string, deps: InstallDeps, options: Locate
   let broken: FoundBinary | undefined;
   const look = (candidate: string, onPath: boolean): FoundBinary | undefined => {
     if (!deps.lexists(candidate)) return undefined;
+    const alias = appAlias(candidate, deps);
+    if (alias !== undefined) return alias && options.skip?.(candidate.replace(/\\/g, "/")) !== true ? { path: candidate, real: candidate, onPath, broken: false } : undefined;
     const real = deps.realpath(candidate);
     if (real !== undefined) {
       if (options.skip?.(real.replace(/\\/g, "/")) === true) return undefined;

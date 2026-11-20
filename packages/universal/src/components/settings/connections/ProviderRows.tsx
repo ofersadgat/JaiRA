@@ -473,7 +473,7 @@ export function InstallPanel({
           last={last}
           end={
             <View flexDirection="row" alignItems="center" gap={6}>
-              {row.elevated === true ? <Tag tone="warn">asks for your password</Tag> : null}
+              {row.elevated === true ? <Tag tone="warn">asks for administrator rights</Tag> : null}
               {row.menu?.sub !== undefined ? (
                 // One button with its customizing joined to it, as a shelf tile's Install and ▾ are.
                 <RNView ref={(el) => void arrows.current.set(row.key, el)} collapsable={false} style={{ flexDirection: "row" }}>

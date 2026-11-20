@@ -188,13 +188,13 @@ function nativeInstall(pkg: ToolPackage, facts: InstallFacts, want: VersionWant 
   const versioned = asked !== undefined ? (windows ? native.versioned?.windows : native.versioned?.posix)?.replace("{version}", asked) : undefined;
   // A script that asks for a password in the system's window: on Linux, polkit's, which needs a desktop.
   if (native.darwinArm64Only === true && facts.platform === "darwin" && facts.arch !== undefined && facts.arch !== "arm64") return undefined;
-  const elevated = facts.platform !== "win32" && native.elevated?.includes(facts.platform) === true;
+  const elevated = native.elevated?.includes(facts.platform) === true;
   if (elevated && facts.platform === "linux" && facts.tools.pkexec === undefined) return undefined;
   const extra = { ...(native.sudo === true ? { sudo: true } : {}), ...(elevated ? { elevated: true } : {}), ...(versioned !== undefined ? { pinned: true } : {}) };
   if (windows) {
     const script = versioned ?? native.windows;
     if (script === undefined) return undefined;
-    return plan("native", INSTALL_VIA.native, facts.tools.powershell ?? "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], script, facts.platform, extra);
+    return plan("native", INSTALL_VIA.native, facts.tools.powershell ?? "powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script], versioned === undefined ? (native.shown?.windows ?? script) : script, facts.platform, extra);
   }
   const script = versioned ?? (facts.platform === "darwin" ? (native.darwin ?? native.posix) : native.posix);
   if (script === undefined || facts.tools.curl === undefined) return undefined;
@@ -291,7 +291,7 @@ function chocoPlan(facts: InstallFacts, verb: "install" | "upgrade", id: string,
   const versionArgs = version !== undefined ? ["--version", version, ...(verb === "upgrade" ? ["--allow-downgrade"] : [])] : [];
   const script = `$p = Start-Process -FilePath ${quote(choco)} -ArgumentList ${[verb, id, ...versionArgs, "-y", "--no-progress"].map(quote).join(",")} -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit $p.ExitCode`;
   const display = `choco ${verb} ${id}${version !== undefined ? ` --version ${version}` : ""} -y (as administrator)`;
-  return plan("chocolatey", INSTALL_VIA.chocolatey, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", script], display, facts.platform, version !== undefined ? { pinned: true } : {});
+  return plan("chocolatey", INSTALL_VIA.chocolatey, facts.tools.powershell ?? "powershell", ["-NoProfile", "-NonInteractive", "-Command", script], display, facts.platform, { elevated: true, ...(version !== undefined ? { pinned: true } : {}) });
 }
 
 /** Scoop's install or update — in the person's own folder, so no rights are asked for. A package in another bucket adds the bucket first. */
@@ -310,7 +310,7 @@ function scoopPlan(facts: InstallFacts, verb: "install" | "update", name: string
 /** WinGet's install, with its agreements accepted here, since nobody can answer them: stdin is closed. */
 function wingetInstall(facts: InstallFacts, id: string, version?: string, pinned = false): InstallPlan {
   const args = ["install", "--id", id, "--exact", ...(version !== undefined ? ["--version", version] : []), "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"];
-  return plan("winget", INSTALL_VIA.winget, "winget", args, `winget install --id ${id} --exact${version !== undefined ? ` --version ${version}` : ""}`, facts.platform, pinned || version !== undefined ? { pinned: true } : {});
+  return plan("winget", INSTALL_VIA.winget, program(facts, "winget") ?? "winget", args, `winget install --id ${id} --exact${version !== undefined ? ` --version ${version}` : ""}`, facts.platform, pinned || version !== undefined ? { pinned: true } : {});
 }
 
 /**
@@ -583,7 +583,7 @@ export function originPlan(pkg: ToolPackage, facts: InstallFacts, origin: Instal
     case "winget": {
       if (pkg.winget === undefined || facts.found?.broken === true || pin === undefined || !isExactVersion(pin)) return updatePlan(pkg, facts, origin);
       const args = ["upgrade", "--id", pkg.winget, "--exact", "--version", pin, "--disable-interactivity"];
-      return plan("winget", INSTALL_VIA.winget, "winget", args, `winget upgrade --id ${pkg.winget} --exact --version ${pin}`, facts.platform, { pinned: true });
+      return plan("winget", INSTALL_VIA.winget, program(facts, "winget") ?? "winget", args, `winget upgrade --id ${pkg.winget} --exact --version ${pin}`, facts.platform, { pinned: true });
     }
     case "chocolatey":
       return pkg.choco !== undefined ? chocoPlan(facts, "upgrade", pkg.choco, isExactVersion(pin) ? pin : undefined) : undefined;

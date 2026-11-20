@@ -1,6 +1,7 @@
 /**
  * Installs that take more than one step: an agent npm installs, on a machine with no Node.js (or one
- * too old for it); a formula, on a machine with no Homebrew. Each way an agent is installed by needs
+ * too old for it); a formula, on a machine with no Homebrew; a WinGet or Chocolatey package, on a
+ * Windows with neither. Each way an agent is installed by needs
  * its installer, and where the installer is missing but can itself be installed, the way is still
  * offered — as a row for what is missing, whose ways each install it and then go on.
  *
@@ -66,6 +67,8 @@ const MANAGERS_TO_INSTALL: readonly VersionManager[] = ["fnm", "nvm", "mise"];
 const PROVIDES: Readonly<Record<string, readonly InstallTool[]>> = {
   node: ["npm", "corepack"],
   homebrew: ["brew"],
+  winget: ["winget"],
+  chocolatey: ["choco"],
   fnm: ["fnm"],
   nvm: ["nvm"],
   volta: ["volta"],
@@ -103,10 +106,43 @@ export function planStep(step: ChainStep, facts: InstallFacts): InstallPlan | un
   return installPlans(step.pkg, facts, want).find((one) => one.method === step.method);
 }
 
-/** The first way a package installs from here, as a step — for one folded into the step it serves. */
-function firstStep(pkg: ToolPackage, facts: InstallFacts): ChainStep | undefined {
+/**
+ * The installers a way needs that can themselves be installed first, by the package that is each:
+ * Homebrew for a formula or cask, WinGet and Chocolatey on Windows.
+ */
+const PREREQUISITES: Partial<Record<InstallMethod, { pkg: string; tool: InstallTool }>> = {
+  homebrew: { pkg: "homebrew", tool: "brew" },
+  winget: { pkg: "winget", tool: "winget" },
+  chocolatey: { pkg: "chocolatey", tool: "choco" },
+};
+
+/** The package that installs the installer this way needs, where it is missing here and the package names something for it. */
+function prerequisiteOf(method: InstallMethod, pkg: ToolPackage, facts: InstallFacts): ToolPackage | undefined {
+  const need = PREREQUISITES[method];
+  if (need === undefined || facts.tools[need.tool] !== undefined) return undefined;
+  const windows = facts.platform === "win32";
+  const named =
+    method === "homebrew" ? pkg.brew !== undefined && (pkg.brew.cask ? facts.platform === "darwin" : !windows) : method === "winget" ? windows && pkg.winget !== undefined : windows && pkg.choco !== undefined;
+  return named ? TOOL_PACKAGES[need.pkg] : undefined;
+}
+
+/**
+ * The first way a package installs from here, as its steps — for one folded into the step it serves:
+ * its own installer's where that is here, else that installer installed first (fnm by WinGet, on a
+ * Windows with no WinGet yet: WinGet, then fnm).
+ */
+function firstSteps(pkg: ToolPackage, facts: InstallFacts): ChainStep[] | undefined {
+  const step = (method: InstallMethod): ChainStep => ({ pkg, title: titleOf(pkg), command: pkg.binary, method });
   const plan = installPlans(pkg, facts)[0];
-  return plan !== undefined ? { pkg, title: titleOf(pkg), command: pkg.binary, method: plan.method } : undefined;
+  if (plan !== undefined) return [step(plan.method)];
+  for (const method of pkg.order) {
+    const prerequisite = prerequisiteOf(method, pkg, facts);
+    const before = prerequisite !== undefined ? installPlans(prerequisite, facts)[0] : undefined;
+    if (prerequisite === undefined || before === undefined) continue;
+    const steps = [{ pkg: prerequisite, title: titleOf(prerequisite), command: prerequisite.binary, method: before.method }, step(method)];
+    if (planStep(steps[1]!, after(facts, steps.slice(0, 1))) !== undefined) return steps;
+  }
+  return undefined;
 }
 
 /** Ways to get something, as one row: the row is the one way when there is one, else it groups them. */
@@ -145,22 +181,20 @@ function nodeWays(chain: ChainFacts, then: ChainChoice, atLeast: string | undefi
   for (const manager of MANAGERS_TO_INSTALL) {
     const its = TOOL_PACKAGES[manager];
     if (m.tools[manager] !== undefined || its === undefined) continue;
-    const first = firstStep(its, m);
-    if (first !== undefined) add(manager, INSTALL_VIA[manager], [first, step(manager)]);
+    const first = firstSteps(its, m);
+    if (first !== undefined) add(manager, INSTALL_VIA[manager], [...first, step(manager)]);
   }
-  if (m.tools.brew !== undefined) add("homebrew", INSTALL_VIA.homebrew, [step("homebrew")]);
-  else {
-    const brew = TOOL_PACKAGES["homebrew"] !== undefined ? firstStep(TOOL_PACKAGES["homebrew"], m) : undefined;
-    if (brew !== undefined) add("homebrew", INSTALL_VIA.homebrew, [brew, step("homebrew")]);
+  // A system's installer: the one here, or — Homebrew, WinGet, Chocolatey — installed first.
+  for (const method of ["homebrew", "winget", "chocolatey", "scoop", "apt", "dnf"] as const) {
+    const prerequisite = prerequisiteOf(method, pkg, m);
+    const first = prerequisite !== undefined ? firstSteps(prerequisite, m) : [];
+    if (first !== undefined) add(method, INSTALL_VIA[method], [...first, step(method)]);
   }
-  for (const method of ["winget", "chocolatey", "scoop", "apt", "dnf"] as const) add(method, INSTALL_VIA[method], [step(method)]);
   return ways;
 }
 
-/** The ways to get Homebrew here, each then taking `then`. */
-function homebrewWays(chain: ChainFacts, then: ChainChoice): ChainChoice[] {
-  const pkg = TOOL_PACKAGES["homebrew"];
-  if (pkg === undefined) return [];
+/** The ways to get an installer here (Homebrew, WinGet, Chocolatey), each then taking `then`. */
+function prerequisiteWays(pkg: ToolPackage, chain: ChainFacts, then: ChainChoice): ChainChoice[] {
   return installPlans(pkg, chain.machine).map((plan) => wayThen(plan.method, plan.via, [{ pkg, title: titleOf(pkg), command: pkg.binary, method: plan.method }], then));
 }
 
@@ -189,10 +223,11 @@ export function installChoicesOf(pkg: ToolPackage, title: string, command: strin
       choices.push({ key: method, name: plan.via, steps: [step(method)] });
       continue;
     }
-    const brewable = pkg.brew !== undefined && facts.tools.brew === undefined && (pkg.brew.cask ? facts.platform === "darwin" : facts.platform !== "win32");
-    if (method === "homebrew" && brewable) {
-      const then: ChainChoice = { key: "homebrew", name: INSTALL_VIA.homebrew, steps: [step("homebrew")] };
-      const group = groupOf("homebrew", INSTALL_VIA.homebrew, homebrewWays(chain, then));
+    // Its installer missing, but one that can be installed: Homebrew, WinGet, Chocolatey — then the way.
+    const prerequisite = facts.platform === chain.machine.platform ? prerequisiteOf(method, pkg, facts) : undefined;
+    if (prerequisite !== undefined) {
+      const then: ChainChoice = { key: method, name: INSTALL_VIA[method], steps: [step(method)] };
+      const group = groupOf(method, INSTALL_VIA[method], prerequisiteWays(prerequisite, chain, then));
       if (group !== undefined) choices.push(group);
     }
   }
@@ -261,6 +296,13 @@ export function stepsOf(choices: readonly ChainChoice[], path: readonly string[]
   return steps;
 }
 
+/** What the output says before a step that asks for an administrator's rights waits for the answer. */
+const ELEVATED_SAYS: Readonly<Partial<Record<NodeJS.Platform, string>>> = {
+  darwin: "macOS asks for an administrator's password in its own window.\n",
+  linux: "Your desktop asks for an administrator's password in its own window.\n",
+  win32: "Windows asks for an administrator's permission in its own window.\n",
+};
+
 /** What a multi-step install looks at: the package itself, and what its steps need. */
 export interface ChainRunHooks {
   /** How a step's package is looked for — {@link gatherInstallFacts} unless a caller needs more. */
@@ -291,7 +333,7 @@ export async function runChoice(pkg: ToolPackage, title: string, command: string
       const why = i > 0 ? ` after ${steps[i - 1]!.title} was installed` : "";
       return { ok: false, reason: `${INSTALL_VIA[step.method]} could not be found to install ${step.title}${why} — check again, or install it by hand` };
     }
-    if (plan.elevated === true) say(now!.platform === "darwin" ? "macOS asks for an administrator's password in its own window.\n" : "Your desktop asks for an administrator's password in its own window.\n");
+    if (plan.elevated === true) say(ELEVATED_SAYS[now!.platform] ?? ELEVATED_SAYS["linux"]!);
     const ran = await runPlan(plan, options, "install");
     if (!ran.ok) return { ok: false, reason: label !== undefined ? `${label}: ${ran.reason}` : ran.reason };
     if (step.atLeast !== undefined) {

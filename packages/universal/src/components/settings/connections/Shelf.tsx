@@ -279,7 +279,7 @@ export function WaysMenu({
               <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
                 <Txt spec={{ voice: "app", scale: 1, weight: 600 }}>{way.name}</Txt>
                 {way.tag !== undefined ? <Tag tone="accent">{way.tag}</Tag> : null}
-                {way.elevated === true ? <Tag tone="warn">asks for your password</Tag> : null}
+                {way.elevated === true ? <Tag tone="warn">asks for administrator rights</Tag> : null}
               </View>
               {way.at !== undefined ? <Txt spec={way.atWords === true ? { voice: "app", scale: 11 / 12.5, color: "dim" } : { voice: "data", scale: 11 / 12, color: "dim" }}>{way.at}</Txt> : null}
               {way.then !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{way.then}</Txt> : null}

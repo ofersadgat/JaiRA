@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import type { ExecutorInfo, InstallChoice } from "@jaira/shared";
 import { AGENT_PACKAGES, installAgent, installChoicesFor } from "../src/agentInstall";
 import { probeExecutor } from "../src/executors";
-import { installFactsOf, stepsOf, installChoicesOf, gatherChainFacts, managerPlan, parseShellEnv, runPlan, shellAdds, shellEnvCommand, versionWant, TOOL_PACKAGES, type InstallDeps } from "../src/install";
+import { GIT_CLI_PACKAGES, installFactsOf, installPlans, locateBinary, stepsOf, installChoicesOf, gatherChainFacts, managerPlan, parseShellEnv, runPlan, shellAdds, shellEnvCommand, versionWant, TOOL_PACKAGES, type InstallDeps } from "../src/install";
 import { DEBIAN, LINUX_HOME, LINUX_PATH, MAC_PATH, MAC_SYSTEM, fakeFs, machineExec, type Files } from "./installRig";
 
 const GEMINI = AGENT_PACKAGES["gemini"]!;
@@ -99,9 +99,59 @@ describe("the menu, a step a row", () => {
   it("on Windows, fnm first too — its default's folder put on the person's PATH, so their terminals have it", async () => {
     const deps = fakeFs({ platform: "win32", home: "C:\\Users\\me", path: ["C:\\Windows\\System32", "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps"], files: { "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe": "file", "C:\\Windows\\System32\\powershell.exe": "file" }, env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", APPDATA: "C:\\Users\\me\\AppData\\Roaming" } });
     const node = (await menuOf(GEMINI, "Gemini CLI", deps))![0]!;
-    expect(node.next?.map((way) => way.key)).toEqual(["fnm", "mise", "winget"]);
+    // Chocolatey too, though it is not here: installed first.
+    expect(node.next?.map((way) => way.key)).toEqual(["fnm", "mise", "winget", "chocolatey"]);
     expect(commands(node.next![0])).toEqual(["winget install --id Schniz.fnm --exact", "fnm install --lts && fnm default lts-latest, and its default on your PATH"]);
     expect(commands(node.next![2])).toEqual(["winget install --id OpenJS.NodeJS --exact"]);
+  });
+
+  it("finds WinGet where Windows keeps it — an app execution alias, which neither stat nor realpath can follow", async () => {
+    const alias = "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps";
+    const app = "C:\\Program Files\\WindowsApps\\Microsoft.DesktopAppInstaller_1.27.350.0_x64__8wekyb3d8bbwe";
+    const deps = fakeFs({
+      platform: "win32",
+      path: ["C:\\Windows\\System32", alias],
+      // The aliases' targets are in a folder no person may read: as the lookups see them, links to nothing.
+      files: { "C:\\Windows\\System32\\powershell.exe": "file", [`${alias}\\winget.exe`]: { link: `${app}\\winget.exe` }, [`${alias}\\python.exe`]: { link: `${app}\\AppInstallerPythonRedirector.exe` } },
+      env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", APPDATA: "C:\\Users\\me\\AppData\\Roaming" },
+    });
+    expect(locateBinary("winget", deps)).toEqual({ path: `${alias}\\winget.exe`, real: `${alias}\\winget.exe`, onPath: true, broken: false });
+    // Windows' python.exe hands over to the Store's redirector: not Python.
+    expect(locateBinary("python", deps)).toBeUndefined();
+    const node = (await menuOf(GEMINI, "Gemini CLI", deps))![0]!;
+    expect(commands(node.next![0])).toEqual(["winget install --id Schniz.fnm --exact", "fnm install --lts && fnm default lts-latest, and its default on your PATH"]);
+  });
+
+  it("on a Windows with neither WinGet nor Chocolatey, installs either first — Chocolatey's as administrator, in Windows' own prompt", async () => {
+    const deps = fakeFs({ platform: "win32", path: ["C:\\Windows\\System32"], files: { "C:\\Windows\\System32\\powershell.exe": "file" }, env: { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", APPDATA: "C:\\Users\\me\\AppData\\Roaming" } });
+    const node = (await menuOf(GEMINI, "Gemini CLI", deps))![0]!;
+    expect(node.next?.map((way) => way.key)).toEqual(["fnm", "mise", "winget", "chocolatey"]);
+    // fnm still first: WinGet, then fnm by it, then Node.js by fnm.
+    expect(node.next![0]!.steps.map((step) => `${step.title}:${step.via}`)).toEqual(["WinGet:the native installer", "fnm:WinGet", "Node.js:fnm"]);
+    expect(commands(node.next![2])).toEqual(["Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe, else Repair-WinGetPackageManager", "winget install --id OpenJS.NodeJS --exact"]);
+    const choco = node.next![3]!;
+    expect(choco.steps.map((step) => [step.title, step.elevated === true])).toEqual([
+      ["Chocolatey", true],
+      ["Node.js", true],
+    ]);
+    expect(choco.steps[1]?.display).toBe("choco install nodejs -y (as administrator)");
+
+    // A git CLI WinGet and Chocolatey have: a row for each, each installing its installer, then it.
+    const gh = await installChoicesFor(GIT_CLI_PACKAGES["gh"]!, "GitHub CLI", "gh", installFactsOf("gh", GIT_CLI_PACKAGES["gh"]!, deps), { exec: nodeSays(undefined), deps });
+    expect(gh?.map((row) => [row.key, row.name, row.steps.map((step) => step.title), row.next?.map((next) => commands(next))])).toEqual([
+      ["winget", "WinGet", ["WinGet"], [["winget install --id GitHub.cli --exact"]]],
+      ["chocolatey", "Chocolatey", ["Chocolatey"], [["choco install gh -y (as administrator)"]]],
+    ]);
+  });
+
+  it("runs Chocolatey's own script as administrator, encoded so no quote in it meets the command line's", () => {
+    const facts = { platform: "win32" as const, home: "C:\\Users\\me", tools: { powershell: "powershell" } };
+    const plan = installPlans(TOOL_PACKAGES["chocolatey"]!, facts)[0]!;
+    expect(plan).toMatchObject({ method: "native", elevated: true, file: "powershell" });
+    const script = plan.args[plan.args.length - 1]!;
+    expect(script).toMatch(/^\$p = Start-Process -FilePath powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','[A-Za-z0-9+/=]+' -Verb RunAs -Wait -PassThru -WindowStyle Hidden; exit \$p\.ExitCode$/);
+    const encoded = /'-EncodedCommand','([^']+)'/.exec(script)![1]!;
+    expect(Buffer.from(encoded, "base64").toString("utf16le")).toContain("iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))");
   });
 
   it("on a Linux desktop, apt asks for its password in polkit's window; with no desktop, sudo -n as before", async () => {

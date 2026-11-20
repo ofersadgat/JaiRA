@@ -6,7 +6,7 @@ updated: 2026-11-19
 decides_for: [engineering/units/agent-executors, ui/surfaces/settings-connections, ui/components/provider-row]
 ---
 
-# 0031. Installs that take more than one step: Node.js before npm, Homebrew before a cask
+# 0031. Installs that take more than one step: Node.js before npm, Homebrew before a cask, WinGet and Chocolatey before theirs
 
 ## The person's words
 
@@ -37,6 +37,11 @@ Then, on what was built:
 > fnm on windows? cant we make it have a default on windows too? 3. the ui for the right arrow on the
 > row looks terrible, make it better. it should look like a single row with a special option to
 > customize
+
+Then, on a new Windows machine:
+
+> im looking at jaira on a brand new windows machine. winget is installed, but jaira doesnt see it.
+> also, jaira should offer to install chocolatey as well as winget if either arent installed.
 
 ## Context
 
@@ -115,6 +120,21 @@ it a step at a time, each planned from what is on the machine when it starts.
   an installer found only there is run by its path. An agent found beside its own `node` in a folder
   the PATH does not reach has that folder added to the end of the PATH JaiRA runs programs with — by
   the install, and by every check after — rather than its path saved, which would not find that node.
+- **Windows' installers** (amended 2026-11-19). WinGet and Chocolatey are prerequisites as Homebrew is:
+  a way by either, where it is missing, is a row for it — `WinGet`, `Chocolatey` — whose way installs
+  it and goes on, and a version manager installed by one folds it in (`fnm`: WinGet, fnm by it, then
+  Node.js). WinGet's is Microsoft's own: App Installer registered for the person
+  (`Add-AppxPackage -RegisterByFamilyName …`, what a fresh sign-in is waiting for the Store to do), else
+  the `Microsoft.WinGet.Client` module's `Repair-WinGetPackageManager`, for the person — no rights
+  asked. Chocolatey's is its own script, run as administrator: Windows asks in its UAC prompt, and the
+  script goes `-EncodedCommand`, so no quote in it meets the command line's. Every Chocolatey step is
+  marked as asking for administrator rights, and the tag says so in words true on all three systems:
+  `asks for administrator rights`.
+- **WinGet where Windows keeps it.** `winget.exe` in `%LOCALAPPDATA%\Microsoft\WindowsApps` is an app
+  execution alias: a link only Windows can follow, which `stat` and `realpath` fail on, so it read as
+  missing — on every Windows. A program there is taken as itself when the app it hands over to is a
+  program of the same name; Windows' `python.exe`, which hands over to the Store's redirector, is not.
+  That folder is looked in even when the app's PATH lacks it.
 - **The request** names a path of keys (`["npm", "nvm"]`), never a command; a path the machine no
   longer offers is refused, running nothing. A row that is one of the agent's own ways and all there is
   to it still sends the way, and runs as it always did.
@@ -128,8 +148,10 @@ it a step at a time, each planned from what is on the machine when it starts.
   project's setup too.
 - Homebrew's package is checked by Gatekeeper, not against Homebrew's own Team ID, which Homebrew does
   not publish; a package signed and notarized by another developer at that URL would pass.
-- Only Node.js and Homebrew are prerequisites. Bun, pnpm, Scoop and Chocolatey as things to install
-  first would each be one more entry in `chain.ts`.
+- Node.js, Homebrew, WinGet and Chocolatey are the prerequisites. Bun, pnpm and Scoop as things to
+  install first would each be one more entry in `chain.ts`.
+- On a Windows whose App Installer the Store has not yet registered, the WinGet row registers it: a
+  second's work, not an install.
 
 ## Revisit when
 
