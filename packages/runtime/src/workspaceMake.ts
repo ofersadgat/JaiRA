@@ -18,6 +18,7 @@ import { mkdtemp, mkdir, readFile, rm, stat, writeFile, readdir, chmod } from "n
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import type { Exec, ExecOptions, ExecResult } from "./exec";
+import { trustedHostKeys, type RemoteRoute, type RouteLadder } from "./sshAccess";
 
 /** What a long git command says as it goes, line by line, for the person watching. */
 export type MakeOutput = (text: string) => void;
@@ -52,16 +53,24 @@ async function git(args: string[], cwd: string | undefined, options: MakeOptions
 async function gitOk(args: string[], cwd: string | undefined, options: MakeOptions, what: string, extra: Partial<ExecOptions> = {}): Promise<string> {
   const result = await git(args, cwd, options, extra);
   if (result.aborted) throw new MakeError(`Stopped while ${what}.`, result);
-  if (result.code !== 0) throw new MakeError(`${what[0]!.toUpperCase()}${what.slice(1)} failed: ${lastLine(result.stderr || result.stdout) ?? `git exited ${String(result.code)}`}`, result);
+  if (result.code !== 0) throw new MakeError(`${what[0]!.toUpperCase()}${what.slice(1)} failed: ${reasonOf(result.stderr || result.stdout) ?? `git exited ${String(result.code)}`}`, result);
   return result.stdout;
 }
 
-function lastLine(text: string): string | undefined {
-  return text
+/** What git says it said beside the reason: the step it began, its progress, and the advice it closes with. */
+const NOT_A_REASON = [/^Cloning into /, /^warning: /, /\d+%/, /^Please make sure you have the correct access rights$/, /^and the repository exists\.$/];
+
+/**
+ * Why git failed, in its own first line that says so. `Host key verification failed.` comes before
+ * `fatal: Could not read from remote repository.` and the advice after it, and the advice's last line,
+ * `and the repository exists.`, is no reason at all.
+ */
+function reasonOf(text: string): string | undefined {
+  const lines = text
     .split(/\r?\n|\r/)
     .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .pop();
+    .filter((line) => line.length > 0);
+  return lines.find((line) => !NOT_A_REASON.some((rx) => rx.test(line))) ?? lines.pop();
 }
 
 /** Lines git prints while it works (`Receiving objects: 45%`), passed on as they come. */
@@ -166,6 +175,11 @@ export interface CheckoutPack {
   /** New files git does not ignore, base64, with their modes. */
   untracked: { path: string; data: string; mode: number }[];
   bytes: number;
+  /**
+   * The host keys the source trusts for its remote's ssh host (`type blob`, from its `known_hosts`) —
+   * public, and what lets a machine that has never seen the host trust it (`sshLadder`).
+   */
+  hostKeys?: string[];
 }
 
 /** The most a pack may weigh: past this a folder is not something to send through the engine link. */
@@ -174,7 +188,8 @@ export const PACK_LIMIT_BYTES = 512 * 1024 * 1024;
 /** Pack the checkout at `dir` (this machine is the source). Nothing in it changes. */
 export async function packCheckout(dir: string, options: MakeOptions): Promise<CheckoutPack> {
   const state = await checkoutState(dir, options);
-  const pack: CheckoutPack = { format: 1, state, untracked: [], bytes: 0 };
+  const hostKeys = await trustedHostKeys(state.remote, options.exec);
+  const pack: CheckoutPack = { format: 1, state, untracked: [], bytes: 0, ...(hostKeys.length > 0 ? { hostKeys } : {}) };
   const scratch = await mkdtemp(join(tmpdir(), "jaira-pack-"));
   try {
     const bundleFile = join(scratch, "commits.bundle");
@@ -212,8 +227,19 @@ export async function packCheckout(dir: string, options: MakeOptions): Promise<C
   }
 }
 
-/** Make `dir` from a pack (this machine is the target): the same branch, commits, changes and new files. */
-export async function unpackCheckout(pack: CheckoutPack, dir: string, options: MakeOptions): Promise<void> {
+/**
+ * Make `dir` from a pack (this machine is the target): the same branch, commits, changes and new files.
+ *
+ * The history comes from the source's remote as the source names it. That name is the source's: an ssh
+ * address works there with its keys and the hosts it trusts, and this machine may have neither. When the
+ * clone fails, `routes` is asked, failure by failure, for another way to the same repository (`sshLadder`,
+ * then its https address); a route that works is kept in the copy (its remote, its `core.sshCommand`).
+ */
+export async function unpackCheckout(
+  pack: CheckoutPack,
+  dir: string,
+  options: MakeOptions & { routes?: (remote: string) => RouteLadder | undefined },
+): Promise<void> {
   if (!(await isEmptyOrMissing(dir))) throw new MakeError(`${dir} is already there and not empty.`);
   const { state } = pack;
   const scratch = await mkdtemp(join(tmpdir(), "jaira-unpack-"));
@@ -229,8 +255,29 @@ export async function unpackCheckout(pack: CheckoutPack, dir: string, options: M
       if (state.branch !== undefined) await gitOk(["checkout", state.branch], dir, options, `switching to ${state.branch}`);
     } else {
       const upstreamBranch = state.upstream?.replace(/^[^/]+\//, "");
-      say?.(`$ git clone ${upstreamBranch !== undefined ? `--branch ${upstreamBranch} ` : ""}${state.remote} ${dir}\n`);
-      await gitOk(["clone", "--progress", ...(upstreamBranch !== undefined ? ["--branch", upstreamBranch] : []), state.remote, dir], undefined, options, "cloning", streaming(options));
+      const clone = (url: string, env?: Record<string, string>): Promise<string> => {
+        say?.(`$ git clone ${upstreamBranch !== undefined ? `--branch ${upstreamBranch} ` : ""}${url} ${dir}\n`);
+        const args = ["clone", "--progress", ...(upstreamBranch !== undefined ? ["--branch", upstreamBranch] : []), url, dir];
+        return gitOk(args, undefined, env !== undefined ? { ...options, env: { ...(options.env ?? {}), ...env } } : options, "cloning", streaming(options));
+      };
+      const ladder = options.routes?.(state.remote);
+      let attempt: RemoteRoute | undefined;
+      const failures: string[] = [];
+      for (let tries = 0; ; tries++) {
+        try {
+          await clone(attempt?.url ?? state.remote, attempt?.env);
+          break;
+        } catch (error) {
+          if (!(error instanceof MakeError) || error.result === undefined || error.result.aborted || ladder === undefined) throw error;
+          failures.push(attempt === undefined ? error.message : `${attempt.url} ${attempt.how} failed too: ${error.message.replace(/^Cloning failed: /, "")}`);
+          if (attempt === undefined) say?.(`${state.remote} cannot be reached from this machine as the source names it (${error.message.replace(/^Cloning failed: /, "")})\n`);
+          const next = tries < 8 ? await ladder.next(`${error.result.stderr}\n${error.result.stdout}`) : undefined;
+          if (next === undefined) throw new MakeError(failures.join(" "), error.result);
+          say?.(next.url === state.remote ? `Trying ${next.url} again, ${next.how}.\n` : `Cloning ${next.url} ${next.how} instead.\n`);
+          attempt = next;
+        }
+      }
+      for (const [key, value] of Object.entries(attempt?.config ?? {})) await gitOk(["config", key, value], dir, options, `setting ${key}`);
       const branch = state.branch;
       if (pack.bundle !== undefined) {
         say?.("$ git fetch <the commits not pushed>\n");

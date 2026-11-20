@@ -33,6 +33,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import {
   EVENT_NAMES,
   EVENT_SPECS,
+  FORGE_CLIS,
   FORGE_LABELS,
   handleOfSummary,
   parseDuration,
@@ -621,6 +622,25 @@ export function pushCredentials(access: Pick<ForgeAccess, "token" | "connection"
     env["WSLENV"] = [process.env["WSLENV"], "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0", "GIT_TERMINAL_PROMPT"].filter((part) => part !== undefined && part.length > 0).join(":");
   }
   return env;
+}
+
+/**
+ * Git's sign-in for `url` through the forge's command line, where JaiRA holds no token: `gh` or `glab`
+ * as git's credential helper for that host (`gh auth git-credential`, `glab auth git-credential`), so
+ * an https clone is the account the command line is signed in as, as every other request through it is.
+ * The host's list of helpers is emptied first, so it is the command line that answers and not a helper
+ * that opens a window of its own. Environment only, as {@link pushCredentials}; nothing is configured.
+ */
+export function cliGitCredentials(provider: ForgeAccess["connection"]["provider"], url: string): Record<string, string> {
+  const { protocol, host } = new URL(url);
+  const key = `credential.${protocol}//${host}.helper`;
+  return {
+    GIT_CONFIG_COUNT: "2",
+    GIT_CONFIG_KEY_0: key,
+    GIT_CONFIG_VALUE_0: "",
+    GIT_CONFIG_KEY_1: key,
+    GIT_CONFIG_VALUE_1: `!${FORGE_CLIS[provider]} auth git-credential`,
+  };
 }
 
 /**

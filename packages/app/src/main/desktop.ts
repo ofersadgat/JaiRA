@@ -1131,6 +1131,7 @@ function buildService(): AppService {
     keychain: appKeychain(baseDir),
     // A forge with no token stored is reached through gh or glab when they are signed in (decision 0004).
     forgeCli: true,
+    forgeSsh: true,
     // The app checks what can actually answer a prompt — by itself, at startup, at project open, and
     // after every configuration write. It is the one caller that should: it has a settings screen to
     // keep honest, and a user who should never have to press a button to find out that the provider

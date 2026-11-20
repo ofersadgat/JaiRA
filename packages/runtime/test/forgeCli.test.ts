@@ -4,14 +4,15 @@
  * ones print (measured 2026-11-20, gh 2.104 and glab 1.126): `--include` gives the status line, the
  * headers, a blank line and the body, a 4xx and a 304 included, and both exit 1 on those.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { parseIntegrations } from "@jaira/shared";
 import type { Exec, ExecOptions, ExecResult } from "../src/exec";
 import { ForgeCliUnavailable, checkForges, cliEndpointOf, cliForgeHttp, forgeAccess, forgeProvider, parseIncluded } from "../src/forge";
-import { pushCredentials } from "../src/gitTools";
+import { cliGitCredentials, pushCredentials } from "../src/gitTools";
 import { SecretResolver } from "../src/secrets";
 
 interface Ran {
@@ -178,6 +179,37 @@ describe("a connection with no token", () => {
     expect(pushCredentials(access, "https://github.com/o/r.git")).toEqual({});
     const stored = forgeAccess(parseIntegrations(undefined), "github.com", { secrets: secrets({ GITHUB_TOKEN: "t" }), cli: { exec: fakeCli({}) } });
     expect(stored).toMatchObject({ via: "token", token: "t" });
+  });
+
+  // A copy opened on Windows from a Mac's checkout had glab signed in and no token: its https clone
+  // must sign in as glab is signed in, not through a credential manager that opens a window.
+  it.skipIf(process.platform === "win32")("hands git the command line as the host's only credential helper", () => {
+    const bin = mkdtempSync(join(tmpdir(), "jaira-glab-"));
+    try {
+      writeFileSync(join(bin, "glab"), '#!/bin/sh\n[ "$1 $2 $3" = "auth git-credential get" ] && cat >/dev/null && printf "username=oauth2\\npassword=from-glab\\n"\n');
+      chmodSync(join(bin, "glab"), 0o755);
+      const env = cliGitCredentials("gitlab", "https://gitlab.com/org/repo.git");
+      const filled = execFileSync("git", ["credential", "fill"], {
+        input: "protocol=https\nhost=gitlab.com\npath=org/repo.git\n\n",
+        encoding: "utf8",
+        env: { ...process.env, ...env, PATH: `${bin}:${process.env["PATH"] ?? ""}`, GIT_TERMINAL_PROMPT: "0" },
+      });
+      expect(filled).toContain("password=from-glab");
+      expect(env["GIT_CONFIG_VALUE_1"]).toBe("!glab auth git-credential");
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("adds an ssh key to the account through the command line, and says which scope a refusal lacks", async () => {
+    const glab = fakeCli({ glab: { "user/keys": { status: 201, body: '{"id":7}' } } });
+    await forgeProvider({ provider: "gitlab", host: "gitlab.com" } as never, { cli: { exec: glab } }).addSshKey!("JaiRA on desk", "ssh-ed25519 AAAA desk\n");
+    expect(glab.ran[0]!.args).toEqual(expect.arrayContaining(["--method", "POST", "user/keys"]));
+    expect(JSON.parse(glab.ran[0]!.options.stdin!)).toEqual({ title: "JaiRA on desk", key: "ssh-ed25519 AAAA desk" });
+    const gh = fakeCli({ gh: { "user/keys": { status: 404, body: '{"message":"Not Found"}' }, meta: { status: 200, body: '{"ssh_keys":["ssh-ed25519 AAAAgh"]}' } } });
+    const github = forgeProvider({ provider: "github", host: "github.com" } as never, { cli: { exec: gh } });
+    await expect(github.addSshKey!("JaiRA on desk", "ssh-ed25519 AAAA")).rejects.toThrow(/admin:public_key/);
+    expect(await github.sshHostKeys!()).toEqual(["ssh-ed25519 AAAAgh"]);
   });
 
   it("lists repositories through the command line", async () => {

@@ -2,7 +2,7 @@ import { useContext, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, type ForgeCheck, type JairaForgeConnection, type SecretTarget } from "@jaira/shared/browser";
 import { layerWriter } from "@jaira/ui/configWriter";
-import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgesOf, gitToolsSentence, newForgeOf, schemaGistOf, secretTargetsOf, stateWord } from "@jaira/ui/connectionsModel";
+import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgeSshOf, forgesOf, gitToolsSentence, newForgeOf, schemaGistOf, secretTargetsOf, stateWord, type ForgeSshView } from "@jaira/ui/connectionsModel";
 import type { IntegrationsPaneProps } from "@jaira/ui/integrationsPaneTypes";
 import { Txt } from "../../../primitives";
 import { SchemaForm } from "../../form/SchemaForm";
@@ -196,6 +196,9 @@ function ForgeRow({
         <Wide key="who">
           <LabelledBoxes label={identity !== undefined ? "Signed in as" : "Signs in as"}>{boxes}</LabelledBoxes>
         </Wide>,
+        <Wide key="ssh">
+          <ForgeSsh view={forgeSshOf(connection, check)} title={title} locked={locked} onMake={(on) => set(`${path}.makeSshKey`, on ? undefined : false)} />
+        </Wide>,
         tokenOpen ? (
           <Wide key="token">
             <TokenEntry connection={name} named={connection.credential} name={tokenName} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveToken} onClose={() => setTokenOpen(false)} />
@@ -247,6 +250,43 @@ function ForgeRow({
       }
       wide={[...(error !== undefined ? [<Wide key="error"><Problem>{error}</Problem></Wide>] : []), ...wide]}
     />
+  );
+}
+
+/**
+ * An opened forge row's "SSH keys on this machine" (decision 0027 §1, amended 2026-11-20): a box per key —
+ * its path, fingerprint and what it does here, tagged `lets you in`, `not on the account`/`refused` or
+ * `can't tell`, and `JaiRA's` for the one JaiRA made — then the switch that lets JaiRA make a key and add
+ * it to the account when none does (`makeSshKey`), and what the check said. Words: `forgeSshOf`.
+ */
+function ForgeSsh({ view, title, locked, onMake }: { view: ForgeSshView; title: string; locked: boolean; onMake: (on: boolean) => void }): JSX.Element {
+  return (
+    <View flexDirection="column" gap={8}>
+      <LabelledBoxes label="SSH keys on this machine">
+        {view.keys.length > 0
+          ? view.keys.map((key) => (
+              <KeyBox key={`${key.name}:${key.facts[0] ?? ""}`} name={key.name} facts={key.facts}>
+                <View flexDirection="row" flexWrap="wrap" gap={4} marginTop={4}>
+                  <Tag tone={key.tone}>{key.tag}</Tag>
+                  {key.jaira ? <Tag tone="accent">JaiRA&apos;s</Tag> : null}
+                </View>
+              </KeyBox>
+            ))
+          : [<Hint key="empty">{view.empty ?? ""}</Hint>]}
+      </LabelledBoxes>
+      <View marginLeft={30} flexDirection="row" alignItems="center" gap={10}>
+        <Switch on={view.makeOn} label={view.makeOn ? `stop making ssh keys for ${title}` : `make ssh keys for ${title}`} disabled={locked} onChange={onMake} />
+        <View flexDirection="column" flexShrink={1} gap={1}>
+          <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 500 }}>{view.makeLabel}</Txt>
+          <Hint>{view.makeSub}</Hint>
+        </View>
+      </View>
+      {view.notes.map((note) => (
+        <View key={note} marginLeft={30}>
+          <Hint>{note}</Hint>
+        </View>
+      ))}
+    </View>
   );
 }
 

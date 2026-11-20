@@ -89,6 +89,7 @@ export * from "./executors";
 export * from "./install";
 export * from "./agentInstall";
 export * from "./workspaceMake";
+export * from "./sshAccess";
 export * from "./setupRun";
 // A workspace's container (decision 0027): made, kept up, and where its commands go.
 export * from "./container";

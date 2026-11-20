@@ -21,6 +21,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve, sep } from "node:path";
 import {
   DEFAULT_TARGET,
@@ -56,6 +57,7 @@ import {
 import {
   NodeExec,
   checkoutState,
+  cliGitCredentials,
   cloneRepository,
   containerPort,
   isWslEnv,
@@ -64,6 +66,9 @@ import {
   forgeAccess,
   forgeProvider,
   ForgeCliUnavailable,
+  httpsAddressOf,
+  sshAddressOf,
+  sshLadder,
   needsOf,
   packCheckout,
   pushCredentials,
@@ -76,6 +81,9 @@ import {
   type CarriedFile,
   type CheckoutPack,
   type Exec,
+  type ForgeAccess,
+  type RemoteRoute,
+  type RouteLadder,
   type ExecEnv,
   type ForgeHttp,
   type ForgeCliOptions,
@@ -413,7 +421,13 @@ export class WorkspaceMaker {
       } else {
         const pack = await this.fetchPack(request.source, out.say);
         out.say(`Copying ${request.source.dir} from ${this.host.labelOf(request.source.machine)}: ${describePack(pack)}\n`);
-        await unpackCheckout(pack, dir, { exec, onOutput: out.say, abortSignal: signal, ...(await this.credentialsFor(pack.state.remote)) });
+        await unpackCheckout(pack, dir, {
+          exec,
+          onOutput: out.say,
+          abortSignal: signal,
+          ...(await this.credentialsFor(pack.state.remote)),
+          routes: (remote) => this.routesFor(remote, pack, out.say, signal),
+        });
       }
       out.phase("open");
       await this.host.open(dir);
@@ -504,13 +518,8 @@ export class WorkspaceMaker {
       out.say(`${target} is already there; leaving it as it is.\n`);
       return;
     }
-    let env: Record<string, string> = {};
-    try {
-      env = pushCredentials(forgeAccess(this.host.integrations(), host, this.forgeOptions()), url);
-    } catch {
-      // A public repository clones without a connection.
-    }
-    await cloneRepository({ url, dir: target, ...(step.ref !== undefined ? { branch: step.ref } : {}) }, { exec: this.exec(), onOutput: out.say, abortSignal: signal, env });
+    // A public repository clones without a connection.
+    await cloneRepository({ url, dir: target, ...(step.ref !== undefined ? { branch: step.ref } : {}) }, { exec: this.exec(), onOutput: out.say, abortSignal: signal, ...(await this.credentialsFor(url, host)) });
   }
 
   private async fetchPack(source: Extract<WorkspaceSource, { kind: "machine" }>, say: (text: string) => void): Promise<CheckoutPack> {
@@ -529,14 +538,85 @@ export class WorkspaceMaker {
   }
 
   /** The forge credentials for a copy's remote, when a connection serves its host. */
-  private async credentialsFor(remote: string | undefined, host?: string): Promise<{ env?: Record<string, string> }> {
-    if (remote === undefined || !/^https?:/i.test(remote)) return {};
+  /**
+   * Git's sign-in for an https `remote` from this machine's connection for its host: the token, or —
+   * with none — the forge's command line as git's credential helper, as whoever it is signed in as.
+   */
+  private credentialsFor(remote: string | undefined, host?: string): Promise<{ env?: Record<string, string> }> {
+    return Promise.resolve(this.access(remote, host)?.credentials ?? {});
+  }
+
+  private access(remote: string | undefined, host?: string): { name: string; credentials: { env: Record<string, string> } } | undefined {
+    if (remote === undefined || !/^https?:/i.test(remote)) return undefined;
     try {
-      return { env: pushCredentials(forgeAccess(this.host.integrations(), host ?? new URL(remote).host, this.forgeOptions()), remote) };
+      const access = forgeAccess(this.host.integrations(), host ?? new URL(remote).host, this.forgeOptions());
+      const env = access.token !== undefined ? pushCredentials(access, remote) : cliGitCredentials(access.connection.provider, remote);
+      return { name: access.name, credentials: { env } };
     } catch {
       // A repository the connections do not serve, or a public one: git asks nothing of it here.
-      return {};
+      return undefined;
     }
+  }
+
+  /**
+   * The ways to a copy's remote after the source's own address fails here. An ssh address stays ssh
+   * while any way to it is left (`sshLadder`: the host key the source trusts, the keys ssh did not offer,
+   * a key added to the account through this machine's connection); https is the last.
+   */
+  private routesFor(remote: string, pack: CheckoutPack, say: (text: string) => void, signal: AbortSignal): RouteLadder {
+    const address = sshAddressOf(remote);
+    const access = address !== undefined ? this.accessFor(address.host) : undefined;
+    const provider = access?.provider;
+    const connection = access === undefined ? undefined : `the ${access.name} connection${access.via === "cli" ? ` (${access.connection.provider === "github" ? "gh" : "glab"})` : ""}`;
+    const ssh = sshLadder(remote, {
+      exec: this.exec(),
+      home: process.env["HOME"] ?? homedir(),
+      say,
+      vouched: async () => [...(pack.hostKeys ?? []), ...((await provider?.sshHostKeys?.().catch(() => [])) ?? [])],
+      ...(provider?.addSshKey !== undefined && access?.connection.makeSshKey !== false ? { addKey: (title: string, key: string) => provider.addSshKey!(title, key) } : {}),
+      ...(access?.connection.makeSshKey === false ? { noKeyBecause: `The ${access.name} connection is set not to make ssh keys (Settings → Connections → Forges), so none was made.` } : {}),
+      keyTitle: `JaiRA on ${this.host.labelOf(this.host.selfId())}`,
+      ...(connection !== undefined ? { connection } : {}),
+      abortSignal: signal,
+    });
+    let sshDone = ssh === undefined;
+    let httpsTried = false;
+    return {
+      next: async (failure) => {
+        if (!sshDone) {
+          const found = await ssh!.next(failure);
+          if (found !== undefined) return found;
+          sshDone = true;
+        }
+        if (httpsTried) return undefined;
+        httpsTried = true;
+        return this.httpsRoute(remote);
+      },
+    };
+  }
+
+  /** This machine's way in to a forge host, or undefined where no connection serves it. */
+  private accessFor(host: string): ForgeAccess | undefined {
+    try {
+      return forgeAccess(this.host.integrations(), host, this.forgeOptions());
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * A copy's way to its source's remote when the address the source uses fails here: an ssh address
+   * works on the source with its keys and the hosts it trusts, which this machine may not have. Its
+   * https address, signed in through this machine's connection for the host. None where the address is
+   * not ssh, or no connection here serves the host: git would be left to sign in on its own, and on
+   * Windows its credential manager opens a window from a job nobody is watching.
+   */
+  private httpsRoute(remote: string): Promise<RemoteRoute | undefined> {
+    const url = httpsAddressOf(remote);
+    if (url === undefined) return Promise.resolve(undefined);
+    const access = this.access(url);
+    if (access === undefined) return Promise.resolve(undefined);
+    return Promise.resolve({ url, ...access.credentials, how: `through the ${access.name} connection` });
   }
 
   // --- a task's environment ------------------------------------------------------------------------

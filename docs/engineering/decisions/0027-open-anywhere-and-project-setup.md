@@ -36,12 +36,47 @@ takes, the setup's steps with where each came from), and **go** (the progress, p
 by step, with what it prints). A finished step can be pressed to go back to it.
 
 - **From a forge**: a clean clone at the branch, with the forge connection's credentials handed to git
-  in its environment (`pushCredentials`), never written into a URL or a config.
+  in its environment (`pushCredentials`), never written into a URL or a config. With no token, where the
+  connection goes through `gh` or `glab` ([0004](0004-remote-review.md), amended 2026-11-20), the command
+  line is git's only credential helper for that host for the clone (`cliGitCredentials`), so it signs in
+  as the command line is signed in, and Windows' credential manager does not open a window from a job.
 - **From a folder on a machine**: copied **as it is** — everything git does not ignore: the branch, its
   commits pushed or not, the changes staged and not, new files. Nothing git ignores travels with the copy
   (dependencies, build output, `.env` files); Bring takes the ignored files the setup names. Where the
   folder has a remote, the history comes from the remote and only the commits it lacks travel between the
-  machines, as a git bundle.
+  machines, as a git bundle. The remote is cloned as the source names it, and **an ssh remote stays ssh
+  until no way over ssh is left** (the person, 2026-11-20: "you should try to preserve an ssh checkout
+  until you have no other option"). An ssh address works on the source with its keys and the hosts it
+  trusts, which the target may not have; when the clone fails there, the target tries, each only where
+  the one before could not mend it (`sshLadder`, `runtime/src/sshAccess.ts`):
+  1. **The host key.** A host the target has never seen is trusted only for a key that a machine already
+     trusting it vouches for: the source's `known_hosts` entries for the host travel in the pack
+     (`hostKeys`, public), and GitHub's published keys (`/meta`) count too. What the host offers now
+     (`ssh-keyscan`) is matched against them and written to the target's `known_hosts`. A key that
+     changed from the one the target knows is never replaced.
+  2. **Keys ssh did not offer.** On Windows, its own OpenSSH, which reaches the Windows ssh-agent that
+     Git's bundled ssh cannot; then each private key in `~/.ssh` that needs no passphrase, alone. A key
+     that needs a passphrase is named, never asked about.
+  3. **A new key on the account.** `~/.ssh/jaira_<host>_ed25519`, made once, added to the account the
+     target's connection for the host signs in as (`ForgeProvider.addSshKey`, through the token or
+     through `gh`/`glab`) and titled `JaiRA on <machine>`. A sign-in that may not add keys says which
+     scope it lacks (gh's `admin:public_key`, GitLab's `api`). Not where the connection says
+     `makeSshKey: false`.
+  The same key is made ahead of any clone (the person, 2026-11-20: "if the setting allows it, the
+  system should automatically create keys for those forges"): after each availability check, every
+  signed-in forge's check carries which of this machine's keys let it in (`ForgeCheck.ssh`,
+  `checkSshKeys` — the account's own list, else `ssh -T` with each key), and where none does and the
+  connection's `makeSshKey` is not `false`, the key is made, added and checked again. Settings →
+  Connections → a forge shows the keys and the switch ([settings-connections](../../ui/surfaces/settings-connections.md)).
+  `gh repo clone` and `glab repo clone` are no route of their own: they run `git clone` over ssh or https
+  by their `git_protocol`, with no ssh credentials of theirs. A key route leaves `core.sshCommand` in the
+  copy, so its fetches and pushes go the same way; the person's ssh config is not changed. Only then is
+  the https address cloned, signed in through the target's connection (the token, or the forge's command
+  line as git's only credential helper for the host), and kept as the copy's remote. Every step says
+  what it did and why it did not get through; a failure names git's first line that gives a reason
+  (`Host key verification failed.`), not the last line of its advice. (2026-11-20: a Mac's checkout opened
+  on a Windows machine failed with "Cloning failed: and the repository exists.", Windows having never
+  trusted gitlab.com's host key.)
 - **To the machine it is on**: it opens there; nothing is copied.
 
 ### 2. Add a workspace is Open with the project chosen

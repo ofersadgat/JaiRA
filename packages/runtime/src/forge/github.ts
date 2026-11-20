@@ -481,6 +481,30 @@ export class GitHubProvider implements ForgeProvider {
     return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}#${number}`).body));
   }
 
+  /** `POST /user/keys`. A token or a gh sign-in without `admin:public_key` (or `write:public_key`) is refused. */
+  async addSshKey(title: string, publicKey: string): Promise<void> {
+    const response = await this.call("POST", "/user/keys", { title, key: publicKey.trim() });
+    if (response.status === 403 || response.status === 404) {
+      throw new ForgeError(
+        `${this.host} would not add an SSH key to this account: the sign-in lacks the admin:public_key scope (\`gh auth refresh --hostname ${this.host} --scopes admin:public_key\` adds it to gh's)`,
+        response.status,
+      );
+    }
+    expectStatus(response, [201], "adding an SSH key to your account");
+  }
+
+  /** `GET /user/keys`: the account's ssh keys, as `type blob`. A sign-in without `read:public_key` is refused. */
+  async sshKeys(): Promise<string[]> {
+    const rows = await this.listed("/user/keys?per_page=100", "listing your ssh keys");
+    return rows.map((row) => asText(asRecord(row)["key"]).split(/\s+/).slice(0, 2).join(" ")).filter((key) => key.includes(" "));
+  }
+
+  /** `GET /meta`'s `ssh_keys`: the host keys GitHub publishes for its ssh endpoint. */
+  async sshHostKeys(): Promise<string[]> {
+    const body = asRecord(expectStatus(await this.call("GET", "/meta"), [200], "reading GitHub's host keys").body);
+    return asList(body["ssh_keys"]).map(asText).filter((key) => key.length > 0);
+  }
+
   async branches(project: string): Promise<ForgeBranch[]> {
     const rows = await this.listed(`/repos/${project}/branches?per_page=100`, `listing the branches of ${project}`);
     return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["sha"]) }));

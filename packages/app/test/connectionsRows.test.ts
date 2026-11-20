@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { parseConfig, type ConfigView, type ForgeCheck, type LocalServerProbe, type McpDetectedSource, type McpServerConfig, type McpServerStatus, type ProbeResult } from "@jaira/shared";
-import { forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgesOf, foundServersOf, lookedInOf, mcpActionOf, mcpChipOf, routeActionOf, routeChipOf, routeLineOf, schemaGistOf, NEW_SERVER_SCHEMA } from "../src/renderer/connectionsModel";
+import { forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgeSshOf, forgesOf, foundServersOf, lookedInOf, mcpActionOf, mcpChipOf, routeActionOf, routeChipOf, routeLineOf, schemaGistOf, NEW_SERVER_SCHEMA } from "../src/renderer/connectionsModel";
 import { MODEL_PROVIDERS } from "../src/renderer/providerSpecs";
 
 const spec = (id: string) => MODEL_PROVIDERS.find((one) => one.id === id)!;
@@ -121,5 +121,41 @@ describe("a forge, closed", () => {
     const row = forgeRowOf("gitlab", forges["gitlab"]!, refused, oauth);
     expect(forgeActionOf(row, refused, "gitlab.com", true)).toEqual({ kind: "sign-in", label: "Sign in again", title: "opens gitlab.com with a code to enter" });
     expect(forgeActionOf(row, refused, "gitlab.com", false)).toEqual({ kind: "token", label: "Replace the token", title: "filed under GITLAB_TOKEN" });
+  });
+});
+
+describe("a forge's ssh keys, opened", () => {
+  const gitlab = { provider: "gitlab" as const, host: "gitlab.com" };
+  const ok: ForgeCheck = { name: "gitlab", provider: "gitlab", host: "gitlab.com", status: "ok", detail: "", identity: { login: "lab" } };
+
+  it("tags each key by whether it lets this machine in, and says how that was found out", () => {
+    const view = forgeSshOf(gitlab, {
+      ...ok,
+      ssh: {
+        by: "account",
+        keys: [
+          { path: "~/.ssh/id_ed25519", fingerprint: "SHA256:a", valid: "yes", detail: "on @lab's account" },
+          { path: "~/.ssh/old", fingerprint: "SHA256:b", valid: "no", detail: "not on @lab's account" },
+          { path: "~/.ssh/locked", fingerprint: "SHA256:c", valid: "unknown", detail: "needs its passphrase" },
+        ],
+      },
+    });
+    expect(view.keys.map((key) => [key.name, key.tag, key.tone])).toEqual([
+      ["~/.ssh/id_ed25519", "lets you in", "ok"],
+      ["~/.ssh/old", "not on the account", "accent"],
+      ["~/.ssh/locked", "can't tell", "warn"],
+    ]);
+    expect(view.notes).toEqual(["Checked against the keys on @lab's gitlab.com account."]);
+    expect(view.makeOn).toBe(true);
+  });
+
+  it("says what was made, what turned off means, and that nothing is checked before signing in", () => {
+    const made = forgeSshOf(gitlab, { ...ok, ssh: { by: "ssh", keys: [{ path: "~/.ssh/jaira_gitlab.com_ed25519", fingerprint: "SHA256:j", valid: "yes", detail: "ssh signs in as @lab", jaira: true }], made: { ok: true, detail: "Added it." } } });
+    expect(made.keys[0]).toMatchObject({ jaira: true, tag: "lets you in" });
+    expect(made.notes).toEqual(["Checked by signing in to gitlab.com over ssh with each key.", "Added it."]);
+    const off = forgeSshOf({ ...gitlab, makeSshKey: false }, { ...ok, ssh: { by: "account", keys: [] } });
+    expect(off).toMatchObject({ makeOn: false, empty: "No ssh keys on this machine." });
+    expect(off.notes).toContain("No key here lets this machine in to gitlab.com over ssh, so a project from gitlab.com is cloned over https here.");
+    expect(forgeSshOf(gitlab, undefined).empty).toBe("Checked once this connection is signed in.");
   });
 });

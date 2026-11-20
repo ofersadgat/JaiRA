@@ -59,6 +59,12 @@ export interface JairaForgeConnection {
    * {@link oauthClientIdFor} says which is used.
    */
   oauthClientId?: string;
+  /**
+   * `false`: JaiRA never makes an ssh key on this machine and adds it to the account this connection
+   * signs in as. Absent means it may: when no key here lets the machine in to the host over ssh, the
+   * check makes `~/.ssh/jaira_<host>_ed25519` and adds it (decision 0027 §1, amended 2026-11-20).
+   */
+  makeSshKey?: boolean;
 }
 
 export interface JairaIntegrationsConfig {
@@ -151,7 +157,7 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
         throw new Error(`${where}: a connection's name is letters, digits, '-' and '_' — the host goes in its 'host' field`);
       }
       const spec = objectAt(entry, where);
-      onlyFields(spec, ["provider", "host", "credential", "enabled", "apiUrl", "oauthClientId"], where);
+      onlyFields(spec, ["provider", "host", "credential", "enabled", "apiUrl", "oauthClientId", "makeSshKey"], where);
       const merged = { ...(out.forges[name] ?? {}), ...spec } as Record<string, unknown>;
 
       const provider = merged["provider"];
@@ -177,6 +183,9 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
       if (clientId !== undefined && (typeof clientId !== "string" || !/^\S+$/.test(clientId))) {
         throw new Error(`${where}.oauthClientId must be the OAuth app's client ID — one word, no spaces`);
       }
+      if (merged["makeSshKey"] !== undefined && typeof merged["makeSshKey"] !== "boolean") {
+        throw new Error(`${where}.makeSshKey must be true or false`);
+      }
       out.forges[name] = {
         provider: provider as ForgeProviderKind,
         host,
@@ -184,6 +193,7 @@ export function parseIntegrations(raw: unknown): JairaIntegrationsConfig {
         ...(merged["enabled"] === false ? { enabled: false } : {}),
         ...(apiUrl !== undefined ? { apiUrl: (apiUrl as string).replace(/\/+$/, "") } : {}),
         ...(clientId !== undefined ? { oauthClientId: clientId as string } : {}),
+        ...(merged["makeSshKey"] === false ? { makeSshKey: false } : {}),
       };
     }
   }
@@ -772,6 +782,15 @@ export interface ForgeProvider {
   repositories?(query?: { search?: string; limit?: number }): Promise<ForgeRepository[]>;
   /** One file's text at a ref, or undefined when it is not there (a setup file read before cloning). */
   fileText?(project: string, path: string, ref?: string): Promise<string | undefined>;
+  /**
+   * Add an SSH public key (`ssh-ed25519 AAAA… comment`) to the signed-in account, so a machine that
+   * made one can clone and push over ssh as that account.
+   */
+  addSshKey?(title: string, publicKey: string): Promise<void>;
+  /** The host keys the forge publishes for its ssh endpoint, as `type blob` (GitHub's `/meta`). */
+  sshHostKeys?(): Promise<string[]>;
+  /** The SSH keys on the signed-in account, as `type blob`. */
+  sshKeys?(): Promise<string[]>;
   /** The comments on one merge request, flat and in order — only those written after `since`, when given. */
   comments(handle: RemoteHandle, options?: { since?: string }): Promise<ForgeNote[]>;
   /**
@@ -840,6 +859,39 @@ export interface ForgeCheck {
    * is signed in, so the connection goes through it (decision 0004, amended 2026-11-20).
    */
   via?: "oauth" | "token" | "cli";
+  /** Which of this machine's ssh keys let it in to the host — checked once the connection is `ok`. */
+  ssh?: ForgeSshKeys;
+}
+
+/** One of this machine's ssh keys, and whether it lets the machine in to a forge's host. */
+export interface ForgeSshKey {
+  /** Where it is: `~/.ssh/id_ed25519`, or `ssh-agent` for a key the agent holds with no file here. */
+  path: string;
+  /** `SHA256:…`, as `ssh-keygen -l` prints it. */
+  fingerprint: string;
+  /** The comment the key carries, when it carries one. */
+  comment?: string;
+  /**
+   * `yes`: on the signed-in account, or ssh signed in with it. `no`: not on the account, or ssh refused
+   * it. `unknown`: neither could be asked (a key that needs its passphrase, a host this machine does not
+   * trust yet).
+   */
+  valid: "yes" | "no" | "unknown";
+  /** Why, in a few words: `on @octo's account`, `ssh signs in as @octo`, `needs its passphrase`. */
+  detail: string;
+  /** JaiRA made it (`jaira_<host>_ed25519`). */
+  jaira?: boolean;
+}
+
+/** What a forge connection's ssh check found on this machine. */
+export interface ForgeSshKeys {
+  keys: ForgeSshKey[];
+  /** How validity was found out: the account's own list of keys, or an ssh sign-in with each. */
+  by?: "account" | "ssh";
+  /** Why some or all of it could not be found out. */
+  note?: string;
+  /** What this check did about having no key that works: made and added one, or why it could not. */
+  made?: { ok: boolean; detail: string };
 }
 
 // --- signing in to a forge through the browser (RFC 8628) -------------------------------------------

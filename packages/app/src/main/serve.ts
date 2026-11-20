@@ -75,6 +75,7 @@ void app.whenReady().then(async () => {
           publish,
           keychain: appKeychain(baseDir),
           forgeCli: true,
+          forgeSsh: true,
           // A server keeps the settings honest and the catalog current for every window it serves.
           probeOnStart: true,
           refreshCatalog: true,

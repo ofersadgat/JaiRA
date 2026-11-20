@@ -66,6 +66,12 @@ describe("the integrations block", () => {
     expect(defaultConfig().integrations).toEqual(parsed);
   });
 
+  it("keeps makeSshKey only when it turns key making off, and refuses anything but a boolean", () => {
+    expect(parseIntegrations({ forges: { gitlab: { makeSshKey: false } } }).forges["gitlab"]?.makeSshKey).toBe(false);
+    expect(parseIntegrations({ forges: { gitlab: { makeSshKey: true } } }).forges["gitlab"]).not.toHaveProperty("makeSshKey");
+    expect(() => parseIntegrations({ forges: { gitlab: { makeSshKey: "no" } } })).toThrow(/makeSshKey must be true or false/);
+  });
+
   it("lets a layer state only what it changes about a built-in", () => {
     const parsed = parseIntegrations({ forges: { gitlab: { credential: "WORK_GITLAB", enabled: false } } });
     expect(parsed.forges["gitlab"]).toEqual({ provider: "gitlab", host: "gitlab.com", credential: "WORK_GITLAB", enabled: false });

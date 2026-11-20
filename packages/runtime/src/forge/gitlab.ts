@@ -431,6 +431,21 @@ export class GitLabProvider implements ForgeProvider {
     return body instanceof Uint8Array ? new TextDecoder().decode(body) : String(body ?? "");
   }
 
+  /** `GET /user/keys`: the account's ssh keys, as `type blob`. */
+  async sshKeys(): Promise<string[]> {
+    const rows = await this.pages("/user/keys", "listing your ssh keys");
+    return rows.map((row) => asText(asRecord(row)["key"]).split(/\s+/).slice(0, 2).join(" ")).filter((key) => key.includes(" "));
+  }
+
+  /** `POST /user/keys`. A token without the `api` scope is refused. */
+  async addSshKey(title: string, publicKey: string): Promise<void> {
+    const response = await this.call("POST", "/user/keys", { title, key: publicKey.trim() });
+    if (response.status === 401 || response.status === 403) {
+      throw new ForgeError(`${this.host} would not add an SSH key to this account: the sign-in lacks the api scope`, response.status);
+    }
+    expectStatus(response, [201], "adding an SSH key to your account");
+  }
+
   async branches(project: string): Promise<ForgeBranch[]> {
     const rows = await this.pages(`/projects/${encodeURIComponent(project)}/repository/branches`, `listing the branches of ${project}`);
     return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["id"]) }));

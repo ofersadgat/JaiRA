@@ -132,3 +132,67 @@ describe("what a row says", () => {
     expect(forgeState(false, check("ok"))).toBe("off");
   });
 });
+
+describe("the ssh keys of a signed-in forge (decision 0027 §1, amended 2026-11-20)", () => {
+  let sshHome: string;
+  const saved = { HOME: process.env["HOME"], SSH_AUTH_SOCK: process.env["SSH_AUTH_SOCK"] };
+  beforeEach(() => {
+    sshHome = mkdtempSync(join(tmpdir(), "jaira-ssh-home-"));
+    process.env["HOME"] = sshHome;
+    delete process.env["SSH_AUTH_SOCK"];
+  });
+  afterEach(() => {
+    process.env["HOME"] = saved.HOME;
+    if (saved.SSH_AUTH_SOCK !== undefined) process.env["SSH_AUTH_SOCK"] = saved.SSH_AUTH_SOCK;
+    rmSync(sshHome, { recursive: true, force: true });
+  });
+
+  /** The forge's replay, with the account's ssh keys kept here: listed, and added to by a POST. */
+  async function withKeys(makeSshKey?: false): Promise<{ added: { title: string; key: string }[]; svc: AppService }> {
+    await service.close();
+    const added: { title: string; key: string }[] = [];
+    const svc = new AppService({
+      baseDir: home,
+      watchWorkflows: false,
+      forgeSsh: true,
+      forgeHttp: (request) => {
+        if (request.url !== "https://gitlab.com/api/v4/user/keys" && !request.url.startsWith("https://gitlab.com/api/v4/user/keys?")) return replay.http(request);
+        if (request.method === "POST") {
+          added.push(request.body as unknown as { title: string; key: string });
+          return Promise.resolve({ status: 201, headers: {}, body: { id: 1 } });
+        }
+        return Promise.resolve({ status: 200, headers: {}, body: added.map((one, i) => ({ id: i, title: one.title, key: one.key })) });
+      },
+    });
+    await svc.open(dir);
+    if (makeSshKey === false) svc.writeConfig({ layer: "project", config: { integrations: { forges: { gitlab: { makeSshKey: false } } } } });
+    svc.setSecret({ name: "GITLAB_TOKEN", value: "good", target: "project-env-local" });
+    service = svc;
+    return { added, svc };
+  }
+
+  async function settled(svc: AppService): Promise<ForgeCheck> {
+    await svc.refreshAvailability();
+    for (let i = 0; i < 200; i++) {
+      const gitlab = svc.readAvailability().forges?.find((f) => f.name === "gitlab");
+      if (gitlab?.ssh !== undefined) return gitlab;
+      await new Promise((done) => setTimeout(done, 25));
+    }
+    throw new Error("the ssh check never landed");
+  }
+
+  it.skipIf(process.platform === "win32")("makes JaiRA's key and adds it to the account when no key here lets the machine in", async () => {
+    const { added, svc } = await withKeys();
+    const gitlab = await settled(svc);
+    expect(added).toHaveLength(1);
+    expect(added[0]!.title).toMatch(/^JaiRA on /);
+    expect(gitlab.ssh).toMatchObject({ by: "account", made: { ok: true }, keys: [{ path: "~/.ssh/jaira_gitlab.com_ed25519", valid: "yes", jaira: true }] });
+  });
+
+  it("makes none where the connection says not to, and still says which keys let the machine in", async () => {
+    const { added, svc } = await withKeys(false);
+    const gitlab = await settled(svc);
+    expect(added).toEqual([]);
+    expect(gitlab.ssh).toEqual({ by: "account", keys: [] });
+  });
+});

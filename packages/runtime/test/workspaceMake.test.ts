@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { NodeExec } from "../src/exec";
+import type { RemoteRoute } from "../src/sshAccess";
 import { checkoutState, cloneRepository, collectIgnored, packCheckout, patternTest, unpackCheckout, writeFiles } from "../src/workspaceMake";
 
 const exec = new NodeExec();
@@ -103,6 +104,45 @@ describe("copying a checkout as it is", () => {
     await unpackCheckout(pack, target, { exec });
     expect(git(target, "remote")).toBe("");
     expect(readFileSync(join(target, "a.txt"), "utf8")).toBe("a\n");
+  });
+});
+
+describe("a copy whose source names its remote in a way this machine cannot use", () => {
+  /** A ladder that hands out these routes in order, recording each failure it was told about. */
+  function ladderOf(...routes: (RemoteRoute | undefined)[]): { told: string[]; routes: (remote: string) => { next(failure: string): Promise<RemoteRoute | undefined> } } {
+    const told: string[] = [];
+    return { told, routes: () => ({ next: (failure) => (told.push(failure), Promise.resolve(routes.shift())) }) };
+  }
+
+  // Opening a Mac's checkout on Windows cloned `git@gitlab.com:org/repo.git` there, and Windows had
+  // never trusted gitlab.com's host key: "Cloning failed: and the repository exists."
+  it("walks the routes it is given until one clones, and keeps that one's remote and config in the copy", async () => {
+    const { bare, work } = forgeAndClone();
+    writeFileSync(join(work, "notes.txt"), "new\n");
+    const pack = await packCheckout(work, { exec });
+    const unreachable = join(scratch(), "only-on-the-source.git");
+    pack.state.remote = unreachable;
+    const ladder = ladderOf({ url: join(scratch(), "nor-this.git"), how: "a second way" }, { url: bare, how: "a third way", config: { "core.sshCommand": "ssh -i key" } });
+    const said: string[] = [];
+    const target = join(scratch(), "copy");
+    await unpackCheckout(pack, target, { exec, onOutput: (t) => said.push(t), routes: ladder.routes });
+    expect(ladder.told).toHaveLength(2);
+    expect(git(target, "remote", "get-url", "origin")).toBe(bare);
+    expect(git(target, "config", "core.sshCommand")).toBe("ssh -i key");
+    expect(git(target, "rev-parse", "HEAD")).toBe(pack.state.head);
+    expect(readFileSync(join(target, "notes.txt"), "utf8")).toBe("new\n");
+    expect(said.join("")).toContain(`${unreachable} cannot be reached from this machine as the source names it`);
+    expect(said.join("")).toContain(`Cloning ${bare} a third way instead.`);
+  });
+
+  it("says every reason when no route clones, and the first alone when there is no other route", async () => {
+    const { work } = forgeAndClone();
+    const pack = await packCheckout(work, { exec });
+    pack.state.remote = join(scratch(), "gone.git");
+    const second = join(scratch(), "also-gone.git");
+    const failed = unpackCheckout(pack, join(scratch(), "copy"), { exec, routes: ladderOf({ url: second, how: "a second way" }).routes });
+    await expect(failed).rejects.toThrow(/^Cloning failed: .*gone\.git.* a second way failed too: /);
+    await expect(unpackCheckout(pack, join(scratch(), "copy"), { exec, routes: ladderOf().routes })).rejects.toThrow(/^Cloning failed: (?!.*failed too)/);
   });
 });
 

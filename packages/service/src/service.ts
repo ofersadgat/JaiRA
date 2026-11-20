@@ -275,6 +275,11 @@ import {
   isSignInRefused,
   type AgentOutcomeObserver,
   checkForges,
+  checkSshKeys,
+  forgeAccess as reachForge,
+  makeSshKeyFor,
+  noKeyLetsIn,
+  type ForgeAccess,
   registerRemoteFunctions,
   registerGitTools,
   registerSystemTools,
@@ -1007,6 +1012,13 @@ export interface AppServiceOptions {
    * test leaves it off, so what the machine running it is signed in to never changes an answer.
    */
   forgeCli?: boolean;
+  /**
+   * Check which of this machine's ssh keys let it in to each signed-in forge, and — where a connection
+   * allows it (`makeSshKey`) and none does — make one and add it to the account (decision 0027 §1,
+   * amended 2026-11-20). The app and `jaira serve` turn it on; a test leaves it off, so the keys of the
+   * machine running it never change an answer, and nothing is added to an account.
+   */
+  forgeSsh?: boolean;
   /**
    * The clock a forge sign-in polls by (RFC 8628 waits seconds between polls). Absent ⇒ real timers;
    * a test passes one that advances at once, so a ten-minute sign-in runs in a tick.
@@ -12180,6 +12192,8 @@ export class AppService {
     // …and a re-check asks every route for its models again too, however recently they answered:
     // a person pressing it has just loaded a model into a local server, or updated an agent.
     if (opts.recheck === true) this.catalogForced = true;
+    // …and a key that could not be added is tried again now rather than hours from now.
+    if (opts.recheck === true) this.sshKeyTries.clear();
     if (this.availabilityRun !== undefined) {
       // `catch` rather than `then`: a pass that THREW must still be followed by the one that was
       // asked for, or one failed socket connect strands every later request behind it forever.
@@ -12194,6 +12208,60 @@ export class AppService {
     });
     this.availabilityRun = run;
     return run;
+  }
+
+  /** When adding a key to each host's account last failed: not tried again on every check, only after a while. */
+  private readonly sshKeyTries = new Map<string, number>();
+
+  /**
+   * Which of this machine's ssh keys let it in to each forge that is signed in, onto the snapshot's
+   * checks; then, for a connection that allows it and where no key does, JaiRA's own key made and added
+   * to the account, and the keys checked again. A failure to add is said on the check and not retried
+   * for six hours, or until the person checks again.
+   */
+  private async checkForgeKeys(integrations: JairaConfigOf["integrations"]): Promise<void> {
+    if (this.options.forgeSsh !== true) return;
+    const snapshot = this.availability;
+    const forges = snapshot?.forges;
+    if (snapshot === undefined || forges === undefined) return;
+    const exec = new NodeExec();
+    const home = process.env["HOME"] ?? homedir();
+    const options = { secrets: this.secretResolver(), ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}), ...withForgeCli(this.forgeCli()) };
+    const checked = await Promise.all(
+      forges.map(async (check): Promise<(typeof forges)[number]> => {
+        const connection = integrations.forges[check.name];
+        if (check.status !== "ok" || connection === undefined) return check;
+        let access: ForgeAccess;
+        try {
+          access = reachForge(integrations, connection.host, options);
+        } catch {
+          return check;
+        }
+        const account = check.identity !== undefined ? `@${check.identity.login}'s account` : "the account";
+        const ask = (): ReturnType<typeof checkSshKeys> => checkSshKeys({ exec, home, host: connection.host, provider: access.provider, account });
+        let ssh = await ask();
+        const triedAt = this.sshKeyTries.get(connection.host);
+        const due = triedAt === undefined || Date.now() - triedAt > 6 * 60 * 60 * 1000;
+        if (connection.makeSshKey !== false && noKeyLetsIn(ssh) && access.provider.addSshKey !== undefined && due) {
+          const made = await makeSshKeyFor({
+            exec,
+            home,
+            host: connection.host,
+            title: `JaiRA on ${this.fleet.identity().label}`,
+            addKey: (title: string, key: string) => access.provider.addSshKey!(title, key),
+            connection: `the ${check.name} connection${access.via === "cli" ? ` (${connection.provider === "github" ? "gh" : "glab"})` : ""}`,
+          });
+          if (made.ok) this.sshKeyTries.delete(connection.host);
+          else this.sshKeyTries.set(connection.host, Date.now());
+          ssh = { ...(made.ok ? await ask() : ssh), made: { ok: made.ok, detail: made.detail } };
+        }
+        return { ...check, ssh };
+      }),
+    );
+    // Only onto the snapshot it was checked for: a newer one has its own check coming.
+    if (this.availability !== snapshot) return;
+    this.availability = { ...snapshot, forges: checked };
+    this.publish({ type: "store:invalidate", scope: "availability" });
   }
 
   private async computeAvailability(): Promise<AvailabilitySnapshot> {
@@ -12244,6 +12312,8 @@ export class AppService {
     });
     this.availability = { routes, executors, forges, gitClis, tree, configured, checkedAt: Date.now() };
     this.publish({ type: "store:invalidate", scope: "availability" });
+    // Which keys let this machine in over ssh: after the snapshot, so ssh's round trips never hold it up.
+    void this.checkForgeKeys(config.integrations).catch(() => undefined);
     // What each reachable route serves, now that it is known which answer — a source whose inputs
     // did not change and whose answer is under a day old is not asked again (`CatalogRefresher`).
     this.kickCatalog();

@@ -900,6 +900,52 @@ export function forgeRowOf(name: string, connection: JairaForgeConnection, check
   return { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth, viaCli };
 }
 
+/** An opened forge row's "SSH keys on this machine": each key and what it does here, and whether JaiRA may make one. */
+export interface ForgeSshView {
+  keys: { name: string; facts: string[]; tag: string; tone: "ok" | "warn" | "accent"; jaira: boolean }[];
+  /** In place of the keys, when there are none to show. */
+  empty?: string;
+  /** Under the keys: how they were checked, what was made, why some could not be told. */
+  notes: string[];
+  makeOn: boolean;
+  makeLabel: string;
+  makeSub: string;
+}
+
+/**
+ * What the ssh section of a forge row says (decision 0027 §1, amended 2026-11-20, the person: "it should
+ * also show if any of your current keys are valid for those forges"): the keys this machine holds, each
+ * tagged `lets you in`, `not on the account` / `refused` or `can't tell`, and the switch that lets
+ * JaiRA make a key and add it to the account when none does.
+ */
+export function forgeSshOf(connection: JairaForgeConnection, check: ForgeCheck | undefined): ForgeSshView {
+  const host = connection.host;
+  const makeOn = connection.makeSshKey !== false;
+  const base = {
+    makeOn,
+    makeLabel: "Make a key when none lets this machine in",
+    makeSub: `~/.ssh/jaira_${host.replace(/[^\w.-]/g, "_")}_ed25519, added to your ${host} account and titled "JaiRA on" this machine`,
+  };
+  if (check === undefined || check.status !== "ok") return { ...base, keys: [], notes: [], empty: "Checked once this connection is signed in." };
+  const ssh = check.ssh;
+  if (ssh === undefined) return { ...base, keys: [], notes: [], empty: "Checking this machine's keys…" };
+  const keys = ssh.keys.map((key) => ({
+    name: key.path,
+    facts: [key.fingerprint, key.detail, ...(key.comment !== undefined ? [key.comment] : [])],
+    tag: key.valid === "yes" ? "lets you in" : key.valid === "no" ? (ssh.by === "account" ? "not on the account" : "refused") : "can't tell",
+    tone: key.valid === "yes" ? ("ok" as const) : key.valid === "no" ? ("accent" as const) : ("warn" as const),
+    jaira: key.jaira === true,
+  }));
+  const none = ssh.keys.every((key) => key.valid !== "yes");
+  const notes = [
+    ssh.by === "account" ? `Checked against the keys on ${check.identity !== undefined ? `@${check.identity.login}'s` : "the"} ${host} account.` : ssh.by === "ssh" ? `Checked by signing in to ${host} over ssh with each key.` : undefined,
+    ssh.note,
+    ssh.made?.detail,
+    none && ssh.made === undefined && !makeOn ? `No key here lets this machine in to ${host} over ssh, so a project from ${host} is cloned over https here.` : undefined,
+  ].filter((note): note is string => note !== undefined && note !== "");
+  return { ...base, keys, notes, ...(keys.length === 0 ? { empty: "No ssh keys on this machine." } : {}) };
+}
+
 /**
  * Where a forge connection is drawn (the person, 2026-11-17, "Forges B"): a row while it connects as
  * someone — or tried to and was refused, or is turned off — and a tile on the "Not connected" shelf
