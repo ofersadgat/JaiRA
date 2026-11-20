@@ -646,3 +646,47 @@ Verified: `app/test/updateScreens.test.ts` (which machine About is about; anothe
 track, never this updater's; what it says in place of the local actions, and offline). Not seen in the
 app: About on a real paired machine.
 
+## Amended 2026-11-20: mac builds are signed with a Developer ID and notarized
+
+A downloaded mac build was signed ad hoc (§2), so macOS refused to open it: `Apple could not verify
+"JaiRA" is free of malware…`, with Privacy & Security's `Open Anyway` the only way past, for every new
+version. The Developer ID now exists, and the release workflow's mac builds, nightly and stable alike, are
+signed with it and notarized by Apple.
+
+- **Secrets.** `CSC_LINK`, the Developer ID Application certificate with its private key as a base64
+  `.p12` (`CSC_KEY_PASSWORD`, its password, only if it has one), and the App Store Connect key the iOS job
+  already has (decision 0017: `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8_BASE64`), which notarizes too.
+  As §2 planned, a mac build is signed only when every one is present; one missing is a warning on the
+  run and the ad hoc build, as before.
+- **The workflow.** `Prepare macOS signing` writes the certificate and the key into the job's temporary
+  folder and gives the later steps electron-builder's own variables for them (`CSC_LINK`,
+  `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`). `CSC_IDENTITY_AUTO_DISCOVERY` stays off for
+  every other build and is on for a mac build being signed, because electron-builder finds the identity in
+  the keychain it makes for `CSC_LINK` only by looking.
+- **`package.mjs`.** `macSigned` is a mac build given `CSC_LINK`: it drops `identity: "-"` and says
+  `jairaBuild.macSigned` in the packaged `package.json`. The hardened runtime and the entitlements are
+  electron-builder's defaults, as the ad hoc builds already had (JIT, unsigned executable memory, no
+  library validation), so the app runs as it did. electron-builder signs every binary in the bundle (the
+  helpers, `jaira-tailnet`, better-sqlite3's addon) with a timestamp, notarizes, and staples the ticket.
+- **electron-builder 26.18.** Before it, electron-builder gave `security set-key-partition-list` the
+  `.p12`'s password where the password of the keychain it had just made belongs, and on macOS 26 that
+  fails for any `.p12` password, empty or not (`SecKeychainUnlock: The user name or passphrase you entered
+  is not correct`, 2026-11-20). 26.18 passes the keychain's own password.
+- **Checked before it is published.** `macGatekeeper` runs after the build: `codesign --verify --deep
+  --strict`, `stapler validate`, and `spctl --assess`, which must accept it as a notarized Developer ID.
+  A failure fails the build, so no build marked signed is published that Gatekeeper refuses. A local build
+  given the certificate but no notary key has its signature checked only.
+- **Updates.** A signed build is not `manual` (§4): Squirrel.Mac installs its updates. A build installed
+  before this one is still manual, so a person moves to a signed build by hand once, and updates install
+  from then on. "Foreclosed for now: macOS auto-update" is lifted for signed builds.
+- **Not changed.** Windows is still unsigned and still shows SmartScreen's warning. The DMG itself is not
+  signed: the app inside it is notarized and stapled, and that is what Gatekeeper checks when it opens.
+  GitLab builds no mac installer, so its pipeline has nothing to sign.
+
+Verified on an Intel Mac (macOS 26), 2026-11-20: `package.mjs` given the Developer ID's `.p12` (no
+password) and no notary key signed the app, its helpers, `jaira-tailnet` and better-sqlite3's addon with
+the Developer ID, timestamped, under the hardened runtime, with no `get-task-allow`; `codesign --verify
+--deep --strict` passed, the packaged `package.json` says `macSigned`, and the probe, the `jaira` command
+and the smoke launch passed. `spctl` refused it only as `Unnotarized Developer ID`. The prepare step was run
+with stand-in values: every secret, no password, and one missing. Not yet seen: notarization, which needs
+the App Store Connect key only GitHub has, and a release run.

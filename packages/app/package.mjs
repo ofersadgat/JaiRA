@@ -58,6 +58,15 @@ const UPDATE_FEED = { owner: "ofersadgat", repo: "releases" };
 const NIGHTLY_VERSION = /^\d+\.\d+\.\d+-nightly\.\d{8}\.\d+$/;
 
 /**
+ * A mac build signed with a Developer ID (decision 0011, amended 2026-11-20): one given its certificate
+ * in `CSC_LINK`, which the release workflow sets only when every signing secret is present. electron-builder
+ * then signs every binary in the app with it, and notarizes and staples the app when `APPLE_API_KEY`,
+ * `APPLE_API_KEY_ID` and `APPLE_API_ISSUER` name an App Store Connect key. Any other mac build, every
+ * local one included, is signed ad hoc.
+ */
+const macSigned = process.platform === "darwin" && (process.env.CSC_LINK ?? "") !== "";
+
+/**
  * The version the workspace resolved, so the stage installs exactly what the tests ran against.
  *
  * Found by walking the resolution paths rather than `require("<name>/package.json")`: a package whose
@@ -121,7 +130,7 @@ function stageApp() {
         dependencies,
         // Read by the updater (`index.ts` `buildInfo`): a mac build installs updates only once it is
         // signed with a Developer ID, and says so here rather than finding out from Squirrel.Mac.
-        jairaBuild: { macSigned: process.platform === "darwin" && process.env.CSC_LINK !== undefined },
+        jairaBuild: { macSigned },
       },
       null,
       2,
@@ -189,9 +198,11 @@ function builderConfig(stage, output, command) {
     mac: {
       target: [{ target: "dmg", arch: [process.arch] }, { target: "zip", arch: [process.arch] }],
       category: "public.app-category.developer-tools",
-      // Unsigned until there is a Developer ID (0011 §2). Apple Silicon refuses to run an arm64 binary
-      // with no signature at all, and packaging invalidates Electron's own, so it is signed ad hoc.
-      ...(process.env.CSC_LINK === undefined ? { identity: "-" } : {}),
+      // The Developer ID when there is one (`macSigned`), found in the keychain electron-builder makes for
+      // `CSC_LINK`. Otherwise ad hoc: Apple Silicon refuses to run an arm64 binary with no signature at
+      // all, and packaging invalidates Electron's own. Either way under the hardened runtime, with
+      // electron-builder's own entitlements (JIT, unsigned executable memory, no library validation).
+      ...(macSigned ? {} : { identity: "-" }),
     },
     linux: {
       target: [{ target: "AppImage", arch: [process.arch] }, { target: "deb", arch: [process.arch] }],
@@ -211,6 +222,28 @@ function packagedExecutable(output) {
   if (process.platform === "win32") return join(dir, "JaiRA.exe");
   if (process.platform === "darwin") return join(dir, "JaiRA.app", "Contents", "MacOS", "JaiRA");
   return join(dir, "jaira-app");
+}
+
+/**
+ * A Developer ID build must pass the check a downloaded copy meets on a person's Mac: Gatekeeper
+ * (`spctl`) accepts it as notarized, with the ticket stapled so that holds offline. A build given the
+ * certificate but no notary key (`APPLE_API_KEY`), as a local one may be, has only its signature checked.
+ */
+function macGatekeeper(output) {
+  const app = dirname(dirname(dirname(packagedExecutable(output))));
+  const run = (command, argv) => {
+    const done = spawnSync(command, argv, { encoding: "utf8" });
+    const said = `${done.stdout ?? ""}${done.stderr ?? ""}`.trim();
+    if (done.status !== 0) throw new Error(`${command} ${argv.join(" ")} failed: exit ${done.status ?? done.signal}\n${said}`);
+    return said;
+  };
+  run("codesign", ["--verify", "--deep", "--strict", app]);
+  if ((process.env.APPLE_API_KEY ?? "") === "") {
+    console.log(`signed with a Developer ID, not notarized (no APPLE_API_KEY): ${app}`);
+    return;
+  }
+  run("xcrun", ["stapler", "validate", app]);
+  console.log(`gatekeeper: ${run("spctl", ["--assess", "--type", "execute", "-vv", app]).replace(/\n/g, ", ")}`);
 }
 
 /** Run `packageProbe.cjs` with the packaged executable in Node mode; it says what it checks. */
@@ -362,4 +395,5 @@ try {
 } finally {
   rmSync(stage, { recursive: true, force: true });
 }
+if (macSigned) macGatekeeper(output);
 if (!args.has("--skip-smoke")) smoke(output);

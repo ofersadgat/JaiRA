@@ -62,7 +62,7 @@
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^44.4.5",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.25.12",
     "node-llama-cpp": "^3.21.1",
     "pixelmatch": "^7.2.0",
