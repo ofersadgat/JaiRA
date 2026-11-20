@@ -466,13 +466,18 @@ export class WorkspaceMaker {
     return files.length;
   }
 
-  /** Where Bring takes files from: the machine named, else the copy's source, else another workspace of the project — this machine's first. */
+  /**
+   * Where Bring takes files from: the machine named — the copy's own folder when it is the copy's
+   * machine, else that machine's workspace of the project — else the copy's source, else another
+   * workspace of the project, this machine's first.
+   */
   private bringSource(named: string | undefined, source: WorkspaceSource | undefined, identity: string | undefined, dir: string): { machineId: string; dir: string } | undefined {
     const workspaces = identity !== undefined ? this.host.workspacesOf(identity).filter((w) => !(w.machineId === this.host.selfId() && samePath(w.dir, dir))) : [];
     if (named !== undefined) {
+      // The window names the machine it showed; for a copy's machine it showed the folder copied.
+      if (source?.kind === "machine" && (source.machine === named || this.host.labelOf(source.machine) === named)) return { machineId: source.machine, dir: source.dir };
       const match = workspaces.find((w) => w.machineId === named || this.host.labelOf(w.machineId) === named);
       if (match !== undefined) return match;
-      if (source?.kind === "machine" && (source.machine === named || this.host.labelOf(source.machine) === named)) return { machineId: source.machine, dir: source.dir };
     }
     if (source?.kind === "machine") return { machineId: source.machine, dir: source.dir };
     return workspaces.find((w) => w.machineId === this.host.selfId()) ?? workspaces[0];

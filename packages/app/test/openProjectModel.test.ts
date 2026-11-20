@@ -4,6 +4,8 @@ import type { MachinesView, ProjectSummary, WorkspacePlan } from "@jaira/shared"
 import {
   addLines,
   appendJobText,
+  bringChoices,
+  bringPlacesOf,
   folderNote,
   forgeOfUrl,
   needWords,
@@ -11,7 +13,9 @@ import {
   planSentence,
   readinessWords,
   sourceForProject,
+  sourceName,
   withStep,
+  workspacesOfSource,
   type WorkspaceJob,
 } from "../src/renderer/openProjectModel";
 
@@ -92,14 +96,59 @@ describe("where a new workspace of a project comes from", () => {
       url: "https://github.com/org/atlas.git",
       label: "github.com/org/atlas",
     });
-    expect(sourceForProject(members, undefined, "me")).toEqual({ kind: "machine", machine: "me", dir: "/Users/sam/Code/atlas", label: "mac-air" });
+    expect(sourceForProject(members, undefined, "me")).toEqual({ kind: "machine", machine: "me", dir: "/Users/sam/Code/atlas", label: "mac-air · atlas" });
     expect(sourceForProject([], undefined, "me")).toBeUndefined();
+  });
+
+  it("copies the workspace on another machine when this one has none, named by that machine and folder", () => {
+    const members = [{ project: "jaira-machine://peer/%2Fsrv%2Fwork%2Fatlas", machine: { id: "peer", label: "build-02", state: "online" } }] as unknown as ProjectSummary[];
+    const source = sourceForProject(members, undefined, "me");
+    expect(source).toEqual({ kind: "machine", machine: "peer", dir: "/srv/work/atlas", label: "build-02 · atlas" });
+    expect(sourceName(source!)).toBe("atlas");
+    expect(sourceName({ kind: "forge", host: "github.com", project: "org/atlas", url: "https://github.com/org/atlas.git" })).toBe("atlas");
   });
 
   it("reads a remote in every form git writes one", () => {
     expect(forgeOfUrl("git@github.com:org/atlas.git")).toEqual({ host: "github.com", project: "org/atlas", httpsUrl: "https://github.com/org/atlas.git" });
     expect(forgeOfUrl("ssh://git@gitlab.example.com:2222/group/sub/x.git")?.project).toBe("group/sub/x");
     expect(forgeOfUrl("https://gitlab.com/group/x")?.httpsUrl).toBe("https://gitlab.com/group/x.git");
+  });
+});
+
+describe("where Bring takes the files git ignores from", () => {
+  const ID = "github.com/org/atlas";
+  const projects = [
+    { project: "/Users/sam/Code/atlas", identity: ID, machine: { id: "me", label: "mac-air", state: "online", self: true } },
+    { project: "jaira-machine://peer/%2Fsrv%2Fatlas", identity: ID, machine: { id: "peer", label: "build-02", state: "online" } },
+    { project: "jaira-machine://peer/%2Fsrv%2Fatlas-1", identity: ID, machine: { id: "peer", label: "build-02", state: "online" } },
+    { project: "jaira-machine://box/%2Fhome%2Fx%2Fatlas", identity: ID, machine: { id: "box", label: "build-box", state: "online" } },
+    { project: "/Users/sam/Code/notes", machine: { id: "me", label: "mac-air", state: "online", self: true } },
+    { project: "/Users/sam/Code/other", identity: "github.com/org/other", machine: { id: "me", label: "mac-air", state: "online", self: true } },
+  ] as unknown as ProjectSummary[];
+  const forge = { kind: "forge", host: "github.com", project: "org/atlas", url: "https://github.com/org/atlas.git", label: "github.com/org/atlas" } as const;
+
+  it("finds the project's workspaces as the engine does: by the repository, a folder with no remote alone", () => {
+    expect(workspacesOfSource(projects, forge, "me").map((p) => p.project)).toHaveLength(4);
+    expect(workspacesOfSource(projects, { kind: "machine", machine: "peer", dir: "/srv/atlas-1" }, "me")).toHaveLength(4);
+    expect(workspacesOfSource(projects, { kind: "machine", machine: "me", dir: "/Users/sam/Code/notes" }, "me").map((p) => p.project)).toEqual(["/Users/sam/Code/notes"]);
+    expect(workspacesOfSource(projects, { ...forge, url: "https://github.com/org/new.git" }, "me")).toEqual([]);
+  });
+
+  it("lists each machine that holds one once, in the project's order", () => {
+    expect(bringPlacesOf(workspacesOfSource(projects, forge, "me"), "me")).toEqual([
+      { machine: "me", label: "mac-air" },
+      { machine: "peer", label: "build-02" },
+      { machine: "box", label: "build-box" },
+    ]);
+  });
+
+  it("takes them from a copy's own machine, else the target's own workspace, else the first that holds one", () => {
+    const places = bringPlacesOf(workspacesOfSource(projects, forge, "me"), "me");
+    const copy = { kind: "machine", machine: "peer", dir: "/srv/atlas", label: "build-02 · atlas" } as const;
+    expect(bringChoices(copy, "me", places).map((p) => p.label)).toEqual(["build-02", "mac-air", "build-box"]);
+    expect(bringChoices(forge, "box", places).map((p) => p.label)).toEqual(["build-box", "mac-air", "build-02"]);
+    expect(bringChoices(forge, "fresh", places.slice(1)).map((p) => p.label)).toEqual(["build-02", "build-box"]);
+    expect(bringChoices(forge, "me", [])).toEqual([]);
   });
 });
 
@@ -126,26 +175,27 @@ describe("Add's card, in four lines", () => {
   ] as const;
 
   it("names the forge, the project and its branch; the machine and its folder, numbered when taken", () => {
-    const lines = addLines({ ...forge, branch: "main" }, "build-01", plan());
+    const lines = addLines({ ...forge, branch: "main" }, "build-01", plan(), undefined);
     expect(lines.project).toEqual({ mark: "gitlab", place: "gitlab.com", name: "mistlabs/atlas", branch: "main" });
     expect(lines.where).toEqual({ machine: "build-01", dir: "/srv/work/atlas-1", note: "atlas is taken there, so atlas-1" });
-    expect(addLines({ ...forge, host: "github.com" }, "x", plan({ taken: undefined })).project).toMatchObject({ mark: "github", branch: "default branch" });
-    expect(addLines({ ...forge, host: "git.example.com" }, "x", plan()).project.mark).toBe("git");
-    expect(addLines(forge, "x", plan({ taken: undefined })).where.note).toBeUndefined();
+    expect(addLines({ ...forge, host: "github.com" }, "x", plan({ taken: undefined }), undefined).project).toMatchObject({ mark: "github", branch: "default branch" });
+    expect(addLines({ ...forge, host: "git.example.com" }, "x", plan(), undefined).project.mark).toBe("git");
+    expect(addLines(forge, "x", plan({ taken: undefined }), undefined).where.note).toBeUndefined();
   });
 
   it("names a copy by the machine and folder it comes from, and the branch it is on", () => {
     const copy = { kind: "machine", machine: "m-studio", dir: "/Users/me/src/atlas", label: "studio-mini · /Users/me/src/atlas" } as const;
-    const lines = addLines(copy, "build-01", plan({ checkout: { branch: "feature/x", head: "abc1234", ahead: 1, changed: 0, untracked: 0 } }));
+    const lines = addLines(copy, "build-01", plan({ checkout: { branch: "feature/x", head: "abc1234", ahead: 1, changed: 0, untracked: 0 } }), bringChoices(copy, "build-01", [])[0]);
     expect(lines.project).toEqual({ mark: "machine", place: "studio-mini", name: "atlas", branch: "feature/x" });
     expect(lines.bring.text).toBe(".env*.local from studio-mini");
   });
 
   it("says what is brought, and the first steps that run then, with how many more", () => {
-    const lines = addLines(forge, "build-01", plan({ setup: { from: "file", target: "default", readiness: "installs", steps: [...steps] } }));
-    expect(lines.bring).toEqual({ text: ".env*.local from another workspace of it", patterns: [".env*.local"] });
+    const lines = addLines(forge, "build-01", plan({ setup: { from: "file", target: "default", readiness: "installs", steps: [...steps] } }), { machine: "m-studio", label: "studio-mini" });
+    expect(lines.bring).toEqual({ text: ".env*.local from studio-mini", patterns: [".env*.local"] });
+    expect(addLines(forge, "build-01", plan(), undefined).bring.text).toBe(".env*.local: no other workspace of it to bring them from");
     expect(lines.then).toEqual({ text: "Install node 22 · pnpm install · 2 more", tone: "accent", count: 4 });
-    const bare = addLines(forge, "build-01", plan({ bring: [] }));
+    const bare = addLines(forge, "build-01", plan({ bring: [] }), undefined);
     expect(bare.bring).toEqual({ text: "nothing git ignores", patterns: [] });
     expect(bare.then).toEqual({ text: "nothing to set up", tone: "dim", count: 0 });
   });

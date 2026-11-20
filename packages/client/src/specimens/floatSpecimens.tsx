@@ -163,6 +163,7 @@ const addCard = (job: boolean): JSX.Element => (
       source={ADD_SOURCE}
       name="atlas"
       machine="m-build"
+      places={[{ machine: "m-self", label: "mac-air" }]}
       machines={OPEN_MACHINES}
       jobs={job ? ADD_JOB : {}}
       onCreate={async () => undefined}

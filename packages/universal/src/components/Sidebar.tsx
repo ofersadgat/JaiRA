@@ -3,7 +3,7 @@ import { View, isWeb } from "@tamagui/core";
 import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
 import type { SidebarAct, SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { SIDEBAR_RAIL } from "@jaira/ui/uiState";
-import { crumbFit, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
+import { SELF_MACHINE, crumbFit, machineOfKey, machinesWithout, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
@@ -730,21 +730,23 @@ function Crumb({
   const t = useTokens();
   const [menu, setMenu] = useState<MenuAt | null>(null);
   // Another workspace of the project (decision 0027): every machine's row has Add under the pointer —
-  // one that has a workspace already takes a second — and the last item opens the full form.
-  const adding = (have: ReadonlySet<string>, at: { x: number; y: number }): MenuItem[] =>
+  // one that has a workspace already takes a second, one that has none (this machine among them) its
+  // first — and the last item opens the full form.
+  const adding = (holding: ReadonlySet<string>, at: { x: number; y: number }): MenuItem[] =>
     onAddWorkspace === undefined
       ? []
       : [
-          ...paired
-            .filter((m) => !have.has(m.id))
-            .map((m, i) => ({
+          ...machinesWithout(paired, holding).map((m, i) => {
+            const id = m.self ? SELF_ADD : m.id;
+            return {
               label: m.label,
               ...(i === 0 ? { separator: true } : {}),
               note: m.online ? "no workspace" : "offline",
               disabled: !m.online,
-              onSelect: () => onAddWorkspace(m.id, at),
-              ...(m.online ? { action: { label: "Add", onSelect: () => onAddWorkspace(m.id, at) } } : {}),
-            })),
+              onSelect: () => onAddWorkspace(id, at),
+              ...(m.online ? { action: { label: "Add", onSelect: () => onAddWorkspace(id, at) } } : {}),
+            };
+          }),
           { label: "Add a workspace…", separator: true, onSelect: () => onAddWorkspace() },
         ];
   if (scope === undefined) {
@@ -758,12 +760,22 @@ function Crumb({
       const box = isWeb ? (e as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
       const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
       const at = { x: box?.left ?? touch?.pageX ?? 0, y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0) };
+      // The machine the one workspace is on — this one, or the paired machine its key names — ticked.
+      const home = machineOfKey(project.project);
+      const there = home === SELF_MACHINE ? undefined : paired.find((m) => m.id === home);
+      const online = home === SELF_MACHINE || there?.online === true;
       setMenu({
         ...at,
         title: "Workspaces",
         items: [
-          { label: "This machine", checked: true, note: "this workspace", onSelect: () => undefined, action: { label: "Add", onSelect: () => onAddWorkspace(SELF_ADD, at) } },
-          ...adding(new Set(), at),
+          {
+            label: home === SELF_MACHINE ? "This machine" : (there?.label ?? home),
+            checked: true,
+            note: online ? "this workspace" : "this workspace · offline",
+            onSelect: () => undefined,
+            ...(online ? { action: { label: "Add", onSelect: () => onAddWorkspace(home === SELF_MACHINE ? SELF_ADD : home, at) } } : {}),
+          },
+          ...adding(new Set([home]), at),
         ],
       });
     };

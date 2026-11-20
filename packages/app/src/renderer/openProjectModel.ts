@@ -18,7 +18,7 @@ import type {
   WorkspaceSource,
   WorkspaceStepEvent,
 } from "@jaira/shared/browser";
-import { parseRemoteProjectKey } from "@jaira/shared/browser";
+import { parseRemoteProjectKey, repositoryIdentity } from "@jaira/shared/browser";
 
 export type OpenStep = "project" | "where" | "how" | "go";
 
@@ -163,7 +163,68 @@ export function sourceForProject(members: readonly ProjectSummary[], remoteUrl: 
   const remote = parseRemoteProjectKey(chosen.project);
   const machine = remote?.machineId ?? chosen.machine?.id ?? selfId;
   if (machine === undefined) return undefined;
-  return { kind: "machine", machine, dir: remote?.dir ?? chosen.project, label: chosen.machine?.label ?? "this machine" };
+  const dir = remote?.dir ?? chosen.project;
+  // Said as Project's folder pane says a folder chosen there: the machine, and the folder's name.
+  return { kind: "machine", machine, dir, label: `${chosen.machine?.label ?? "this machine"} · ${folderNameOf(dir)}` };
+}
+
+/** A folder's last part: `/srv/work/atlas` → `atlas`. */
+function folderNameOf(dir: string): string {
+  return dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
+}
+
+/** What a workspace from `source` is called, as the engine names it before its plan says: the repository's or the folder's name. */
+export function sourceName(source: WorkspaceSource): string {
+  return source.kind === "forge" ? (source.project.split("/").pop() ?? source.project) : folderNameOf(source.dir);
+}
+
+/** A machine that holds a workspace of the project: where Bring can take the files git ignores from. */
+export interface BringPlace {
+  machine: string;
+  label: string;
+}
+
+/**
+ * The workspaces of the project `source` is, as the engine finds them when it brings files: every
+ * workspace with the repository's identity — a forge's repository, or the folder's own when it has
+ * one. A folder with no remote is a project of one.
+ */
+export function workspacesOfSource(projects: readonly ProjectSummary[], source: WorkspaceSource, selfId: string | undefined): ProjectSummary[] {
+  if (source.kind === "forge") {
+    const identity = repositoryIdentity(source.url);
+    return identity === undefined ? [] : projects.filter((p) => p.identity === identity);
+  }
+  const at = projects.find((p) => {
+    const remote = parseRemoteProjectKey(p.project);
+    return remote !== undefined ? remote.machineId === source.machine && remote.dir === source.dir : (p.machine?.id ?? selfId) === source.machine && p.project === source.dir;
+  });
+  if (at === undefined) return [];
+  return at.identity === undefined ? [at] : projects.filter((p) => p.identity === at.identity);
+}
+
+/** The machines a project's workspaces are on, each once, in the order they are listed (this machine's first). */
+export function bringPlacesOf(members: readonly ProjectSummary[], selfId: string | undefined): BringPlace[] {
+  const out: BringPlace[] = [];
+  for (const m of members) {
+    const machine = parseRemoteProjectKey(m.project)?.machineId ?? m.machine?.id ?? selfId;
+    if (machine === undefined || out.some((p) => p.machine === machine)) continue;
+    out.push({ machine, label: m.machine?.label ?? "this machine" });
+  }
+  return out;
+}
+
+/**
+ * Where Bring can take the files git ignores from (decision 0027), the one it takes them from first: a
+ * copy's own machine (the folder copied); else the target's own workspace of the project, else the
+ * first machine that holds one. Empty when nothing holds the project yet. The window sends the one
+ * shown as `bringFrom`, so what it says is what happens.
+ */
+export function bringChoices(source: WorkspaceSource & { label: string }, target: string, places: readonly BringPlace[]): BringPlace[] {
+  if (source.kind === "machine") {
+    return [{ machine: source.machine, label: source.label.split(" · ")[0]! }, ...places.filter((p) => p.machine !== source.machine)];
+  }
+  const own = places.find((p) => p.machine === target);
+  return own !== undefined ? [own, ...places.filter((p) => p !== own)] : [...places];
 }
 
 /** A git remote URL as a forge, a project on it, and the HTTPS URL to clone it by. */
@@ -189,7 +250,8 @@ export interface AddLines {
   then: { text: string; tone: "ok" | "accent" | "warn" | "dim" | "bad"; count: number };
 }
 
-export function addLines(source: WorkspaceSource & { label: string }, target: string, plan: WorkspacePlan): AddLines {
+/** `from`: where Bring takes the files from — the first of {@link bringChoices}; absent, nothing holds them. */
+export function addLines(source: WorkspaceSource & { label: string }, target: string, plan: WorkspacePlan, from: BringPlace | undefined): AddLines {
   const project: AddLines["project"] =
     source.kind === "forge"
       ? {
@@ -206,9 +268,10 @@ export function addLines(source: WorkspaceSource & { label: string }, target: st
         };
   const name = plan.dir.split(/[\\/]/).filter(Boolean).pop() ?? plan.dir;
   const where: AddLines["where"] = { machine: target, dir: plan.dir, ...(plan.taken !== undefined ? { note: `${plan.taken} is taken there, so ${name}` } : {}) };
-  const from = source.kind === "machine" ? source.label.split(" · ")[0]! : "another workspace of it";
   const bring: AddLines["bring"] =
-    plan.bring.length === 0 ? { text: "nothing git ignores", patterns: [] } : { text: `${plan.bring.join(", ")} from ${from}`, patterns: plan.bring };
+    plan.bring.length === 0
+      ? { text: "nothing git ignores", patterns: [] }
+      : { text: from !== undefined ? `${plan.bring.join(", ")} from ${from.label}` : `${plan.bring.join(", ")}: no other workspace of it to bring them from`, patterns: plan.bring };
   const steps = plan.setup.steps.filter((s) => s.status !== "brings");
   const ready = readinessWords(plan);
   const then: AddLines["then"] =

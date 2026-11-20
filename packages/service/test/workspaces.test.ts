@@ -129,6 +129,26 @@ describe("making a workspace from a folder on another machine", () => {
     // The name is taken now: the next one is numbered.
     expect(build.folderFor("work")).toEqual({ dir: join(projects, "work-1"), taken: "work", projectsFolder: projects });
   });
+
+  it("brings from the folder copied when its machine is named, though that machine has another workspace of it", async () => {
+    const { work } = sourceCheckout();
+    // Another workspace of the same project on studio-mini, with its own .env.local.
+    const other = scratch();
+    writeFileSync(join(other, ".env.local"), "KEY=other\n");
+    const studio = new WorkspaceMaker(host("studio-mini", scratch(), []));
+    const pushes: PushMessage[] = [];
+    const projects = scratch();
+    const build = new WorkspaceMaker({
+      ...host("build-01", projects, pushes, { "studio-mini": studio }),
+      identityOf: () => "example.com/atlas",
+      workspacesOf: () => [{ machineId: "studio-mini", dir: other }],
+    });
+
+    const { jobId } = build.create({ source: { kind: "machine", machine: "studio-mini", dir: work }, bringFrom: "studio-mini" });
+    const done = await finished(pushes, jobId);
+    expect(done.ok).toBe(true);
+    expect(readFileSync(join(projects, "work", ".env.local"), "utf8")).toBe("KEY=1\n");
+  });
 });
 
 describe("making a workspace from a forge", () => {

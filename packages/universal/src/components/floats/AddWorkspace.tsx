@@ -10,7 +10,9 @@ import { faceOf } from "@jaira/ui/environmentModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import {
   addLines,
+  bringChoices,
   needWords,
+  type BringPlace,
   type WorkspaceJob,
 } from "@jaira/ui/openProjectModel";
 import { invoke } from "@jaira/ui/store";
@@ -33,6 +35,8 @@ interface AddProps {
   name: string;
   /** The machine it goes to. */
   machine: string;
+  /** The machines holding a workspace of the project: where Bring can take the files git ignores from. */
+  places: readonly BringPlace[];
   machines: MachinesView | undefined;
   jobs: Record<string, WorkspaceJob>;
   onCreate: (
@@ -83,6 +87,7 @@ function AddCard({
   source,
   name,
   machine,
+  places,
   machines,
   jobs,
   onCreate,
@@ -125,14 +130,20 @@ function AddCard({
         : machines?.machines.find((m) => m.id === source.machine)
       : undefined;
   const ready = plan !== "loading" && !("error" in plan) ? plan : undefined;
+  // Where Bring takes the files from: said on its line, and sent, so the line is what happens.
+  const from = bringChoices(source, machine, places)[0];
   const lines =
-    ready !== undefined ? addLines(source, label, ready) : undefined;
+    ready !== undefined ? addLines(source, label, ready, from) : undefined;
   const job = jobId !== undefined ? jobs[jobId] : undefined;
 
   const add = async (): Promise<void> => {
     if (ready === undefined) return;
     const id = await onCreate(
-      { source, ...(machine !== selfId ? { machine } : {}) },
+      {
+        source,
+        ...(machine !== selfId ? { machine } : {}),
+        ...(from !== undefined ? { bringFrom: from.machine } : {}),
+      },
       `${ready.name} on ${label}`,
     );
     if (id !== undefined) setJobId(id);

@@ -14,11 +14,14 @@ import type {
 import {
   OPEN_STEPS,
   OPEN_STEP_LABELS,
+  bringChoices,
   folderNote,
   needWords,
   placeGroupsOf,
   planSentence,
   readinessWords,
+  sourceName,
+  type BringPlace,
   type OpenFlowStart,
   type OpenStep,
   type WorkspaceJob,
@@ -63,11 +66,14 @@ export function OpenProject({
   onCreate,
   onCancelJob,
   onOpenThere,
+  placesOf,
   staged = false,
 }: {
   start: OpenFlowStart;
   machines: MachinesView | undefined;
   jobs: Record<string, WorkspaceJob>;
+  /** The machines holding a workspace of the project a source is: where Bring can take files from. */
+  placesOf?: (source: Source) => readonly BringPlace[];
   onClose: () => void;
   onCreate: (request: WorkspaceCreateRequest, label: string) => Promise<string | undefined>;
   onCancelJob: (jobId: string) => void;
@@ -118,9 +124,18 @@ export function OpenProject({
 
   const targetPlan = (chosenFolder !== undefined ? customPlan : target !== undefined ? plans[target] : undefined) as PlanState | undefined;
   const plan = isPlan(targetPlan) ? targetPlan : undefined;
-  const openThere = source?.kind === "machine" && target === source.machine && chosenFolder === undefined;
+  const adding = start.mode === "add";
+  // A folder taken to the machine it is on opens there — unless it is a workspace of the project being
+  // added to: that machine then takes a second workspace, a copy of it beside it.
+  const openThere = !adding && source?.kind === "machine" && target === source.machine && chosenFolder === undefined;
   const job = jobId !== undefined ? jobs[jobId] : undefined;
-  const title = start.mode === "add" ? `Add a workspace to ${start.name ?? source?.label ?? "the project"}` : "Open a project";
+  // The project's name while it is the one the dialog was opened for; another chosen at Project, that one's.
+  const projectName = source === undefined ? undefined : ((source === start.source ? start.name : undefined) ?? plan?.name ?? sourceName(source));
+  const title = adding ? `Add a workspace to ${projectName ?? "the project"}` : "Open a project";
+  // Where Bring takes the files git ignores from: the one chosen, else the first it would take them from —
+  // sent either way, so How it gets there says what happens.
+  const choices = source !== undefined && target !== undefined ? bringChoices(source, target, placesOf?.(source) ?? []) : [];
+  const bringPlace = choices.find((c) => c.machine === bringFrom) ?? choices[0];
 
   const go = async (): Promise<void> => {
     if (source === undefined || target === undefined) return;
@@ -133,7 +148,7 @@ export function OpenProject({
       source,
       ...(target !== selfId ? { machine: target } : {}),
       ...(chosenFolder !== undefined ? { folder: chosenFolder } : {}),
-      ...(bringFrom !== undefined ? { bringFrom } : {}),
+      ...(bringPlace !== undefined ? { bringFrom: bringPlace.machine } : {}),
     };
     const id = await onCreate(request, `${plan?.name ?? source.label} on ${machineLabel(target)}`);
     if (id !== undefined) {
@@ -145,18 +160,18 @@ export function OpenProject({
   const verb = source?.kind === "forge" ? "Clone" : "Copy";
   const name = plan?.name ?? source?.label.split("/").pop() ?? "it";
   const secondary: { label: string; onPress: () => void } | undefined =
-    step === "where" && start.mode === "add" && target !== undefined && !openThere ? { label: "Next: how it gets there", onPress: () => setStep("how") } : undefined;
+    step === "where" && adding && target !== undefined && !openThere ? { label: "Next: how it gets there", onPress: () => setStep("how") } : undefined;
   const primary: { label: string; disabled: boolean; onPress: () => void } =
     step === "project"
       ? { label: "Next: where it goes", disabled: source === undefined, onPress: () => setStep("where") }
       : step === "where"
         ? openThere
           ? { label: `Open ${name} on ${machineLabel(target)}`, disabled: false, onPress: () => void go() }
-          : start.mode === "add" && target !== undefined
-            ? { label: `Add ${machineLabel(target)}`, disabled: plan === undefined, onPress: () => void go() }
+          : adding && target !== undefined
+            ? { label: `Add ${machineLabel(target)}`, disabled: plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
             : { label: "Next: how it gets there", disabled: target === undefined, onPress: () => setStep("how") }
         : step === "how"
-          ? { label: start.mode === "add" ? `Add ${machineLabel(target)}` : `${verb} ${name} to ${machineLabel(target)}`, disabled: plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
+          ? { label: adding ? `Add ${machineLabel(target)}` : `${verb} ${name} to ${machineLabel(target)}`, disabled: plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
           : job?.finished !== undefined
             ? { label: "Done", disabled: false, onPress: onClose }
             : { label: "Hide — it carries on", disabled: false, onPress: onClose };
@@ -183,6 +198,7 @@ export function OpenProject({
             <WhereStep
               machines={machines}
               source={source}
+              adding={adding}
               target={target}
               plans={plans}
               folder={folder}
@@ -194,12 +210,12 @@ export function OpenProject({
             />
           ) : null}
           {step === "how" && source !== undefined && target !== undefined ? (
-            <HowStep source={source} target={machineLabel(target)} plan={targetPlan} machines={machines} bringFrom={bringFrom} onBringFrom={setBringFrom} />
+            <HowStep source={source} target={machineLabel(target)} plan={targetPlan} choices={choices} bringFrom={bringPlace?.machine} onBringFrom={setBringFrom} />
           ) : null}
           {step === "go" ? <GoStep job={job} onCancel={() => jobId !== undefined && onCancelJob(jobId)} /> : null}
         </View>
         <Foot
-          back={step === "where" && start.mode !== "add" ? "‹ Project" : step === "how" ? "‹ Where it goes" : undefined}
+          back={step === "where" ? "‹ Project" : step === "how" ? "‹ Where it goes" : undefined}
           onBack={() => setStep(step === "how" ? "where" : "project")}
           onCancel={onClose}
           primary={primary}
@@ -374,12 +390,24 @@ function PlaceRow({
 // --- 1 · the project ---------------------------------------------------------------------------------
 
 function ProjectStep({ machines, source, onSource }: { machines: MachinesView | undefined; source: Source | undefined; onSource: (s: Source) => void }): JSX.Element {
-  const [place, setPlace] = useState<Place | undefined>(machines !== undefined ? { kind: "machine", id: machines.self.id, label: machines.self.label } : undefined);
+  // It opens where the project chosen is — its forge, or the machine its folder is on — so going back to
+  // it shows that choice; with none, this machine's folders.
+  const [place, setPlace] = useState<Place | undefined>(
+    source?.kind === "forge"
+      ? { kind: "forge", host: source.host, label: source.host }
+      : source?.kind === "machine"
+        ? { kind: "machine", id: source.machine, label: labelOf(machines, source.machine) }
+        : machines !== undefined
+          ? { kind: "machine", id: machines.self.id, label: machines.self.label }
+          : undefined,
+  );
   const [forges, setForges] = useState<ForgeRepositoriesView | { error: string } | undefined>(undefined);
   useEffect(() => {
     invoke("forge:repositories", {}).then(setForges, (e: unknown) => setForges({ error: e instanceof Error ? e.message : String(e) }));
   }, []);
   const hosts = forges !== undefined && !("error" in forges) ? [...new Map(forges.connections.map((c) => [c.host, c])).values()] : [];
+  // The chosen project's forge, when no connection serves it: listed still, so the choice is shown.
+  const unserved = source?.kind === "forge" && forges !== undefined && !hosts.some((c) => c.host === source.host) ? source.host : undefined;
   const groups = placeGroupsOf(machines);
   return (
     <>
@@ -413,6 +441,14 @@ function ProjectStep({ machines, source, onSource }: { machines: MachinesView | 
             onPress={() => setPlace({ kind: "forge", host: c.host, label: c.host })}
           />
         ))}
+        {unserved !== undefined ? (
+          <PlaceRow
+            label={forgeLabel(unserved)}
+            chosen={place?.kind === "forge" && place.host === unserved}
+            right={{ text: "not signed in", tone: "dim" }}
+            onPress={() => setPlace({ kind: "forge", host: unserved, label: unserved })}
+          />
+        ) : null}
         {forges !== undefined && hosts.length === 0 ? (
           <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", lineHeight: 1.4 }} paddingHorizontal={8} paddingTop={2}>
             {"error" in forges ? forges.error : "No forge is signed in. Settings → Connections → Forges."}
@@ -421,8 +457,14 @@ function ProjectStep({ machines, source, onSource }: { machines: MachinesView | 
       </Column>
       <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} gap={10} paddingVertical={14} paddingHorizontal={18}>
         {place?.kind === "machine" ? <FolderPane machineId={place.id} self={place.id === machines?.self.id} label={place.label} source={source} onSource={onSource} /> : null}
-        {place?.kind === "forge" && forges !== undefined && !("error" in forges) ? (
-          <RepoPane host={place.host} repos={forges.repositories.filter((r) => r.host === place.host)} source={source} onSource={onSource} />
+        {place?.kind === "forge" && forges !== undefined ? (
+          <RepoPane
+            host={place.host}
+            repos={"error" in forges ? [] : forges.repositories.filter((r) => r.host === place.host)}
+            served={hosts.some((c) => c.host === place.host)}
+            source={source}
+            onSource={onSource}
+          />
         ) : null}
       </View>
     </>
@@ -436,12 +478,12 @@ function FolderPane({ machineId, self, label, source, onSource }: { machineId: s
     setError(undefined);
     invoke("files:browse", { ...(self ? {} : { machine: machineId }), ...(dir !== undefined ? { dir } : {}) }).then(setListing, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
+  const chosenHere = source?.kind === "machine" && source.machine === machineId ? source.dir : undefined;
   useEffect(() => {
     setListing(undefined);
-    browse();
+    browse(chosenHere !== undefined ? parentOf(chosenHere) : undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
-  const chosenHere = source?.kind === "machine" && source.machine === machineId ? source.dir : undefined;
   const choose = (dir: string): void => onSource({ kind: "machine", machine: machineId, dir, label: `${label} · ${dir.split(/[\\/]/).filter(Boolean).pop() ?? dir}` });
   return (
     <>
@@ -480,54 +522,91 @@ function FolderPane({ machineId, self, label, source, onSource }: { machineId: s
   );
 }
 
-function RepoPane({ host, repos, source, onSource }: { host: string; repos: ForgeRepositoryRow[]; source: Source | undefined; onSource: (s: Source) => void }): JSX.Element {
+function RepoPane({
+  host,
+  repos,
+  served,
+  source,
+  onSource,
+}: {
+  host: string;
+  repos: ForgeRepositoryRow[];
+  /** A connection serves the host: its repositories are listed. */
+  served: boolean;
+  source: Source | undefined;
+  onSource: (s: Source) => void;
+}): JSX.Element {
   const [search, setSearch] = useState("");
   const [branches, setBranches] = useState<ForgeBranch[] | undefined>(undefined);
   const chosen = source?.kind === "forge" && source.host === host ? source : undefined;
+  // A forge's names are not case-sensitive: the remote a workspace was cloned by may spell one otherwise.
+  const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+  const repoOf = (project: string): ForgeRepositoryRow | undefined => repos.find((r) => same(r.project, project));
   const shown = repos.filter((r) => search.trim() === "" || r.project.toLowerCase().includes(search.trim().toLowerCase())).slice(0, 200);
+  // A project added from its remote names no branch: it is cloned at the default one.
+  const branch = chosen !== undefined ? (chosen.branch ?? repoOf(chosen.project)?.defaultBranch) : undefined;
   useEffect(() => {
     setBranches(undefined);
-    if (chosen === undefined) return;
+    if (chosen === undefined || !served) return;
     invoke("forge:branches", { host, project: chosen.project }).then(setBranches, () => setBranches([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chosen?.project]);
+  }, [chosen?.project, served]);
   const pick = (repo: ForgeRepositoryRow, branch?: string): void =>
     onSource({ kind: "forge", host, project: repo.project, url: repo.cloneUrl, branch: branch ?? repo.defaultBranch, label: `${repo.project} · ${branch ?? repo.defaultBranch}` });
-  const repoOf = (project: string): ForgeRepositoryRow | undefined => repos.find((r) => r.project === project);
+  const branchRow = branches ?? (branch !== undefined ? [{ name: branch, head: "" }] : []);
   return (
     <>
       <View flexDirection="row" alignItems="center" gap={8}>
         <Txt spec={{ voice: "app", scale: 1, weight: 600 }}>{host}</Txt>
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>{repos.length} repositories</Txt>
+        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>{served ? `${repos.length} repositories` : "not signed in"}</Txt>
         <View flexGrow={1} />
-        <TextField value={search} onChange={setSearch} placeholder="Find a repository" label="Find a repository" width={200} />
+        {served ? <TextField value={search} onChange={setSearch} placeholder="Find a repository" label="Find a repository" width={200} /> : null}
       </View>
       <List>
+        {chosen !== undefined && repoOf(chosen.project) === undefined ? <ListRow glyph="▸" name={chosen.project} chosen onPress={() => undefined} /> : null}
         {shown.map((repo) => (
           <ListRow
             key={repo.project}
             glyph="▸"
             name={repo.project}
-            chosen={chosen?.project === repo.project}
+            chosen={chosen !== undefined && same(chosen.project, repo.project)}
             chip={repo.private ? "private" : undefined}
             onPress={() => pick(repo)}
           />
         ))}
-        {repos.length === 0 ? <Hint>No repositories this connection can reach.</Hint> : null}
+        {served && repos.length === 0 ? <Hint>No repositories this connection can reach.</Hint> : null}
       </List>
-      {chosen !== undefined ? (
+      {chosen !== undefined && branchRow.length > 0 ? (
         <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6}>
           <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>Branch</Txt>
-          {(branches ?? [{ name: chosen.branch ?? "main", head: "" }]).slice(0, 12).map((b) => (
-            <Button key={b.name} kind={b.name === chosen.branch ? "primary" : "ghost"} onPress={() => repoOf(chosen.project) && pick(repoOf(chosen.project)!, b.name)}>
+          {branchRow.slice(0, 12).map((b) => (
+            <Button key={b.name} kind={b.name === branch ? "primary" : "ghost"} onPress={() => repoOf(chosen.project) && pick(repoOf(chosen.project)!, b.name)}>
               {b.name}
             </Button>
           ))}
         </View>
       ) : null}
-      <Hint>A repository is cloned at its branch, clean; Bring then adds the files git ignores from one of your machines.</Hint>
+      <Hint>
+        {served
+          ? "A repository is cloned at its branch, clean; Bring then adds the files git ignores from one of your machines."
+          : `No forge connection serves ${host}, so its repositories aren't listed here and git clones ${chosen?.project ?? "one"} with what it has on the machine it goes to. Settings → Connections → Forges signs one in.`}
+      </Hint>
     </>
   );
+}
+
+/** A forge host as the column names it: GitHub, GitLab (with the host when it is their own), else the host. */
+function forgeLabel(host: string): string {
+  if (/(^|\.)github\./.test(host)) return host === "github.com" ? "GitHub" : `GitHub · ${host}`;
+  if (/(^|\.)gitlab\./.test(host)) return host === "gitlab.com" ? "GitLab" : `GitLab · ${host}`;
+  return host;
+}
+
+/** The folder a folder is in, for browsing to it: `/srv/work/atlas` → `/srv/work`, `C:\src\atlas` → `C:\src`. */
+function parentOf(dir: string): string | undefined {
+  const cut = dir.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+  if (cut === "") return dir.startsWith("/") ? "/" : undefined;
+  return /^[A-Za-z]:$/.test(cut) ? `${cut}\\` : cut;
 }
 
 // --- 2 · where it goes ---------------------------------------------------------------------------------
@@ -535,6 +614,7 @@ function RepoPane({ host, repos, source, onSource }: { host: string; repos: Forg
 function WhereStep({
   machines,
   source,
+  adding,
   target,
   plans,
   folder,
@@ -543,6 +623,8 @@ function WhereStep({
 }: {
   machines: MachinesView | undefined;
   source: Source;
+  /** Adding a workspace of the project: the machine a copied folder is on takes a second, like any other. */
+  adding: boolean;
   target: string | undefined;
   plans: Record<string, PlanState>;
   folder: { parent: string; name: string } | undefined;
@@ -550,9 +632,11 @@ function WhereStep({
   onFolder: (f: { parent: string; name: string } | undefined) => void;
 }): JSX.Element {
   const groups = placeGroupsOf(machines);
+  // Opening a folder: the machine it is on opens it where it is. Adding a workspace of the project: that
+  // folder is already one, so its machine is a place a copy goes, with its status like the rest.
+  const itIs = !adding && source.kind === "machine" ? source.machine : undefined;
   const statusOf = (id: string, onlineNow: boolean): { text: string; tone: string } | undefined => {
     if (!onlineNow) return { text: "offline", tone: "dim" };
-    if (source.kind === "machine" && source.machine === id) return { text: "has it", tone: "dim" };
     const plan = plans[id];
     if (plan === "loading" || plan === undefined) return { text: "…", tone: "dim" };
     if ("error" in plan) return { text: "can't", tone: "dim" };
@@ -563,21 +647,21 @@ function WhereStep({
   return (
     <>
       <Column>
-        {source.kind === "machine" ? (
+        {itIs !== undefined ? (
           <View flexDirection="column" gap={1}>
             <Txt spec={HEAD} paddingTop={8} paddingHorizontal={8} paddingBottom={3}>
               Where it is
             </Txt>
-            <PlaceRow label={labelOf(machines, source.machine)} chosen={target === source.machine} right={{ text: "open it there", tone: "accent" }} onPress={() => onTarget(source.machine)} />
+            <PlaceRow label={labelOf(machines, itIs)} chosen={target === itIs} right={{ text: "open it there", tone: "accent" }} onPress={() => onTarget(itIs)} />
           </View>
         ) : null}
         {groups.map((group) => {
-          const rows = group.machines.filter((m) => !(source.kind === "machine" && m.id === source.machine));
+          const rows = group.machines.filter((m) => m.id !== itIs);
           if (rows.length === 0) return null;
           return (
             <View key={group.title} flexDirection="column" gap={1}>
               <Txt spec={HEAD} paddingTop={8} paddingHorizontal={8} paddingBottom={3}>
-                {source.kind === "machine" && group.title === "This machine" ? "Copy it to" : group.title}
+                {itIs !== undefined && group.title === "This machine" ? "Copy it to" : group.title}
               </Txt>
               {rows.map((m) => (
                 <PlaceRow key={m.id} label={m.label} chosen={target === m.id} dim={!m.online} right={statusOf(m.id, m.online)} onPress={() => (m.online ? onTarget(m.id) : undefined)} />
@@ -588,10 +672,10 @@ function WhereStep({
       </Column>
       <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} gap={10} paddingVertical={14} paddingHorizontal={18}>
         {target === undefined ? <Hint>Choose the machine it goes to.</Hint> : null}
-        {target !== undefined && source.kind === "machine" && target === source.machine ? (
+        {target !== undefined && target === itIs && source.kind === "machine" ? (
           <Note tone="plain">{`It stays where it is: ${source.dir} on ${label ?? "that machine"} opens as a project there. Nothing is copied.`}</Note>
         ) : null}
-        {target !== undefined && !(source.kind === "machine" && target === source.machine) ? (
+        {target !== undefined && target !== itIs ? (
           plan === undefined || plan === "loading" ? (
             <Hint>Asking {label}…</Hint>
           ) : "error" in plan ? (
@@ -697,22 +781,23 @@ function HowStep({
   source,
   target,
   plan,
-  machines,
+  choices,
   bringFrom,
   onBringFrom,
 }: {
   source: Source;
   target: string;
   plan: PlanState | undefined;
-  machines: MachinesView | undefined;
+  /** The machines Bring can take the files from (`bringChoices`): a copy's own first, then the project's others. */
+  choices: readonly BringPlace[];
+  /** The one it takes them from. */
   bringFrom: string | undefined;
-  onBringFrom: (id: string | undefined) => void;
+  onBringFrom: (id: string) => void;
 }): JSX.Element {
   const t = useTokens();
   if (plan === undefined || plan === "loading") return <Hint>Reading the project's setup…</Hint>;
   if ("error" in plan) return <Hint bad>{plan.error}</Hint>;
   const then = plan.setup.steps.filter((s) => s.status !== "brings");
-  const from = [{ id: undefined as string | undefined, label: source.kind === "machine" ? source.label.split(" · ")[0]! : "automatic" }, ...(machines !== undefined ? [machines.self, ...machines.machines.filter((m) => m.state === "online")].map((m) => ({ id: m.id as string | undefined, label: m.label })) : [])];
   return (
     <ScrollView {...(scrollbarProps(t) as object)} style={{ flexGrow: 1 } as never} contentContainerStyle={{ paddingVertical: 16, paddingHorizontal: 28, gap: 18 } as never}>
       <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.5 }}>{planSentence(source, target, plan)}</Txt>
@@ -733,14 +818,18 @@ function HowStep({
                 {pattern}
               </Txt>
             ))}
-            <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6}>
-              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>from</Txt>
-              {from.map((m) => (
-                <Button key={m.id ?? "auto"} kind={bringFrom === m.id ? "primary" : "ghost"} onPress={() => onBringFrom(m.id)}>
-                  {m.label}
-                </Button>
-              ))}
-            </View>
+            {choices.length > 0 ? (
+              <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6}>
+                <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>from</Txt>
+                {choices.map((m) => (
+                  <Button key={m.machine} kind={bringFrom === m.machine ? "primary" : "ghost"} onPress={() => onBringFrom(m.machine)}>
+                    {m.label}
+                  </Button>
+                ))}
+              </View>
+            ) : (
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>There is no other workspace of it to bring them from.</Txt>
+            )}
           </View>
         </Section>
       ) : null}

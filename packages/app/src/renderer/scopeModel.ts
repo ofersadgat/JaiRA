@@ -8,7 +8,7 @@
  * Kept per project in `JairaUiState.modes`, by the group's key. Pure, so the narrowing and the title's
  * fit are testable without drawing the sidebar.
  */
-import { projectNameOf, type JairaUiState, type ProjectSummary, type RunTarget } from "@jaira/shared/browser";
+import { parseRemoteProjectKey, projectNameOf, type JairaUiState, type ProjectSummary, type RunTarget } from "@jaira/shared/browser";
 import { dirOf, type ProjectGroup } from "./workspaceGroups";
 
 /** The machine id a workspace this machine holds is filed under. */
@@ -148,6 +148,41 @@ export function runTargetOf(group: ProjectGroup, scope: Scope): RunTarget | unde
   const members = group.members.filter((m) => machineOf(m) === scope.machine);
   const id = members.find((m) => m.machine !== undefined)?.machine?.id;
   return id !== undefined ? { machine: id } : members[0] !== undefined ? { project: members[0].project } : undefined;
+}
+
+// --- the machine menu's Add rows (decision 0027) -------------------------------------------------
+
+/** A paired machine, as the project's machine menu has it. */
+export interface MenuMachine {
+  id: string;
+  label: string;
+  online: boolean;
+}
+
+/** A machine that holds none of the project's workspaces: Add on its row makes one there. */
+export interface AddableMachine extends MenuMachine {
+  self: boolean;
+}
+
+/**
+ * The machine a project's one workspace is on: {@link SELF_MACHINE} for this machine's, else the
+ * machine its key names — so the menu of a project that lives only on build-01 ticks build-01, not
+ * this machine.
+ */
+export function machineOfKey(project: string): string {
+  return parseRemoteProjectKey(project)?.machineId ?? SELF_MACHINE;
+}
+
+/**
+ * The machines holding none of the project's workspaces (`holding`: the ids of those that hold one,
+ * {@link SELF_MACHINE} for this one), each a row with Add — the menu lists every machine: this one
+ * first when it holds none, then the paired ones in their order.
+ */
+export function machinesWithout(paired: readonly MenuMachine[], holding: ReadonlySet<string>): AddableMachine[] {
+  return [
+    ...(holding.has(SELF_MACHINE) ? [] : [{ id: SELF_MACHINE, label: "This machine", online: true, self: true }]),
+    ...paired.filter((m) => !holding.has(m.id)).map((m) => ({ ...m, self: false })),
+  ];
 }
 
 // --- the title ------------------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import { TASK_GROUPS, TASK_GROUP_LABELS, TASK_SORTS, TASK_WHENS, TASK_WHEN_MODE,
 import { boardCardOrderOf } from "@jaira/ui/boardModel";
 import { openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
 import type { AskSpec } from "@jaira/ui/menuTypes";
-import type { BoardCard } from "@jaira/shared/browser";
+import type { BoardCard, WorkspaceSource } from "@jaira/shared/browser";
 import { TaskListPanel } from "../components/tasks/TaskListPanel";
 import { AskDialog } from "../components/files/AskDialog";
 import { copyText } from "../clipboard";
@@ -38,7 +38,7 @@ import { FolderBrowser } from "../components/floats/FolderBrowser";
 import { AddWorkspacePop } from "../components/floats/AddWorkspace";
 import { OpenProject } from "../components/floats/OpenProject";
 import { pointRect } from "../components/floats/Float";
-import { sourceForProject } from "@jaira/ui/openProjectModel";
+import { bringPlacesOf, sourceForProject, workspacesOfSource, type BringPlace } from "@jaira/ui/openProjectModel";
 import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
@@ -120,6 +120,9 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
    * a workspace on another machine; all of them returns to the project's first.
    */
   const group = groupOf(groups, state.at);
+  // The machines holding a workspace of the project a source is — where Bring can take the files git
+  // ignores from, as the engine finds them (decision 0027).
+  const bringPlaces = (source: WorkspaceSource): BringPlace[] => bringPlacesOf(workspacesOfSource(state.projects, source, machinesView?.self.id), machinesView?.self.id);
   const scope =
     group === undefined || group.members.length < 2
       ? undefined
@@ -377,6 +380,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         source={adding.source}
         name={adding.name}
         machine={adding.machine}
+        places={bringPlaces(adding.source)}
         machines={machinesView}
         jobs={state.workspaceJobs}
         onCreate={actions.createWorkspace}
@@ -397,6 +401,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         onCreate={actions.createWorkspace}
         onCancelJob={actions.cancelWorkspace}
         onOpenThere={(machine, dir) => void actions.openOnMachine(machine, dir, "open")}
+        placesOf={bringPlaces}
       />
     ) : null}
     {healthAt !== null ? (

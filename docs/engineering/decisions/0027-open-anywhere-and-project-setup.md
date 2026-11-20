@@ -2,7 +2,7 @@
 id: engineering/decisions/0027-open-anywhere-and-project-setup
 type: decision
 status: built
-updated: 2026-11-18
+updated: 2026-11-20
 decides_for: [engineering/decisions/0013-machines, engineering/decisions/0026-settings-follow-the-person, engineering/units/forge-integrations, engineering/units/tool-policy, engineering/units/project-config]
 ---
 
@@ -53,7 +53,17 @@ Where (the machine and the folder, numbered when taken), Bring and Then — and 
 and Where open the dialog at that step with everything filled in; Bring and Then open under their line;
 More… opens it at How it gets there. Once pressed, the card follows the job in place (Details opens the
 dialog at Go). **Add a workspace…** at the bottom opens the dialog at Where it goes. The project's remote is cloned, or — with no remote — one of its
-workspaces is copied, this machine's first. A project of one workspace has the same menu on its name.
+workspaces is copied, this machine's first. A project of one workspace has the same menu on its name, the
+machine that workspace is on ticked — another machine, when the project lives only there — and every
+machine with none, this one among them, offering Add.
+
+The person, 2026-11-20: adding a local workspace of a project that lives on another machine asks only
+where it goes; the dialog shows the project and lets the person go back and change it, but what it says
+must be right. So, adding: the machine a copied folder is on is a place a second workspace goes, not `open
+it there`; `‹ Project` is in the foot, and Project opens at the project chosen; Bring offers only machines
+that hold a workspace of the project, says the one it will take the files from, and the window sends that
+one (`bringFrom`, the copy's own folder when it names the copy's machine), so what it says is what
+happens.
 
 ### 3. Each machine has a projects folder
 

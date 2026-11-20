@@ -2,7 +2,7 @@
 id: ui/surfaces/open-project
 type: ui-surface
 status: shipped
-updated: 2026-11-18
+updated: 2026-11-20
 kind: dialog
 realizes: [ux/patterns/button-says-what-will-happen, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/all-projects-in-one-place, product/parallel-work-without-collisions]
@@ -43,11 +43,17 @@ designs it was chosen from.
 - **A forge.** Its repositories (`forge:repositories`), most recently changed first, each with `private`
   when it is; a field finds one; the chosen one's branches (`forge:branches`) as buttons under the list, the
   default branch chosen.
+- **The project chosen, shown.** Opened with a project already chosen (adding a workspace) or gone back to,
+  the step opens where that project is: its forge, the repository and branch chosen; or its machine, at the
+  folder that holds it. A forge no connection serves is listed under `FORGES` all the same, `not signed in`,
+  its pane the repository chosen and why nothing else is listed. Adding a workspace, the dialog's title names
+  the project chosen — another one chosen here, that one.
 
 ## 2 · Where it goes: a machine, and a folder on it
 
 - **The column.** For a folder on a machine, `WHERE IT IS` with that machine and `open it there`; then the
-  machines, each with its status for this project at its right, from its `workspace:plan`: `ready`
+  machines (adding a workspace, the folder is one already: its machine is listed with the rest and takes a
+  second, copied beside it), each with its status for this project at its right, from its `workspace:plan`: `ready`
   (`--ok`), `installs node` (`--accent`), `password` (`--warn`), `can't` or `offline` (`--dim`), `…` while it
   is asked.
 - **The pane.** The machine's name and status; a note when it is ready, needs a password or cannot set the
@@ -60,7 +66,10 @@ designs it was chosen from.
 - A sentence: `build-01 clones main from github.com, brings .env*.local, then sets it up.`
 - For a copy, `Copied from studio-mini`: the branch and its commits not pushed, what is not committed,
   and what is left behind (what git ignores).
-- `Bring`, when the setup brings files: the patterns, and `from` — automatic, or a machine.
+- `Bring`, when the setup brings files: the patterns, and `from` — the machines it can take them from, the one
+  it will chosen: a copy's own machine first (the folder copied), then each machine holding a workspace of the
+  project, the target's own first. The one chosen is sent, so what it says is what happens. With none,
+  `There is no other workspace of it to bring them from.`
 - `Then`: each step of the setup, numbered, with where it came from under it (`.nvmrc`,
   `.github/workflows/ci.yml · Install deps`) and what it takes on the machine at its right (`✓ 22.11.0
   there`, `installs first`, `needs a password there`, `runs`, `can't: …`). Under it, what is wrong with the
@@ -92,8 +101,8 @@ menu stood, in the sidebar's tokens: 400 wide (the window less 16 at most), padd
     `--dim`; for a copy, the machine's icon and name and the folder. `›` opens the dialog at Project.
   - `WHERE` — the machine's icon and name, the folder mark, the folder's last three parts in data 11.5;
     under it `atlas is taken there, so atlas-1` when it is. `›` opens the dialog at Where it goes.
-  - `BRING` — `.env*.local from studio-mini` (or `from another workspace of it`), or `nothing git
-    ignores` in `--dim`. `▾` opens the patterns under it.
+  - `BRING` — `.env*.local from studio-mini`, the machine How it gets there would choose first (and Add sends),
+    `.env*.local: no other workspace of it to bring them from`, or `nothing git ignores` in `--dim`. `▾` opens the patterns under it.
   - `THEN` — the first two steps and `· 2 more`, or `nothing to set up` in `--dim`. `▾` opens every step
     under it, numbered, with what it takes there at its right.
 - **The foot.** Under a `--line`: `More…` (the dialog at How it gets there), then `Cancel` and `Add

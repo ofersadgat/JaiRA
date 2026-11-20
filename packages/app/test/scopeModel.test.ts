@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { remoteProjectKey, type JairaUiState, type ProjectSummary } from "@jaira/shared";
 import { groupProjects } from "../src/renderer/workspaceGroups";
-import { chooseMachine, chooseWorkspace, crumbFit, inScope, machinesOf, placesOf, runTargetOf, scopeModes, scopeOf, SELF_MACHINE } from "../src/renderer/scopeModel";
+import { chooseMachine, chooseWorkspace, crumbFit, inScope, machineOfKey, machinesOf, machinesWithout, placesOf, runTargetOf, scopeModes, scopeOf, SELF_MACHINE } from "../src/renderer/scopeModel";
 
 const ID = "github.com/ofersadgat/jaira";
 const self = { id: "m-desk", label: "ofer-desk", state: "online" as const, self: true as const };
@@ -30,6 +30,27 @@ describe("the machines and workspaces a project spans", () => {
       [SELF_MACHINE, "ofer-desk", ["JaiRA", "JaiRA-2"]],
       ["m-box", "build-box", ["JaiRA"]],
     ]);
+  });
+});
+
+describe("the machine menu's Add rows", () => {
+  const paired = [
+    { id: "m-box", label: "build-box", online: true },
+    { id: "m-old", label: "old-mini", online: false },
+  ];
+
+  it("ticks the machine a lone workspace is on, which is not this one when it lives elsewhere", () => {
+    expect(machineOfKey("C:\\src\\JaiRA")).toBe(SELF_MACHINE);
+    expect(machineOfKey(remoteProjectKey("m-box", "/home/ofer/JaiRA"))).toBe("m-box");
+  });
+
+  it("lists every machine holding none, this one first when it holds none", () => {
+    expect(machinesWithout(paired, new Set([SELF_MACHINE])).map((m) => m.id)).toEqual(["m-box", "m-old"]);
+    expect(machinesWithout(paired, new Set(["m-box"]))).toEqual([
+      { id: SELF_MACHINE, label: "This machine", online: true, self: true },
+      { id: "m-old", label: "old-mini", online: false, self: false },
+    ]);
+    expect(machinesWithout(paired, new Set(machinesOf(group).map((m) => m.id))).map((m) => m.id)).toEqual(["m-old"]);
   });
 });
 
