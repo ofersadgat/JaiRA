@@ -293,14 +293,22 @@ describe("what runs around a command inside the container, run by a shell here",
     const sleeper = Number(readFileSync(inner, "utf8").trim());
     expect(spawnSync("sh", ["-c", CONTAINER_STOP, "jaira", pid], { env }).status).toBe(0);
     expect(await ended).toBe(143);
+    // Ended, not yet reaped: the sleeper's shell died with it, so it was handed to whatever reaps
+    // orphans here, which in a CI container may get to it late. A zombie answers signal 0, but it runs
+    // nothing; on Linux its state says so.
     const alive = (p: number): boolean => {
       try {
         process.kill(p, 0);
-        return true;
       } catch {
         return false;
       }
+      try {
+        return !/^\d+ \(.*\) Z/.test(readFileSync(`/proc/${p}/stat`, "utf8"));
+      } catch {
+        return true;
+      }
     };
+    for (const until = Date.now() + 2000; alive(sleeper) && Date.now() < until; ) await new Promise((r) => setTimeout(r, 25));
     expect(alive(sleeper)).toBe(false);
     expect(existsSync(pid)).toBe(false);
     // Stopped twice, or once it has ended: nothing to stop, and no error.
