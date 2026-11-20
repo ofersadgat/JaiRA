@@ -197,10 +197,14 @@ export const CONTAINER_RUN =
 /**
  * The stop: TERM to the run's group (or to the command, where it has none), KILL two seconds later to
  * what is left. Nothing to do once the run has ended and taken its file with it.
+ *
+ * `kill -s SIG -- -<group>`, not `kill -SIG -- -<group>`: dash, Debian's `sh`, reads the `--` after
+ * `-TERM` as a number and fails ("Illegal number: -"), so the stop fell back to the leader alone and
+ * what it had started kept running (GitLab's Linux runner, 2026-11-20).
  */
 export const CONTAINER_STOP =
-  'f=$1; [ -f "$f" ] || exit 0; p=$(cat "$f"); kill -TERM -- "-$p" 2>/dev/null || kill -TERM "$p" 2>/dev/null; ' +
-  'sleep 2; kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null; rm -f "$f"; exit 0';
+  'f=$1; [ -f "$f" ] || exit 0; p=$(cat "$f"); kill -s TERM -- "-$p" 2>/dev/null || kill -s TERM "$p" 2>/dev/null; ' +
+  'sleep 2; kill -s KILL -- "-$p" 2>/dev/null || kill -s KILL "$p" 2>/dev/null; rm -f "$f"; exit 0';
 
 /**
  * A command run inside a workspace's container (decision 0027):
@@ -426,8 +430,15 @@ export class NodeExec implements Exec {
               if (child.exitCode !== null || child.signalCode !== null) return;
               signalled = true;
               // A command in a container is reached only by its stop (above): Ctrl-C ends it there.
-              if (stop !== undefined) kill();
-              else killTree(child, signal, this.defaults.killTree);
+              if (stop !== undefined) return kill();
+              killTree(child, signal, this.defaults.killTree);
+              // The same race the other way round (measured 2026-11-20, GitLab's Linux runner): dash
+              // run with -c catches SIGINT and waits out the job it is running before it acts on it, so
+              // a `sleep` forked just after the signal reached the group keeps the shell alive for its
+              // 30 s. Still running after a moment, the group gets the signal again — a second Ctrl-C.
+              setTimeout(() => {
+                if (!settled && child.exitCode === null && child.signalCode === null) killTree(child, signal, this.defaults.killTree);
+              }, INTERRUPT_GRACE_MS).unref?.();
             },
             ...(child.pid !== undefined ? { pid: child.pid } : {}),
           });
