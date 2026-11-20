@@ -1,7 +1,23 @@
 import { useContext, useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { ProbeResult } from "@jaira/shared/browser";
-import { agentActionOf, agentChecksAgain, agentChipOf, agentLineOf, agentPlaceOf, installPanelOf, providerSayState, settingsGistOf, updateOf, useProviderRow, type AgentAction } from "@jaira/ui/connectionsModel";
+import {
+  agentActionOf,
+  agentChecksAgain,
+  agentChipOf,
+  agentLineOf,
+  agentPlaceOf,
+  installPanelOf,
+  notInstalledOf,
+  providerSayState,
+  retryActionOf,
+  retryWayOf,
+  settingsGistOf,
+  unreachedOf,
+  updateOf,
+  useProviderRow,
+  type AgentAction,
+} from "@jaira/ui/connectionsModel";
 import type { ProviderSpec } from "@jaira/ui/providerSpecs";
 import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { Hint, Stack } from "../bits";
@@ -13,7 +29,7 @@ import { InstallLogBox } from "./InstallLog";
 import { ShellChoice } from "./ShellChoice";
 import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
-import { AnotherTile, InstallTile, Shelf, ShelfCard } from "./Shelf";
+import { AnotherTile, InstallButton, InstallTile, Shelf, ShelfCard } from "./Shelf";
 
 /**
  * Settings → Connections → Agents: the agents on this machine as rows that open in place, then the shelf
@@ -27,11 +43,14 @@ import { AnotherTile, InstallTile, Shelf, ShelfCard } from "./Shelf";
  *                        (`RunsAs`) — signed out or not working, a ghost Check again before it
  *                        (`CheckAgain`, `agentChecksAgain`); then the switch and the chevron
  *   an opened row        the chip and the button go; the head's sentence whole, with its fix (none when
- *                        an install panel is the fix), the version line with Update, and Check again
- *                        under them while it is signed out or not working; then across it,
- *                        8 apart: the install panel; "Runs as" and the login and key boxes
- *                        (`LabelledBoxes`); the key's entry; the folded Settings holding the provider's
- *                        form (`SettingsFold`)
+ *                        an install is the fix), the version line with Update, and under them, 6 apart,
+ *                        Install (`InstallButton`: "Install again" after one that failed, ⌄ for the
+ *                        other ways) while it is not installed, and Check again while it is signed out
+ *                        or not working; then across it, 8 apart: the install's output; the panel of
+ *                        what is left of an install, or the path it was found at; and — only once the
+ *                        program can be reached — "Runs as" and the login and key boxes
+ *                        (`LabelledBoxes`), the key's entry, Shell, and the folded Settings holding the
+ *                        provider's form (`SettingsFold`)
  *   the shelf            "More agents" (`Shelf.tsx`): a tile per agent not installed (`InstallTile`),
  *                        and "Another agent CLI" last; what a tile opened, across
  *   installing           Install or Update pressed — on a tile or a row — makes the agent a row of the
@@ -93,7 +112,12 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
   const panel = installPanelOf(install);
   const update = updateOf(install);
   const line = agentLineOf(probe, state, install);
-  const action = agentActionOf(spec, probe, state, install, merged);
+  // Not reached — not installed, half removed, off the PATH: only what would make it work is shown.
+  const unreached = state !== "off" && unreachedOf(probe);
+  const notInstalled = state !== "off" && notInstalledOf(probe);
+  // An install that failed is tried again the way it was asked for.
+  const retry = notInstalled ? retryWayOf(log) : undefined;
+  const action = retryActionOf(agentActionOf(spec, probe, state, install, merged), retry);
   const chip = agentChipOf(probe, state, merged);
   const agentLogins = probe?.accounts !== undefined && state !== "off";
 
@@ -149,34 +173,38 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
             <InstallLogBox log={log} onCancel={() => onCancelInstall(spec.id)} onHide={() => onHideInstallLog(spec.id)} />
           </Wide>
         ) : null,
-        // While it installs, the output is the panel: the ways come back if it did not work.
-        panel !== undefined && !running ? (
+        // While it installs, the output is the panel. Not installed, Install under the sentence is the way.
+        panel !== undefined && !running && !notInstalled ? (
           <Wide key="install">
             <InstallPanel panel={panel} running={running} busy={busy} locked={locked} onInstall={(method) => onInstall(spec.id, method)} onCancel={() => onCancelInstall(spec.id)} onUse={(path) => onUseCommand(spec.id, path)} />
           </Wide>
         ) : null,
-        credentials.length > 0 ? (
+        credentials.length > 0 && !unreached ? (
           <Wide key="as">
             <LabelledBoxes label="Runs as">{credentials}</LabelledBoxes>
           </Wide>
         ) : null,
-        keyOpen ? (
+        keyOpen && !unreached ? (
           <Wide key="key">
             <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
           </Wide>
         ) : null,
         // The shell its commands run in (decision 0030): emulated, or a live zsh, bash or sh.
-        <Wide key="shell">
-          <LabelledBoxes label="Shell">
-            {[<ShellChoice key="shell" here={row.here["shell"]} merged={merged["shell"]} locked={locked} onWrite={(shell) => write({ shell })} />]}
-          </LabelledBoxes>
-        </Wide>,
+        unreached ? null : (
+          <Wide key="shell">
+            <LabelledBoxes label="Shell">
+              {[<ShellChoice key="shell" here={row.here["shell"]} merged={merged["shell"]} locked={locked} onWrite={(shell) => write({ shell })} />]}
+            </LabelledBoxes>
+          </Wide>
+        ),
         // The form is the provider's own, drawn whole once its fold is open.
-        <SettingsFold key="form" gist={settingsGistOf(spec)}>
-          <Stack>
-            <ProviderForm spec={spec} row={row} layer={layer} onRemove={onRemove} />
-          </Stack>
-        </SettingsFold>,
+        unreached ? null : (
+          <SettingsFold key="form" gist={settingsGistOf(spec)}>
+            <Stack>
+              <ProviderForm spec={spec} row={row} layer={layer} onRemove={onRemove} />
+            </Stack>
+          </SettingsFold>
+        ),
       ]
     : [];
 
@@ -193,16 +221,17 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
                 state={state}
                 word={providerSayState(probe, state)}
                 detail={probe && state !== "off" && probe.detail ? probe.detail : undefined}
-                // An install panel is the fix, with the command it runs: its sentence would only point at it.
-                fix={probe && state !== "off" && probe.fix && panel === undefined ? probe.fix : undefined}
+                // An install is the fix, with the command it runs: its sentence would only point at it — unless nothing here installs it.
+                fix={probe && state !== "off" && probe.fix && (panel === undefined || panel.rows.length === 0) ? probe.fix : undefined}
               />
               {probe?.version ? (
                 // The output's head says it is updating, with Cancel: here, Update waits.
                 <Version after={update !== undefined ? <UpdateAfter via={update.via} title={update.title} running={false} disabled={busy || running} onUpdate={() => onInstall(spec.id)} onCancel={() => onCancelInstall(spec.id)} /> : undefined}>{probe.version}</Version>
               ) : null}
-              {/* Opened, the fix is in the boxes across the row (a login's Sign in again, the + box's Sign in); Check again stays under the sentence. */}
-              {checkAgain !== null ? (
-                <View flexDirection="row" marginLeft={30} marginTop={4}>
+              {/* Opened, the fix is in the boxes across the row (a login's Sign in again, the + box's Sign in); Install and Check again stay under the sentence. */}
+              {(notInstalled && !running) || checkAgain !== null ? (
+                <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} marginLeft={30} marginTop={4}>
+                  {notInstalled && !running ? <InstallButton title={spec.title} install={install} retry={retry} busy={busy} onInstall={(way) => onInstall(spec.id, way)} /> : null}
                   {checkAgain}
                 </View>
               ) : null}

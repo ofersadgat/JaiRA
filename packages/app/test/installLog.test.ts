@@ -1,54 +1,64 @@
 /**
  * What an install printed, as Connections keeps and draws it (`installLog.ts`): the service sends the
- * installer's output raw, and the box shows what a terminal would be left showing — colours gone, a
- * progress bar redrawn as its last drawing — with the end kept when there is too much.
+ * installer's output raw, saying where each command starts; it is kept a block a command, each drawn
+ * as the agents' terminal draws it (`TermScreen`) — colours kept, a progress bar redrawn as its last
+ * drawing — with the end kept when there is too much.
  */
 import { describe, expect, it } from "vitest";
-import { INSTALL_LOG_KEEP, appendInstallLog, installLogHeadOf, installLogKey, installLogsOf, terminalText, type InstallLog } from "../src/renderer/installLog";
+import { INSTALL_LOG_KEEP, appendInstallLog, installLogHeadOf, installLogKey, installLogPlain, installLogsOf, startedInstallLog, type InstallLog } from "../src/renderer/installLog";
+import { TermScreen } from "../src/renderer/terminalModel";
 
-const running: InstallLog = { text: "", running: true, update: false };
+const running: InstallLog = startedInstallLog(["npm"]);
 
-describe("what the box shows of an installer's output", () => {
-  it("drops colours, cursor moves and a window title", () => {
-    expect(terminalText("\u001b[34m==>\u001b[0m \u001b[1mPouring gh--2.83.0\u001b[0m\n")).toBe("==> Pouring gh--2.83.0");
-    expect(terminalText("\u001b]0;brew\u0007\u001b[?25lnpm warn\u001b[K\n")).toBe("npm warn");
+/** What a block's screen is left showing, as text. */
+function drawn(raw: string): string {
+  const screen = new TermScreen();
+  screen.write(raw);
+  return screen.plain().replace(/\n$/, "");
+}
+
+describe("a block a command", () => {
+  it("starts a block where the service says a command starts, and adds what follows to it", () => {
+    let log = appendInstallLog(running, "", { display: "curl -fsSL https://fnm.vercel.app/install | bash", step: "Step 1 of 3: fnm (the native installer)" });
+    log = appendInstallLog(log, "Installing fnm…\n");
+    log = appendInstallLog(log, "", { display: "fnm install --lts", step: "Step 2 of 3: Node.js (fnm)" });
+    log = appendInstallLog(log, "Installing Node v24.11.1\n");
+    expect(log.blocks).toEqual([
+      { command: "curl -fsSL https://fnm.vercel.app/install | bash", step: "Step 1 of 3: fnm (the native installer)", text: "Installing fnm…\n" },
+      { command: "fnm install --lts", step: "Step 2 of 3: Node.js (fnm)", text: "Installing Node v24.11.1\n" },
+    ]);
+    expect(installLogPlain(log, drawn)).toBe("── Step 1 of 3: fnm (the native installer)\n$ curl -fsSL https://fnm.vercel.app/install | bash\nInstalling fnm…\n\n── Step 2 of 3: Node.js (fnm)\n$ fnm install --lts\nInstalling Node v24.11.1");
+    // What is said before any command is a block of its own, with no command.
+    expect(appendInstallLog(running, "looking…\n").blocks).toEqual([{ text: "looking…\n" }]);
   });
 
-  it("shows a progress bar redrawn on its line as its last drawing", () => {
-    expect(terminalText("$ brew install gh\n#####   20%\r##########  40%\r################ 100%\n==> Done\n")).toBe("$ brew install gh\n################ 100%\n==> Done");
-    // A shorter drawing replaces the line: the escape that would have erased the rest is gone.
-    expect(terminalText("Downloading 100%\rDone\n")).toBe("Done");
+  it("is drawn as a terminal draws it: a progress bar's last drawing, a spinner's last frame, its colours kept", () => {
+    expect(drawn("#####   20%\r##########  40%\r################ 100%\n==> Pouring gh\n")).toBe("################ 100%\n==> Pouring gh");
+    expect(drawn("\r\u001b[K⠙ idealTree\r\u001b[K⠹ reify")).toBe("⠹ reify");
+    const screen = new TermScreen();
+    screen.write("\u001b[34m==>\u001b[0m Pouring\n");
+    expect(screen.lines()[0]?.[0]).toMatchObject({ text: "==>", fg: expect.any(String) });
   });
 
-  it("keeps the line as it was while the redraw after a carriage return has not come yet", () => {
-    expect(terminalText("fetching 40%\r")).toBe("fetching 40%");
-    // …and a \r\n split across two chunks is one newline once both are in.
-    expect(terminalText("one\r" + "\ntwo\n")).toBe("one\ntwo");
-  });
-
-  it("follows a spinner that draws each frame over an erased line, and ends by erasing it", () => {
-    // npm's: \r ESC[K before each frame, and once more at the end.
-    const npm = "\r\u001b[K⠙ idealTree\r\u001b[K⠹ reify:@google/gemini-cli\r\u001b[K\u001b[?25h\nadded 412 packages in 4s\n";
-    expect(terminalText(npm)).toBe("\nadded 412 packages in 4s");
-    // Midway, the frame being shown.
-    expect(terminalText("\r\u001b[K⠙ idealTree\r\u001b[K⠹ reify")).toBe("⠹ reify");
-    // ESC[2K and a move to the first column do the same.
-    expect(terminalText("old frame\u001b[2K\u001b[1Gnew frame\n")).toBe("new frame");
-  });
-
-  it("takes back a character for a backspace, and leaves a cleared line empty", () => {
-    expect(terminalText("ab\bc\n")).toBe("ac");
-    expect(terminalText("spinning |\r          \rnext\n")).toBe("next");
-    expect(terminalText("spinning |\r          \r")).toBe("");
+  it("remembers the way it was asked for, to try again the same way", () => {
+    expect(startedInstallLog(["npm", "fnm"])).toEqual({ blocks: [], running: true, update: false, way: ["npm", "fnm"] });
+    expect(startedInstallLog(undefined)).toEqual({ blocks: [], running: true, update: true });
   });
 });
 
 describe("an install's log", () => {
-  it("keeps the end of the output when there is more than it holds", () => {
-    const full = appendInstallLog(running, "x".repeat(INSTALL_LOG_KEEP - 2));
-    const over = appendInstallLog(full, "tail!");
-    expect(over.text.length).toBe(INSTALL_LOG_KEEP);
-    expect(over.text.endsWith("tail!")).toBe(true);
+  it("keeps the end of the output when there is more than it holds, a block whose text is all gone with it", () => {
+    let log = appendInstallLog(running, "", { display: "first" });
+    log = appendInstallLog(log, "x".repeat(INSTALL_LOG_KEEP - 2));
+    log = appendInstallLog(log, "", { display: "second" });
+    log = appendInstallLog(log, "tail!");
+    expect(log.blocks.map((block) => [block.command, block.text.length])).toEqual([
+      ["first", INSTALL_LOG_KEEP - 5],
+      ["second", 5],
+    ]);
+    const over = appendInstallLog(log, "y".repeat(INSTALL_LOG_KEEP));
+    expect(over.blocks.map((block) => block.command)).toEqual(["second"]);
+    expect(over.blocks[0]!.text.length).toBe(INSTALL_LOG_KEEP);
     expect(over.running).toBe(true);
   });
 
@@ -69,5 +79,11 @@ describe("an install's log", () => {
       tone: "failed",
       words: "'brew install gh' exited 1: Error: no bottle",
     });
+    // The installer's own words are in the output under it: the head says where it failed.
+    const said = appendInstallLog(appendInstallLog(running, "", { display: "fnm install --lts" }), "error: Access is denied.\n");
+    expect(installLogHeadOf({ ...said, running: false, outcome: { ok: false, reason: "step 2 of 3, Node.js: 'fnm install --lts' exited 1: error: Access is denied." } })).toEqual({ tone: "failed", words: "install failed at step 2 of 3, Node.js — exited 1" });
+    expect(installLogHeadOf({ ...said, running: false, outcome: { ok: false, reason: "'brew install gh' exited 1: Error: no bottle" } })).toEqual({ tone: "failed", words: "install failed — exited 1" });
+    // A reason the output does not hold is said whole.
+    expect(installLogHeadOf({ ...said, running: false, outcome: { ok: false, reason: "fnm could not be found to install Node.js after fnm was installed — check again, or install it by hand" } }).words).toMatch(/^fnm could not be found/);
   });
 });

@@ -3,7 +3,7 @@
  * as it prints it — and its own last words when it fails. Only a way the lookups offered is run: a
  * request names a way, never a command.
  */
-import type { AgentInstallOutcome, InstallMethod } from "@jaira/shared";
+import type { AgentInstallOutcome, InstallCommandShown, InstallMethod } from "@jaira/shared";
 import type { ToolPackage } from "./catalog";
 import { appleStubTarget, gatherInstallFacts, inGuest, type InstallFacts, type InstallLookup } from "./locate";
 import { INSTALL_VIA, planOf, type InstallPlan } from "./plan";
@@ -16,6 +16,12 @@ export interface InstallRunOptions extends InstallLookup {
    * included, for whoever draws it to make sense of. Settings → Connections shows it under the row.
    */
   onOutput?: (text: string) => void;
+  /**
+   * A command starts: what `onOutput` says after this is its output — and, of an install that takes
+   * more than one step, which step it is (`Step 2 of 3: Node.js (fnm)`). Without it, the command is
+   * said in the text (`$ brew install gh`), and a step's line before it.
+   */
+  onCommand?: (command: InstallCommandShown) => void;
 }
 
 /** Long enough for a download on a slow line; an installer that waits on a question fails sooner (stdin is closed). */
@@ -40,6 +46,13 @@ export function sayTo(onOutput: ((text: string) => void) | undefined): (text: st
   };
 }
 
+/** What the output says before a command that asks for an administrator's rights waits for the answer. */
+const ELEVATED_SAYS: Readonly<Partial<Record<NodeJS.Platform, string>>> = {
+  darwin: "macOS asks for an administrator's password in its own window.\n",
+  linux: "Your desktop asks for an administrator's password in its own window.\n",
+  win32: "Windows asks for an administrator's permission in its own window.\n",
+};
+
 /** How one installer's run came out. */
 export type PlanRun = { ok: true; stdout: string; stderr: string } | { ok: false; reason: string; stdout?: string; stderr?: string };
 
@@ -48,9 +61,16 @@ export type PlanRun = { ok: true; stdout: string; stderr: string } | { ok: false
  * waiting forever), its output streamed to `onOutput` after the command it runs. `verb` names what
  * a cancel cancelled.
  */
-export async function runPlan(chosen: InstallPlan, options: InstallRunOptions, verb: "install" | "update"): Promise<PlanRun> {
+export async function runPlan(chosen: InstallPlan, options: InstallRunOptions, verb: "install" | "update", step?: string): Promise<PlanRun> {
   const say = sayTo(options.onOutput);
-  say(`$ ${chosen.display}\n`);
+  if (options.onCommand !== undefined) {
+    try {
+      options.onCommand({ display: chosen.display, ...(step !== undefined ? { step } : {}) });
+    } catch {
+      // Somebody watching; the install goes on without them.
+    }
+  } else say(`${step !== undefined ? `── ${step}\n` : ""}$ ${chosen.display}\n`);
+  if (chosen.elevated === true) say(ELEVATED_SAYS[options.deps.platform] ?? ELEVATED_SAYS["linux"]!);
   // Passed into WSL or a container it would be this machine's; there, its own PATH is the right one.
   const env = inGuest(options) ? undefined : withTerminal(chosen.env, options.deps);
   let result;
@@ -68,7 +88,7 @@ export async function runPlan(chosen: InstallPlan, options: InstallRunOptions, v
   }
   if (result.aborted) return { ok: false, reason: `the ${verb} was cancelled` };
   if (result.timedOut) return { ok: false, reason: `'${chosen.display}' did not finish in time` };
-  if (result.code !== 0) {
+  if (result.code !== 0 && !(result.code !== null && chosen.alreadyHere?.includes(result.code) === true)) {
     // The installer's own last words: "already installed", "permission denied" and a network error are
     // different problems, and the last line is where each says which.
     const said = lastLine(`${result.stdout}\n${result.stderr}`, result.stderr);

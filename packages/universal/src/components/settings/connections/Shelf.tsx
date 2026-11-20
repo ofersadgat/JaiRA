@@ -339,6 +339,80 @@ export function WaysMenu({
  * ways under ▾ with the command each runs. `onSettings` is an agent's way to say where it already is;
  * a tile without one has nothing to set when nothing installs it.
  */
+/**
+ * An opened row's Install, while its program is not here — in place of a list of the ways: the
+ * recommended way (after one that failed, that way again: "Install again"), with ⌄ joined to it for
+ * the others, step by step, as a tile's. Tagged where its way asks for administrator rights.
+ *
+ *   the button    ghost, app 11.5/12.5, joined to its ⌄ (padding 0 5, 1px over the button's edge)
+ *   the tag       after it, 6 apart: `asks for administrator rights` (--warn)
+ */
+export function InstallButton({
+  title,
+  install,
+  retry,
+  busy,
+  onInstall,
+}: {
+  title: string;
+  install: AgentInstall | undefined;
+  /** The way an install that failed was asked for: the button tries it again. */
+  retry?: InstallWay | undefined;
+  busy: boolean;
+  onInstall: (way: InstallWay | undefined) => void;
+}): JSX.Element | null {
+  const t = useTokens();
+  const foot = useRef<RNView | null>(null);
+  const [menu, setMenu] = useState<FloatRect | null>(null);
+  const { ways, menu: rows } = shelfTileOf(install);
+  const first = ways[0];
+  if (first === undefined) return null;
+  const wayOf = (row: (typeof ways)[number]): InstallWay | undefined => row.choice ?? row.method;
+  const items: TileWay[] =
+    rows !== undefined
+      ? waysOfMenu(rows, onInstall)
+      : ways.map((way, i) => ({ key: way.key, name: way.name, at: way.at, title: way.title, ...(i === 0 && ways.length > 1 ? { tag: "recommended" } : {}), onPress: () => onInstall(wayOf(way)) }));
+  // Something to choose: more than one way, or a way whose next step has more than one.
+  const choose = items.length > 1 || items.some((item) => item.sub !== undefined);
+  const openWays = (): void => foot.current?.measureInWindow((x, y, w, h) => setMenu({ left: x, top: y, right: x + w, bottom: y + h }));
+  return (
+    <View flexDirection="row" alignItems="center" gap={6}>
+      <RNView ref={foot} collapsable={false} style={{ flexDirection: "row" }}>
+        <Button
+          kind="ghost"
+          font={ROW_BUTTON}
+          disabled={busy}
+          title={retry !== undefined ? "try the same way again" : first.title}
+          onPress={() => onInstall(retry ?? wayOf(first))}
+          {...(choose ? { borderTopRightRadius: 0, borderBottomRightRadius: 0 } : {})}
+        >
+          {retry !== undefined ? "Install again" : "Install"}
+        </Button>
+        {choose ? (
+          <Button
+            kind="ghost"
+            label={`choose how ${title} installs`}
+            title="choose another way"
+            {...({ "aria-haspopup": "menu", "aria-expanded": menu !== null } as object)}
+            disabled={busy}
+            onPress={openWays}
+            paddingHorizontal={5}
+            marginLeft={-1}
+            borderTopLeftRadius={0}
+            borderBottomLeftRadius={0}
+          >
+            <Icon name="chevron" size={11} color={String(t.v("text"))} />
+          </Button>
+        ) : null}
+      </RNView>
+      {retry === undefined && first.elevated === true ? <Tag tone="warn">asks for administrator rights</Tag> : null}
+      {menu !== null ? <WaysMenu anchor={menu} title={`Install ${title} with`} items={items} busy={busy} onClose={() => setMenu(null)} /> : null}
+    </View>
+  );
+}
+
+const ROW_BUTTON = { voice: "app", scale: 11.5 / 12.5 } as const;
+
 export function InstallTile({
   brand,
   title,

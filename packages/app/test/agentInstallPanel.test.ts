@@ -4,8 +4,8 @@
  * one, the path it was found at — and what its version line says when it runs (`connectionsModel.ts`).
  */
 import { describe, expect, it } from "vitest";
-import type { AgentInstall, InstallChoice } from "@jaira/shared";
-import { installMenuOf, installPanelOf, shelfTileOf, updateOf } from "../src/renderer/connectionsModel";
+import type { AgentInstall, InstallChoice, ProbeResult } from "@jaira/shared";
+import { installMenuOf, installPanelOf, notInstalledOf, retryActionOf, retryWayOf, shelfTileOf, unreachedOf, updateOf } from "../src/renderer/connectionsModel";
 
 const NATIVE = { method: "native", via: "the native installer", display: "curl -fsSL https://claude.ai/install.sh | bash" } as const;
 const NPM = { method: "npm", via: "npm", display: "npm install -g @anthropic-ai/claude-code" } as const;
@@ -103,3 +103,31 @@ describe("the install menu, a step a row", () => {
   });
 });
 
+
+describe("a program the check could not reach", () => {
+  const failed = (install: AgentInstall): ProbeResult => ({ name: "gemini-cli", status: "failed", detail: "not found", install }) as ProbeResult;
+
+  it("is not reached when not installed, half removed or off the PATH — and only the first is offered Install in place of a panel", () => {
+    expect([unreachedOf(failed({})), notInstalledOf(failed({}))]).toEqual([true, true]);
+    expect([unreachedOf(failed({ path: "/x/gemini", broken: true })), notInstalledOf(failed({ path: "/x/gemini", broken: true }))]).toEqual([true, false]);
+    expect([unreachedOf(failed({ path: "/x/gemini", onPath: false })), notInstalledOf(failed({ path: "/x/gemini", onPath: false }))]).toEqual([true, false]);
+    // Found and run, but failing (signed out, a key missing): reached — who it runs as matters.
+    expect(unreachedOf(failed({ path: "/usr/local/bin/gemini", onPath: true }))).toBe(false);
+    expect(unreachedOf({ name: "gemini-cli", status: "ok", detail: "" } as ProbeResult)).toBe(false);
+  });
+
+  it("tries an install that failed again the way it was asked for — not one cancelled, running, or that worked", () => {
+    const way = ["npm", "fnm"];
+    expect(retryWayOf({ running: false, way, outcome: { ok: false, reason: "step 2 of 3, Node.js: 'fnm install --lts' exited 1: denied" } })).toEqual(way);
+    expect(retryWayOf({ running: false, way, outcome: { ok: false, reason: "the install was cancelled" } })).toBeUndefined();
+    expect(retryWayOf({ running: true, way })).toBeUndefined();
+    expect(retryWayOf({ running: false, way, outcome: { ok: true } })).toBeUndefined();
+    const install = { kind: "install" as const, label: "Install", title: "runs …", choice: ["npm"] };
+    expect(retryActionOf(install, way)).toEqual({ kind: "install", label: "Install again", title: "try the same way again", choice: way });
+    expect(retryActionOf(install, "homebrew")).toEqual({ kind: "install", label: "Install again", title: "try the same way again", method: "homebrew" });
+    expect(retryActionOf(install, undefined)).toBe(install);
+    // A path to use is not an install to try again.
+    const use = { kind: "install" as const, label: "Use it", title: "run it from this path", path: "/x/gemini" };
+    expect(retryActionOf(use, way)).toBe(use);
+  });
+});

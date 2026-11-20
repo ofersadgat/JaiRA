@@ -9,7 +9,7 @@ import { posix, win32 } from "node:path";
 import type { Exec } from "../exec";
 import { isContainerEnv, isWslEnv, type ExecEnv } from "../paths";
 import { VERSION_MANAGERS, type ToolPackage, type VersionManager } from "./catalog";
-import { knownShellEnv, loginShellEnv, type ShellEnv } from "./shellEnv";
+import { freshShellEnv, knownShellEnv, loginShellEnv, type ShellEnv } from "./shellEnv";
 import { compareVersions, versionParts } from "./version";
 
 /** The binary as found. */
@@ -117,6 +117,12 @@ export async function machineInstallDeps(exec: Exec): Promise<InstallDeps> {
   return nodeInstallDeps();
 }
 
+/** {@link machineInstallDeps}, the terminal asked again: what an installer just added to its PATH is there. */
+export async function freshMachineInstallDeps(exec: Exec): Promise<InstallDeps> {
+  await freshShellEnv(exec);
+  return nodeInstallDeps();
+}
+
 /** This process's machine — with what the person's terminal adds, once {@link loginShellEnv} has answered. */
 export function nodeInstallDeps(): InstallDeps {
   const platform = process.platform;
@@ -189,6 +195,9 @@ function usualDirSpecs(platform: InstallFacts["platform"]): readonly string[] {
       "~\\.local\\bin",
       "%APPDATA%\\npm",
       "%LOCALAPPDATA%\\Microsoft\\WinGet\\Links",
+      // A portable package WinGet could not link (no Developer Mode, not an administrator): its own folder,
+      // which WinGet adds to the person's PATH instead — after this app started.
+      "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\*",
       // WinGet itself, an app execution alias Windows puts here once App Installer is registered.
       "%LOCALAPPDATA%\\Microsoft\\WindowsApps",
       // WinGet's machine-wide links; Chocolatey's shims; Scoop's, the person's and the machine-wide.
@@ -613,6 +622,11 @@ export interface InstallLookup {
   exec: Exec;
   execEnv?: ExecEnv;
   deps: InstallDeps;
+  /**
+   * The machine looked at again, the person's terminal's environment asked afresh — after a step whose
+   * installer changed it (WinGet, Chocolatey and fnm add to the PATH in the registry or the profile).
+   */
+  refresh?: () => Promise<InstallDeps>;
   timeoutMs?: number;
   /** The folder a version is asked in — a version manager's shim answers with the version that folder pins. */
   cwd?: string;

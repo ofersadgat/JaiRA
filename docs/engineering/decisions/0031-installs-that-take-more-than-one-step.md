@@ -135,6 +135,13 @@ it a step at a time, each planned from what is on the machine when it starts.
   missing — on every Windows. A program there is taken as itself when the app it hands over to is a
   program of the same name; Windows' `python.exe`, which hands over to the Store's redirector, is not.
   That folder is looked in even when the app's PATH lacks it.
+- **Between steps, the machine looked at again** (amended 2026-11-19, from a Windows that failed it). An
+  installer may put what it installed where only a new terminal looks: WinGet a portable package it
+  could not link (no Developer Mode, not an administrator) in its own folder under
+  `%LOCALAPPDATA%\Microsoft\WinGet\Packages`, added to the person's PATH in the registry. So after
+  each step the person's terminal's environment is asked afresh, and WinGet's package folders are
+  looked in as a usual place. And WinGet's `install` of a package it installed before exits
+  0x8A15002B ("no newer package versions"): that step is done, not failed.
 - **The request** names a path of keys (`["npm", "nvm"]`), never a command; a path the machine no
   longer offers is refused, running nothing. A row that is one of the agent's own ways and all there is
   to it still sends the way, and runs as it always did.
@@ -143,7 +150,8 @@ it a step at a time, each planned from what is on the machine when it starts.
 
 - Gemini CLI installs on a bare machine in one press: fnm, Node.js by it, then npm.
 - The person sees every command before it runs (a row's title lists the whole path), and each step's
-  output under a line naming it (`── Step 2 of 3: Node.js (fnm)`).
+  output as a command on the agents' terminal's screen, under a line naming it (`Step 2 of 3: Node.js
+  (fnm)`): the service says where each command starts (`install:output` with `command`).
 - apt and dnf on a Linux desktop now ask for the password in polkit's window instead of failing — for a
   project's setup too.
 - Homebrew's package is checked by Gatekeeper, not against Homebrew's own Team ID, which Homebrew does

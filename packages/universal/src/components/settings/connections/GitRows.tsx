@@ -1,16 +1,16 @@
 import { useContext, useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { GIT_CLI_NAMES, type GitCliName, type InstallWay, type ProbeResult } from "@jaira/shared/browser";
-import { GIT_CLI_TITLES, agentLineOf, gitCliActionOf, gitCliPanelOf, gitCliPlaceOf, providerSayState, providerState, updateOf } from "@jaira/ui/connectionsModel";
+import { GIT_CLI_TITLES, agentLineOf, gitCliActionOf, gitCliPanelOf, gitCliPlaceOf, notInstalledOf, providerSayState, providerState, retryActionOf, retryWayOf, updateOf } from "@jaira/ui/connectionsModel";
 import type { InstallLog } from "@jaira/ui/installLog";
 import { Hint } from "../bits";
 import { SettingsLayerContext } from "../layers";
 import { SettingsGroup } from "../SettingsPage";
-import { ActionSlot, RowLine } from "./Closed";
+import { ActionSlot, CheckAgain, RowLine } from "./Closed";
 import { InstallLogBox } from "./InstallLog";
 import { InstallPanel, UpdateAfter } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
-import { InstallTile, Shelf } from "./Shelf";
+import { InstallButton, InstallTile, Shelf } from "./Shelf";
 
 /**
  * Settings → Connections → Git: git, which JaiRA runs for worktrees, diffs and pushes, as a row that
@@ -38,6 +38,8 @@ export function GitRows({
   onInstall,
   onCancel,
   onHideLog,
+  onRecheck,
+  rechecking,
 }: {
   /** The last check of each git program; absent before the first. */
   checks: ProbeResult[] | undefined;
@@ -48,6 +50,9 @@ export function GitRows({
   onInstall: (name: GitCliName, way?: InstallWay) => void;
   onCancel: (name: GitCliName) => void;
   onHideLog: (name: GitCliName) => void;
+  /** Check again — a program installed elsewhere, or after an install that failed. */
+  onRecheck?: (() => void) | undefined;
+  rechecking?: boolean | undefined;
 }): JSX.Element | null {
   // A program on this machine is nothing a layer states: "What you changed" has none of it.
   const onlyStated = useContext(SettingsLayerContext)?.onlyStated === true;
@@ -73,6 +78,8 @@ export function GitRows({
               onInstall={(method) => onInstall(name, method)}
               onCancel={() => onCancel(name)}
               onHideLog={() => onHideLog(name)}
+              onRecheck={onRecheck}
+              rechecking={rechecking === true}
             />
           ))}
         </ConnRows>
@@ -109,6 +116,8 @@ function GitCliRow({
   onInstall,
   onCancel,
   onHideLog,
+  onRecheck,
+  rechecking,
 }: {
   first: boolean;
   name: GitCliName;
@@ -119,6 +128,8 @@ function GitCliRow({
   onInstall: (way?: InstallWay) => void;
   onCancel: () => void;
   onHideLog: () => void;
+  onRecheck: (() => void) | undefined;
+  rechecking: boolean;
 }): JSX.Element {
   // Opened by an install — one pressed on the shelf's tile mounts it so — for its output to be seen.
   const [open, setOpen] = useState(running);
@@ -132,7 +143,10 @@ function GitCliRow({
   const panel = gitCliPanelOf(install);
   const update = updateOf(install);
   const line = agentLineOf(probe, state, install);
-  const action = gitCliActionOf(probe);
+  // Not installed: Install under the sentence — after one that failed, the same way again.
+  const notInstalled = notInstalledOf(probe);
+  const retry = notInstalled ? retryWayOf(log) : undefined;
+  const action = retryActionOf(gitCliActionOf(probe), retry);
   const waiting = running ? { words: install?.install?.[0]?.method === "command-line-tools" ? "finish in Apple's installer" : "installing…", onCancel } : undefined;
 
   const slot = open || action === undefined ? null : <ActionSlot action={action} waiting={waiting} disabled={busy || running} onPress={() => onInstall(action.kind === "install" ? (action.choice ?? action.method) : undefined)} />;
@@ -157,6 +171,12 @@ function GitCliRow({
                 // The output's head says it is updating, with Cancel: here, Update waits.
                 <Version after={update !== undefined ? <UpdateAfter via={update.via} title={update.title} running={false} disabled={busy || running} onUpdate={() => onInstall()} onCancel={onCancel} /> : undefined}>{probe.version}</Version>
               ) : null}
+              {probe?.status === "failed" && !running ? (
+                <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} marginLeft={30} marginTop={4}>
+                  {notInstalled ? <InstallButton title={title} install={install} retry={retry} busy={busy} onInstall={onInstall} /> : null}
+                  {onRecheck !== undefined ? <CheckAgain checking={rechecking} disabled={busy} onPress={onRecheck} /> : null}
+                </View>
+              ) : null}
             </>
           ) : (
             <RowLine state={state} word={line.word} rest={line.rest} />
@@ -175,7 +195,7 @@ function GitCliRow({
                 </Wide>
               ) : null,
               // While it installs, the output is the panel: the ways come back if it did not work.
-              panel !== undefined && !running ? (
+              panel !== undefined && !running && !notInstalled ? (
                 <Wide key="install">
                   {panel.rows.length > 0 ? (
                     <InstallPanel panel={panel} running={running} busy={busy} locked={busy} onInstall={(method) => onInstall(method)} onCancel={onCancel} onUse={() => undefined} />

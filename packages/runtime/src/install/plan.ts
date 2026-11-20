@@ -84,6 +84,11 @@ export interface InstallPlan {
    * `opt` folder, a version manager's versions — as usual places are written (`~`, `$NAME`, `*`).
    */
   lands?: string[];
+  /**
+   * Exit codes that say what it installs is already here — WinGet's "no newer version", where it was
+   * asked to install a package it had installed before: the step is done, not failed.
+   */
+  alreadyHere?: number[];
 }
 
 /**
@@ -308,9 +313,17 @@ function scoopPlan(facts: InstallFacts, verb: "install" | "update", name: string
 }
 
 /** WinGet's install, with its agreements accepted here, since nobody can answer them: stdin is closed. */
+/**
+ * WinGet's answers that the package is already installed — `install` of one it has finds no newer
+ * version (0x8A15002B), or says so outright (0x8A150061) — as Windows reports them, unsigned, and as
+ * a signed 32-bit code.
+ */
+const WINGET_ALREADY_HERE = [0x8a15002b, 0x8a150061].flatMap((code) => [code, code - 0x1_0000_0000]);
+
 function wingetInstall(facts: InstallFacts, id: string, version?: string, pinned = false): InstallPlan {
   const args = ["install", "--id", id, "--exact", ...(version !== undefined ? ["--version", version] : []), "--source", "winget", "--accept-package-agreements", "--accept-source-agreements", "--disable-interactivity"];
-  return plan("winget", INSTALL_VIA.winget, program(facts, "winget") ?? "winget", args, `winget install --id ${id} --exact${version !== undefined ? ` --version ${version}` : ""}`, facts.platform, pinned || version !== undefined ? { pinned: true } : {});
+  const one = plan("winget", INSTALL_VIA.winget, program(facts, "winget") ?? "winget", args, `winget install --id ${id} --exact${version !== undefined ? ` --version ${version}` : ""}`, facts.platform, pinned || version !== undefined ? { pinned: true } : {});
+  return { ...one, alreadyHere: WINGET_ALREADY_HERE };
 }
 
 /**

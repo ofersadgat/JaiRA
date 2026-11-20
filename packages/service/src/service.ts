@@ -264,6 +264,7 @@ import {
   installGitCli,
   probeGitCli,
   machineInstallDeps,
+  freshMachineInstallDeps,
   agentPackageOf,
   type InstallDeps,
   signInAgent,
@@ -685,7 +686,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { downAgentsOf, EXECUTOR_TITLES, GIT_CLI_NAMES, type AgentInstallMethod, type AgentInstallOutcome, type AgentInstallRequest, type GitCliName, type InstallTarget, type MachinesView } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES, GIT_CLI_NAMES, type AgentInstallMethod, type AgentInstallOutcome, type AgentInstallRequest, type GitCliName, type InstallCommandShown, type InstallTarget, type MachinesView } from "@jaira/shared";
 import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
@@ -12454,6 +12455,11 @@ export class AppService {
     return this.options.installDeps !== undefined ? Promise.resolve(this.options.installDeps) : machineInstallDeps(new NodeExec());
   }
 
+  /** How an install that takes more than one step looks at this machine again between steps — not a test's stand-in. */
+  private installRefresh(): { refresh?: () => Promise<InstallDeps> } {
+    return this.options.installDeps === undefined ? { refresh: () => freshMachineInstallDeps(new NodeExec()) } : {};
+  }
+
   /** Installs and updates still running, by agent — what Cancel aborts. */
   private readonly installs = new Map<string, AbortController>();
 
@@ -12477,8 +12483,10 @@ export class AppService {
         exec: new NodeExec({ execEnv: config.execEnvironment }),
         execEnv: config.execEnvironment,
         deps: await this.installDeps(),
+        ...this.installRefresh(),
         abortSignal: controller.signal,
         onOutput: output.say,
+        onCommand: output.command,
       });
       if (outcome.ok) output.say(INSTALLED_CHECKING);
       return this.options.installDeps === undefined ? reachedBesideNode(outcome, config.execEnvironment) : outcome;
@@ -12495,7 +12503,7 @@ export class AppService {
    * second and sent together, so an installer drawing a progress bar a character at a time is a few
    * pushes a second rather than hundreds. `end` sends what is left.
    */
-  private installOutput(target: InstallTarget): { say: (text: string) => void; end: () => void } {
+  private installOutput(target: InstallTarget): { say: (text: string) => void; command: (command: InstallCommandShown) => void; end: () => void } {
     let held = "";
     let timer: ReturnType<typeof setTimeout> | undefined;
     const send = (): void => {
@@ -12509,6 +12517,12 @@ export class AppService {
       say: (text) => {
         held += text;
         timer ??= setTimeout(send, INSTALL_OUTPUT_EVERY_MS);
+      },
+      // What was printed before it belongs to the command before: sent first.
+      command: (command) => {
+        if (timer !== undefined) clearTimeout(timer);
+        send();
+        this.publish({ type: "install:output", target, text: "", command });
       },
       end: () => {
         if (timer !== undefined) clearTimeout(timer);
@@ -12569,8 +12583,10 @@ export class AppService {
         exec: new NodeExec({ execEnv: config.execEnvironment }),
         execEnv: config.execEnvironment,
         deps: await this.installDeps(),
+        ...this.installRefresh(),
         abortSignal: controller.signal,
         onOutput: output.say,
+        onCommand: output.command,
       });
       if (outcome.ok) output.say(INSTALLED_CHECKING);
       return outcome;

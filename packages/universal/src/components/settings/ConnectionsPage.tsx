@@ -120,6 +120,8 @@ export function ConnectionsPage(): JSX.Element {
           onInstall={(name, method) => void actions.installGitCli(name, method)}
           onCancel={(name) => void actions.cancelGitCliInstall(name)}
           onHideLog={(name) => actions.hideInstallLog({ kind: "gitCli", name })}
+          onRecheck={() => void actions.recheckAvailability()}
+          rechecking={state.rechecking}
         />
       </SettingsSection>
       <SettingsSection

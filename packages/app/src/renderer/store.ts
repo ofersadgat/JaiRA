@@ -83,7 +83,7 @@ import type {
   RunTarget,
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
-import { appendInstallLog, installLogKey, type InstallLog } from "./installLog";
+import { appendInstallLog, installLogKey, startedInstallLog, type InstallLog } from "./installLog";
 import { appendJobText, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
 import {
   clearedAbove,
@@ -2610,7 +2610,7 @@ export function useApp() {
           const key = installLogKey(message.target);
           const log = ref.current.installLogs[key];
           if (log === undefined || !log.running) break;
-          patch({ installLogs: { ...ref.current.installLogs, [key]: appendInstallLog(log, message.text) } });
+          patch({ installLogs: { ...ref.current.installLogs, [key]: appendInstallLog(log, message.text, message.command) } });
           break;
         }
         case "log:entry": {
@@ -4335,7 +4335,7 @@ export function useApp() {
         if (ref.current.installing.includes(name)) return;
         const key = installLogKey({ kind: "agent", name });
         // The log starts empty: the service's first push is the command it runs.
-        patch({ installing: [...ref.current.installing, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: way === undefined } }, error: null });
+        patch({ installing: [...ref.current.installing, name], installLogs: { ...ref.current.installLogs, [key]: startedInstallLog(way) }, error: null });
         let outcome: InstallLog["outcome"];
         try {
           const answered = await invoke("executor:install", { name, ...installRequestOf(way) });
@@ -4369,7 +4369,7 @@ export function useApp() {
       installGitCli: async (name: GitCliName, way?: InstallWay) => {
         if (ref.current.installingGitClis.includes(name)) return;
         const key = installLogKey({ kind: "gitCli", name });
-        patch({ installingGitClis: [...ref.current.installingGitClis, name], installLogs: { ...ref.current.installLogs, [key]: { text: "", running: true, update: way === undefined } }, error: null });
+        patch({ installingGitClis: [...ref.current.installingGitClis, name], installLogs: { ...ref.current.installLogs, [key]: startedInstallLog(way) }, error: null });
         let outcome: InstallLog["outcome"];
         try {
           const answered = await invoke("gitCli:install", { name, ...installRequestOf(way) });

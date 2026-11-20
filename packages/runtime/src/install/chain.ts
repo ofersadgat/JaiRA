@@ -296,13 +296,6 @@ export function stepsOf(choices: readonly ChainChoice[], path: readonly string[]
   return steps;
 }
 
-/** What the output says before a step that asks for an administrator's rights waits for the answer. */
-const ELEVATED_SAYS: Readonly<Partial<Record<NodeJS.Platform, string>>> = {
-  darwin: "macOS asks for an administrator's password in its own window.\n",
-  linux: "Your desktop asks for an administrator's password in its own window.\n",
-  win32: "Windows asks for an administrator's permission in its own window.\n",
-};
-
 /** What a multi-step install looks at: the package itself, and what its steps need. */
 export interface ChainRunHooks {
   /** How a step's package is looked for — {@link gatherInstallFacts} unless a caller needs more. */
@@ -316,7 +309,10 @@ export interface ChainRunHooks {
  * Answers when the last installer exits, with where the package's binary is now.
  */
 export async function runChoice(pkg: ToolPackage, title: string, command: string, path: readonly string[], options: InstallRunOptions, hooks: ChainRunHooks = {}): Promise<AgentInstallOutcome> {
-  const look = hooks.facts ?? ((step: Pick<ChainStep, "pkg" | "command">) => gatherInstallFacts(step.command, step.pkg, options));
+  // The machine as each step finds it: looked at again after a step, whose installer may have added to
+  // the PATH where only a new terminal sees it (WinGet's portable packages, Chocolatey, fnm's default).
+  let lookup: InstallRunOptions = options;
+  const look = hooks.facts ?? ((step: Pick<ChainStep, "pkg" | "command">) => gatherInstallFacts(step.command, step.pkg, lookup));
   const facts = await look({ pkg, command });
   const chain = await gatherChainFacts(options);
   if (facts === undefined || chain === undefined) return { ok: false, reason: `could not look for '${command}' where it runs` };
@@ -326,19 +322,19 @@ export async function runChoice(pkg: ToolPackage, title: string, command: string
   const say = sayTo(options.onOutput);
   for (const [i, step] of steps.entries()) {
     const label = steps.length > 1 ? `step ${i + 1} of ${steps.length}, ${step.title}` : undefined;
-    if (label !== undefined) say(`${i > 0 ? "\n" : ""}── Step ${i + 1} of ${steps.length}: ${step.title} (${INSTALL_VIA[step.method]})\n`);
     const now = await look(step);
     const plan = now !== undefined ? planStep(step, now) : undefined;
     if (plan === undefined) {
       const why = i > 0 ? ` after ${steps[i - 1]!.title} was installed` : "";
       return { ok: false, reason: `${INSTALL_VIA[step.method]} could not be found to install ${step.title}${why} — check again, or install it by hand` };
     }
-    if (plan.elevated === true) say(ELEVATED_SAYS[now!.platform] ?? ELEVATED_SAYS["linux"]!);
-    const ran = await runPlan(plan, options, "install");
+    if (i > 0 && options.onCommand === undefined) say("\n");
+    const ran = await runPlan(plan, lookup, "install", label !== undefined ? `Step ${i + 1} of ${steps.length}: ${step.title} (${INSTALL_VIA[step.method]})` : undefined);
     if (!ran.ok) return { ok: false, reason: label !== undefined ? `${label}: ${ran.reason}` : ran.reason };
+    if (options.refresh !== undefined) lookup = { ...lookup, deps: await options.refresh() };
     if (step.atLeast !== undefined) {
       const got = (await look(step))?.found;
-      const version = got !== undefined && !got.broken ? await runVersion(got.path, step.pkg.version, options) : undefined;
+      const version = got !== undefined && !got.broken ? await runVersion(got.path, step.pkg.version, lookup) : undefined;
       if (version !== undefined && !versionSatisfies(version, step.atLeast)) {
         return { ok: false, reason: `${plan.via} installed ${step.title} ${version}, older than ${title} runs on (${minimumWords(step.atLeast)}) — choose another way` };
       }

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { Platform, ScrollView, TextInput, type GestureResponderEvent } from "react-native";
+import { ScrollView, TextInput, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { CommandDialect } from "@jaira/shared/browser";
-import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
+import { hueOf } from "@jaira/ui/approvalModel";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
 import { PLACES, type Place } from "@jaira/ui/splitModel";
 import { invoke } from "@jaira/ui/store";
@@ -20,7 +20,6 @@ import {
   type TermLine,
   type TerminalTone,
 } from "@jaira/ui/terminalModel";
-import { takenApartOf } from "@jaira/ui/transcript";
 import { base64Of } from "@jaira/ui/valueViewMeta";
 import { copyText } from "../../clipboard";
 import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
@@ -31,6 +30,7 @@ import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { colorOf } from "../Sidebar";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
+import { CommandLine, Following, IconButton, ScreenLine } from "./TermParts";
 import { useTerminal } from "./useTerminal";
 
 /**
@@ -282,55 +282,6 @@ function pressedAt(e: GestureResponderEvent): { x: number; y: number } {
   return rect !== undefined ? { x: rect.right, y: rect.bottom + 4 } : { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 12 };
 }
 
-/** The command line taken apart by the approval's parser, on the terminal's ground. */
-function CommandLine({ command, dialect, t }: { command: string; dialect: CommandDialect; t: Tokens }): JSX.Element {
-  const segments = useMemo(() => lineSegments(command, takenApartOf(command, dialect).requests.map((request) => ({ span: request.span, matched: [] }))), [command, dialect]);
-  return (
-    <>
-      {segments.map((segment, at) =>
-        segment.kind === "glue" ? (
-          <Text key={at} color={TERM_INK.hint}>
-            {segment.text}
-          </Text>
-        ) : (
-          <Text
-            key={at}
-            color={TERM_INK.text}
-            backgroundColor={t.mix(colorOf(t, hueOf(segment.part)), 22, "transparent") as never}
-            {...((Platform.OS === "web" ? { paddingHorizontal: 3, borderRadius: 4, style: { boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" } } : {}) as object)}
-          >
-            {segment.pieces.map((piece) => piece.text).join("")}
-          </Text>
-        ),
-      )}
-    </>
-  );
-}
-
-/** One line of the screen, its spans in their colours. */
-function ScreenLine({ line, t }: { line: TermLine; t: Tokens }): JSX.Element {
-  const base = font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object;
-  return (
-    <Text {...base} color={TERM_INK.text} {...(isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 })}>
-      {line.length === 0
-        ? " "
-        : line.map((span, i) => (
-            <Text
-              key={i}
-              color={span.you === true ? TERM_INK.accent : (span.fg ?? TERM_INK.text)}
-              {...(span.you === true ? { backgroundColor: "rgba(179,182,255,0.16)" } : span.bg !== undefined ? { backgroundColor: span.bg } : {})}
-              {...(span.bold === true || span.you === true ? { fontWeight: "600" } : {})}
-              {...(span.dim === true ? { opacity: 0.6 } : {})}
-              {...(span.italic === true ? { fontStyle: "italic" } : {})}
-              {...(span.underline === true ? { textDecorationLine: "underline" } : {})}
-            >
-              {span.text}
-            </Text>
-          ))}
-    </Text>
-  );
-}
-
 /** The screen's scroller: a card's is as tall as its lines (at most 320 once opened out); a filled one scrolls and follows the end. */
 function Scroller({ fill, follow, signal, capped = false, children }: { fill: boolean; follow: boolean; signal: number; capped?: boolean; children: ReactNode }): JSX.Element {
   const ref = useRef<ScrollView>(null);
@@ -456,38 +407,6 @@ function Readings({ reading, onReading }: { reading: Reading; onReading: (readin
         );
       })}
     </View>
-  );
-}
-
-function Following({ on, onPress }: { on: boolean; onPress: () => void }): JSX.Element {
-  const t = useTokens();
-  return (
-    <Press
-      onPress={onPress}
-      {...({ "aria-pressed": on } as object)}
-      title={on ? "following the end — press to stop" : "follow the end"}
-      flexDirection="row"
-      alignItems="center"
-      gap={5}
-      height={24}
-      paddingHorizontal={9}
-      borderRadius={6}
-      box={({ hovered }) => ({ backgroundColor: on ? t.v("tint-accent") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
-    >
-      <View transform={[{ rotate: "90deg" }]}>
-        <Icon name="arrow" size={12} color={String(t.v(on ? "accent" : "dim"))} />
-      </View>
-      <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: on ? "accent" : "dim" }}>Following</Txt>
-    </Press>
-  );
-}
-
-function IconButton({ icon, label, onPress }: { icon: "copy"; label: string; onPress: () => void }): JSX.Element {
-  const t = useTokens();
-  return (
-    <Press onPress={onPress} label={label} title={label} width={26} height={24} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered }) => (hovered ? { backgroundColor: t.v("fill-ghost-hover") } : {})}>
-      {({ hovered }: { hovered: boolean }) => <Icon name={icon} size={13} color={String(t.v(hovered ? "text" : "dim"))} />}
-    </Press>
   );
 }
 

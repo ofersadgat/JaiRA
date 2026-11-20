@@ -113,6 +113,12 @@ export function knownShellEnv(): ShellEnv | undefined {
   return known;
 }
 
+/** Ask the person's terminal afresh, an installer having just changed what a new one would have. */
+export function freshShellEnv(exec: Exec, platform?: NodeJS.Platform, shell?: string): Promise<ShellEnv> {
+  cached = undefined;
+  return loginShellEnv(exec, platform, shell);
+}
+
 /** Forget what was asked: a test's next machine is another. */
 export function resetShellEnv(): void {
   cached = undefined;

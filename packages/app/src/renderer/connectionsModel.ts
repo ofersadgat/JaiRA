@@ -291,6 +291,37 @@ export function agentPlaceOf(probe: ProbeResult | undefined): "row" | "shelf" {
   return probe?.status === "failed" && probe.install !== undefined && probe.install.path === undefined ? "shelf" : "row";
 }
 
+/**
+ * Whether the check could not reach the program: not installed, what is left of an install, or installed
+ * where this app's PATH does not reach. Then who it runs as, its shell and its settings say nothing that
+ * matters yet, and the row shows only what would make it work.
+ */
+export function unreachedOf(probe: ProbeResult | undefined): boolean {
+  const install = probe?.install;
+  return probe?.status === "failed" && install !== undefined && (install.path === undefined || install.broken === true || install.onPath === false);
+}
+
+/** Not installed at all — nothing of it found: what an opened row offers is Install, not a list of ways. */
+export function notInstalledOf(probe: ProbeResult | undefined): boolean {
+  const install = probe?.install;
+  return probe?.status === "failed" && install !== undefined && install.path === undefined && install.broken !== true;
+}
+
+/**
+ * The way an install that failed was asked for, to try it again the same way — undefined while it runs,
+ * after it worked, after a Cancel, or for an update (no way named).
+ */
+export function retryWayOf(log: { running: boolean; way?: InstallWay | undefined; outcome?: { ok: true } | { ok: false; reason: string } | undefined } | undefined): InstallWay | undefined {
+  if (log === undefined || log.running || log.outcome === undefined || log.outcome.ok || /cancelled$/.test(log.outcome.reason)) return undefined;
+  return log.way;
+}
+
+/** A closed row's install button as the retry of the way that failed: "Install again", by that way. */
+export function retryActionOf(action: AgentAction | undefined, retry: InstallWay | undefined): AgentAction | undefined {
+  if (action?.kind !== "install" || action.path !== undefined || retry === undefined) return action;
+  return { kind: "install", label: "Install again", title: "try the same way again", ...(typeof retry === "string" ? { method: retry } : { choice: retry }) };
+}
+
 /** A shelf tile's line under its name, and the ways to install it — the recommended one first. */
 export function shelfTileOf(install: AgentInstall | undefined): { sub: string; ways: InstallPanelRow[]; menu?: InstallMenuRow[] } {
   const ways = (installPanelOf(install)?.rows ?? []).filter((row) => row.method !== undefined || row.choice !== undefined);

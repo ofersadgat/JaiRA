@@ -246,6 +246,83 @@ describe("a path through the menu", () => {
     expect(old).toEqual({ ok: false, reason: "apt installed Node.js 18.19.0, older than Gemini (cli) runs on (20 or newer) — choose another way" });
   });
 
+  it("on Windows, finds fnm in WinGet's own folder — WinGet could not link it, and put that folder on a PATH this app does not have", async () => {
+    const local = "C:\\Users\\me\\AppData\\Local";
+    const fnmHome = "C:\\Users\\me\\AppData\\Roaming\\fnm\\aliases\\default";
+    const pkgDir = `${local}\\Microsoft\\WinGet\\Packages\\Schniz.fnm_Microsoft.Winget.Source_8wekyb3d8bbwe`;
+    const files: Files = { "C:\\Windows\\System32\\powershell.exe": "file", [`${local}\\Microsoft\\WindowsApps\\winget.exe`]: "file" };
+    const exec = machineExec((file, args) => {
+      if (file === "winget" && args.includes("Schniz.fnm")) {
+        files[`${pkgDir}\\fnm.exe`] = "file";
+        return {};
+      }
+      if (/powershell(\.exe)?$/i.test(file) && args.some((one) => one.includes(`${pkgDir}\\fnm.exe`))) {
+        files[`${fnmHome}\\node.exe`] = "file";
+        files[`${fnmHome}\\npm.cmd`] = "file";
+        return {};
+      }
+      if (file === `${fnmHome}\\node.exe` && args[0] === "--version") return { stdout: "v24.11.1\n" };
+      if (file === `${fnmHome}\\npm.cmd` && args.join(" ") === "install -g @google/gemini-cli") {
+        files[`${fnmHome}\\gemini.cmd`] = "file";
+        return {};
+      }
+      return undefined;
+    });
+    const deps = fakeFs({ platform: "win32", path: ["C:\\Windows\\System32", `${local}\\Microsoft\\WindowsApps`], files, env: { LOCALAPPDATA: local, APPDATA: "C:\\Users\\me\\AppData\\Roaming" } });
+    const info = { name: "gemini-cli", kind: "generic", command: "gemini", enabled: true } as ExecutorInfo;
+    let said = "";
+    const outcome = await installAgent(info, { choice: ["npm"] }, { exec, deps, onOutput: (text) => (said += text) });
+    expect(said).toContain("── Step 2 of 3: Node.js (fnm)");
+    expect(outcome).toEqual({ ok: true, path: `${fnmHome}\\gemini.cmd`, onPath: false });
+  });
+
+  it("looks at the machine again after each step, the person's terminal asked afresh — what an installer added to the PATH is there", async () => {
+    const tools = "C:\\Tools\\fnm";
+    const files: Files = { "C:\\Windows\\System32\\powershell.exe": "file", "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe": "file" };
+    const env = { LOCALAPPDATA: "C:\\Users\\me\\AppData\\Local", APPDATA: "C:\\Users\\me\\AppData\\Roaming" };
+    const path = ["C:\\Windows\\System32", "C:\\Users\\me\\AppData\\Local\\Microsoft\\WindowsApps"];
+    const exec = machineExec((file, args) => {
+      if (file === "winget" && args.includes("Schniz.fnm")) {
+        files[`${tools}\\fnm.exe`] = "file";
+        return {};
+      }
+      return /powershell(\.exe)?$/i.test(file) ? { code: 1, stderr: "stop here\n" } : undefined;
+    });
+    let refreshed = 0;
+    const deps = fakeFs({ platform: "win32", path, files, env });
+    const refresh = () => {
+      refreshed++;
+      return Promise.resolve({ ...deps, shell: { pathDirs: [tools], vars: {} } });
+    };
+    const info = { name: "gemini-cli", kind: "generic", command: "gemini", enabled: true } as ExecutorInfo;
+    const outcome = await installAgent(info, { choice: ["npm"] }, { exec, deps, refresh });
+    expect(refreshed).toBe(1);
+    // fnm was found where the terminal now has it: step 2 ran it, and stopped where this machine said to.
+    expect(outcome).toEqual({ ok: false, reason: "step 2 of 3, Node.js: 'fnm install --lts && fnm default lts-latest, and its default on your PATH' exited 1: stop here" });
+    expect(exec.calls.at(-1)?.args.join(" ")).toContain(`${tools}\\fnm.exe`);
+  });
+
+  it("tells a watcher where each command starts, of several steps which one — the text is then the command's output alone", async () => {
+    const exec = machineExec(() => ({ prints: [["stdout", "ok\n"]] }));
+    const commands: unknown[] = [];
+    let said = "";
+    const facts = { platform: "win32" as const, home: "C:\\Users\\me", tools: { powershell: "powershell" } };
+    const plan = installPlans(TOOL_PACKAGES["chocolatey"]!, facts)[0]!;
+    await runPlan(plan, { exec, deps: fakeFs({ platform: "win32", path: [], files: {} }), onOutput: (text) => (said += text), onCommand: (command) => commands.push(command) }, "install", "Step 1 of 2: Chocolatey (the native installer)");
+    expect(commands).toEqual([{ display: plan.display, step: "Step 1 of 2: Chocolatey (the native installer)" }]);
+    // Run as administrator: said inside its own command, before it waits.
+    expect(said).toBe("Windows asks for an administrator's permission in its own window.\nok\n");
+  });
+
+  it("takes WinGet's 'no newer version' as done: fnm it installed before is still there", async () => {
+    const exec = machineExec(() => ({ code: 2316632107, stdout: "Found an existing package already installed. Trying to upgrade the installed package...\nNo available upgrade found.\n" }));
+    const facts = { platform: "win32" as const, home: "C:\\Users\\me", tools: { winget: "winget" } };
+    const plan = installPlans(TOOL_PACKAGES["fnm"]!, facts).find((one) => one.method === "winget")!;
+    expect(await runPlan(plan, { exec, deps: fakeFs({ platform: "win32", path: [], files: {} }) }, "install")).toMatchObject({ ok: true });
+    const failing = machineExec(() => ({ code: 2316632100 }));
+    expect(await runPlan(plan, { exec: failing, deps: fakeFs({ platform: "win32", path: [], files: {} }) }, "install")).toMatchObject({ ok: false });
+  });
+
   it("refuses a path the machine no longer offers, running nothing", async () => {
     const exec = nodeSays(undefined);
     const info = { name: "gemini-cli", kind: "generic", command: "gemini", enabled: true } as ExecutorInfo;

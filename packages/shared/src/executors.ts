@@ -274,6 +274,13 @@ export interface AgentInstallCommand {
  * way, and the command as a person would type it. `elevated` asks for an administrator's password in
  * the system's own window (macOS's, polkit's on Linux, Windows' UAC) — JaiRA never sees it.
  */
+/** A command an install runs, as its output names it: what it runs, and — of several steps — which step it is. */
+export interface InstallCommandShown {
+  display: string;
+  /** `Step 2 of 3: Node.js (fnm)`. */
+  step?: string;
+}
+
 export interface InstallStepShown {
   /** What this step installs: "fnm", "Node.js", "Homebrew", "Gemini CLI". */
   title: string;

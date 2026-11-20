@@ -28,6 +28,7 @@ import type {
   SignInOutcome,
   AgentInstallOutcome,
   AgentInstallRequest,
+  InstallCommandShown,
   GitCliName,
 } from "./executors";
 import type { ForgeBranch, ForgeSignInOutcome, ForgeSignInPending, ForgeSignInStart, ForgeSignOutOutcome, RemoteStatusView } from "./forge";
@@ -3382,12 +3383,13 @@ export type PushMessage =
   | { type: "desktop:driving"; driving: DesktopDriving | null }
   /**
    * What an install or update running here printed since the last of these: an agent's
-   * (`executor:install`) or a git program's (`gitCli:install`). The first says the command
-   * (`$ brew install gh`); then the installer's stdout and stderr, raw — escapes and carriage returns
-   * kept — a tenth of a second's worth at a time. Settings → Connections draws it under the row. This
+   * (`executor:install`) or a git program's (`gitCli:install`): the installer's stdout and stderr,
+   * raw — escapes and carriage returns kept — a tenth of a second's worth at a time. One with `command`
+   * says a command starts (`brew install gh`, of several steps which one), its `text` empty: what
+   * follows is that command's. Settings → Connections draws each as a terminal under the row. This
    * machine's.
    */
-  | { type: "install:output"; target: InstallTarget; text: string }
+  | { type: "install:output"; target: InstallTarget; text: string; command?: InstallCommandShown }
   | ({ type: "workspace:progress" } & WorkspaceProgress)
   | ({ type: "workspace:finished" } & WorkspaceFinished)
   /**
