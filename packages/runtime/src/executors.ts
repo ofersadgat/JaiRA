@@ -290,10 +290,14 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
   // Where the binary is and how it got there, for an agent JaiRA can install — asked beside the
   // version, since a missing binary's row offers the install and a present one's the update.
   const pkg = options.install !== undefined ? agentPackageOf(info) : undefined;
-  const lookup = { exec: options.exec, deps: options.install!, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) };
+  let lookup = { exec: options.exec, deps: options.install!, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}), ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}) };
   let facts = pkg !== undefined ? await gatherInstallFacts(info.command, pkg, lookup) : undefined;
   const reached = pkg !== undefined && facts !== undefined ? reachBesideNode(pkg, facts, lookup, options.reach) : undefined;
-  if (pkg !== undefined && reached !== undefined) facts = (await gatherInstallFacts(info.command, pkg, { ...lookup, deps: { ...lookup.deps, pathDirs: [...lookup.deps.pathDirs, reached] } })) ?? facts;
+  // Looked at again with the folder on the PATH: `deps` was read before `reach` changed this process's.
+  if (pkg !== undefined && reached !== undefined) {
+    lookup = { ...lookup, deps: { ...lookup.deps, pathDirs: [...lookup.deps.pathDirs, reached] } };
+    facts = (await gatherInstallFacts(info.command, pkg, lookup)) ?? facts;
+  }
   const listed = pkg !== undefined && facts !== undefined ? agentInstallOf(pkg, facts) : undefined;
   const choices = pkg !== undefined && facts !== undefined ? await installChoicesFor(pkg, agentTitleOf(info), info.command, facts, lookup) : undefined;
   const install = listed !== undefined ? { ...listed, ...(choices !== undefined ? { choices } : {}) } : undefined;

@@ -157,22 +157,25 @@ describe("probeGitCli", () => {
     expect(result.install?.method).toBeUndefined();
   });
 
+  // `reach` changes this process's PATH, not the machine already read: the look after it must not wait
+  // for `deps` to change, as a real one never does.
   it("reaches a program found only in its installer's folder, and says so", async () => {
     const files: Record<string, "file"> = { ...MAC, "/opt/homebrew/bin/brew": "file", "/opt/homebrew/bin/gh": "file" };
-    const path = [...MAC_PATH];
-    const deps = fakeFs({ path, files });
+    const deps = fakeFs({ path: [...MAC_PATH], files });
     const reached: string[] = [];
     const exec = scriptedExec({ "gh --version": { stdout: "gh version 2.83.0 (2026-10-21)\nhttps://github.com/cli/cli/releases/tag/v2.83.0\n" } });
-    const result = await probeGitCli("gh", {
-      exec,
-      deps,
-      reach: (dir) => {
-        reached.push(dir);
-        path.push(dir);
-      },
-    });
+    const result = await probeGitCli("gh", { exec, deps, reach: (dir) => reached.push(dir) });
     expect(reached).toEqual(["/opt/homebrew/bin"]);
     expect(result).toMatchObject({ status: "ok", version: "2.83.0 (2026-10-21)", detail: "found at /opt/homebrew/bin/gh — JaiRA added /opt/homebrew/bin to the PATH it runs programs with" });
+  });
+
+  it("reaches gh in Program Files right after WinGet installed it there", async () => {
+    const deps = fakeFs({ platform: "win32", path: [...WIN_PATH], files: { ...WIN_TOOLS, "C:\\Program Files\\GitHub CLI\\gh.exe": "file" } });
+    const reached: string[] = [];
+    const exec = scriptedExec({ "gh --version": { stdout: "gh version 2.105.0 (2026-11-12)\n" } });
+    const result = await probeGitCli("gh", { exec, deps, reach: (dir) => reached.push(dir) });
+    expect(reached).toEqual(["C:\\Program Files\\GitHub CLI"]);
+    expect(result).toMatchObject({ status: "ok", detail: "found at C:\\Program Files\\GitHub CLI\\gh.exe — JaiRA added C:\\Program Files\\GitHub CLI to the PATH it runs programs with" });
   });
 
   it("says what to do on a Linux where nothing here installs it", async () => {

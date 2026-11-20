@@ -57,16 +57,21 @@ export async function probeGitCli(name: GitCliName, given: GitCliCheckOptions): 
   let facts = looked.facts;
   const placeholder = looked.placeholder;
 
-  // Installed where the PATH this app was started with does not reach: made reachable, then looked at again.
+  // Installed where the PATH this app was started with does not reach: made reachable, then looked at
+  // again — with the folder on the PATH looked through, since `deps` is the machine as it was read before
+  // `reach` changed this process's PATH, and would still say the folder is not on it.
   let reached: string | undefined;
+  let lookup: GitCliCheckOptions = options;
   if (facts.found !== undefined && !facts.found.broken && !facts.found.onPath && native && options.reach !== undefined) {
     reached = (facts.platform === "win32" ? win32 : posix).dirname(facts.found.path);
     options.reach(reached);
-    facts = (await gitCliFacts(name, options))?.facts ?? facts;
+    const pathDirs = options.deps.pathDirs.includes(reached) ? options.deps.pathDirs : [...options.deps.pathDirs, reached];
+    lookup = { ...options, deps: { ...options.deps, pathDirs } };
+    facts = (await gitCliFacts(name, lookup))?.facts ?? facts;
   }
 
   const listed = agentInstallOf(pkg, facts);
-  const choices = await installChoicesFor(pkg, TITLES[name], pkg.binary, facts, options);
+  const choices = await installChoicesFor(pkg, TITLES[name], pkg.binary, facts, lookup);
   const install = choices !== undefined ? { ...listed, choices } : listed;
   const found = facts.found;
   if (found === undefined) {
