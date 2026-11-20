@@ -247,7 +247,7 @@ the other gaps you identified as well".
   from its own terminal — and its calls, transcripts and approvals go through JaiRA, so it is visible and
   gated here and cannot be resumed.
   - **declarative-ai** (`@declarative-ai/script`'s `report.ts`, SCRIPTS.md §17.3) defines the reporting:
-    an engine that takes reports advertises a socket and a token in `$DAI_HOME/endpoints/`; `runScript`
+    an engine that takes reports advertises a socket and a token in its endpoints directory; `runScript`
     (so `dai-script`) and the host `import "@declarative-ai/script"` installs find it, say hello with the
     script and its `meta`, report each `llm()` and `agent()` as it begins and what it answered, a phase,
     a log line, an `input()` answered and a script called, ask about each tool an agent wants to use, and
@@ -261,6 +261,19 @@ the other gaps you identified as well".
     `ask-first`), and asks the person on the task where the set asks. The run ends as the program said,
     or interrupted when it went away without saying; it cannot be resumed (`TaskMeta.reported`), and the
     sweep of abandoned runs leaves it alone while it reports.
+  - **Where the advert is kept** (amended 2026-11-20). The person: "why is there something being written
+    to ~/.declarative-ai ? that doesnt make sense given that the product is jaira not declarative-ai.
+    declarative-ai is just a library". It was `$DAI_HOME/endpoints/`, by default `~/.declarative-ai/`,
+    which only this app ever wrote. An advert lasts only as long as its engine, so it is now kept in this
+    user's directory in the system's temporary one: `$DAI_ENDPOINTS`, else
+    `/tmp/declarative-ai-endpoints-<uid>` on macOS and Linux (the same for a terminal, ssh, cron and the
+    desktop, which `$TMPDIR` and `$XDG_RUNTIME_DIR` are not), `%TEMP%\declarative-ai-endpoints` on
+    Windows. `/tmp` is shared, so a directory that is not the user's alone (owned by them, mode `0700`)
+    is neither read nor written. The engine writes the advert again every hour, so the system's cleaning
+    of its temporary directory never takes it for long. The location and the writing are declarative-ai's
+    (`advertiseEndpoint` and `endpointsDir`, from `@declarative-ai/script/report`); the service no longer
+    keeps a copy of the path. On its first start a build takes away its old advert in the home folder,
+    and the folder with it once that leaves it empty.
 
 - **The chat-turn path is gone** (§2, built 2026-11-19). A message reaches a conversation only as the
   answer to its program's `input()`; `chat:send` to a conversation that is not a program refuses it in

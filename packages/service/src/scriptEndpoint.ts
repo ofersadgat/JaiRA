@@ -5,22 +5,30 @@
  * wants to use — so the run is a task here, visible and gated, while it runs its own calls there. It
  * cannot be resumed: its program is the process that reported it.
  *
- * The engine's host starts it beside its pipe and ADVERTISES it where declarative-ai looks —
- * `$DAI_HOME/endpoints/` (default `~/.declarative-ai/endpoints/`) — as `{ name, socket, token,
- * protocol, pid }`, taken away when the host closes. The wire is declarative-ai's: newline-delimited
+ * The engine's host starts it beside its pipe and ADVERTISES it where declarative-ai looks, through
+ * declarative-ai's own `advertiseEndpoint` — `$DAI_ENDPOINTS`, else this user's directory in the system's
+ * temporary one, never the home directory — as `{ name, socket, token, protocol, pid }`, written again
+ * every hour while it listens and taken away when the host closes. The wire is declarative-ai's: newline-delimited
  * JSON on the socket, a request `{ id, method, params }` answered `{ id, result }` or `{ id, error }`,
  * a notification without an `id`. `hello` must come first and carry the advertised token; what the
  * service makes of the rest is `AppService`'s (`reportedRunBegin` and the methods after it).
  */
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmdirSync, rmSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonValue } from "@declarative-ai/json";
+import { advertiseEndpoint, REPORT_PROTOCOL } from "@declarative-ai/script/report";
 
 /** The protocol of declarative-ai's reporting this endpoint speaks. */
-export const SCRIPT_REPORT_PROTOCOL = 1;
+export const SCRIPT_REPORT_PROTOCOL = REPORT_PROTOCOL;
+
+/**
+ * How often the advert is written again while the endpoint listens: the system clears its temporary
+ * directory of what has not changed in days, and a running engine must stay findable.
+ */
+const ADVERT_REFRESH_MS = 60 * 60 * 1000;
 
 /** A run as `hello` describes it. */
 export interface ReportedRunInfo {
@@ -71,7 +79,7 @@ export interface ScriptEndpointOptions {
   /** The engine's home, which names its socket and its advert. */
   baseDir: string;
   version: string;
-  /** Where to advertise. Default: `$DAI_HOME/endpoints`, else `~/.declarative-ai/endpoints`. */
+  /** Where to advertise. Default: declarative-ai's `endpointsDir()`. */
   advertDir?: string;
   log?: (level: "info" | "warn", message: string) => void;
 }
@@ -80,11 +88,6 @@ export interface ScriptEndpoint {
   readonly socket: string;
   readonly advert: string;
   close(): Promise<void>;
-}
-
-/** Where declarative-ai looks for endpoints. */
-export function scriptAdvertDir(env: NodeJS.ProcessEnv = process.env): string {
-  return join(env["DAI_HOME"] !== undefined && env["DAI_HOME"].length > 0 ? env["DAI_HOME"] : join(homedir(), ".declarative-ai"), "endpoints");
 }
 
 /** Start listening for reports, and advertise where. */
@@ -104,21 +107,56 @@ export async function startScriptEndpoint(options: ScriptEndpointOptions): Promi
       resolve();
     });
   });
-  const dir = options.advertDir ?? scriptAdvertDir();
-  const advert = join(dir, `jaira-${hash}.json`);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(advert, `${JSON.stringify({ name: "JaiRA", socket, token, protocol: SCRIPT_REPORT_PROTOCOL, pid: process.pid, version: options.version }, null, 2)}\n`, { mode: 0o600 });
+  const env = options.advertDir !== undefined ? { ...process.env, DAI_ENDPOINTS: options.advertDir } : process.env;
+  const name = `jaira-${hash}`;
+  const advertise = (): string =>
+    advertiseEndpoint(name, { name: "JaiRA", socket, token, protocol: SCRIPT_REPORT_PROTOCOL, pid: process.pid, version: options.version }, env);
+  let advert: string;
+  try {
+    advert = advertise();
+  } catch (e) {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (process.platform !== "win32") rmSync(socket, { force: true });
+    throw e;
+  }
+  if (env["DAI_ENDPOINTS"] === undefined) forgetHomeAdvert(name);
+  const refresh = setInterval(() => {
+    try {
+      advertise();
+    } catch (e) {
+      options.log?.("warn", `could not advertise where scripts run as programs report: ${(e as Error).message}`);
+    }
+  }, ADVERT_REFRESH_MS);
+  refresh.unref();
   options.log?.("info", `scripts run as programs report to this engine at ${socket}`);
   return {
     socket,
     advert,
     close: async () => {
+      clearInterval(refresh);
       rmSync(advert, { force: true });
       for (const conn of connections) conn.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       if (process.platform !== "win32") rmSync(socket, { force: true });
     },
   };
+}
+
+/**
+ * Until 2026-11-20 the advert was kept in `~/.declarative-ai/endpoints`, a folder in the person's home
+ * that only this app ever wrote. Take this engine's old advert away, and the two folders when that leaves
+ * them empty. Drop this once the builds that wrote there are gone.
+ */
+function forgetHomeAdvert(name: string): void {
+  const old = join(homedir(), ".declarative-ai");
+  rmSync(join(old, "endpoints", `${name}.json`), { force: true });
+  for (const dir of [join(old, "endpoints"), old]) {
+    try {
+      rmdirSync(dir);
+    } catch {
+      return;
+    }
+  }
 }
 
 /** One reporting connection: `hello` first, then the run's reports, in the order they were sent. */

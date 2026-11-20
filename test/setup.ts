@@ -27,10 +27,10 @@ export const BASE_DIR = mkdtempSync(join(tmpdir(), "jaira-base-"));
 
 process.env["JAIRA_HOME"] = BASE_DIR;
 
-// The same for declarative-ai's home (decision 0029, ruling 12): an engine a test hosts advertises where
-// scripts run as programs report to it, under `$DAI_HOME/endpoints` — never in the developer's real one,
+// The same for declarative-ai's endpoints (decision 0029, ruling 12): an engine a test hosts advertises
+// where scripts run as programs report to it, in `$DAI_ENDPOINTS` — never in the developer's real one,
 // where a script they run would find an engine a test left behind.
-process.env["DAI_HOME"] = join(BASE_DIR, "dai");
+process.env["DAI_ENDPOINTS"] = join(BASE_DIR, "dai", "endpoints");
 
 /**
  * The same floor under the THIRD layer (decision 0006): a test sees an empty built-in layer unless

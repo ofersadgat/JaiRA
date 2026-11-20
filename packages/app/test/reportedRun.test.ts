@@ -40,7 +40,7 @@ afterEach(async () => {
 });
 
 const project = (): Project => (service as unknown as { session(): { project: Project } }).session().project;
-const env = (): NodeJS.ProcessEnv => ({ DAI_HOME: join(testHome(), "dai") });
+const env = (): NodeJS.ProcessEnv => ({ DAI_ENDPOINTS: join(testHome(), "dai", "endpoints") });
 const run = (file: string, meta?: Record<string, unknown>) => ({ file: join(dir, file), args: ["first"], cwd: dir, pid: process.pid, ...(meta !== undefined ? { meta } : {}) });
 
 describe("a script run as a program, reported here (ruling 12)", { timeout: 60_000 }, () => {

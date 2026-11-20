@@ -44,7 +44,7 @@ export interface HostEngineOptions {
   /**
    * Take reports from scripts run as plain programs (decision 0029, ruling 12; `scriptEndpoint.ts`):
    * on unless `false`. `advertDir` is where the endpoint is advertised — declarative-ai's
-   * `$DAI_HOME/endpoints` by default.
+   * `endpointsDir()` by default: `$DAI_ENDPOINTS`, else this user's directory in the temporary one.
    */
   scripts?: false | { advertDir?: string };
   /** Tests. */
