@@ -4,11 +4,12 @@
  * the ways to take the step after behind its arrow; a path through it runs a step at a time, each
  * planned from what the step before left on the machine.
  */
+import { delimiter } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { ExecutorInfo, InstallChoice } from "@jaira/shared";
 import { AGENT_PACKAGES, installAgent, installChoicesFor } from "../src/agentInstall";
 import { probeExecutor } from "../src/executors";
-import { GIT_CLI_PACKAGES, installFactsOf, installPlans, locateBinary, stepsOf, installChoicesOf, gatherChainFacts, managerPlan, parseShellEnv, runPlan, shellAdds, shellEnvCommand, versionWant, TOOL_PACKAGES, type InstallDeps } from "../src/install";
+import { GIT_CLI_PACKAGES, installFactsOf, installPlans, locateBinary, stepsOf, installChoicesOf, gatherChainFacts, machineInstallDeps, managerPlan, nodeInstallDeps, parseShellEnv, resetShellEnv, runPlan, shellAdds, shellEnvCommand, versionWant, TOOL_PACKAGES, type InstallDeps } from "../src/install";
 import { DEBIAN, LINUX_HOME, LINUX_PATH, MAC_PATH, MAC_SYSTEM, fakeFs, machineExec, type Files } from "./installRig";
 
 const GEMINI = AGENT_PACKAGES["gemini"]!;
@@ -346,6 +347,29 @@ describe("an agent npm put beside its own Node.js", () => {
     expect(reached).toEqual([bin]);
     expect(probe.install).toMatchObject({ path: `${bin}/gemini`, onPath: true, method: "npm" });
     expect(probe.install?.choices).toBeUndefined();
+  });
+});
+
+describe("a folder this process put on its own PATH", () => {
+  // The Mac opened from the Finder: the git check found gh in Homebrew's folder and added it to the
+  // PATH, and Codex was installed there afterwards. Described with the folder on the PATH, the install
+  // was judged reachable and nothing was saved — and the next start, which has no such folder, failed.
+  it("is described as not on it, since the next start will not have it — and is still looked in, from the terminal's PATH", async () => {
+    const was = process.env["PATH"];
+    resetShellEnv();
+    try {
+      process.env["PATH"] = ["/usr/bin", "/bin", "/usr/local/bin"].join(delimiter);
+      const login = machineExec(() => ({ stdout: `__JAIRA_SHELL_ENV__\nPATH=${["/usr/local/bin", "/usr/bin", "/bin"].join(delimiter)}\n` }));
+      const deps = await machineInstallDeps(login, new Set(["/usr/local/bin"]));
+      expect(deps.pathDirs).toEqual(["/usr/bin", "/bin"]);
+      expect(deps.shell?.pathDirs).toEqual(["/usr/local/bin"]);
+      // Nothing added by this process: the PATH as it is.
+      expect(nodeInstallDeps().pathDirs).toEqual(["/usr/bin", "/bin", "/usr/local/bin"]);
+    } finally {
+      if (was === undefined) delete process.env["PATH"];
+      else process.env["PATH"] = was;
+      resetShellEnv();
+    }
   });
 });
 

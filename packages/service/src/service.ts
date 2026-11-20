@@ -12474,15 +12474,18 @@ export class AppService {
   /**
    * The machine the installs look at: a test's stand-in, or this one as the person's own terminal sees
    * it — the variables and PATH their shell profile sets, asked once (`loginShellEnv`), so an nvm or fnm
-   * set up only in `.zshrc` is found by an app opened from the Finder.
+   * set up only in `.zshrc` is found by an app opened from the Finder. Its PATH is the one this app was
+   * started with: a folder {@link appendToPath} added is described as not on it, since the next start
+   * will not have it — an agent installed into Homebrew's folder after the git check reached gh there
+   * is pointed at its path, rather than left to a bare command that fails once the app is opened again.
    */
   private installDeps(): Promise<InstallDeps> {
-    return this.options.installDeps !== undefined ? Promise.resolve(this.options.installDeps) : machineInstallDeps(new NodeExec());
+    return this.options.installDeps !== undefined ? Promise.resolve(this.options.installDeps) : machineInstallDeps(new NodeExec(), PATH_ADDED);
   }
 
   /** How an install that takes more than one step looks at this machine again between steps — not a test's stand-in. */
   private installRefresh(): { refresh?: () => Promise<InstallDeps> } {
-    return this.options.installDeps === undefined ? { refresh: () => freshMachineInstallDeps(new NodeExec()) } : {};
+    return this.options.installDeps === undefined ? { refresh: () => freshMachineInstallDeps(new NodeExec(), PATH_ADDED) } : {};
   }
 
   /** Installs and updates still running, by agent — what Cancel aborts. */

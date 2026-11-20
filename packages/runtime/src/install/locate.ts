@@ -112,21 +112,26 @@ export function shellAdds(shell: ShellEnv | undefined, env: Readonly<Record<stri
  * This process's machine as the person's own terminal sees it: {@link nodeInstallDeps} once the
  * terminal's environment has been asked (once per process; later calls do not wait).
  */
-export async function machineInstallDeps(exec: Exec): Promise<InstallDeps> {
+export async function machineInstallDeps(exec: Exec, added?: ReadonlySet<string>): Promise<InstallDeps> {
   await loginShellEnv(exec);
-  return nodeInstallDeps();
+  return nodeInstallDeps(added);
 }
 
 /** {@link machineInstallDeps}, the terminal asked again: what an installer just added to its PATH is there. */
-export async function freshMachineInstallDeps(exec: Exec): Promise<InstallDeps> {
+export async function freshMachineInstallDeps(exec: Exec, added?: ReadonlySet<string>): Promise<InstallDeps> {
   await freshShellEnv(exec);
-  return nodeInstallDeps();
+  return nodeInstallDeps(added);
 }
 
-/** This process's machine — with what the person's terminal adds, once {@link loginShellEnv} has answered. */
-export function nodeInstallDeps(): InstallDeps {
+/**
+ * This process's machine — with what the person's terminal adds, once {@link loginShellEnv} has answered.
+ * `added` are the folders this process put on its own PATH since it started (Homebrew's, once the git
+ * check reached gh there): a restart takes them off again, so they are described as not on it — a
+ * program in one is not reached by its bare command the next time the app opens, and is pointed at.
+ */
+export function nodeInstallDeps(added: ReadonlySet<string> = new Set()): InstallDeps {
   const platform = process.platform;
-  const pathDirs = (process.env["PATH"] ?? "").split(platform === "win32" ? ";" : ":").filter((dir) => dir.length > 0);
+  const pathDirs = (process.env["PATH"] ?? "").split(platform === "win32" ? ";" : ":").filter((dir) => dir.length > 0 && !added.has(dir));
   const shell = shellAdds(knownShellEnv(), process.env, pathDirs, platform);
   return {
     platform,
