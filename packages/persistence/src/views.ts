@@ -30,6 +30,7 @@ import {
   type WorkflowShape,
 } from "./projection";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { scriptContextOf } from "./userModules";
 import { EFFECTIVE_SEQ, EFFECTIVE_SESSION } from "./sessionStore";
 import { workflowShape } from "./shape";
 
@@ -299,7 +300,7 @@ export function bundleFor(project: Project, workflow: string, snapshotHash?: str
     // Tolerant: a half-saved file the workflow does not reference must not blank the
     // board (the user is editing in another window).
     return loadWorkflowBundle(
-      readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
+      readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined, scripts: scriptContextOf(project.paths, project.config.workflows.path) }),
       workflow,
       { ...workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }), standingLayers: project.config.permissions.layers },
     );

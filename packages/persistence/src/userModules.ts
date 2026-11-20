@@ -35,14 +35,14 @@
  * whatever is approved, and the hard refusal happens once, at task start, in {@link freezeForRun}.
  */
 import { createHmac } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve as resolvePath } from "node:path";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join, resolve as resolvePath } from "node:path";
 
 import {
   createSymbolIndex,
   createUserFunctions,
   freezeModules,
-  loadSignatureContext,
   moduleHash,
   pendingApprovals,
   requirePathFor,
@@ -66,6 +66,110 @@ import { nodeVfs } from "./vfs";
 /** Absolute, forward-slashed — the one spelling a hash, an approval and a require path agree on. */
 export function canonicalModulePath(file: string): string {
   return resolvePath(file).replace(/\\/g, "/");
+}
+
+// --- What a workflow script needs, made when it is needed ----------------------
+
+let compiler: SignatureContext | undefined;
+
+/**
+ * The TypeScript compiler a workflow SCRIPT compiles with: loaded the first time a script is needed —
+ * listed, loaded or started — and kept for the process.
+ *
+ * Synchronous, because what needs a script is: the browse and `loadBundle` are. It was the pair's,
+ * awaited when a project opened, so a process that had opened none compiled no script — a window on
+ * an empty address listed no `session`, and a new chat said "'session' cannot be a conversation: it
+ * does not take one text input" (2026-11-20). `typescript` is external in every bundle (the app's and
+ * the CLI's `build.mjs`), so it is required where it lies, from beside this code under either module
+ * system: the app's bundle is CommonJS, and the CLI's ESM bundle defines `__dirname` in its banner.
+ */
+export function scriptCompiler(): SignatureContext {
+  if (compiler !== undefined) return compiler;
+  const from = typeof __dirname === "string" ? __dirname : process.cwd();
+  const required = createRequire(join(from, "noop.js"))("typescript") as SignatureContext["ts"] & { default?: SignatureContext["ts"] };
+  compiler = {
+    ts: required.default ?? required,
+    readLib: (file) => {
+      try {
+        return existsSync(file) ? readFileSync(file, "utf8") : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+  };
+  return compiler;
+}
+
+/** Where a script's imports resolve, for one project: hw's `ModuleResolveOptions` less the vfs. */
+export interface ScriptContext {
+  /** The search path, canonical — where an imported STATE is named from (`workflowScripts.ts`). */
+  searchPath: readonly string[];
+  /** The require path modules resolve each other along — the search path plus its `node_modules`. */
+  requirePath: readonly string[];
+  /** The `$`-roots an import may name (`$JAIRA`, `$PROJECT`, `$BASE`, `$SYSTEM`) — as a reference's. */
+  roots: Readonly<Record<string, string>>;
+}
+
+/**
+ * {@link ScriptContext} for one project: its configured search path (`workflows.path`), else the one
+ * its layer roots generate, closed by the built-in layer's directories whatever was configured — for
+ * the reason `searchPathFor` gives: `workflows.path` replaces the generated list, and what ships is
+ * not something a replacement may drop.
+ */
+export function scriptContextOf(paths: JairaPaths, searchPath?: readonly string[]): ScriptContext {
+  const builtIn = workflowSearchPath([paths.builtIn.dir]).map(canonicalModulePath);
+  const configured = (searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
+  const path = [...configured.filter((dir) => !builtIn.includes(dir)), ...builtIn];
+  return {
+    searchPath: path,
+    requirePath: requirePathFor(path),
+    roots: { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir, SYSTEM: paths.builtIn.dir },
+  };
+}
+
+/** What gating, freezing and running a script's code — or a module's — needs. The pair has it; so does {@link scriptModulesFor}. */
+export type ModuleGate = Pick<UserModules, "vfs" | "requirePath" | "approvals">;
+
+/** {@link ModuleGate} with the rest of what a script's run is handed: its context, and the gate as one question. */
+export interface ScriptModules extends ScriptContext, ModuleGate {
+  /** Whether a module may run: approved, and unchanged since (SPEC §7.5.5). */
+  approved: (file: string) => boolean;
+}
+
+/**
+ * What a project's workflow scripts are compiled, gated and run with: the pair, when this process
+ * built one; else made now for this project — its context, and its base root's approvals.
+ *
+ * The same rule a compile follows (`workflowScripts.ts`): what exists is used, and what does not is
+ * made when it is needed, so a script is no less a workflow in a process that opened no project. Under
+ * a simulation (`definitionOverlay.ts`) the files it proposes are trusted, as {@link prepareOverlayModules}
+ * trusts them.
+ */
+export function scriptModulesFor(paths: JairaPaths, searchPath?: readonly string[]): ScriptModules {
+  const modules = userModules();
+  if (modules !== undefined) return modules;
+  const vfs = nodeVfs();
+  const shipped = trustingBuiltIn(storeOf(paths.base), paths.builtIn.dir, vfs);
+  const overlay = currentDefinitionOverlay();
+  const approvals: Approvals =
+    overlay === undefined ? shipped : { ...shipped, approved: (file) => (overlay.files.has(realPathOf(file)) ? currentHashOf(vfs, file) : shipped.approved(file)) };
+  return { ...scriptContextOf(paths, searchPath), vfs, approvals, approved: gateOf(approvals, vfs) };
+}
+
+/**
+ * Whether a module may run, by a store: approved, and unchanged since.
+ *
+ * Both `undefined`s are refusals and neither may cancel the other: a file that has never been
+ * approved has no stored hash, and one that cannot be read has no current hash. Comparing them
+ * directly would make an unreadable, never-approved file compare EQUAL and contribute.
+ */
+function gateOf(approvals: ApprovalStore, vfs: Vfs): (file: string) => boolean {
+  return (file) => {
+    const stored = approvals.approved(file);
+    if (stored === undefined) return false;
+    const actual = currentHashOf(vfs, file);
+    return actual !== undefined && actual === stored;
+  };
 }
 
 // --- The approval store -------------------------------------------------------
@@ -183,6 +287,36 @@ export function approvalsIn(base: ApprovalPaths): Approvals {
   };
 }
 
+/** The stores this process opened, by database file: one handle per base root, closed by {@link resetUserModules}. */
+const stores = new Map<string, Approvals>();
+
+/**
+ * A base root's store, looked up at each call — opened the first time anything asks, and opened
+ * again after {@link resetUserModules} closed it. Looked up rather than held, so what a run took
+ * before a rebuild (an approval granted mid-run rebuilds the pair) does not go on asking a closed
+ * database.
+ */
+function storeOf(base: ApprovalPaths): Approvals {
+  const open = (): Approvals => {
+    const key = canonicalModulePath(base.dbFile);
+    let store = stores.get(key);
+    if (store === undefined) {
+      store = approvalsIn(base);
+      stores.set(key, store);
+    }
+    return store;
+  };
+  return {
+    approved: (file) => open().approved(file),
+    approve: (file, hash) => open().approve(file, hash),
+    revoke: (file) => open().revoke(file),
+    all: () => open().all(),
+    unverified: () => open().unverified(),
+    // The process's to close, not a holder's.
+    close: () => undefined,
+  };
+}
+
 interface ApprovalRow {
   path: string;
   hash: string;
@@ -259,11 +393,6 @@ export interface UserModules {
   searchPath: readonly string[];
   /** The `$`-roots an import may name (`$JAIRA`, `$PROJECT`, `$BASE`, `$SYSTEM`) — as a reference's. */
   roots: Readonly<Record<string, string>>;
-  /**
-   * The compiler, loaded — what compiles a workflow script SYNCHRONOUSLY (hw `compileScriptWith`),
-   * which a sync `loadBundle` needs for the same reason it needs this pair at all.
-   */
-  signatures: SignatureContext;
   /** Whether a module may run: approved, and unchanged since (SPEC §7.5.5) — the gate the index applies. */
   approved: (file: string) => boolean;
 }
@@ -291,14 +420,8 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // Everything below asks THIS store, so the built-in layer's exemption (decision 0006) holds at all
   // three gates at once — the index, the pending walk and the freeze — rather than at whichever of
   // them somebody remembered.
-  const approvals = trustingBuiltIn(approvalsIn(paths.base), paths.builtIn.dir, vfs);
-  // The built-in layer's directories close the list whatever was configured, for the reason
-  // `searchPathFor` gives: `workflows.path` replaces the generated list, and what ships is not
-  // something a replacement may drop.
-  const builtIn = workflowSearchPath([paths.builtIn.dir]).map(canonicalModulePath);
-  const configured = (options.searchPath ?? workflowSearchPath(paths.roots)).map(canonicalModulePath);
-  const searchPath = [...configured.filter((dir) => !builtIn.includes(dir)), ...builtIn];
-  const requirePath = requirePathFor(searchPath);
+  const approvals = trustingBuiltIn(storeOf(paths.base), paths.builtIn.dir, vfs);
+  const { searchPath, requirePath, roots } = scriptContextOf(paths, options.searchPath);
   // ONE parse cache behind both indexes. Named off the option rather than off a `SymbolTable` import
   // because hw does not re-export that type — and a cache is exactly the thing that must not be two
   // maps, since the gated and ungated indexes read the very same files.
@@ -306,16 +429,7 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // The gate, at the only place it can be applied without lying about resolution: an unapproved
   // file contributes NO symbol, so it cannot capture a name a later approved file would answer — and
   // a workflow script's imported module does not run.
-  //
-  // Both `undefined`s are refusals and neither may cancel the other: a file that has never been
-  // approved has no stored hash, and one that cannot be read has no current hash. Comparing them
-  // directly would make an unreadable, never-approved file compare EQUAL and contribute.
-  const approved = (file: string): boolean => {
-    const stored = approvals.approved(file);
-    if (stored === undefined) return false;
-    const actual = currentHashOf(vfs, file);
-    return actual !== undefined && actual === stored;
-  };
+  const approved = gateOf(approvals, vfs);
   const symbols = await createSymbolIndex({
     vfs,
     approved,
@@ -326,9 +440,7 @@ export async function prepareUserModules(paths: JairaPaths, options: PrepareUser
   // records what a file DECLARES, and resolution still asks `symbols`, which refuses.
   const openSymbols = await createSymbolIndex({ vfs, cache });
   const userFunctions = await createUserFunctions({ vfs, requirePath });
-  const signatures = await loadSignatureContext();
-  const roots = { JAIRA: paths.jairaDir, PROJECT: paths.projectDir, BASE: paths.base.baseDir, SYSTEM: paths.builtIn.dir };
-  current = { symbols, openSymbols, userFunctions, approvals, requirePath, vfs, searchPath, roots, signatures, approved };
+  current = { symbols, openSymbols, userFunctions, approvals, requirePath, vfs, searchPath, roots, approved };
   return current;
 }
 
@@ -358,10 +470,11 @@ export const AGENT_PRESET = "agent";
  * search path they resolve along, the `$`-roots, and the approval gate the symbol index applies — so a
  * script's imported module runs exactly when a function module in the same file would; and the layer
  * every `agent()` call starts from, {@link AGENT_PRESET}. A fresh vfs, because the run reads what is on
- * disk now. `undefined` when this process built no pair: a script then imports no code.
+ * disk now. The pair's, when this process built one; else made now for the project the run is in
+ * ({@link scriptModulesFor}). `undefined` only with neither: a script then imports no code.
  */
-export function scriptModuleOptions(): ScriptModuleOptions | undefined {
-  const modules = current;
+export function scriptModuleOptions(paths?: JairaPaths, searchPath?: readonly string[]): ScriptModuleOptions | undefined {
+  const modules = current ?? (paths !== undefined ? scriptModulesFor(paths, searchPath) : undefined);
   if (modules === undefined) return undefined;
   return {
     vfs: nodeVfs(),
@@ -420,7 +533,8 @@ export async function prepareOverlayModules(overlay: DefinitionOverlay): Promise
  * database open for no reason.
  */
 export function resetUserModules(): void {
-  current?.approvals.close();
+  for (const store of stores.values()) store.close();
+  stores.clear();
   current = undefined;
 }
 
@@ -549,7 +663,7 @@ export function scriptFilesOf(bundle: WorkflowBundle): string[] {
  * shows: the file, its hash and its whole source, and the hash approved before, when there was one.
  * The script's own text only: what it IMPORTS is a module, gated by {@link moduleApprovalsFor}.
  */
-export function scriptApprovalsFor(modules: UserModules, files: readonly string[]): ModuleApproval[] {
+export function scriptApprovalsFor(modules: ModuleGate, files: readonly string[]): ModuleApproval[] {
   const out: ModuleApproval[] = [];
   for (const file of files) {
     const source = modules.vfs.read(file);
@@ -636,7 +750,7 @@ export type { PendingApproval } from "@declarative-ai/hw";
  * Runs the closure walk with no gate — which is safe because preparing does not execute anything —
  * so the answer covers a module's imports as well as the module a state names.
  */
-export async function approvalsPending(modules: UserModules, entries: readonly string[]): Promise<PendingApproval[]> {
+export async function approvalsPending(modules: ModuleGate, entries: readonly string[]): Promise<PendingApproval[]> {
   return pendingApprovals(entries.map(canonicalModulePath), {
     vfs: modules.vfs,
     requirePath: modules.requirePath,
@@ -694,7 +808,7 @@ export function withheldApprovalsOf(modules: UserModules, withheld: readonly Wit
  * anybody is asked rather than after they answer the first prompt.
  */
 export async function moduleApprovalsFor(
-  modules: UserModules,
+  modules: ModuleGate,
   entries: readonly string[],
   withheld: readonly WithheldSymbol[] = [],
 ): Promise<ModuleApproval[]> {
@@ -730,7 +844,7 @@ export async function moduleApprovalsFor(
  * An error and not a prompt, deliberately: a run is not the moment to be deciding what code to
  * trust. The caller's job is to have asked first — {@link approvalsPending} is how.
  */
-export async function freezeForRun(modules: UserModules, entries: readonly string[]): Promise<FrozenModules> {
+export async function freezeForRun(modules: ModuleGate, entries: readonly string[]): Promise<FrozenModules> {
   return freezeModules(entries.map(canonicalModulePath), {
     vfs: modules.vfs,
     requirePath: modules.requirePath,

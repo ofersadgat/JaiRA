@@ -27,8 +27,10 @@ import {
   readWorkflowFiles,
   resetUserModules,
   scriptApprovalsFor,
+  scriptContextOf,
   scriptFilesOf,
   scriptModuleOptions,
+  scriptModulesFor,
   snapshotWithModules,
   userModules,
   workflowLoadOptions,
@@ -187,6 +189,54 @@ export default async function fix() { return await agent("fix the build"); }
     expect(readWorkflowFiles(p.paths.workflowsDir)["greet.json"]).toBe(first);
     writeFileSync(join(p.paths.workflowsDir, "greet.ts"), SCRIPT.replace('"Greet"', '"Greet loudly"'), "utf8");
     expect(readWorkflowFiles(p.paths.workflowsDir)["greet.json"]).toMatchObject({ label: "Greet loudly" });
+  });
+});
+
+/**
+ * The same script in a process that has built no module pair — one that opened no project: a window on
+ * an empty address, `jaira serve` (2026-11-20: "'session' cannot be a conversation: it does not take
+ * one text input"). Nothing is prepared beforehand: needing the script compiles it, in this project's
+ * context, and its code and what it imports are asked about and run as they are in a project.
+ */
+describe("a workflow script in a process that built no module pair", { timeout: 30_000 }, () => {
+  const bare = (): Project => (project = openProject(dir, { baseDir: testHome() }));
+
+  it("is compiled when it is needed — listed, loaded and validated — and the compile is reused", () => {
+    const p = bare();
+    expect(userModules()).toBeUndefined();
+    expect(browseWorkflows(p).workflows.find((w) => w.rootId === "greet")).toMatchObject({ label: "Greet" });
+    const files = readWorkflowFiles(p.paths.workflowsDir, { scripts: scriptContextOf(p.paths) });
+    expect(Object.keys(files).sort()).toEqual(["greet.json", "greet/call_0.json"]);
+    const bundle = loadWorkflowBundle(files, "greet", workflowLoadOptions(p.paths));
+    expect(Object.keys(bundle.states).sort()).toEqual(["greet", "greet/call_0"]);
+    expect(validateBundle(bundle).errors).toEqual([]);
+    expect(readWorkflowFiles(p.paths.workflowsDir, { scripts: scriptContextOf(p.paths) })["greet.json"]).toBe(files["greet.json"]);
+    // Nothing was built to get here.
+    expect(userModules()).toBeUndefined();
+  });
+
+  it("asks before its own code and what it imports run, and runs once both are approved", async () => {
+    const p = bare();
+    const scriptFile = canonicalModulePath(join(p.paths.workflowsDir, "greet.ts"));
+    const bundle = loadWorkflowBundle(readWorkflowFiles(p.paths.workflowsDir, { scripts: scriptContextOf(p.paths) }), "greet", workflowLoadOptions(p.paths));
+    const asked = async (): Promise<string[]> => {
+      const refused = await snapshotWithModules(p, bundle).catch((e: unknown) => e);
+      return refused instanceof ApprovalRequired ? refused.pending.map((one) => one.file) : [];
+    };
+    expect(await asked()).toEqual([scriptFile]);
+    scriptModulesFor(p.paths).approvals.approve(scriptFile, moduleHash(SCRIPT));
+    expect(await asked()).toEqual([canonicalModulePath(libFile)]);
+    scriptModulesFor(p.paths).approvals.approve(canonicalModulePath(libFile), moduleHash(LIB));
+    await expect(snapshotWithModules(p, bundle)).resolves.toMatchObject({ hash: expect.any(String) });
+    const ran = await executeWorkflow({
+      bundle,
+      inputs: { who: "ada" },
+      registry: newRegistry(),
+      prompt: buildPromptExecutor({ fakeRules: [{ promptIncludes: "ADA", output: "hello, ADA" }] }),
+      scripts: scriptModuleOptions(p.paths)!,
+    });
+    expect(statusOfResult(ran)).toBe("completed");
+    expect((ran as { value?: unknown }).value).toEqual({ line: "hello, ADA" });
   });
 });
 

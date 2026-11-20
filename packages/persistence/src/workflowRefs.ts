@@ -29,7 +29,7 @@ import { stateFilePath } from "@declarative-ai/hw";
 import { parseJsonText, workflowSearchPath, type JairaPaths } from "@jaira/shared";
 import { hostCalleeSignatures, readDefinition } from "@jaira/runtime";
 
-import { userModules, type UnapprovedWatch } from "./userModules";
+import { scriptContextOf, userModules, type ScriptContext, type UnapprovedWatch } from "./userModules";
 import { scriptStateFor } from "./workflowScripts";
 import { nodeVfs } from "./vfs";
 import { automationsVfs, nearerStates, nearerWorkflowDirs, referenceRootPath, settingsLayerRootNames } from "./fileLayers";
@@ -114,6 +114,8 @@ export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptio
   // layers' `workflows/` lead, ahead of the project's own.
   const searchPath = searchPathFor(workflowsDir, roots, options.path ?? workflowSearchPath(paths.roots), paths.builtIn.dir, nearerWorkflowDirs(paths));
   const tolerant = options.tolerant === true;
+  // What a workflow SCRIPT on the path compiles in, the first time a load needs it: this project's context.
+  const scripts = scriptContextOf(paths, options.path);
   let nearer: Record<string, unknown> | undefined;
   return {
     defaultRoot: searchPath,
@@ -136,7 +138,7 @@ export function workflowLoadOptions(paths: JairaPaths, options: WorkflowRefOptio
     // Searched along the WHOLE path, not just the workflows directory: a bare id may be supplied by
     // any layer, and reading only the first would make a base-root state unloadable at exactly the
     // moment it is needed — when nothing in the project defines it.
-    loadState: (id) => readStateFile(id, searchPath, tolerant),
+    loadState: (id) => readStateFile(id, searchPath, tolerant, scripts),
     // Shadowing is this project's override mechanism, so it is not news. Without this the lint
     // surface would carry one warning per overridden state, which is how a warning stops being read.
     shadowing: "override",
@@ -242,7 +244,7 @@ export function standaloneLoadOptions(workflowsDir: string, tolerant = false): L
  * through to the next root. An unreadable file is not the same as a missing one, and quietly
  * resolving to the base copy because the project's is malformed would hide the actual fault.
  */
-function readStateFile(id: string, roots: string | readonly string[], tolerant: boolean): unknown | undefined {
+function readStateFile(id: string, roots: string | readonly string[], tolerant: boolean, scripts?: ScriptContext): unknown | undefined {
   const search = typeof roots === "string" ? [roots] : roots;
   for (const root of search) {
     const file = `${stateFilePath(id, root)}.json`;
@@ -266,7 +268,7 @@ function readStateFile(id: string, roots: string | readonly string[], tolerant: 
   // (hw SCRIPTS.md). Searched after every root's files, so a state file anywhere on the path wins,
   // as it always did. A script that does not compile is the caller's error, as a malformed file is.
   try {
-    const script = scriptStateFor(id, search);
+    const script = scriptStateFor(id, search, scripts);
     if (script !== undefined) return script;
   } catch (e) {
     if (!tolerant) throw e;

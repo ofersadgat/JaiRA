@@ -28,6 +28,7 @@ import {
   stateSessions,
   workflowLoadOptions,
   type Project,
+  scriptContextOf,
 } from "@jaira/persistence";
 import { REWOUND_EVENT, STEERED_EVENT } from "@jaira/shared";
 import type { ChangeFile, ImproveHost, LessonRecord, LessonScope } from "@jaira/runtime";
@@ -417,7 +418,7 @@ export function createImproveHost(project: Project, options: ImproveHostOptions 
         if (file.path.startsWith("workflows/") && STATE_SUFFIXES.some((s) => file.path.endsWith(s))) {
           const id = file.path.slice("workflows/".length).replace(/\.[^./]+$/, "");
           try {
-            const bundle = loadWorkflowBundle(readWorkflowFiles(project.paths.workflowsDir), id, workflowLoadOptions(project.paths));
+            const bundle = loadWorkflowBundle(readWorkflowFiles(project.paths.workflowsDir, { scripts: scriptContextOf(project.paths, project.config.workflows.path) }), id, workflowLoadOptions(project.paths));
             const report = validateBundle(bundle);
             for (const e of report.errors) problems.push(`${e.stateId} ${e.path}: ${e.message}`);
           } catch (e) {

@@ -31,6 +31,7 @@ import { loadWorkflowBundle } from "./permissionSets";
 import { isUnder } from "./descriptions";
 import type { Project } from "./project";
 import { browseSource, projectSource, readWorkflowsTolerantly, type LayerSource } from "./workflows";
+import { scriptContextOf } from "./userModules";
 import { workflowLayerDirs } from "./fileLayers";
 import { workflowLoadOptions } from "./workflowRefs";
 
@@ -166,7 +167,7 @@ export function digestSource(source: LayerSource, options: WorkflowDigestOptions
   const wanted =
     options.roots === undefined ? browser.workflows : browser.workflows.filter((w) => options.roots!.includes(w.rootId));
 
-  const { files } = readWorkflowsTolerantly(source.paths.workflowsDir);
+  const { files } = readWorkflowsTolerantly(source.paths.workflowsDir, { context: scriptContextOf(source.paths, source.searchPath) });
   // The file each state is read from — the copy no nearer layer shadows, in whichever layer it is: a
   // project's, Shared's, the settings' newer layers' (decision 0023, amended 2026-11-18) or what ships.
   // Named as before — its path under `workflows/` — in the layer this source authors in, and with its

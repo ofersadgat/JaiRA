@@ -73,6 +73,7 @@ import {
 import { snapshotWithModules } from "./lifecycle";
 import type { Project } from "./project";
 import { loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { scriptContextOf } from "./userModules";
 import { loadWorkflowBundle } from "./permissionSets";
 import { workflowLoadOptions } from "./workflowRefs";
 import { ensureLocalLayerIgnored, workflowLayerDirs } from "./fileLayers";
@@ -181,7 +182,7 @@ export interface GenerateVersionResult {
 
 /** Load a state and its closure from the LIVE layers — the project's files first, the rest found on the path. */
 function loadLive(project: Project, rootRef: string, extra: Record<string, unknown> = {}): WorkflowBundle {
-  const files = { ...readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }), ...extra };
+  const files = { ...readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined, scripts: scriptContextOf(project.paths, project.config.workflows.path) }), ...extra };
   return loadWorkflowBundle(files, rootRef, { ...workflowLoadOptions(project.paths, { path: project.config.workflows.path }), standingLayers: project.config.permissions.layers });
 }
 

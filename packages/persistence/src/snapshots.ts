@@ -33,6 +33,7 @@ import { dirname, join, relative, sep } from "node:path";
 import { isBareStateId, parseReferencedFile, snapshotHash, stateIdFromPath, type LoadedState, type WorkflowBundle } from "@declarative-ai/hw";
 import { readJsonFile } from "@jaira/shared";
 import { scriptStatesIn } from "./workflowScripts";
+import type { ScriptContext } from "./userModules";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.snapshots");
@@ -113,6 +114,12 @@ export interface ReadWorkflowFilesOptions {
    * reports the collected errors alongside it so the diagnosis stays sharp.
    */
   onError?: (relPath: string, message: string) => void;
+  /**
+   * The project the directory is read for, whose context a workflow script here compiles in — its
+   * search path, require path and `$`-roots (`scriptContextOf`). Absent, the pair's when this process
+   * built one, else the directory's own.
+   */
+  scripts?: ScriptContext;
 }
 
 /** The suffixes a state file may carry. A state is JSON or YAML; both parse to the same value. */
@@ -161,7 +168,7 @@ export function readWorkflowFiles(
   walk(workflowsDir);
   // The workflow SCRIPTS here, as the documents they compile to (hw SCRIPTS.md). A state file that
   // defines the same state as a script is refused rather than letting one silently win.
-  for (const { key, script, document } of scriptStatesIn(workflowsDir, options.onError)) {
+  for (const { key, script, document } of scriptStatesIn(workflowsDir, options.onError, options.scripts)) {
     const clash = Object.keys(files).find((file) => stateIdFromPath(file.split(sep).join("/")) === stateIdFromPath(key));
     if (clash === undefined) {
       files[key] = document;

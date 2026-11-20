@@ -74,6 +74,7 @@ import {
   type TaskLoad,
   type WorkflowBrowser,
   disabledRefusalOf,
+  scriptContextOf,
 } from "@jaira/persistence";
 import {
   defaultConfig,
@@ -921,7 +922,7 @@ async function runAdhocInProcess(projectDir: string, root: string, inputs: Recor
   try {
     // Validate against the LIVE files before minting anything: a broken workflow should fail here,
     // not leave a task pinned to a snapshot nothing can run.
-    const files = readWorkflowFiles(project.paths.workflowsDir);
+    const files = readWorkflowFiles(project.paths.workflowsDir, { scripts: scriptContextOf(project.paths, project.config.workflows.path) });
     if (Object.keys(files).length === 0) throw new Error(`no workflow state files under ${project.paths.workflowsDir}`);
     // The PROJECT's options, not the standalone ones. A project is open here, so the load gets the
     // whole search path, the layer roots, the registry contributor and — the one that bit — the js/ts
@@ -1469,7 +1470,7 @@ async function runTaskNow(
     // before the run: `prepare()` is what turns resolved functions into runnable ones, and SPEC
     // §7.5.5 puts that on the far side of the approval gate `beginTaskRun` already ran.
     await prepareResolvedFunctions();
-    const scripts = scriptModuleOptions();
+    const scripts = scriptModuleOptions(project.paths, project.config.workflows.path);
     const result = await executeWorkflow({
       // An adopted child is read through a stand-in state — see `withAdoptedStandIns`.
       bundle: withAdoptedStandIns(started.bundle, resume?.loaded),

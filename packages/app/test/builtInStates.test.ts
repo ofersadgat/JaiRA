@@ -22,7 +22,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
+import { initProject, resetUserModules, userModules } from "@jaira/persistence";
 import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
@@ -127,7 +127,27 @@ describe("starting with nothing installed", () => {
     expect(stateFiles(join(dir, ".jaira", "workflows"))).toEqual([]);
   });
 
+  it("offers it in a process that never opened a project — a window on an empty address", async () => {
+    // The setup above opened a project, which built the module pair; a window that opened none never
+    // had one, and listed no workflow script: a new chat said "'session' cannot be a conversation: it
+    // does not take one text input" (2026-11-20). Needing the script now compiles it.
+    resetUserModules();
+    const home = mkdtempSync(join(tmpdir(), "jaira-shipped-empty-"));
+    const bare = new AppService({ publish: () => undefined, baseDir: home, watchWorkflows: false });
+    try {
+      const session = bare.browseWorkflows(SHARED_SESSION).workflows.find((w) => w.rootId === CHAT_SESSION);
+      expect(session).toMatchObject({ layer: "system", conversationInput: "message" });
+      expect(session?.loadError).toBeUndefined();
+      expect(userModules()).toBeUndefined();
+    } finally {
+      await bare.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("starts one with NO project open, in a shared root that does not exist yet", async () => {
+    // In a process that never opened one: starting it compiles it.
+    resetUserModules();
     const home = mkdtempSync(join(tmpdir(), "jaira-shipped-bare-"));
     const base = join(home, "never-created");
     const bare = new AppService({ publish: () => undefined, baseDir: base, watchWorkflows: false });

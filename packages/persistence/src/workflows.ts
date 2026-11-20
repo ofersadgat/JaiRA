@@ -35,7 +35,7 @@ import { checkLabel } from "./runLabel";
 import { isStateFile } from "./snapshots";
 import { scriptStatesIn } from "./workflowScripts";
 import { loadWorkflowBundle } from "./permissionSets";
-import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
+import { scriptContextOf, userModules, watchingForUnapproved, withheldApprovalsOf, type ScriptContext } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 import { disabledAmong } from "./disabled";
 import { workflowLayerDirs } from "./fileLayers";
@@ -53,8 +53,11 @@ export type { LintIssue, LintSeverity, WorkflowBrowser, WorkflowEntry, WorkflowF
  */
 export function readWorkflowsTolerantly(
   workflowsDir: string,
-  /** `scripts: false` reads the state FILES alone, compiling no script — for a question only a file can answer. */
-  options: { scripts?: boolean } = {},
+  /**
+   * `scripts: false` reads the state FILES alone, compiling no script — for a question only a file can
+   * answer. `context` is the project's a script here compiles in (`scriptContextOf`).
+   */
+  options: { scripts?: boolean; context?: ScriptContext } = {},
 ): {
   files: Record<string, unknown>;
   errors: Map<string, string>;
@@ -94,7 +97,7 @@ export function readWorkflowsTolerantly(
   // malformed state file is.
   const scripts = new Map<string, string>();
   if (options.scripts === false) return { files, errors, scripts };
-  for (const { key, script, root, document } of scriptStatesIn(workflowsDir, (file, message) => errors.set(file, message))) {
+  for (const { key, script, root, document } of scriptStatesIn(workflowsDir, (file, message) => errors.set(file, message), options.context)) {
     if (!root) continue;
     if (files[key] !== undefined) {
       errors.set(script, `'${key}' and '${script}' both define this state — keep one`);
@@ -518,8 +521,10 @@ function lintLayers(
 ): WorkflowBrowser {
   const byStateId = new Map<string, { file: string; raw: unknown; layer: WorkflowLayer; root: string }>();
   const fileEntries: WorkflowFileEntry[] = [];
+  // Every layer's scripts compile in THIS project's context, as its loads do (`workflowLoadOptions`).
+  const context = scriptContextOf(paths, searchPath);
   for (const { dir, layer } of layers) {
-    const { files, errors, scripts } = readWorkflowsTolerantly(dir);
+    const { files, errors, scripts } = readWorkflowsTolerantly(dir, { context });
     for (const [file, message] of errors) {
       fileEntries.push({ stateId: stateIdFromPath(file).replace(/\.(ts|js)$/i, ""), file, error: message, layer, root: dir });
     }

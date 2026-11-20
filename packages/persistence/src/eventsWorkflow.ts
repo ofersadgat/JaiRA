@@ -26,6 +26,7 @@ import { isEventName, type EventDelivery, type JairaBasePaths, type StartingStat
 import { loadWorkflowBundle } from "./permissionSets";
 import type { Project } from "./project";
 import { readWorkflowFiles } from "./snapshots";
+import { scriptContextOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
 
 /** The events workflow's id, in every layer. */
@@ -48,7 +49,7 @@ export interface EventsWorkflowReading {
  */
 export function readEventsWorkflow(project: Project): EventsWorkflowReading {
   const bundle = loadWorkflowBundle(
-    readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
+    readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined, scripts: scriptContextOf(project.paths, project.config.workflows.path) }),
     EVENTS_WORKFLOW,
     { ...workflowLoadOptions(project.paths, { path: project.config.workflows.path }), standingLayers: project.config.permissions.layers },
   );

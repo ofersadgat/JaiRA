@@ -93,6 +93,7 @@ import {
   loadPinnedBundle,
   userModules,
   scriptModuleOptions,
+  scriptModulesFor,
   loadPermissionFunction,
   workflowLoadOptions,
   canonicalModulePath,
@@ -6030,8 +6031,10 @@ export class AppService {
    */
   async functionsApprove(request: { files: string[]; project?: string }): Promise<{ approved: number }> {
     const open = this.session(request.project);
-    const modules = userModules();
-    if (modules === undefined) throw this.refusal("functions", "this process has no js/ts function support to approve into");
+    // Into the pair's store, or — in a process that opened no project — the project's, made now: a
+    // workflow script there is asked about before it runs, so it can be approved there too.
+    const built = userModules() !== undefined;
+    const modules = scriptModulesFor(open.project.paths, open.project.config.workflows.path);
     let approved = 0;
     for (const file of request.files) {
       const source = modules.vfs.read(canonicalModulePath(file));
@@ -6043,7 +6046,8 @@ export class AppService {
       modules.approvals.approve(canonicalModulePath(file), moduleHashOf(source));
       approved += 1;
     }
-    await prepareUserModules(open.project.paths, { searchPath: open.project.config.workflows.path, rebuild: true });
+    // The pair's index reads what is approved once, so it is built again; what is made on demand reads it at each question.
+    if (built) await prepareUserModules(open.project.paths, { searchPath: open.project.config.workflows.path, rebuild: true });
     return { approved };
   }
 
@@ -6829,7 +6833,7 @@ export class AppService {
         // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
         // puts on the far side of the approval gate `beginTaskRun`'s freeze already ran.
         if (userFns !== undefined) await prepareUserFunctions(userFns.userFunctions);
-        const scripts = scriptModuleOptions();
+        const scripts = scriptModuleOptions(project.paths, project.config.workflows.path);
         const result = await executeWorkflow({
           // A loaded machine that ADOPTED a task (decision 0005 §2) reads that child through a
           // stand-in state — see `withAdoptedStandIns`. Every other run gets its bundle as pinned.

@@ -26,6 +26,7 @@ import {
   userModules,
   workflowLoadOptions,
   type Project,
+  scriptContextOf,
 } from "@jaira/persistence";
 import { grantAlwaysGrantedTools } from "@jaira/runtime";
 
@@ -95,7 +96,7 @@ export function versionSourceFor(
     if (modules !== undefined) {
       let files: WorkflowBundle;
       try {
-        files = loadForPin(project, readWorkflowFiles(project.paths.workflowsDir), rootId, { vfs: nodeVfs() });
+        files = loadForPin(project, readWorkflowFiles(project.paths.workflowsDir, { scripts: scriptContextOf(project.paths, project.config.workflows.path) }), rootId, { vfs: nodeVfs() });
       } catch {
         return undefined;
       }

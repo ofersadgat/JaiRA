@@ -13,7 +13,7 @@ import { loadPermissionFunction, loadWorkflowBundle, permissionFunctionRefsOf } 
 import { newTaskId, isStartableStatus, type ChatSettings, type Holding, type InputProvenance, type SplitEntry, type TaskMeta, type TaskProvenance, type TaskStartedBy, type TaskStatus } from "@jaira/shared";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "./snapshots";
 import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } from "./documents";
-import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, scriptApprovalsFor, scriptFilesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
+import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, scriptApprovalsFor, scriptContextOf, scriptFilesOf, scriptModulesFor, userModules, watchingForUnapproved, type ModuleGate, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
 import { refuseIfDisabled } from "./disabled";
@@ -334,6 +334,7 @@ export async function pinWorkflow(
     const unreadable: string[] = [];
     const files = readWorkflowFiles(project.paths.workflowsDir, {
       onError: (relPath, message) => unreadable.push(`${relPath}: ${message}`),
+      scripts: scriptContextOf(project.paths, project.config.workflows.path),
     });
     // A fragment a document reference pulls in no longer has to be tracked and pinned alongside
     // the states: the snapshot stores the resolved definition, which has it spliced in already
@@ -387,28 +388,23 @@ export async function snapshotWithModules(
   // modules it reaches are found by loading it the way a run will, and are held to the same approval
   // and the same freeze as a module a state calls (decision 0007, amended 2026-09-22).
   const entries = [...new Set([...moduleEntriesOf(bundle), ...permissionFunctionModulesOf(project, bundle)])].sort();
+  // What the gate and the freeze ask: the pair, or — in a process that opened no project — this
+  // project's, made now. A script imports code (`improve/lesson` imports `./author`) wherever it runs,
+  // and is asked about wherever it runs: with no project open it was neither frozen nor asked about.
+  const modules = scriptModulesFor(project.paths, project.config.workflows.path);
   // A workflow script's own code runs in this process, so it is approved by content like a module
   // (decision 0029 §1): a script nobody agreed to — edited by a person, or written by an improver —
   // is a question before the run, never code that ran because it was in a workflow.
-  await refuseIfScriptsUnapproved(scriptFilesOf(bundle));
+  refuseIfScriptsUnapproved(modules, scriptFilesOf(bundle));
   if (entries.length === 0) {
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
     return { hash: snap.hash, dir: snap.dir, bundle };
-  }
-  const modules = userModules();
-  if (modules === undefined) {
-    // The bundle names a module symbol, which means the loader resolved one, which means this
-    // process built the pair. Reaching here would be a wiring bug rather than an authoring one, so it
-    // says so instead of failing later with something about an unregistered function.
-    throw refusal(log, 
-      `workflow '${bundle.rootId}' calls js/ts functions (${entries.join(", ")}) but this process never called prepareUserModules()`,
-    );
   }
   // The freeze refuses with a message; this refuses with a QUESTION, and it has to come first or the
   // question never gets asked. Both cases reach here — a module approved but since edited, and an
   // import of an approved module that was never approved itself — and neither shows up as a withheld
   // symbol, because a bundle that names an approved module loads perfectly well.
-  await refuseIfUnapproved([], entries);
+  await refuseIfUnapproved([], entries, modules);
   const frozen = await freezeForRun(modules, entries);
   const withDigest: WorkflowBundle = { ...bundle, moduleDigest: frozen.digest };
   const snap = await ensureSnapshot(project.paths.snapshotsDir, withDigest, { modules: frozen.emitted });
@@ -447,18 +443,16 @@ function permissionFunctionModulesOf(project: Project, bundle: WorkflowBundle): 
  * It stays a `Refusal`, so a host with nobody attached prints the message and stops exactly as
  * before. A host with a human narrows to {@link ApprovalRequired} and asks.
  */
-async function refuseIfScriptsUnapproved(files: readonly string[]): Promise<void> {
+function refuseIfScriptsUnapproved(modules: ModuleGate, files: readonly string[]): void {
   if (files.length === 0) return;
-  const modules = userModules();
-  if (modules === undefined) return;
   const pending = scriptApprovalsFor(modules, files);
   if (pending.length === 0) return;
   throw new ApprovalRequired(approvalRefusalMessage(pending), pending);
 }
 
-async function refuseIfUnapproved(withheld: readonly WithheldSymbol[], entries: readonly string[] = []): Promise<void> {
+async function refuseIfUnapproved(withheld: readonly WithheldSymbol[], entries: readonly string[] = [], gate?: ModuleGate): Promise<void> {
   if (withheld.length === 0 && entries.length === 0) return;
-  const modules = userModules();
+  const modules = gate ?? userModules();
   if (modules === undefined) return;
   const pending = await moduleApprovalsFor(modules, entries, withheld);
   if (pending.length === 0) return;
