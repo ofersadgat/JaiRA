@@ -638,6 +638,7 @@ async function probeOneRoute(
         : `no value was found for '${found.named}'`,
     fix: `store a key under ${found.named ?? found.variable}, or turn this route off`,
     ...(found.named !== undefined ? { credentialMissing: found.named } : {}),
+    keyNeeded: found.named ?? found.variable,
   };
 }
 

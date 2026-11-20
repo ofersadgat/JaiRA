@@ -284,11 +284,30 @@ export function updateOf(install: AgentInstall | undefined): { via: string; titl
 /**
  * Where an agent is drawn in Connections → Agents: a row of its own once its binary is on this machine
  * (running, half removed, or found where this app's PATH does not reach), and a tile on the shelf under
- * the card while it is not — the check looked for the binary, found none, and could not start one. An
- * agent the check did not look for (the SDK, a CLI JaiRA cannot install, one turned off) is a row.
+ * the card while it is not — the check looked for the binary, found none, and could not start one. One
+ * that cannot run without a key and has none (`keyNeeded`) is on the shelf too, until it has its key
+ * (the person, 2026-11-19: grouped "with the uninstalled tools until you add an api key"). An agent the
+ * check did not look for (a CLI JaiRA cannot install, one turned off) is a row.
  */
 export function agentPlaceOf(probe: ProbeResult | undefined): "row" | "shelf" {
-  return probe?.status === "failed" && probe.install !== undefined && probe.install.path === undefined ? "shelf" : "row";
+  if (probe?.status !== "failed") return "row";
+  if (probe.keyNeeded !== undefined) return "shelf";
+  return probe.install !== undefined && probe.install.path === undefined ? "shelf" : "row";
+}
+
+/**
+ * Where a model API is drawn in Connections → Model APIs: a row once it has a key (or is turned off, or
+ * not checked yet), and a tile on the shelf under the card while it has none (`keyNeeded`) — the
+ * agents' rule for a key (the person, 2026-11-19: "model apis should have the same shelf").
+ */
+export function routePlaceOf(probe: ProbeResult | undefined): "row" | "shelf" {
+  return keyTileOf(probe) !== undefined ? "shelf" : "row";
+}
+
+/** A shelf tile for an agent or a model API waiting on its key: the line under its name, and its button's title. */
+export function keyTileOf(probe: ProbeResult | undefined): { sub: string; title: string } | undefined {
+  if (probe?.status !== "failed" || probe.keyNeeded === undefined) return undefined;
+  return { sub: "needs an API key", title: `store ${probe.keyNeeded}` };
 }
 
 /**

@@ -303,6 +303,8 @@ describe("probeExecutor", () => {
     expect(installed.status).toBe("ok");
     expect(missing).toMatchObject({ status: "failed" });
     expect(missing.detail).toContain("not installed");
+    // Not installed is not waiting on a key: no key would make it run.
+    expect(missing.keyNeeded).toBeUndefined();
     expect(exec.calls).toEqual([]);
   });
 
@@ -325,6 +327,8 @@ describe("probeExecutor", () => {
     expect(result.status).toBe("failed");
     expect(result.detail).toContain("no API key is configured");
     expect(result.fix).toContain("claude-cli");
+    // What Connections reads to put it with the agents not set up, until it has its key.
+    expect(result.keyNeeded).toBe("ANTHROPIC_API_KEY");
   });
 
   /**

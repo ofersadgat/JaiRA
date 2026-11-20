@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentInstall, ExecutorInfo, ProbeResult } from "@jaira/shared";
-import { agentActionOf, agentChecksAgain, agentChipOf, agentLineOf, agentPlaceOf, settingsGistOf, shelfTileOf } from "../src/renderer/connectionsModel";
+import { agentActionOf, agentChecksAgain, agentChipOf, agentLineOf, agentPlaceOf, keyTileOf, routePlaceOf, settingsGistOf, shelfTileOf } from "../src/renderer/connectionsModel";
 import { agentProviders } from "../src/renderer/providerSpecs";
 
 const NATIVE = { method: "native", via: "the native installer", display: "curl -fsSL https://claude.ai/install.sh | bash" } as const;
@@ -31,10 +31,27 @@ describe("where an agent is drawn", () => {
     expect(agentPlaceOf(probe({ status: "failed", install: { path: "/Users/me/.local/bin/claude", onPath: false } }))).toBe("row");
   });
 
-  it("keeps a row for one the check did not look for: the SDK, a CLI it cannot install, one turned off, one not checked", () => {
-    expect(agentPlaceOf(probe({ status: "failed", detail: "no API key" }))).toBe("row");
+  it("puts an agent that cannot run without a key it has not got on the shelf, until it has one", () => {
+    expect(agentPlaceOf(probe({ status: "failed", detail: "no API key is configured", keyNeeded: "ANTHROPIC_API_KEY" }))).toBe("shelf");
+    expect(keyTileOf(probe({ status: "failed", keyNeeded: "ANTHROPIC_API_KEY" }))).toEqual({ sub: "needs an API key", title: "store ANTHROPIC_API_KEY" });
+    // With its key, it is a row like any other.
+    expect(agentPlaceOf(probe({ status: "ok", credential: { source: "keychain" } }))).toBe("row");
+    expect(keyTileOf(probe({ status: "ok" }))).toBeUndefined();
+  });
+
+  it("keeps a row for one the check did not look for: a CLI it cannot install, one that fails for another reason, one turned off, one not checked", () => {
+    expect(agentPlaceOf(probe({ status: "failed", detail: "'@anthropic-ai/claude-agent-sdk' is not installed" }))).toBe("row");
     expect(agentPlaceOf(probe({ status: "disabled" }))).toBe("row");
     expect(agentPlaceOf(undefined)).toBe("row");
+  });
+});
+
+describe("where a model API is drawn", () => {
+  it("puts one with no key on the shelf, and keeps a row for one with a key, turned off, or not checked", () => {
+    expect(routePlaceOf(probe({ name: "anthropic", status: "failed", keyNeeded: "ANTHROPIC_API_KEY" }))).toBe("shelf");
+    expect(routePlaceOf(probe({ name: "anthropic", status: "ok", credential: { source: "keychain" } }))).toBe("row");
+    expect(routePlaceOf(probe({ name: "anthropic", status: "disabled" }))).toBe("row");
+    expect(routePlaceOf(undefined)).toBe("row");
   });
 });
 

@@ -15,11 +15,13 @@ import {
   type WeightsFileCheck,
 } from "@jaira/shared/browser";
 import {
+  blocksFor,
   emptyLevelWords,
   fieldControlOf,
   keyBoxWords,
   keyEntryExecutor,
   keyEntryName,
+  keyTileOf,
   levelFieldsOf,
   localServerSaid,
   loginAddWords,
@@ -32,6 +34,7 @@ import {
   routeActionOf,
   routeChipOf,
   routeLineOf,
+  routePlaceOf,
   secretTargetsOf,
   settingsGistOf,
   useProviderRow,
@@ -56,7 +59,8 @@ import { Switch } from "../controls";
 import { ActionSlot, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { CardActions, Chevron, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMark, LogoutButton, Problem, RowHead, Say, SmallButton, SplitAddBox, Spin, Tag, WaitingBox, Who, Wide, AddBox } from "./Row";
 import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
-import { WaysMenu, waysOfMenu } from "./Shelf";
+import { Shelf, ShelfCard, Tile, WaysMenu, waysOfMenu } from "./Shelf";
+import { SettingsGroup } from "../SettingsPage";
 import { Icon } from "../../panel/Icon";
 import { useTokens } from "../../../tokens";
 
@@ -99,6 +103,72 @@ export function ProviderRows(props: ProvidersPaneProps & { specs: ProviderSpec[]
         />
       ))}
     </ConnRows>
+  );
+}
+
+/**
+ * Connections → Model APIs: the card of the APIs that have a key, then the shelf `More model APIs` of
+ * the ones that have none (`routePlaceOf`) — a tile each, `Add a key` opening the key's entry across
+ * the shelf, as the agents' shelf does for an agent waiting on its key. Stored, the check runs again
+ * and the API is a row. With every API on the shelf, no card is drawn.
+ */
+export function ApiRows(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.Element | null {
+  const { config, routeProbes, busy, editable, layer, specs } = props;
+  const shown = useShownSpecs(specs);
+  const [keyFor, setKeyFor] = useState<string | null>(null);
+  if (config === null) {
+    return (
+      <SettingsGroup>
+        <Hint card>The configuration could not be read.</Hint>
+      </SettingsGroup>
+    );
+  }
+  const rows = shown.filter((spec) => routePlaceOf(routeProbes[spec.id]) === "row");
+  const shelf = shown.filter((spec) => routePlaceOf(routeProbes[spec.id]) === "shelf");
+  // Stored, the check runs again and the API leaves the shelf — and its entry with it.
+  const keyOf = shelf.find((spec) => spec.id === keyFor);
+  return (
+    <>
+      {rows.length > 0 ? (
+        <SettingsGroup>
+          <ProviderRows {...props} specs={rows} />
+        </SettingsGroup>
+      ) : null}
+      {shelf.length > 0 ? (
+        <Shelf title="More model APIs" sub="none is used until it has its key" across={keyOf !== undefined ? <KeyShelfCard {...props} spec={keyOf} onClose={() => setKeyFor(null)} /> : null}>
+          {shelf.map((spec) => (
+            <KeyTile key={`${layer}:${spec.id}`} spec={spec} probe={routeProbes[spec.id]} chosen={keyFor === spec.id} disabled={busy || !editable} onPress={() => setKeyFor(spec.id)} />
+          ))}
+        </Shelf>
+      ) : null}
+    </>
+  );
+}
+
+/** A tile on a shelf for an agent or a model API waiting on its key: its name, `needs an API key`, and `Add a key`. */
+export function KeyTile({ spec, probe, chosen, disabled, onPress }: { spec: ProviderSpec; probe: ProbeResult | undefined; chosen: boolean; disabled: boolean; onPress: () => void }): JSX.Element | null {
+  const key = keyTileOf(probe);
+  if (key === undefined) return null;
+  return <Tile brand={spec.id} title={spec.title} sub={key.sub} chosen={chosen} button={{ label: "Add a key", title: key.title, disabled, onPress }} />;
+}
+
+/** What a key tile opened, across its shelf: `{name} key`, holding the key's entry. */
+export function KeyShelfCard(props: ProvidersPaneProps & { spec: ProviderSpec; onClose: () => void }): JSX.Element | null {
+  const { spec, config, layer, busy, editable, secrets, onSaveCredential, onClose } = props;
+  if (config === null) return null;
+  return (
+    <ShelfCard key={`${layer}:${spec.id}:key`} title={`${spec.title} key`} onClose={onClose}>
+      <KeyEntry
+        spec={spec}
+        merged={blocksFor(spec, config[layer], config.effective).merged}
+        layer={layer}
+        busy={busy || !editable}
+        secrets={secrets}
+        hasProject={config.projectFile.length > 0}
+        onSave={onSaveCredential}
+        onClose={onClose}
+      />
+    </ShelfCard>
   );
 }
 

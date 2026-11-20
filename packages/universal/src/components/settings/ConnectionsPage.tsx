@@ -8,7 +8,7 @@ import { useShell } from "../../app/shell";
 import { Txt } from "../../primitives";
 import { Button } from "./Button";
 import { AgentRows } from "./connections/AgentRows";
-import { ProviderRows } from "./connections/ProviderRows";
+import { ApiRows, ProviderRows } from "./connections/ProviderRows";
 import { ForgeRows } from "./connections/ForgeRows";
 import { GitRows } from "./connections/GitRows";
 import { McpServerRows } from "./connections/McpServerRows";
@@ -85,8 +85,14 @@ export function ConnectionsPage(): JSX.Element {
       >
         <AgentRows {...rows} specs={groups.agents} />
       </SettingsSection>
-      <SettingsSection id="model-apis" title="Model APIs" info="They return a completion for a key. A model id's prefix names one — anthropic/claude-sonnet-5 goes to the first of these.">
-        <ProviderRows {...rows} specs={groups.apis} />
+      <SettingsSection
+        id="model-apis"
+        title="Model APIs"
+        info="They return a completion for a key. A model id's prefix names one — anthropic/claude-sonnet-5 goes to the first of these."
+        // The card is ApiRows' own, with the shelf of APIs that have no key under it.
+        plain
+      >
+        <ApiRows {...rows} specs={groups.apis} />
       </SettingsSection>
       <SettingsSection
         id="local-models"

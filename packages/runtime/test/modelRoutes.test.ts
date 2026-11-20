@@ -330,6 +330,8 @@ describe("probeModelRoutes — what can actually be reached", () => {
     expect(anthropic.status).toBe("failed");
     expect(anthropic.detail).toContain("ANTHROPIC_API_KEY");
     expect(anthropic.fix).toContain("ANTHROPIC_API_KEY");
+    // What Connections reads to put it on the Model APIs shelf, until it has its key.
+    expect(anthropic.keyNeeded).toBe("ANTHROPIC_API_KEY");
   });
 
   it("passes a remote route whose named credential resolves, and names only its origin", async () => {

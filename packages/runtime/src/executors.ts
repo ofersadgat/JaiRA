@@ -260,6 +260,7 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
         detail: `the SDK is installed, but no value was found for '${credential.credentialMissing}'`,
         fix: `store a value for '${credential.credentialMissing}', or use claude-cli — it runs on its own subscription`,
         ...credential,
+        keyNeeded: credential.credentialMissing,
       };
     }
     // A REQUIRED key that config never names is just as fatal as one that will not resolve, and used
@@ -271,6 +272,7 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
         status: "failed",
         detail: `the SDK is installed, but no API key is configured — ${SDK_KEY_NAMES[0]} is not set`,
         fix: `store a key under ${SDK_KEY_NAMES[0]}, or use claude-cli — it runs on its own subscription`,
+        keyNeeded: SDK_KEY_NAMES[0],
       };
     }
     return {

@@ -205,6 +205,12 @@ export interface ProbeResult {
   /** Set when config names a credential and nothing in the chain supplies it. */
   credentialMissing?: string;
   /**
+   * Set on an agent or a model API that cannot run without a key and has none to run with — no key
+   * named and none under its usual variable, or one named and found nowhere: the name the key would be
+   * looked up under. Settings → Connections puts it on its section's shelf until it has its key.
+   */
+  keyNeeded?: string;
+  /**
    * What would FIX a `failed` route or executor, in one imperative line.
    *
    * Separate from `detail` because they are different sentences and the UI shows them differently:

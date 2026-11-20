@@ -8,6 +8,7 @@ import {
   agentLineOf,
   agentPlaceOf,
   installPanelOf,
+  keyTileOf,
   notInstalledOf,
   providerSayState,
   retryActionOf,
@@ -27,7 +28,7 @@ import { SettingsGroup } from "../SettingsPage";
 import { ActionSlot, CheckAgain, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { InstallLogBox } from "./InstallLog";
 import { ShellChoice } from "./ShellChoice";
-import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
+import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, KeyShelfCard, KeyTile, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
 import { AnotherTile, InstallButton, InstallTile, Shelf, ShelfCard } from "./Shelf";
 
@@ -52,7 +53,9 @@ import { AnotherTile, InstallButton, InstallTile, Shelf, ShelfCard } from "./She
  *                        (`LabelledBoxes`), the key's entry, Shell, and the folded Settings holding the
  *                        provider's form (`SettingsFold`)
  *   the shelf            "More agents" (`Shelf.tsx`): a tile per agent not installed (`InstallTile`),
- *                        and "Another agent CLI" last; what a tile opened, across
+ *                        a tile per agent that cannot run without a key it has not got (`Tile`:
+ *                        "needs an API key", `Add a key`, which opens the key's entry across), and
+ *                        "Another agent CLI" last; what a tile opened, across
  *   installing           Install or Update pressed — on a tile or a row — makes the agent a row of the
  *                        card, opened, with what the installer prints scrolling across it first
  *                        (`InstallLog.tsx`); it stays a row, with the output, until Hide, however the
@@ -271,9 +274,9 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
 
 // --- the shelf ----------------------------------------------------------------------------------
 
-type Opened = { kind: "add" } | { kind: "settings"; id: string } | null;
+type Opened = { kind: "add" } | { kind: "settings"; id: string } | { kind: "key"; id: string } | null;
 
-/** The agents this machine does not have yet, a tile each, and the tile that adds another CLI. */
+/** The agents this machine does not have yet, or that wait on a key, a tile each, and the tile that adds another CLI. */
 function AgentShelf(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.Element | null {
   const { specs, config, executorProbes, busy, editable, layer, installing, onInstall, onCancelInstall, onAdd } = props;
   // Adding is setting something, which "What you changed" is not showing.
@@ -281,10 +284,13 @@ function AgentShelf(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.
   const [opened, setOpened] = useState<Opened>(null);
   if (specs.length === 0 && onlyStated) return null;
   const settingsOf = opened?.kind === "settings" ? specs.find((spec) => spec.id === opened.id) : undefined;
+  // Stored, the check runs again and the agent leaves the shelf — and its entry with it.
+  const keyOf = opened?.kind === "key" ? specs.find((spec) => spec.id === opened.id) : undefined;
+  const waitsOnKey = specs.some((spec) => keyTileOf(executorProbes[spec.id]) !== undefined);
   return (
     <Shelf
       title="More agents"
-      sub={specs.length > 0 ? "not on this machine yet — none is used until it is installed" : undefined}
+      sub={specs.length === 0 ? undefined : waitsOnKey ? "not set up yet — none is used until it is installed or has its key" : "not on this machine yet — none is used until it is installed"}
       across={
         <>
           {opened?.kind === "add" ? (
@@ -295,23 +301,28 @@ function AgentShelf(props: ProvidersPaneProps & { specs: ProviderSpec[] }): JSX.
           {settingsOf !== undefined && config !== null ? (
             <ShelfSettings key={`${layer}:${settingsOf.id}`} {...props} spec={settingsOf} probe={executorProbes[settingsOf.id]} layerDoc={config[layer]} effective={config.effective} onClose={() => setOpened(null)} />
           ) : null}
+          {keyOf !== undefined ? <KeyShelfCard {...props} spec={keyOf} onClose={() => setOpened(null)} /> : null}
         </>
       }
     >
-      {specs.map((spec) => (
-        <InstallTile
-          key={`${layer}:${spec.id}`}
-          brand={spec.id}
-          title={spec.title}
-          install={executorProbes[spec.id]?.install}
-          running={installing.has(spec.id)}
-          busy={busy}
-          chosen={opened?.kind === "settings" && opened.id === spec.id}
-          onInstall={(way) => onInstall(spec.id, way)}
-          onCancel={() => onCancelInstall(spec.id)}
-          onSettings={() => setOpened({ kind: "settings", id: spec.id })}
-        />
-      ))}
+      {specs.map((spec) =>
+        keyTileOf(executorProbes[spec.id]) !== undefined ? (
+          <KeyTile key={`${layer}:${spec.id}`} spec={spec} probe={executorProbes[spec.id]} chosen={opened?.kind === "key" && opened.id === spec.id} disabled={busy || !editable} onPress={() => setOpened({ kind: "key", id: spec.id })} />
+        ) : (
+          <InstallTile
+            key={`${layer}:${spec.id}`}
+            brand={spec.id}
+            title={spec.title}
+            install={executorProbes[spec.id]?.install}
+            running={installing.has(spec.id)}
+            busy={busy}
+            chosen={opened?.kind === "settings" && opened.id === spec.id}
+            onInstall={(way) => onInstall(spec.id, way)}
+            onCancel={() => onCancelInstall(spec.id)}
+            onSettings={() => setOpened({ kind: "settings", id: spec.id })}
+          />
+        ),
+      )}
       {onlyStated ? null : <AnotherTile title="Another agent CLI" sub="any other binary" open={opened?.kind === "add"} onPress={() => setOpened((was) => (was?.kind === "add" ? null : { kind: "add" }))} />}
     </Shelf>
   );
