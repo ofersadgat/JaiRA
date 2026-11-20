@@ -31,6 +31,7 @@ import {
   SecretResolver,
   forgeForHost,
   onMachine,
+  sharedSecretStore,
   registerGitTools,
   registerRemoteFunctions,
   reviewWithRemote,
@@ -107,7 +108,9 @@ function grantProject(project: Project, log: (message: string) => void): void {
 export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, options: CliRemoteOptions): { dispose(): void } {
   const { project, taskId, workspace, exec } = options;
   const config = project.config;
-  const secrets = new SecretResolver({ projectDir: project.paths.projectDir, baseDir: project.paths.base.baseDir });
+  // The keychain is the one the app keeps too (`sharedSecretStore`): a token stored in Settings is found here.
+  const keychain = sharedSecretStore({ baseDir: project.paths.base.baseDir });
+  const secrets = new SecretResolver({ projectDir: project.paths.projectDir, baseDir: project.paths.base.baseDir, keychain: (name) => keychain.get(name) });
   // A forge with no token stored goes through gh or glab where they are signed in (decision 0004) —
   // except under a test's transport, which answers every request itself.
   const cli = options.http === undefined ? { exec, execEnv: onMachine({ execEnv: config.execEnvironment }).execEnv } : undefined;

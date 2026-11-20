@@ -70,6 +70,7 @@ export * from "./ciArtifacts";
 export * from "./ciLog";
 export * from "./artifactSink";
 export * from "./secrets";
+export * from "./secretStore";
 // Connections to forges, and the providers behind them (decision 0004 §1).
 export * from "./forge";
 export * from "./remote";

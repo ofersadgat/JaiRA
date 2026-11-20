@@ -147,8 +147,9 @@ import {
   registerChangesetFunctions,
   UserEventHub,
   registerUnservedEvents,
-  registerCommandFunction,
   onMachine,
+  sharedSecretStore,
+  registerCommandFunction,
   registerGenericAgents,
   REVIEW_ARTIFACTS,
   worktreeChangeset,
@@ -649,9 +650,12 @@ function buildRunEnvironment(
   // The skills (decision 0029 §10), from the project's layers when there is a project, else the base's.
   registerSkillTools(registry, projectDir !== undefined ? [join(projectDir, ".jaira"), jairaBasePaths().baseDir] : [jairaBasePaths().baseDir]);
   // The secret chain: the provider routes' keys, the SDK agent's key, the MCP servers' secrets.
+  // The keychain is the one the app keeps too (`sharedSecretStore`): a key stored in Settings is found here.
+  const keychain = sharedSecretStore({ baseDir: jairaBasePaths().baseDir });
   const secrets = new SecretResolver({
     ...(projectDir !== undefined ? { projectDir } : {}),
     baseDir: jairaBasePaths().baseDir,
+    keychain: (name) => keychain.get(name),
   });
   // The Git tools (decision 0010 §1), over the call's workspace — else the project — and the forge its
   // remote picks. Nobody can be asked from here, so `publish: "ask"` refuses a push with a sentence;
@@ -665,9 +669,9 @@ function buildRunEnvironment(
       execEnv: config.execEnvironment,
       integrations: config.integrations,
       secrets,
-      publishing: new PublishAuthorizer({ publish: config.functions.review_artifacts.publish }),
       // A forge with no token stored goes through gh or glab where they are signed in (decision 0004).
       cli: { exec, execEnv: onMachine({ execEnv: config.execEnvironment }).execEnv },
+      publishing: new PublishAuthorizer({ publish: config.functions.review_artifacts.publish }),
       // A CI download is kept with the run's task, as the file tools keep its writes — only a durable
       // run has one (decision 0016).
       ...(files ? { artifacts: centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {}),

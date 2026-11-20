@@ -9,7 +9,7 @@
  * The chain, first hit wins:
  *
  * ```text
- *   1. the OS keychain              Electron's safeStorage, encrypted at rest — app only
+ *   1. the OS keychain              the shared store (`secretStore.ts`), encrypted at rest
  *   2. <project>/.jaira/.env.local  this checkout's JaiRA config, not committed
  *   3. <project>/.jaira/.env        this checkout's JaiRA config, possibly committed
  *   4. <project>/.env.local         this checkout, not committed
@@ -32,10 +32,11 @@
  * to be found would be the wrong way round. So `.jaira/` wins: a key put there was put there FOR
  * JaiRA, where one at the repository root may be shared with everything else the project runs.
  *
- * The CLI has no keychain — `safeStorage` is Electron's, and there is no way to reach it from a
- * plain Node process. That is not a gap to work around: it is why entries 2–6 exist and why the
- * app must never be the ONLY place a credential can live, or a workflow would run in the app and
- * fail on the command line for reasons nothing reports.
+ * The keychain is one store for every JaiRA process on the machine — the app, `jaira serve`, the
+ * command line, a build run from source (`sharedSecretStore`; decision 0012 §6, amended 2026-11-20) —
+ * so a key stored in Settings is found by a run on the command line. Where no key can be kept (a
+ * session with no keyring) there is none, which is why entries 2–6 exist: the keychain must never be
+ * the ONLY place a credential can live.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

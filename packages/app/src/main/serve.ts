@@ -14,7 +14,7 @@ import { app } from "electron";
 import { AppService, hostEngine, resolveBaseDir, type HostedEngine } from "@jaira/service";
 import { takeHomeFlag } from "@jaira/shared";
 import { startPlugins } from "@jaira/runtime";
-import { electronKeychain } from "./keychain";
+import { appKeychain } from "./keychain";
 import { tailChromiumLog } from "./chromiumLog";
 
 const home = takeHomeFlag(process.argv.slice(1)).home;
@@ -73,7 +73,7 @@ void app.whenReady().then(async () => {
           baseDir,
           version: app.getVersion(),
           publish,
-          keychain: electronKeychain(),
+          keychain: appKeychain(baseDir),
           forgeCli: true,
           // A server keeps the settings honest and the catalog current for every window it serves.
           probeOnStart: true,

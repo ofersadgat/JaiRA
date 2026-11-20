@@ -62,7 +62,7 @@ import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./c
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
 import { CLIENT_SCHEME_PRIVILEGES, CLIENT_URL, registerClientProtocol } from "./clientProtocol";
 import { recordForge, type ForgeRecordSpec } from "@jaira/service/forgeRecord";
-import { electronKeychain } from "./keychain";
+import { appKeychain } from "./keychain";
 import { tailChromiumLog } from "./chromiumLog";
 import { showDrivingBand } from "./drivingBand";
 import { startPlugins } from "@jaira/runtime";
@@ -1124,7 +1124,7 @@ function buildService(): AppService {
     // A window's engine keeps a copy of the other machines' tasks, to read while they are offline
     // (decision 0013 §6); `jaira serve` does not, unless the person switches it on.
     replicate: true,
-    keychain: electronKeychain(),
+    keychain: appKeychain(baseDir),
     // A forge with no token stored is reached through gh or glab when they are signed in (decision 0004).
     forgeCli: true,
     // The app checks what can actually answer a prompt — by itself, at startup, at project open, and

@@ -50,13 +50,13 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `userData/secrets.json`, `{<name>: base64 safeStorage ciphertext}` | read whole on every `get`, `set` and `remove`; written whole with `writeFileSync` on `set` and `remove` | the file, unreadable without the OS keyring entry | [secret-chain](secret-chain.md) reads and writes through `KeychainPort` |
+| `userData/secrets.json`, `{<name>: base64 safeStorage ciphertext}` — a build's old store | read once, the first time `appKeychain` is used after the app is ready: each entry the shared store lacks is moved into it, and the file renamed `secrets.moved.json` | the shared store (`sharedSecretStore`, `<base>/system/secrets.json`) | [secret-chain](secret-chain.md) reads and writes through `KeychainPort` |
 | Crash dumps | written by crashpad under `app.getPath("crashDumps")`, never uploaded | that directory | named in the `renderer` crash entry |
 | `window`, `rendererAlive`, `closing`, `reloadedAt` | set by the window and quit hooks | `index.ts` memory | [ipc-bridge](ipc-bridge.md) reads `window` and `rendererAlive` before every push |
 | `appearance` in `<base>/settings.json` and `<base>/personal-settings.json` | read through `AppService.windowAppearance` at window creation, after every `config:write` and on `nativeTheme` `updated` | the files | [project-config](project-config.md) |
 | Launch, `app`, `crash` and `runtime` entries | filed through `recordApp`, `recordCrash`, `recordWarning` | the app log | [app-log](app-log.md) |
 
-`KeychainPort` is `available(): boolean` checked on every call against `safeStorage.isEncryptionAvailable()`, `reason` `this system provides no OS-backed encrypted store, so secrets must go in a .env.local file`, `get(name)`, `set(name, value)` and `remove(name)`.
+`KeychainPort` is `available(): boolean` (whether the store's key can be had or made; a miss is believed for 30 seconds), `reason` (the platform's sentence, such as `the login Keychain cannot be reached (locked, or this is a session without one), so secrets must go in a .env.local file`), `get(name)`, `set(name, value)`, `remove(name)` and `names()` — `appKeychain(baseDir)` over `sharedSecretStore`, the same store every JaiRA process on the machine uses.
 
 ## The invariants keep remote code out of the window and every failure on record
 
@@ -83,7 +83,7 @@ It deliberately does not own:
 | The renderer hangs or the page will not load | filed as a `renderer` crash; nothing else | quit and relaunch | a frozen or blank window |
 | A run never settles while quitting | `service.close()` waits for it with no timeout, so `app.quit` is never called | end the process | no window, and the process keeps running |
 | Two app instances run against one base root | no lock; each rewrites `user-settings.json` and `secrets.json` whole from what it read, and each opens the same project databases | none | a preference or stored key the other instance wrote disappears |
-| The process is killed while `secrets.json` is written | the write is not atomic; a truncated file parses as `{}`, every key reads absent, and the next `set` writes only its own key | enter the keys again | providers read as missing their keys |
+| The process is killed while `secrets.json` is written | written to a temporary file and renamed, so the last whole file stays | none needed | nothing |
 | A ciphertext was written under another OS user or a reset keyring | `decryptString` throws and `get` answers `undefined`, so the chain falls through | enter the key again | the key reads as missing |
 | The command line holds `--home <dir>` | `startupProject` takes `<dir>` as the project argument, and its open fails unless `<dir>` holds `.jaira/` | pass the root through `JAIRA_HOME` instead | a `failed to open <dir>` error in Logs at every launch |
 | Restoring the remembered projects throws | filed `failed to re-open the remembered projects: <message>` with the stack; the window still opens | reopen the project | the window opens without its projects |

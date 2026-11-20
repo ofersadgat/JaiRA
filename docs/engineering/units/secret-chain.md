@@ -42,7 +42,7 @@ It deliberately does not own:
 ## The resolver is runtime code with the keychain injected, and the app and the CLI each build their own
 
 - Layer `core`, package `@jaira/runtime`. It reads files with `node:fs` and imports only `JAIRA_DIR_NAME` and types from `@jaira/shared`.
-- The keychain arrives as a function because `safeStorage` is Electron's and the runtime is shared with the CLI. The CLI builds one resolver per run in `cli.ts` with `projectDir` and the shared root and no keychain.
+- The keychain arrives as a function so a test can stand one in. Every process passes the same store, `sharedSecretStore` (`runtime/src/secretStore.ts`: `<base>/system/secrets.json`, its key kept by the operating system under one name — decision 0012 §6, amended 2026-11-20): the app through `appKeychain`, the CLI in `cli.ts` and `remoteWiring.ts`.
 - Boundary: renderer and main. A value enters over `secret:set` and no channel returns one; probes and Settings carry `SecretOrigin` only.
 - Boundary: derived and committed. The template `.gitignore` ignores `.env.local`; a `.env` is not ignored, so a value in `<project>/.jaira/.env` or `<project>/.env` is committable.
 - Upstream seam: none of its own. `modelRouterOptions` in [model-routing](model-routing.md) puts `lookup` values into `@declarative-ai/llm` `ModelRouterOptions`, and probes receive the resolver as `ProbeOptions.secrets`.
@@ -51,7 +51,7 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| Keychain entries | read through `KeychainPort.get`; written and removed by `setSecret` with target `keychain` | `safeStorage` ciphertext in `userData/secrets.json` | [app-shell](app-shell.md) owns the file |
+| Keychain entries | read through `KeychainPort.get`; written and removed by `setSecret` with target `keychain` | AES-256-GCM ciphertext in `<base>/system/secrets.json`, the key in the OS keyring as `JaiRA Secrets` (Windows: DPAPI, `<base>/system/secrets.key`) | `sharedSecretStore`, one for every build and process |
 | `<base>/.env.local` | read; written by target `base-env-local` | the file | hand edits |
 | `<project>/.jaira/.env.local` | read; written by target `project-env-local` | the file | hand edits |
 | `<project>/.jaira/.env`, `<project>/.env.local`, `<project>/.env`, `<base>/.env` | read only | the files | hand edits and the project's own tooling |

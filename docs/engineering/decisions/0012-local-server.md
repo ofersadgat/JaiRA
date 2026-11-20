@@ -172,6 +172,28 @@ If every step finds nothing, there is no host.
   handles that case (`keychain.available()` is false), and Settings says why a keychain secret is not
   seen.
 
+**One store for every build (2026-11-20, the person: "it sounds like the different builds are storing
+their secrets in different places. they shouldnt").** `safeStorage` belongs to a build: its ciphertext
+was in the app's own `userData` (`Application Support/JaiRA` installed, `Application Support/@jaira/app`
+from source), and its key is the app's (a Keychain entry named after the app on a Mac, a key in
+`userData`'s `Local State` on Windows). A Mac paired with another machine while running from source,
+then ran the installed nightly: the nightly knew the machine from `~/.jaira` and held no token to
+reach it, and the forge tokens had to be signed in again. So the store is now the person's, not the
+build's:
+
+- **The ciphertext** is `<base>/system/secrets.json`, AES-256-GCM, written through a rename
+  (`sharedSecretStore`, `runtime/src/secretStore.ts`).
+- **The key** is 32 random bytes the operating system keeps under one name: the login Keychain's
+  `JaiRA Secrets` through `/usr/bin/security`, Windows' DPAPI for the user (`<base>/system/secrets.key`,
+  through Windows PowerShell), the Secret Service through `secret-tool`. Made the first time something
+  is stored. `security` opens an item it made to `security` without a prompt, whichever build asks —
+  which is also any program the person runs, the reach their shell's own credentials already have.
+- **Every process uses it**: the desktop and the windowless server (`appKeychain`), the npm `jaira
+  serve` and the `jaira` command line, whose secret chains had no keychain until now.
+- **Moving.** Each build moves its own `safeStorage` secrets in the first time it runs with this — only
+  it holds the key they were written with — leaving a name the shared store already has as it is, and
+  renames its old file `secrets.moved.json`.
+
 ## Build order
 
 1. Move `AppService` and `handlers` into `@jaira/service`, with no change in behaviour. The desktop
