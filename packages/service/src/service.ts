@@ -367,6 +367,9 @@ import {
   type PermissionFunctionRunner,
   Git,
   NodeExec,
+  onMachine,
+  type ExecEnv,
+  type ForgeCliOptions,
   parseFakeRules,
   policyCanEscalate,
   projectPolicy,
@@ -997,6 +1000,12 @@ export interface AppServiceOptions {
    * so checking a connection never leaves the process.
    */
   forgeHttp?: ForgeHttp;
+  /**
+   * Reach a forge no token is stored for through its own command line (`gh`, `glab`), as whoever it is
+   * signed in as there (decision 0004, amended 2026-11-20). The app and `jaira serve` turn it on; a
+   * test leaves it off, so what the machine running it is signed in to never changes an answer.
+   */
+  forgeCli?: boolean;
   /**
    * The clock a forge sign-in polls by (RFC 8628 waits seconds between polls). Absent ⇒ real timers;
    * a test passes one that advances at once, so a ten-minute sign-in runs in a tick.
@@ -1782,6 +1791,7 @@ export class AppService {
       integrations: () => this.effectiveConfig().integrations,
       secrets: () => this.secretResolver(),
       ...(options.forgeHttp !== undefined ? { forgeHttp: options.forgeHttp } : {}),
+      forgeCli: () => this.forgeCli(),
       workspacesOf: (identity) => {
         const self = this.fleet.identity().id;
         const local = this.listProjects()
@@ -2764,13 +2774,25 @@ export class AppService {
     const key = JSON.stringify([session.key, host]);
     let provider = this.forges.get(key);
     if (provider === undefined) {
+      const cli = this.forgeCli(session.project.config.execEnvironment);
       provider = forgeForHost(session.project.config.integrations, host, {
         secrets: this.secretResolver(session),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        ...(cli !== undefined ? { cli } : {}),
       });
       this.forges.set(key, provider);
     }
     return provider;
+  }
+
+  /**
+   * How a forge with no token stored is reached: its command line, run on the machine — never in a
+   * workspace's container, as the git programs are checked (`probeGitClis`). Undefined where it is off.
+   */
+  private forgeCli(execEnv: ExecEnv | undefined = this.effectiveConfig().execEnvironment): ForgeCliOptions | undefined {
+    if (this.options.forgeCli !== true) return undefined;
+    const machine = onMachine({ ...(execEnv !== undefined ? { execEnv } : {}) }).execEnv;
+    return { exec: new NodeExec(machine !== undefined ? { execEnv: machine } : {}), ...(machine !== undefined ? { execEnv: machine } : {}) };
   }
 
   /**
@@ -6371,6 +6393,7 @@ export class AppService {
         integrations: config.integrations,
         secrets: this.secretResolver(open),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        ...withForgeCli(this.forgeCli(config.execEnvironment)),
         publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
         events: this.toolEventWaits(open, taskId),
         modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
@@ -6505,6 +6528,7 @@ export class AppService {
       exec,
       execEnv: config.execEnvironment,
       ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+      ...withForgeCli(this.forgeCli(config.execEnvironment)),
       // A scripted run has nobody to ask: left out, `ask` refuses with a sentence instead of parking
       // a question a test never answers.
       ...(scripted === undefined ? { confirmPublish: (request: PublishRequest) => this.askToPublish(open, taskId, request) } : {}),
@@ -12185,6 +12209,7 @@ export class AppService {
         secrets,
         signedIn: (credential) => marks[credential]?.source,
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+        ...withForgeCli(this.forgeCli(config.execEnvironment)),
       }),
       this.probeGitClis(),
     ]);
@@ -16712,6 +16737,11 @@ interface UsageRefusal {
   reason: string;
   /** The key's balance is empty — no reset to wait for. */
   credit?: true;
+}
+
+/** The `cli` member of a forge's options, when there is a command line to go through. */
+function withForgeCli(cli: ForgeCliOptions | undefined): { cli?: ForgeCliOptions } {
+  return cli !== undefined ? { cli } : {};
 }
 
 function usageRefusalOf(failure: unknown): UsageRefusal | undefined {

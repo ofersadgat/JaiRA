@@ -6,8 +6,9 @@
  * of response HEADERS — GitHub's `ETag` and `X-Poll-Interval`, a `Retry-After`, a `429` — which a
  * helper that returned only the parsed body would have thrown away before anyone could obey them.
  *
- * REST and GraphQL over plain HTTP, decided (option D was the `gh`/`glab` CLIs): two optional
- * binaries, uneven JSON, and no conditional requests — which is the whole polling budget on GitHub.
+ * REST and GraphQL over plain HTTP, decided — and, since 2026-11-20, the same requests through the
+ * `gh`/`glab` command lines where no token is stored (`cliForgeHttp`, `./cli.ts`): another
+ * `ForgeHttp`, not another provider, so conditional requests and every parse stay the providers' own.
  */
 import type { JsonValue } from "@declarative-ai/json";
 
@@ -110,6 +111,14 @@ export class ForgeError extends Error {
   ) {
     super(message);
     this.name = "ForgeError";
+  }
+}
+
+/** Why a host has no usable provider — said as a sentence, because every caller shows it to a person. */
+export class NoForgeConnection extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NoForgeConnection";
   }
 }
 

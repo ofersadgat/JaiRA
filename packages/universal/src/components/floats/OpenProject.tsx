@@ -451,7 +451,7 @@ function ProjectStep({ machines, source, onSource }: { machines: MachinesView | 
         ) : null}
         {forges !== undefined && hosts.length === 0 ? (
           <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", lineHeight: 1.4 }} paddingHorizontal={8} paddingTop={2}>
-            {"error" in forges ? forges.error : "No forge is signed in. Settings → Connections → Forges."}
+            {"error" in forges ? forges.error : "No forge is signed in. Settings → Connections → Forges signs one in, or `gh auth login` / `glab auth login` on this machine."}
           </Txt>
         ) : null}
       </Column>
@@ -589,7 +589,7 @@ function RepoPane({
       <Hint>
         {served
           ? "A repository is cloned at its branch, clean; Bring then adds the files git ignores from one of your machines."
-          : `No forge connection serves ${host}, so its repositories aren't listed here and git clones ${chosen?.project ?? "one"} with what it has on the machine it goes to. Settings → Connections → Forges signs one in.`}
+          : `No forge connection serves ${host}, so its repositories aren't listed here and git clones ${chosen?.project ?? "one"} with what it has on the machine it goes to. Settings → Connections → Forges signs one in, or signing in to ${host} with gh or glab on this machine.`}
       </Hint>
     </>
   );

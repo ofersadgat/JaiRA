@@ -148,6 +148,7 @@ import {
   UserEventHub,
   registerUnservedEvents,
   registerCommandFunction,
+  onMachine,
   registerGenericAgents,
   REVIEW_ARTIFACTS,
   worktreeChangeset,
@@ -665,6 +666,8 @@ function buildRunEnvironment(
       integrations: config.integrations,
       secrets,
       publishing: new PublishAuthorizer({ publish: config.functions.review_artifacts.publish }),
+      // A forge with no token stored goes through gh or glab where they are signed in (decision 0004).
+      cli: { exec, execEnv: onMachine({ execEnv: config.execEnvironment }).execEnv },
       // A CI download is kept with the run's task, as the file tools keep its writes — only a durable
       // run has one (decision 0016).
       ...(files ? { artifacts: centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {}),

@@ -83,7 +83,7 @@ printed in a bordered `--panel-2` box. `atlas on build-01 is ready` when it is.
 
 | State | Shown |
 | --- | --- |
-| no forge signed in | under `FORGES`: `No forge is signed in. Settings → Connections → Forges.` |
+| no forge signed in | under `FORGES`: `No forge is signed in. Settings → Connections → Forges signs one in, or \`gh auth login\` / \`glab auth login\` on this machine.` A forge `gh` or `glab` is signed in to is listed as one JaiRA holds a token for. |
 | a machine is asked | its status `…`; its pane `Asking build-01…` |
 | setup cannot run there | the primary is disabled; the note says which step and why |
 | stopped | `atlas on build-01 stopped` and the reason; what was made stays |

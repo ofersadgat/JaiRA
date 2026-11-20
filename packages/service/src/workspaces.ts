@@ -63,6 +63,7 @@ import {
   collectIgnored,
   forgeAccess,
   forgeProvider,
+  ForgeCliUnavailable,
   needsOf,
   packCheckout,
   pushCredentials,
@@ -77,6 +78,7 @@ import {
   type Exec,
   type ExecEnv,
   type ForgeHttp,
+  type ForgeCliOptions,
   type SecretResolver,
   type SetupReadContext,
   type SetupRunContext,
@@ -102,6 +104,8 @@ export interface WorkspaceMakerHost {
   integrations(): JairaIntegrationsConfig;
   secrets(): SecretResolver;
   forgeHttp?: ForgeHttp;
+  /** A forge's own command line, for a connection no token is stored for (`ForgeOptions.cli`). */
+  forgeCli?(): ForgeCliOptions | undefined;
   /** Every machine's workspaces of a project, by its repository identity: this machine's with `machineId` = selfId. */
   workspacesOf(identity: string): { machineId: string; dir: string }[];
   /** The repository identity of a folder on this machine. */
@@ -141,24 +145,30 @@ export class WorkspaceMaker {
 
   // --- forges ------------------------------------------------------------------------------------
 
-  /** Every signed-in forge connection's repositories, most recently changed first. */
+  /**
+   * Every signed-in forge connection's repositories, most recently changed first — signed in with a
+   * token JaiRA holds, or through the forge's command line (`gh`, `glab`) where it holds none. One
+   * neither way in is not listed, as Settings shows it under "Not connected".
+   */
   async repositories(request: { search?: string } = {}): Promise<ForgeRepositoriesView> {
     const integrations = this.host.integrations();
-    const secrets = this.host.secrets();
+    const options = this.forgeOptions();
     const connections: ForgeRepositoriesView["connections"] = [];
     const rows: ForgeRepositoryRow[] = [];
     await Promise.all(
       Object.entries(integrations.forges).map(async ([name, connection]) => {
-        if (connection.enabled === false || connection.credential === undefined) return;
-        const hit = secrets.lookup(connection.credential);
-        if (hit === undefined) return;
+        if (connection.enabled === false) return;
+        const hit = connection.credential !== undefined ? options.secrets.lookup(connection.credential) : undefined;
+        if (hit === undefined && options.cli === undefined) return;
         const base = { name, host: connection.host, provider: connection.provider };
         try {
-          const provider = forgeProvider(connection, hit.value, this.host.forgeHttp !== undefined ? { http: this.host.forgeHttp } : {});
+          const provider = forgeProvider(connection, hit !== undefined ? hit.value : { cli: options.cli! }, options);
           const listed = (await provider.repositories?.(request.search !== undefined ? { search: request.search } : {})) ?? [];
           rows.push(...listed.map((repo) => ({ ...repo, host: connection.host, provider: connection.provider, connection: name })));
           connections.push(base);
         } catch (error) {
+          // The command line is not there, or not signed in to this host: not a connection, as without a token.
+          if (error instanceof ForgeCliUnavailable) return;
           connections.push({ ...base, error: error instanceof Error ? error.message : String(error) });
         }
       }),
@@ -171,8 +181,9 @@ export class WorkspaceMaker {
     return forgeAccess(this.host.integrations(), request.host, this.forgeOptions()).provider.branches(request.project);
   }
 
-  private forgeOptions(): { secrets: SecretResolver; http?: ForgeHttp } {
-    return { secrets: this.host.secrets(), ...(this.host.forgeHttp !== undefined ? { http: this.host.forgeHttp } : {}) };
+  private forgeOptions(): { secrets: SecretResolver; http?: ForgeHttp; cli?: ForgeCliOptions } {
+    const cli = this.host.forgeCli?.();
+    return { secrets: this.host.secrets(), ...(this.host.forgeHttp !== undefined ? { http: this.host.forgeHttp } : {}), ...(cli !== undefined ? { cli } : {}) };
   }
 
   // --- a folder here ------------------------------------------------------------------------------

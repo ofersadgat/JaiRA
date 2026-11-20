@@ -2,7 +2,8 @@
  * The git programs on the machine agents run on — git, GitHub's `gh`, GitLab's `glab` — checked and
  * installed as an agent's binary is (`agentInstall.ts`), for Settings → Connections → Git.
  *
- * git is the one JaiRA needs: worktrees, diffs and pushes all run it (`git.ts`). `gh` and `glab` it does
+ * git is the one JaiRA needs: worktrees, diffs and pushes all run it (`git.ts`). `gh` and `glab` it runs
+ * only for a forge connection with no token, which goes through them (`forge/cli.ts`); otherwise it does
  * not run — a forge is reached through JaiRA's own connection — but an agent may, from a shell, so
  * whether they are there is worth saying, and installing them is one press.
  *

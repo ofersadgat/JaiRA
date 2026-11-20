@@ -30,6 +30,7 @@ import {
   RemoteWatcher,
   SecretResolver,
   forgeForHost,
+  onMachine,
   registerGitTools,
   registerRemoteFunctions,
   reviewWithRemote,
@@ -107,7 +108,10 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
   const { project, taskId, workspace, exec } = options;
   const config = project.config;
   const secrets = new SecretResolver({ projectDir: project.paths.projectDir, baseDir: project.paths.base.baseDir });
-  const forgeOptions = { secrets, ...(options.http !== undefined ? { http: options.http } : {}) };
+  // A forge with no token stored goes through gh or glab where they are signed in (decision 0004) —
+  // except under a test's transport, which answers every request itself.
+  const cli = options.http === undefined ? { exec, execEnv: onMachine({ execEnv: config.execEnvironment }).execEnv } : undefined;
+  const forgeOptions = { secrets, ...(options.http !== undefined ? { http: options.http } : {}), ...(cli !== undefined ? { cli } : {}) };
 
   // What each parked gate is deciding, and who to tell when the forge settles it.
   const gates = new Map<string, { changeset?: Changeset; options: string[]; settle: (value: JsonValue) => void }>();
@@ -157,6 +161,7 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
     exec,
     execEnv: config.execEnvironment,
     ...(options.http !== undefined ? { http: options.http } : {}),
+    ...(cli !== undefined ? { cli } : {}),
     ...(terminal !== undefined ? { confirmPublish: (request: PublishRequest) => askAtTerminal(terminal, request) } : {}),
     grantProject: () => grantProject(project, options.log),
   });
@@ -174,6 +179,7 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
       integrations: config.integrations,
       secrets,
       ...(options.http !== undefined ? { http: options.http } : {}),
+      ...(cli !== undefined ? { cli } : {}),
       publishing: primitives.publishing,
     }),
   );

@@ -74,6 +74,7 @@ void app.whenReady().then(async () => {
           version: app.getVersion(),
           publish,
           keychain: electronKeychain(),
+          forgeCli: true,
           // A server keeps the settings honest and the catalog current for every window it serves.
           probeOnStart: true,
           refreshCatalog: true,

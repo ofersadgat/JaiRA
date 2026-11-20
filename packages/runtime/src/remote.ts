@@ -58,7 +58,7 @@ import {
   type RemoteHandleRow,
 } from "@jaira/shared";
 import type { Exec } from "./exec";
-import { forgeForHost, type ForgeHttp } from "./forge";
+import { forgeForHost, type ForgeCliOptions, type ForgeHttp } from "./forge";
 import { Git } from "./git";
 import type { ExecEnv } from "./paths";
 import type { SecretResolver } from "./secrets";
@@ -176,6 +176,8 @@ export interface RemoteOptions {
   exec: Exec;
   execEnv?: ExecEnv;
   http?: ForgeHttp;
+  /** The forge's command line, for a connection with no token (`ForgeOptions.cli`). */
+  cli?: ForgeCliOptions;
   /**
    * Ask the person. Absent ⇒ nobody can be asked (a headless run), and `ask` refuses with a sentence
    * rather than publishing on nobody's say-so.
@@ -246,6 +248,7 @@ export class RemotePrimitives {
     return forgeForHost(this.options.integrations, host, {
       secrets: this.options.secrets,
       ...(this.options.http !== undefined ? { http: this.options.http } : {}),
+      ...(this.options.cli !== undefined ? { cli: this.options.cli } : {}),
     });
   }
 

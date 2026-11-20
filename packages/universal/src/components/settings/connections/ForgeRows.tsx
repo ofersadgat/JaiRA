@@ -112,7 +112,7 @@ function ForgeRow({
   const [open, setOpen] = useState(false);
   const [tokenOpen, setTokenOpen] = useState(false);
   const row = forgeRowOf(name, connection, check, oauth);
-  const { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth } = row;
+  const { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth, viaCli } = row;
   const pending = oauth?.pending.get(name);
   const canSignIn = oauth !== undefined && connection.provider !== undefined;
   const line = forgeLineOf(state, check);
@@ -141,11 +141,18 @@ function ForgeRow({
       <LoginCardBox key="who" active>
         <View flexDirection="row" alignItems="center" justifyContent="space-between" marginBottom={2}>
           <LoginMark initial={identity.login.charAt(0).toUpperCase()} />
-          <Tag tone="accent">{viaOAuth ? "OAuth" : "token"}</Tag>
+          <Tag tone="accent">{viaCli ?? (viaOAuth ? "OAuth" : "token")}</Tag>
         </View>
         <Who>{identity.login}</Who>
-        <Facts lines={[...(identity.scopes !== undefined && identity.scopes.length > 0 ? [identity.scopes.join(", ")] : []), ...(check?.credential ? [`${tokenName} · ${SECRET_SOURCE_LABELS[check.credential.source]}`] : [])]} />
-        {oauth !== undefined ? (
+        <Facts
+          lines={[
+            ...(identity.scopes !== undefined && identity.scopes.length > 0 ? [identity.scopes.join(", ")] : []),
+            ...(check?.credential ? [`${tokenName} · ${SECRET_SOURCE_LABELS[check.credential.source]}`] : []),
+            // No token here: the account is the command line's, and `<cli> auth logout` is what signs it out.
+            ...(viaCli !== undefined ? [`signed in through ${viaCli} · \`${viaCli} auth logout\` signs out`] : []),
+          ]}
+        />
+        {oauth !== undefined && viaCli === undefined ? (
           <CardActions>
             <SmallButton kind="ghost" disabled={locked} onPress={() => oauth.onDisconnect(name)}>
               Disconnect

@@ -19,8 +19,8 @@ siblings: [engineering/units/secret-chain, engineering/units/model-routing, engi
 [Decision 0004](../decisions/0004-remote-review.md) §1 is the design; this is what the code does.
 
 - **The `integrations` block.** `parseIntegrations` in `@jaira/shared` `forge.ts` reads `forges` (connections by name: `{provider, host, credential?, enabled?, apiUrl?}`, with `gitlab` and `github` built in), `review.settleAfter`, and `oauth` (an OAuth app's `clientId` per provider). The fields are in [settings-json](../contracts/settings-json.md).
-- **Providers.** `forgeProvider(connection, token)` builds `GitLabProvider` or `GitHubProvider` over the `ForgeHttp` seam; `forgeForHost` picks one by a git remote's host and resolves its token through the [secret chain](secret-chain.md). Both send the token as `Authorization: Bearer`, which GitLab takes from a personal access token and an OAuth token alike (`PRIVATE-TOKEN` takes only the first).
-- **The check.** `checkForge` asks the host `GET /user` and reports a `ForgeCheck`: `ok` with the identity, `failed` with a `fix`, `unconfigured` when no token resolves, `disabled`. `via` says whether the token in use came from a sign-in (`oauth`) or a paste (`token`). The app runs the check in every availability pass, into `AvailabilitySnapshot.forges`.
+- **Providers.** `forgeProvider(connection, token | { cli })` builds `GitLabProvider` or `GitHubProvider` over the `ForgeHttp` seam — `fetch` with the token, or `cliForgeHttp` (`forge/cli.ts`), which sends the same request through `gh api --include` / `glab api --include` as whoever that command line is signed in as; `forgeForHost` picks one by a git remote's host and resolves its token through the [secret chain](secret-chain.md), going through the command line where no token resolves and `ForgeOptions.cli` is given (decision 0004, amended 2026-11-20). Both send the token as `Authorization: Bearer`, which GitLab takes from a personal access token and an OAuth token alike (`PRIVATE-TOKEN` takes only the first).
+- **The check.** `checkForge` asks the host `GET /user` and reports a `ForgeCheck`: `ok` with the identity, `failed` with a `fix`, `unconfigured` when no token resolves, `disabled`. `via` says whether the token in use came from a sign-in (`oauth`) or a paste (`token`) — or `cli`: no token, and `gh` or `glab` is signed in to the host, which the check asks `GET /user` through. A command line not installed or not signed in leaves the connection `unconfigured`. The app runs the check in every availability pass, into `AvailabilitySnapshot.forges`.
 - **Sign-in through the browser.** `deviceFlow.ts` is RFC 8628's device authorization grant, pure over `ForgeHttp`, a clock and a `sleep`: `deviceFlowEndpoints`, `requestDeviceCode`, `pollDeviceToken`, `refreshDeviceToken`, `oauthAppNeeded`. `AppService` wires it to `forge:signIn`, `forge:cancelSignIn`, `forge:signIns`, `forge:signOut` and the `forge:signInFinished` push ([ipc-channels](../contracts/ipc-channels.md), [push-messages](../contracts/push-messages.md)).
 
 It deliberately does not own:
@@ -79,6 +79,7 @@ forge:signIn {connection}
 | 8 | Disconnect removes a token only from a place JaiRA writes, and names the place otherwise | `forgeSignIn.test.ts` "disconnects a pasted token the same way, and refuses one in a file…" |
 | 9 | A token within five minutes of dying is renewed before the check asks about it | `forgeSignIn.test.ts` "renews a token about to die…" |
 | 10 | A token's value is never in a check, a snapshot or a settings file | `integrations.test.ts` "never lets the token's value out of main…" |
+| 11 | With no token, a connection is checked, listed and reached through its command line; a stored token is never bypassed for it; nothing JaiRA holds is on its command line | `forgeCli.test.ts` |
 
 ## The failure modes
 
@@ -90,6 +91,7 @@ forge:signIn {connection}
 | The network drops for three polls in a row | `{code:"failed"}` naming the host | sign in again | the reason |
 | The app closes mid-sign-in | the poll is aborted; `{code:"canceled"}` is pushed to a window that is going away | sign in again after restart | nothing waits |
 | No keychain here | the token goes to `<base>/.env.local`; a token in a project's `.jaira/.env.local` under the same name is found first | remove the project's copy | the check names the other token, `via: "token"` |
+| No token, and `gh`/`glab` is not installed or not signed in to the host | the connection stays `unconfigured`; a call through it throws `ForgeCliUnavailable` naming `{cli} auth login --hostname {host}` | sign in there, or in JaiRA | the shelf tile, as without a token |
 | A renewal fails (refresh token revoked, app deleted) | logged at `warn`; the old token stays | sign in again | the check reports the token refused with "sign in again" |
 
 ## What migrates

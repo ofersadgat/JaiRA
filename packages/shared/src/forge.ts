@@ -66,6 +66,9 @@ export interface JairaIntegrationsConfig {
   forges: Record<string, JairaForgeConnection>;
 }
 
+/** The command line that speaks for each provider — what a connection with no token goes through (decision 0004, amended 2026-11-20). */
+export const FORGE_CLIS: Record<ForgeProviderKind, "gh" | "glab"> = { github: "gh", gitlab: "glab" };
+
 /**
  * JaiRA's own OAuth apps, one per public forge, used for the device flow when no layer names another
  * (registered 2026-09-23). Only the client IDs: a device flow is a public client, and a secret
@@ -833,9 +836,10 @@ export interface ForgeCheck {
   /**
    * How the token in use got there: `oauth` when a sign-in through the browser stored it — and it is
    * still the one the chain finds — `token` for one pasted, or put in a file by hand. Absent while no
-   * token resolves.
+   * token resolves — except `cli`: no token is stored, and the forge's own command line (`gh`, `glab`)
+   * is signed in, so the connection goes through it (decision 0004, amended 2026-11-20).
    */
-  via?: "oauth" | "token";
+  via?: "oauth" | "token" | "cli";
 }
 
 // --- signing in to a forge through the browser (RFC 8628) -------------------------------------------

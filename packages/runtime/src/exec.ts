@@ -42,6 +42,11 @@ export interface ExecOptions {
   /** Text piped to stdin, then closed. */
   stdin?: string;
   /**
+   * Keep stdout as the bytes it was, too ({@link ExecResult.stdoutBytes}) — for output that is not
+   * text (an archive a forge's command line downloads). `stdout` is still its UTF-8 reading.
+   */
+  stdoutBytes?: boolean;
+  /**
    * Each chunk of the child's output as it arrives, beside the whole that the result carries — for a
    * command somebody is watching run (an installer, in Settings → Connections). A throw from it is
    * swallowed: watching is not the work.
@@ -72,6 +77,8 @@ export interface ExecResult {
   /** Set when the process was killed by a signal (or by us, on abort/timeout). */
   signal: NodeJS.Signals | null;
   stdout: string;
+  /** stdout as bytes, when {@link ExecOptions.stdoutBytes} asked for them. */
+  stdoutBytes?: Uint8Array;
   stderr: string;
   /** The command as invoked, for error messages and audit. */
   command: string;
@@ -338,6 +345,7 @@ export class NodeExec implements Exec {
       };
 
       let stdout = "";
+      const stdoutChunks: Buffer[] | undefined = merged.stdoutBytes === true ? [] : undefined;
       let stderr = "";
       let timedOut = false;
       let aborted = false;
@@ -380,6 +388,7 @@ export class NodeExec implements Exec {
       };
 
       child.stdout?.on("data", (chunk: Buffer) => {
+        stdoutChunks?.push(chunk);
         const text = chunk.toString("utf8");
         stdout += text;
         observeOutput("stdout", text);
@@ -406,7 +415,7 @@ export class NodeExec implements Exec {
         settled = true;
         cleanup();
         observeExit(code, signal);
-        resolve({ code, signal, stdout, stderr, command: printable, timedOut, aborted });
+        resolve({ code, signal, stdout, ...(stdoutChunks !== undefined ? { stdoutBytes: new Uint8Array(Buffer.concat(stdoutChunks)) } : {}), stderr, command: printable, timedOut, aborted });
       });
 
       if (merged.interactive !== undefined && merged.stdin === undefined) {

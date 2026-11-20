@@ -53,7 +53,7 @@ import type { CiArtifactSink } from "./ciArtifacts";
 import { createCiTools } from "./ciTools";
 import { inBatches, requestPipelines } from "./ciViews";
 import type { Exec } from "./exec";
-import { forgeAccess, NoForgeConnection, type ForgeAccess, type ForgeHttp } from "./forge";
+import { forgeAccess, NoForgeConnection, type ForgeAccess, type ForgeCliOptions, type ForgeHttp } from "./forge";
 import { Git } from "./git";
 import { isWslEnv, type ExecEnv } from "./paths";
 import { PublishRefusal, type PublishAuthorizer, type PublishRequest } from "./remote";
@@ -121,6 +121,8 @@ export interface WorkspaceGitOptions {
   integrations: JairaIntegrationsConfig;
   secrets: SecretResolver;
   http?: ForgeHttp;
+  /** The forge's command line, for a connection with no token (`ForgeOptions.cli`). */
+  cli?: ForgeCliOptions;
   /** The run's publish question — `RemotePrimitives.publishing` where a run has them, so both ask once. */
   publishing: Pick<PublishAuthorizer, "authorize">;
   /** What `wait_for_event` waits on. Absent: it answers that nothing watches the repository here. */
@@ -138,7 +140,7 @@ export function workspaceGitHost(options: WorkspaceGitOptions): GitToolHost {
     workspaceRoot: options.workspaceRoot,
     ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
     git: (dir) => new Git({ exec: options.exec, repoDir: dir, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}) }),
-    forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}) }),
+    forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}), ...(options.cli !== undefined ? { cli: options.cli } : {}) }),
     authorizePublish: (request) => options.publishing.authorize(request),
     ...(options.events !== undefined ? { events: options.events } : {}),
     ...(options.modelOf !== undefined ? { modelOf: options.modelOf } : {}),
@@ -302,7 +304,9 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
   const push = async (at: Reached, branch: string): Promise<string> => {
     const head = await at.git.revParse(`refs/heads/${branch}`);
     if (head === undefined) throw new GitToolRefusal(`there is no local branch '${branch}' to push`);
-    const pushUrl = /^https?:\/\//i.test(at.url) ? at.url : `https://${at.location.host}/${at.location.project}.git`;
+    // With a token, over https whatever the remote says, so the push is the connection's. Through the
+    // forge's command line there is no token to send: the remote as it is, signed as git signs it.
+    const pushUrl = at.access.token === undefined || /^https?:\/\//i.test(at.url) ? at.url : `https://${at.location.host}/${at.location.project}.git`;
     try {
       await at.git.run(["push", pushUrl, `refs/heads/${branch}:refs/heads/${branch}`], { timeoutMs: 120_000, env: pushCredentials(at.access, pushUrl, host.execEnv) });
     } catch (e) {
@@ -598,8 +602,13 @@ function durationText(ms: number): string {
  * Basic with the user each forge documents for a token over https (GitHub `x-access-token`, GitLab
  * `oauth2`), which both accept from a personal token and an OAuth one alike. Under WSL the variables
  * are named in `WSLENV`, the only way an environment variable crosses into the distro.
+ *
+ * A connection that goes through the forge's command line holds no token: nothing is laid over git,
+ * which signs in as it already does — the credential helper `gh auth setup-git` / `glab auth login`
+ * set up, or the remote's ssh key.
  */
 export function pushCredentials(access: Pick<ForgeAccess, "token" | "connection">, pushUrl: string, execEnv?: ExecEnv): Record<string, string> {
+  if (access.token === undefined) return {};
   const user = access.connection.provider === "github" ? "x-access-token" : "oauth2";
   const url = new URL(pushUrl);
   const header = `Authorization: Basic ${Buffer.from(`${user}:${access.token}`).toString("base64")}`;

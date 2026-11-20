@@ -6,6 +6,7 @@
  * the host saying who the token belongs to, so that is what is asked.
  */
 import {
+  FORGE_CLIS,
   FORGE_LABELS,
   connectionForHost,
   type ForgeCheck,
@@ -15,12 +16,14 @@ import {
   type SecretSource,
 } from "@jaira/shared";
 import type { SecretResolver } from "../secrets";
+import { ForgeCliUnavailable, cliForgeHttp, type ForgeCliOptions } from "./cli";
 import { GitHubProvider } from "./github";
 import { GitLabProvider } from "./gitlab";
-import { ForgeError, fetchForgeHttp, type ForgeHttp } from "./http";
+import { ForgeError, NoForgeConnection, fetchForgeHttp, type ForgeHttp } from "./http";
 
 export * from "./http";
 export * from "./deviceFlow";
+export * from "./cli";
 export { GitLabProvider } from "./gitlab";
 export { GitHubProvider, GITHUB_READ_QUERY, GITHUB_REPLY_MUTATION, GITHUB_RESOLVE_MUTATION } from "./github";
 
@@ -35,26 +38,32 @@ export interface ForgeOptions {
    * anywhere else is some other token, and is `token`.
    */
   signedIn?: (credential: string) => SecretSource | undefined;
+  /**
+   * The forge's own command line (`gh`, `glab`), for a connection no token is stored for: the same
+   * provider, its requests sent through the command line as whoever it is signed in as (decision 0004,
+   * amended 2026-11-20). Absent: a connection with no token has no way in, as before.
+   */
+  cli?: ForgeCliOptions;
 }
 
-/** The provider for a connection, given the token's value. The only place a provider is constructed. */
-export function forgeProvider(connection: JairaForgeConnection, token: string, options: Pick<ForgeOptions, "http" | "now"> = {}): ForgeProvider {
+/** How a provider reaches its forge: with a token over the API, or through the forge's command line. */
+export type ForgeWay = { token: string } | { cli: ForgeCliOptions };
+
+/**
+ * The provider for a connection, given the token's value or the command line to go through. The only
+ * place a provider is constructed: the same class either way, only its transport differs.
+ */
+export function forgeProvider(connection: JairaForgeConnection, way: string | ForgeWay, options: Pick<ForgeOptions, "http" | "now"> = {}): ForgeProvider {
+  const chosen: ForgeWay = typeof way === "string" ? { token: way } : way;
   const built = {
     host: connection.host,
-    token,
-    http: options.http ?? fetchForgeHttp,
+    // Through the command line there is no token here: it signs the request, and drops the header.
+    token: "token" in chosen ? chosen.token : "",
+    http: "cli" in chosen ? cliForgeHttp(connection.provider, connection.host, chosen.cli) : (options.http ?? fetchForgeHttp),
     ...(connection.apiUrl !== undefined ? { apiUrl: connection.apiUrl } : {}),
     ...(options.now !== undefined ? { now: options.now } : {}),
   };
   return connection.provider === "gitlab" ? new GitLabProvider(built) : new GitHubProvider(built);
-}
-
-/** Why a host has no usable provider — said as a sentence, because every caller shows it to a person. */
-export class NoForgeConnection extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "NoForgeConnection";
-  }
 }
 
 /**
@@ -77,7 +86,10 @@ export interface ForgeAccess {
   name: string;
   connection: JairaForgeConnection;
   provider: ForgeProvider;
-  token: string;
+  /** Absent when the provider goes through the forge's command line: git then signs in as it already does. */
+  token?: string;
+  /** How the provider reaches the forge. */
+  via: "token" | "cli";
 }
 
 export function forgeAccess(integrations: JairaIntegrationsConfig, host: string, options: ForgeOptions): ForgeAccess {
@@ -86,14 +98,15 @@ export function forgeAccess(integrations: JairaIntegrationsConfig, host: string,
     throw new NoForgeConnection(`no connection is set up for ${host} — add one under Settings → Connections → Forges`);
   }
   const { name, connection } = found;
+  const hit = connection.credential !== undefined ? options.secrets.lookup(connection.credential) : undefined;
+  if (hit !== undefined) return { name, connection, provider: forgeProvider(connection, hit.value, options), token: hit.value, via: "token" };
+  // No token: the forge's command line, when there is one to go through. Whether it is signed in is
+  // found out by the first request, which says so in a sentence (`ForgeCliUnavailable`).
+  if (options.cli !== undefined) return { name, connection, provider: forgeProvider(connection, { cli: options.cli }, options), via: "cli" };
   if (connection.credential === undefined) {
     throw new NoForgeConnection(`the ${name} connection names no token — store one under Settings → Connections → Forges`);
   }
-  const hit = options.secrets.lookup(connection.credential);
-  if (hit === undefined) {
-    throw new NoForgeConnection(`the ${name} connection's token ${connection.credential} is not stored anywhere JaiRA looks`);
-  }
-  return { name, connection, provider: forgeProvider(connection, hit.value, options), token: hit.value };
+  throw new NoForgeConnection(`the ${name} connection's token ${connection.credential} is not stored anywhere JaiRA looks`);
 }
 
 /** What a token needs, said once per provider — the `fix` line of a refused one. */
@@ -106,21 +119,16 @@ const TOKEN_NEEDS: Record<JairaForgeConnection["provider"], string> = {
 export async function checkForge(name: string, connection: JairaForgeConnection, options: ForgeOptions): Promise<ForgeCheck> {
   const base = { name, provider: connection.provider, host: connection.host };
   if (connection.enabled === false) return { ...base, status: "disabled", detail: "turned off" };
-  if (connection.credential === undefined) {
-    return { ...base, status: "unconfigured", detail: "no token is named", fix: "store a token below" };
-  }
-  const hit = options.secrets.lookup(connection.credential);
+  const hit = connection.credential !== undefined ? options.secrets.lookup(connection.credential) : undefined;
   if (hit === undefined) {
-    return {
-      ...base,
-      status: "unconfigured",
-      detail: `no token stored under ${connection.credential}`,
-      fix: "store a token below",
-      credentialMissing: connection.credential,
-    };
+    const none: ForgeCheck =
+      connection.credential === undefined
+        ? { ...base, status: "unconfigured", detail: "no token is named", fix: "store a token below" }
+        : { ...base, status: "unconfigured", detail: `no token stored under ${connection.credential}`, fix: "store a token below", credentialMissing: connection.credential };
+    return options.cli !== undefined ? checkForgeCli(base, connection, options.cli, none) : none;
   }
   const credential = { source: hit.source, ...(hit.file !== undefined ? { file: hit.file } : {}) };
-  const via = options.signedIn?.(connection.credential) === hit.source ? ("oauth" as const) : ("token" as const);
+  const via = connection.credential !== undefined && options.signedIn?.(connection.credential) === hit.source ? ("oauth" as const) : ("token" as const);
   try {
     const identity = await forgeProvider(connection, hit.value, options).whoami();
     // A classic GitHub token says what it may do. One that can sign in and cannot touch a repository
@@ -146,6 +154,26 @@ export async function checkForge(name: string, connection: JairaForgeConnection,
     const label = FORGE_LABELS[connection.provider].name;
     const why = error instanceof ForgeError ? `${label} answered ${error.status}` : (error as Error).message;
     return { ...base, status: "failed", detail: `could not reach ${connection.host} — ${why}`, fix: "check the host and the network, then re-check", credential, via };
+  }
+}
+
+/**
+ * A connection with no token, checked through its forge's command line: who it is signed in as there.
+ * Not installed, or not signed in to the host, leaves the connection as it was without one (`none`); a
+ * command line that is signed in and answers otherwise is a failed connection, said why.
+ */
+async function checkForgeCli(base: Pick<ForgeCheck, "name" | "provider" | "host">, connection: JairaForgeConnection, cli: ForgeCliOptions, none: ForgeCheck): Promise<ForgeCheck> {
+  const program = FORGE_CLIS[connection.provider];
+  try {
+    const identity = await forgeProvider(connection, { cli }).whoami();
+    if (connection.provider === "github" && identity.scopes !== undefined && !identity.scopes.includes("repo")) {
+      return { ...base, status: "failed", detail: `signed in to ${program} as @${identity.login}, but without the repo scope`, fix: `run \`gh auth refresh --hostname ${connection.host} --scopes repo\``, identity, via: "cli" };
+    }
+    return { ...base, status: "ok", detail: `signed in as @${identity.login} through ${program}`, identity, via: "cli" };
+  } catch (error) {
+    if (error instanceof ForgeCliUnavailable) return none;
+    const why = error instanceof ForgeError && error.status > 0 ? `${FORGE_LABELS[connection.provider].name} answered ${error.status}` : (error as Error).message;
+    return { ...base, status: "failed", detail: `${program} could not reach ${connection.host} — ${why}`, fix: "check the host and the network, then re-check", via: "cli" };
   }
 }
 

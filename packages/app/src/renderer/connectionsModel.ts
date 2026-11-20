@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   BUILTIN_FORGES,
+  FORGE_CLIS,
   FORGE_LABELS,
   SECRET_SOURCE_LABELS,
   FORGE_PROVIDERS,
@@ -894,7 +895,9 @@ export function forgeRowOf(name: string, connection: JairaForgeConnection, check
   const identity = state === "available" ? check?.identity : undefined;
   const signingIn = oauth?.signingIn.has(name) === true;
   const viaOAuth = oauth?.viaOAuth.has(name) === true;
-  return { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth };
+  // Signed in through the forge's command line: no token here, the account is the one gh or glab has.
+  const viaCli = check?.via === "cli" ? FORGE_CLIS[connection.provider] : undefined;
+  return { path, builtin, enabled, state, label, title, tokenName, identity, signingIn, viaOAuth, viaCli };
 }
 
 /**
@@ -927,7 +930,7 @@ export function forgeActionOf(row: ReturnType<typeof forgeRowOf>, check: ForgeCh
 /** Who a connected forge acts as, as its closed row's chip: the account, and how it signed in. */
 export function forgeChipOf(row: ReturnType<typeof forgeRowOf>): AgentChip | undefined {
   if (row.identity === undefined) return undefined;
-  return { kind: "login", who: row.identity.login, fact: row.viaOAuth ? "OAuth" : "token", more: 0 };
+  return { kind: "login", who: row.identity.login, fact: row.viaCli ?? (row.viaOAuth ? "OAuth" : "token"), more: 0 };
 }
 
 /**

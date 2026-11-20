@@ -591,6 +591,30 @@ the rest):
   removes the token locally and does not revoke the grant: GitHub's revocation needs the client
   secret a public client does not have.
 
+**A forge's own command line, beside the token (2026-11-20, the person: "we should fix it so that
+both the api and command line can implement the same class which the ui uses to do what it needs").**
+On a Windows machine `gh` and `glab` were installed and signed in, Settings → Connections → Git said so,
+and Open still said `No forge is signed in`: JaiRA holds no token there, and it reached a forge only
+with one. Option D is now taken alongside C rather than instead of it. §1 holds — one interface, one
+provider class per forge, the only code that knows an endpoint — and the provider's transport is what
+differs:
+
+- **The command line is a `ForgeHttp`.** `cliForgeHttp` (`runtime/src/forge/cli.ts`) sends the request the
+  provider built through `gh api --include` or `glab api --include`, the body on stdin, the
+  `Authorization` header dropped, and reads what they print back the way `fetch` hands a response over:
+  status line, headers, body — a 4xx and a 304 too (measured with gh 2.104 and glab 1.126: both exit 1
+  there and still print it). So conditional requests keep working, which was option D's main cost.
+- **A stored token wins; the command line is the way in where there is none.** `forgeAccess` and
+  `checkForge` go through the command line only when the connection's token resolves nowhere. Signed in
+  there, the check is `ok` with `via: "cli"` and `signed in as @{login} through {gh|glab}`; not
+  installed, or not signed in to the host, the connection stays `unconfigured`, as it was.
+- **A push signs in as git already does.** Through the command line JaiRA holds no token, so
+  `pushCredentials` lays nothing over git and `git_push` pushes to the remote as it is — over ssh, or
+  through the credential helper `gh auth setup-git` installs.
+- **Where it is on.** The app and `jaira serve` (`AppService` `forgeCli`), and the `jaira` command
+  line's own Git tools and remote primitives. A test leaves it off, so what the machine running the
+  suite is signed in to never changes an answer.
+
 ## Open
 
 - A `tree: "base"` changeset has no commit to push. Step 2 materializes one
