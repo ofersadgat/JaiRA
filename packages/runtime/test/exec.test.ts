@@ -51,6 +51,19 @@ describe("resolveInvocation", () => {
       argv: ["-d", "Ubuntu", "--", "ls", "-la"],
     });
   });
+
+  it("runs npm's own npm.cmd, named by its path, as node npm-cli.js on Windows — never the .cmd, which is EINVAL", () => {
+    // An install of codex right after fnm installed Node runs npm by the path it was found at, off this
+    // app's PATH; spawning that `.cmd` failed "spawn EINVAL" in Settings → Connections.
+    const dir = "C:\\Users\\me\\AppData\\Roaming\\fnm\\node-versions\\v26.13.1\\installation";
+    const npmCmd = ['SET "NODE_EXE=%~dp0\\node.exe"', 'SET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"', '"%NODE_EXE%" "%NPM_CLI_JS%" %*'].join("\r\n");
+    const files: Record<string, string | true> = { [`${dir}\\npm.cmd`]: npmCmd, [`${dir}\\node.exe`]: true };
+    const program = { platform: "win32", pathDirs: [], exists: (p: string) => p in files, readText: (p: string) => (typeof files[p] === "string" ? (files[p] as string) : undefined) };
+    expect(resolveInvocation(`${dir}\\npm.cmd`, ["install", "-g", "@openai/codex"], { program })).toEqual({
+      file: `${dir}\\node.exe`,
+      argv: [`${dir}\\node_modules\\npm\\bin\\npm-cli.js`, "install", "-g", "@openai/codex"],
+    });
+  });
 });
 
 describe("NodeExec (native)", () => {
