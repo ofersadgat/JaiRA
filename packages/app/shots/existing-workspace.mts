@@ -9,7 +9,10 @@
  *   3-refused      a clone of another repository chosen: refused, saying why
  *   4-joins        a clone of the project chosen: `Add project-2 to project`
  *   5-grouped      after it: one project of two workspaces
- *   6-open-joins   Open, a third clone: it says it joins, and joins
+ *   6-no-remote    a folder with no git remote chosen: Add will ask
+ *   7-ask          Add pressed for it: connect it, add it without git, or cancel
+ *   8-plain        added without git: one project of three workspaces
+ *   9-open-joins   Open, a third clone: it says it joins, and joins
  *
  * Nothing is cloned or copied: every folder is opened where it is.
  *
@@ -36,25 +39,23 @@ function clone(dir: string, remote: string): void {
   execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
 }
 
-/** Click the control labelled `label` in a folder row's `Choose`. */
+/** The folder `name` in the column of the folder browsed: the row beside its own `Open <name>`. */
+const rowOf = (name: string): string =>
+  `[...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify(name)} && e.nextElementSibling?.getAttribute('aria-label') === ${JSON.stringify(`Open ${name}`)})`;
+
+/** Choose the folder `name` in the folder browsed: a press on its row. */
 async function choose(app: App, name: string): Promise<void> {
-  const hit = await app.evaluate<boolean>(`(() => {
-    const row = document.querySelector('[aria-label=' + JSON.stringify(${JSON.stringify(name)}) + ']');
-    const button = row && [...row.parentElement.querySelectorAll('*')].find((e) => e.children.length === 0 && e.textContent === 'Choose');
-    if (!button) return false;
-    (button.closest('button, [role=button]') ?? button).click();
-    return true;
-  })()`);
-  if (!hit) throw new Error(`no Choose for ${name}`);
+  await app.until(`!!${rowOf(name)}`, `${name} in the folders`, 60);
+  await app.evaluate(`${rowOf(name)}.click()`);
   await settle(500);
 }
 
-/** In the open dialog, go into the folder named `name`. */
+/** In the open dialog, go into the folder named `name`: its `›`. */
 async function goInto(app: App, name: string): Promise<void> {
-  const find = `[...document.querySelectorAll('[role=dialog] [aria-label], [aria-modal=true] [aria-label]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify(name)})`;
+  const find = `[...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify(`Open ${name}`)})`;
   await app.until(`!!${find}`, `${name} in the folder list`, 60);
   await app.evaluate(`${find}.click()`);
-  await settle(500);
+  await settle(700);
 }
 
 const dialogText = `(() => [...document.querySelectorAll('[role=dialog], [aria-modal=true]')].map((d) => d.innerText).join('\\n---\\n'))()`;
@@ -66,6 +67,7 @@ async function main(): Promise<void> {
   clone(join(WORLD, "project-2"), REMOTE);
   clone(join(WORLD, "project-3"), "https://gitlab.com/acme/project");
   clone(join(WORLD, "other"), "git@github.com:acme/other.git");
+  mkdirSync(join(WORLD, "scratch"), { recursive: true });
   const app = await App.launch(world, { out: OUT, port: 9283 });
   const workspaces = async (): Promise<ProjectSummary[]> => (await app.ipc<ProjectSummary[]>("project:list")).filter((p) => p.kind === "user");
   try {
@@ -109,6 +111,32 @@ async function main(): Promise<void> {
     await settle(1500);
     await app.shot("5-grouped");
 
+    // A folder with no git remote: Add asks what to do with it.
+    await clickTitled(app, ["Workspace: all"]);
+    await app.until(says("Add a workspace…"), "the workspace menu", 60);
+    await clickFirst(app, "Add a workspace…");
+    await app.until(says("More options…"), "which machine, asked", 60);
+    await app.evaluate(`[...document.querySelectorAll('[role=menu] [role=menuitem]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify(self)}).click()`);
+    await app.until(says(`use a folder already on ${self}`), "Add's card again", 80);
+    await clickFirst(app, `use a folder already on ${self}`);
+    await choose(app, "scratch");
+    await app.until(says("Add scratch to project") + " && " + says("adding it asks how"), "the primary for a folder with no remote", 40);
+    await settle(600);
+    await app.shot("6-no-remote");
+    await clickFirst(app, "Add scratch to project");
+    await app.until(says("scratch has no git remote") + " && " + says("Add it without git") + " && " + says("Connect it to gitlab.com/acme/project"), "Add asking what to do", 40);
+    await settle(600);
+    await app.shot("7-ask");
+    await clickFirst(app, "Add it without git");
+    for (let i = 0; ; i++) {
+      const listed = await workspaces();
+      if (listed.length === 3 && listed.every((p) => p.identity === "gitlab.com/acme/project")) break;
+      if (i > 60) throw new Error(`scratch did not join: ${JSON.stringify(listed.map((p) => [p.project, p.identity]))}`);
+      await settle(250);
+    }
+    await settle(1500);
+    await app.shot("8-plain");
+
     // Open, a third clone of the project: from the home folder, walked to.
     await clickTitled(app, ["open another project"]);
     await clickFirst(app, "Open project…");
@@ -120,18 +148,18 @@ async function main(): Promise<void> {
     await app.until(says("project-3"), "the world's folders", 60);
     await choose(app, "project-3");
     await app.until(says("The same repository as project: it becomes another of its workspaces, where it is. Nothing is copied."), "Open saying it joins", 40);
-    await app.shot("6-open-joins");
+    await app.shot("9-open-joins");
     await clickFirst(app, "Next: where it goes");
     await app.until(says("Add project-3 to project"), "the primary adding it where it is", 40);
     await clickFirst(app, "Add project-3 to project");
     for (let i = 0; ; i++) {
       const listed = await workspaces();
-      if (listed.length === 3 && listed.every((p) => p.identity === "gitlab.com/acme/project")) break;
+      if (listed.length === 4 && listed.every((p) => p.identity === "gitlab.com/acme/project")) break;
       if (i > 60) throw new Error(`project-3 did not join: ${JSON.stringify(listed.map((p) => [p.project, p.identity]))}`);
       await settle(250);
     }
     await settle(1500);
-    await app.shot("7-grouped-three");
+    await app.shot("10-grouped-four");
     console.log("passed");
   } finally {
     await app.close();

@@ -226,6 +226,7 @@ function MachineRows({ view, onView, machine }: { view: MachinesView; onView: (v
           machines={[browseMachine]}
           initial={browseMachine.id}
           mode="folder"
+          view={view}
           startDir={view.self.projectsFolder}
           onClose={() => setBrowsing(false)}
           onChosen={(_, dir) => {

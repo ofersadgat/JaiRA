@@ -84,7 +84,7 @@ import type {
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
 import { appendInstallLog, installLogKey, startedInstallLog, type InstallLog } from "./installLog";
-import { appendJobText, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
+import { appendJobText, withRecentFolder, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
 import {
   clearedAbove,
   statesPath,
@@ -3924,6 +3924,26 @@ export function useApp() {
       readNotice: (notice: Pick<EventsNotice, "id" | "at">, backlog: readonly Pick<EventsNotice, "id">[]) => {
         const next = withNoticeRead(ref.current.settings.ui, notice, backlog);
         if (next !== ref.current.settings.ui) setUi(next);
+      },
+      /** A folder chosen in the Open dialog or the folder chooser: a `recent` place under its machine. */
+      rememberFolder: (machine: string, dir: string) => {
+        const ui = ref.current.settings.ui;
+        if (ui.recentFolders?.[machine]?.[0] === dir) return;
+        setUi({ ...ui, recentFolders: withRecentFolder(ui.recentFolders, machine, dir) });
+      },
+      /**
+       * A folder with no git remote taken into a project (`project:join`), then opened where it is.
+       * `git` gives it the project's remote; `plain` keeps it as the project's without git.
+       */
+      joinAndOpen: async (machine: string, dir: string, identity: string, how: "git" | "plain") => {
+        patch({ busy: true, error: null });
+        try {
+          await invoke("project:join", { dir, identity, how, machine });
+        } catch (e) {
+          fail(e);
+          return;
+        }
+        await actionsRef.current.openOnMachine(machine, dir, "open");
       },
 
       // --- the shell --------------------------------------------------------

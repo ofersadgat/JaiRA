@@ -1780,6 +1780,13 @@ export interface IpcContract {
   /** `remember: false`: open it without adding it to the projects a window re-opens (a `jaira` command's). */
   "project:open": { request: { dir: string; remember?: boolean; /** On a paired machine (decision 0013 §8). */ machine?: string }; response: { dir: string; recovered: string[] } };
   /**
+   * A folder with no git remote taken into a project the person has (Add a workspace, the person,
+   * 2026-11-21: "ask the user what to do"). `git`: it is given the project's remote as `origin` —
+   * `git init` first when it is no repository — so git says what it is. `plain`: this machine keeps
+   * that the folder is a workspace of `identity`, without git. Opened afterwards like any folder.
+   */
+  "project:join": { request: { dir: string; identity: string; how: "git" | "plain"; machine?: string }; response: { identity: string; remote?: string } };
+  /**
    * Create `.jaira/` in a directory and open it — `jaira init`, reachable from the app.
    *
    * Separate from `project:open` rather than a flag on it, because the two differ in what they may
@@ -2833,6 +2840,7 @@ export type IpcResponse<C extends IpcChannel> = IpcContract[C]["response"];
  */
 export const IPC_CHANNELS = [
   "project:open",
+  "project:join",
   "project:init",
   "project:choose",
   "project:inspect",

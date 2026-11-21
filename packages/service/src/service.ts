@@ -534,6 +534,7 @@ import {
   parseUpdates,
   parseEngineConfig,
   parseRemoteProjectKey,
+  repositoryIdentity,
   remoteProjectKey,
   PLACED_EVENT,
   REWOUND_EVENT,
@@ -870,7 +871,7 @@ import type {
   ToolChoice,
 } from "@jaira/shared";
 import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
-import { ensureLocalSettingsIgnored, personalProjectSettingsFileOf, readRepositoryIdentities, readRepositoryIdentity } from "@jaira/persistence";
+import { ensureLocalSettingsIgnored, forgetRepositoryIdentity, personalProjectSettingsFileOf, readRepositoryIdentities, readRepositoryIdentity } from "@jaira/persistence";
 import { CONFIG_LAYERS, isProjectLayer } from "@jaira/shared";
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
@@ -3955,7 +3956,7 @@ export class AppService {
     const here = { project: existsSync(join(at, ".jaira")), git: existsSync(join(at, ".git")) };
     const identities = await readRepositoryIdentities([...(here.git ? [at] : []), ...entries.filter((e) => e.git).map((e) => e.path)]);
     const identified = <T extends object>(entry: T, path: string): T & { identity?: string } => {
-      const identity = identities.get(path);
+      const identity = this.joinedWorkspaces()[path] ?? identities.get(path);
       return identity !== undefined ? { ...entry, identity } : entry;
     };
     const parent = dirname(at);
@@ -4001,11 +4002,99 @@ export class AppService {
   private repositoryOf(dir: string): string | undefined {
     let identity: string | null | undefined = this.repositories.get(dir);
     if (identity === undefined) {
-      // The same reading the person's settings for a project are keyed by (`personalProjectSettingsFileOf`).
-      identity = readRepositoryIdentity(dir) ?? null;
+      // The same reading the person's settings for a project are keyed by (`personalProjectSettingsFileOf`) —
+      // but a folder the person took into a project without git is that project's (`joinProject`), even
+      // inside another repository's checkout, whose remote git would answer with.
+      identity = this.joinedWorkspaces()[dir] ?? readRepositoryIdentity(dir) ?? null;
       this.repositories.set(dir, identity);
     }
     return identity ?? undefined;
+  }
+
+  /** Where the folders taken into a project without git are kept: `~/.jaira/system/joined-workspaces.json`. */
+  private get joinedFile(): string {
+    return join(jairaBasePaths(this.baseDir).systemDir, "joined-workspaces.json");
+  }
+
+  private joined: Record<string, string> | undefined;
+
+  /** The folders taken into a project without git (`joinProject` `plain`), by folder: the project's identity. */
+  private joinedWorkspaces(): Record<string, string> {
+    if (this.joined === undefined) {
+      try {
+        const raw = JSON.parse(readFileSync(this.joinedFile, "utf8")) as unknown;
+        this.joined = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+          ? Object.fromEntries(Object.entries(raw as Record<string, unknown>).filter((e): e is [string, string] => typeof e[1] === "string"))
+          : {};
+      } catch {
+        this.joined = {};
+      }
+    }
+    return this.joined;
+  }
+
+  /**
+   * A folder with no git remote taken into a project the person has (Add a workspace; the person,
+   * 2026-11-21: "if a project folder doesnt have a git connection and you try to add it to a project,
+   * ask the user what to do"). `git`: it is given the project's remote as `origin` — the remote one of
+   * its workspaces here has, else the forge's https address — after `git init` when it is no repository.
+   * `plain`: kept here as a workspace of the project, without git. Either way it then groups with the
+   * project's other workspaces (decision 0013 §4); opening it is the window's next request.
+   */
+  joinProject(request: { dir: string; identity: string; how: "git" | "plain" }): { identity: string; remote?: string } {
+    const dir = resolvePath(request.dir);
+    const identity = request.identity.trim();
+    if (identity === "") throw this.refusal("project", "No project was named to take the folder into.");
+    if (!existsSync(dir)) throw this.refusal("project", `${dir} does not exist.`);
+    // Its own repository's remote only: a folder inside another checkout is not that repository.
+    const has = existsSync(join(dir, ".git")) ? readRepositoryIdentity(dir) : undefined;
+    if (has !== undefined && has !== identity) throw this.refusal("project", `${dir} is already ${has}, not ${identity}.`);
+    if (request.how === "plain") {
+      const next = { ...this.joinedWorkspaces(), [dir]: identity };
+      mkdirSync(dirname(this.joinedFile), { recursive: true });
+      writeFileSync(`${this.joinedFile}.tmp`, JSON.stringify(next, null, 2));
+      renameSync(`${this.joinedFile}.tmp`, this.joinedFile);
+      this.joined = next;
+      this.repositories.delete(dir);
+      return { identity };
+    }
+    const git = (...args: string[]): string => execFileSync("git", ["-C", dir, ...args], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"], timeout: 15_000 }).trim();
+    // The address its other workspaces here fetch from, so it is reached the same way (ssh or https).
+    let remote: string | undefined;
+    for (const member of this.workspacesOf(identity)) {
+      if (parseRemoteProjectKey(member.project) !== undefined) continue;
+      try {
+        remote = execFileSync("git", ["-C", member.project, "config", "--get", "remote.origin.url"], { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"], timeout: 5000 }).trim() || undefined;
+      } catch {
+        remote = undefined;
+      }
+      if (remote !== undefined && repositoryIdentity(remote) === identity) break;
+      remote = undefined;
+    }
+    remote ??= `https://${identity}.git`;
+    try {
+      if (!existsSync(join(dir, ".git"))) git("init", "-q");
+      const origin = (() => {
+        try {
+          return git("config", "--get", "remote.origin.url");
+        } catch {
+          return "";
+        }
+      })();
+      if (origin === "") git("remote", "add", "origin", remote);
+      else git("remote", "set-url", "origin", remote);
+    } catch (e) {
+      const said = (e as { stderr?: string }).stderr?.toString().trim();
+      throw this.refusal("project", `git could not give ${dir} the remote ${remote}: ${said !== undefined && said !== "" ? said : (e as Error).message}`);
+    }
+    forgetRepositoryIdentity(dir);
+    this.repositories.delete(dir);
+    if (this.joined?.[dir] !== undefined) {
+      const { [dir]: _gone, ...rest } = this.joined;
+      this.joined = rest;
+      writeFileSync(this.joinedFile, JSON.stringify(rest, null, 2));
+    }
+    return { identity, remote };
   }
 
   /**
@@ -13509,7 +13598,7 @@ export class AppService {
         const keys = new Set<string>();
         for (const open of this.userSessions()) {
           if (parseRemoteProjectKey(open.key) !== undefined) continue;
-          const identity = readRepositoryIdentity(open.project.paths.projectDir);
+          const identity = this.repositoryOf(open.project.paths.projectDir);
           if (identity !== undefined) keys.add(projectSettingsKey(identity, open.project.paths.projectDir));
         }
         return [...keys];

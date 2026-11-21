@@ -34,6 +34,11 @@ export function readRepositoryIdentity(dir: string): string | undefined {
   return identity ?? undefined;
 }
 
+/** Read a folder's identity from git again next time: a remote was just given to it. */
+export function forgetRepositoryIdentity(dir: string): void {
+  identities.delete(dir);
+}
+
 /** A folder's identity from `git config --get-regexp` of its remotes: `upstream`'s, else `origin`'s. */
 function identityOfRemotes(listed: string): string | null {
   const urls = new Map<string, string>();

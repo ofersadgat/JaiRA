@@ -38,25 +38,47 @@ designs it was chosen from.
     another of its workspaces, where it is. Nothing is copied.` (copied elsewhere, `the copy becomes another
     of its workspaces`; a repository, `atlas's repository: the clone becomes another of its workspaces.`);
   - a folder already open: `Already a workspace of atlas: opening it goes to it.`;
-  - adding, anything that is not the project: why — `mist is a workspace of mist, not atlas.`, `scratch has
+  - adding, a folder with no git remote: `scratch has no git remote, so nothing says it is atlas
+    (github.com/acme/atlas). Adding it asks whether to connect it to that remote or to add it without
+    git.` on `--panel-2`; pressing `Add scratch to atlas` asks (below);
+  - adding, anything else that is not the project: why — `mist is a workspace of mist, not atlas.`, `scratch has
     no git remote, so it isn't atlas (github.com/acme/atlas).`, `fork is github.com/me/atlas, not atlas
     (github.com/acme/atlas).` — and the primary is disabled.
   The same repository is the identity the sidebar groups workspaces by (decision 0013 §4).
 
 ## 1 · Project: a place, then what is in it
 
-- **The column.** 232 wide on `--bg` with a `--line` right: `THIS MACHINE` and the paired machines grouped
-  `MACS`, `LINUX`, `WINDOWS`, `OTHER` (online first), then `FORGES` — one row per signed-in forge host. An
-  offline machine is dimmed with `offline` at its right. Rows are padded 5 8 with radius 6; the chosen one on
-  `--tint-accent` at 600.
-- **A machine.** Its folders, read by its engine (`files:browse`): roots as ghost buttons, the folder it is
-  in, `..`, and each folder with its chip and a `Choose` button (a press on the row goes in). The chip names
-  the project it is open in (`atlas · open`), else the project of the person's it would join (`atlas`), else
-  `JaiRA project` or `git`. Inside a clone, `Choose atlas-2` beside the roots chooses the folder itself. A
-  folder chosen is copied **as it is** — everything git does not ignore — or opened where it is.
+- **The column** (proposal 6 of [the eight](../assets/add-workspace/index.html), the person, 2026-11-21).
+  232 wide on `--bg` with a `--line` right: `THIS MACHINE` and the paired machines grouped `MACS`, `LINUX`,
+  `WINDOWS`, `OTHER` (online first), each with its `MachineIcon` (what it is, what it runs, whether it is
+  reached); then `FORGES` — one row per signed-in forge host with GitHub's or GitLab's mark (git's for
+  another). An offline machine is dimmed with `offline` at its right. Under the machine chosen, its places
+  (`machinePlacesOf`), indented 30 with a 14 glyph: the folder its new workspaces go in (`★`, `projects`),
+  the folders holding its workspaces, fullest first (`2 workspaces`), the folders lately chosen there
+  (`recent`, kept per device in the layout, six a machine), `Home`, and its other roots; a press browses
+  there, and the place browsed is the row marked. Rows are padded 5 8 with radius 6; the chosen one on
+  `--tint-accent`, a chosen machine at 600.
+- **A machine.** Its folders, read by its engine (`files:browse`), in columns as Where it goes has them:
+  the path from `~`, then the folder above, the folder browsed, and the folder chosen. Each folder in the
+  middle says what it is — the project it is open in (`atlas · open`), else the project of the person's it
+  would join (`atlas`), else `JaiRA project` or `git` — with its mark and a `›`. A press chooses it; `›`
+  or a second press goes in. The third column is the folder chosen (or, with none chosen there, the folder
+  browsed): its glyph, name, that pill, the repository it is a clone of with its forge's mark, where it
+  stands among the person's projects, its path, and `Choose <name>` (or `✓ Chosen`) and `Open ›`. A folder
+  chosen is copied **as it is** — everything git does not ignore — or opened where it is.
 - **Adding, a folder already there.** A folder of the project that is not yet one of its workspaces is added
   where it is, nothing copied: choosing it takes the target to its machine, and the primary reads `Add
   atlas-2 to atlas` at once. One that is already a workspace is copied to make another, as before.
+- **Adding, a folder with no git remote** (the person, 2026-11-21: "ask the user what to do"). It is added
+  where it is too, and `Add scratch to atlas` asks first, in a card over the dialog, 460 wide: `scratch has
+  no git remote`, `Nothing says it is atlas (github.com/acme/atlas). What should Add do with it on
+  build-01?`, then two answers, each a bordered row with its glyph, what it is and what it does — `Connect
+  it to github.com/acme/atlas` (the remote as `origin`, the one a workspace of it on that machine fetches
+  from, else the forge's https address; `git init` first when it is no repository; nothing fetched) and
+  `Add it without git` (that machine's engine keeps the folder as a workspace of the project,
+  `~/.jaira/system/joined-workspaces.json`) — and `Cancel`. Either way it then opens there and groups with
+  the project (`project:join`). Copied elsewhere it would have no remote either, so another machine is
+  refused, saying so.
 - **A forge.** Its repositories (`forge:repositories`), most recently changed first, each with `private`
   when it is; a field finds one; the chosen one's branches (`forge:branches`) as buttons under the list, the
   default branch chosen.
@@ -68,7 +90,8 @@ designs it was chosen from.
 
 ## 2 · Where it goes: a machine, and a folder on it
 
-- **The column.** For a folder on a machine, `WHERE IT IS` with that machine and `open it there`; then the
+- **The column.** As Project's — the machines with their icons, the chosen one's places, which browse the
+  pane there — for a folder on a machine, `WHERE IT IS` with that machine and `open it there`; then the
   machines (adding a workspace, the folder is one already: its machine is listed with the rest and takes a
   second, copied beside it), each with its status for this project at its right, from its `workspace:plan`: `ready`
   (`--ok`), `installs node` (`--accent`), `password` (`--warn`), `can't` or `offline` (`--dim`), `…` while it
@@ -144,3 +167,12 @@ menu stood, in the sidebar's tokens: 400 wide (the window less 16 at most), padd
 | --- | --- |
 | the plan is asked | `Reading the project's setup there…` in `--dim` |
 | the plan failed | why, in `--bad`; Add stays disabled |
+
+## The folder chooser
+
+`New project on build-01…` and Settings → Machines → Projects folder → `Change…` (`FolderBrowser.tsx`):
+a card `min(1000px, 94vw)` wide and 600 tall — its title (`New project`, `Choose a folder`, `Open a
+project`; 15 700, padded 14 20, a `--line` under), the column and the folders in columns as Project has
+them, and a foot whose primary names the folder chosen, else the folder browsed: `Make a project of notes
+on build-01`, `Use notes on studio-mini`, `Open notes on build-01`. Its third column says what the
+primary will do with it.

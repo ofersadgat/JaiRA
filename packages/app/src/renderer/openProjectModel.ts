@@ -74,6 +74,11 @@ export type SourceStanding =
   | { kind: "new" }
   | { kind: "joins"; group: ProjectGroup }
   | { kind: "workspace"; group: ProjectGroup }
+  /**
+   * Adding a folder with no git remote to a project that has one: nothing says it is the project, so
+   * Add asks — connect it to the project's remote, add it without git, or not (the person, 2026-11-21).
+   */
+  | { kind: "unconnected"; group: ProjectGroup; name: string }
   | { kind: "other"; reason: string };
 
 /** The repository a chosen project is: a forge's from its URL, a folder's as its listing read it. */
@@ -109,7 +114,7 @@ export function standingOf(source: ChosenSource, groups: readonly ProjectGroup[]
   if (holder !== undefined) return { kind: "other", reason: `${name} is a workspace of ${holder.label}, not ${adding.label}.` };
   if (adding.identity === undefined) return { kind: "other", reason: `${adding.label} has no git remote, so nothing else can be told to be it: only a copy of one of its workspaces can be added.` };
   if (source.kind === "forge") return { kind: "other", reason: `${name} is another repository: ${adding.label} is ${adding.identity}.` };
-  if (identity === undefined) return { kind: "other", reason: `${name} has no git remote, so it isn't ${adding.label} (${adding.identity}).` };
+  if (identity === undefined) return { kind: "unconnected", group: adding, name };
   return { kind: "other", reason: `${name} is ${identity}, not ${adding.label} (${adding.identity}).` };
 }
 
@@ -124,6 +129,10 @@ export function standingWords(standing: SourceStanding, source: ChosenSource, ad
       return undefined;
     case "other":
       return { text: standing.reason, tone: "bad" };
+    case "unconnected":
+      return stays
+        ? { text: `${standing.name} has no git remote, so nothing says it is ${standing.group.label} (${standing.group.identity ?? ""}). Adding it asks whether to connect it to that remote or to add it without git.`, tone: "plain" }
+        : { text: `${standing.name} has no git remote: a copy of it would have none either. It is added where it is.`, tone: "bad" };
     case "workspace":
       return adding
         ? undefined
@@ -407,4 +416,82 @@ export function addLines(source: WorkspaceSource & { label: string }, target: st
           count: steps.length,
         };
   return { project, where, bring, then };
+}
+
+/** A place in a machine's row of the Open dialog's column: where its folders are browsed from. */
+export interface MachinePlace {
+  kind: "projects" | "workspaces" | "recent" | "home" | "root";
+  /** What the row says: the folder's own name, `Home`, or the root. */
+  label: string;
+  dir: string;
+  /** At the row's right: `projects`, `2 workspaces`, `recent`. */
+  note?: string;
+}
+
+/** The folders on `machine` that hold a workspace of the person's projects. */
+export function workspaceDirsOn(groups: readonly ProjectGroup[], machine: string, selfId: string | undefined): string[] {
+  const out: string[] = [];
+  for (const group of groups) {
+    if (group.kind !== "user") continue;
+    for (const member of group.members) {
+      const on = parseRemoteProjectKey(member.project)?.machineId ?? member.machine?.id ?? selfId;
+      if (on === machine) out.push(dirOf(member.project));
+    }
+  }
+  return out;
+}
+
+const trimmed = (dir: string): string => (/^[A-Za-z]:[\\/]?$/.test(dir) || dir === "/" ? dir : dir.replace(/[\\/]+$/, ""));
+const lastPart = (dir: string): string => dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
+const parentPart = (dir: string): string | undefined => {
+  const cut = trimmed(dir).replace(/[\\/][^\\/]*$/, "");
+  if (cut === "") return dir.startsWith("/") ? "/" : undefined;
+  return /^[A-Za-z]:$/.test(cut) ? `${cut}\\` : cut;
+};
+
+/**
+ * A machine's places, as a file dialog's sidebar has them (proposal 6, the person, 2026-11-21): the
+ * folder its new workspaces go in; the folders that hold its workspaces, the fullest first; the folders
+ * chosen there lately; its home; its other roots. Each folder once, the first way it is listed.
+ */
+export function machinePlacesOf(input: {
+  projectsFolder?: string | undefined;
+  /** Its workspaces' folders (`workspaceDirsOn`). */
+  workspaces?: readonly string[];
+  recent?: readonly string[];
+  /** Its roots as a listing has them: its home first. */
+  roots?: readonly string[];
+}): MachinePlace[] {
+  const out: MachinePlace[] = [];
+  const seen = new Set<string>();
+  const add = (place: MachinePlace): void => {
+    const key = trimmed(place.dir).toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(place);
+  };
+  const counts = new Map<string, number>();
+  for (const dir of input.workspaces ?? []) {
+    const parent = parentPart(dir);
+    if (parent !== undefined) counts.set(trimmed(parent), (counts.get(trimmed(parent)) ?? 0) + 1);
+  }
+  if (input.projectsFolder !== undefined && input.projectsFolder !== "") add({ kind: "projects", label: lastPart(input.projectsFolder), dir: input.projectsFolder, note: "projects" });
+  const home = input.roots?.[0];
+  [...counts.entries()]
+    .filter(([dir]) => home === undefined || trimmed(dir) !== trimmed(home))
+    .sort((a, b) => b[1] - a[1] || lastPart(a[0]).localeCompare(lastPart(b[0])))
+    .slice(0, 4)
+    .forEach(([dir, n]) => add({ kind: "workspaces", label: lastPart(dir), dir, note: `${n} workspace${n === 1 ? "" : "s"}` }));
+  for (const dir of (input.recent ?? []).slice(0, 3)) add({ kind: "recent", label: lastPart(dir), dir, note: "recent" });
+  if (home !== undefined) add({ kind: "home", label: "Home", dir: home });
+  for (const root of (input.roots ?? []).slice(1)) add({ kind: "root", label: root, dir: root });
+  return out;
+}
+
+/** The folders lately chosen on a machine, the newest first: `dir` put first, six kept. */
+export function withRecentFolder(recent: Readonly<Record<string, readonly string[]>> | undefined, machine: string, dir: string): Record<string, string[]> {
+  const was = recent?.[machine] ?? [];
+  const out: Record<string, string[]> = Object.fromEntries(Object.entries(recent ?? {}).map(([k, v]) => [k, [...v]]));
+  out[machine] = [dir, ...was.filter((d) => trimmed(d) !== trimmed(dir))].slice(0, 6);
+  return out;
 }

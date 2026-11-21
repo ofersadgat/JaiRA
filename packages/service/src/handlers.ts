@@ -128,6 +128,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "project:open": ((request: { dir: string; remember?: boolean }) =>
       service.open(resolve(request.dir), request.remember === false ? { remember: false } : {})) as Handler,
     "project:init": ((request: { dir: string }) => service.init(resolve(request.dir))) as Handler,
+    "project:join": ((request: { dir: string; identity: string; how: "git" | "plain" }) =>
+      service.joinProject({ dir: request.dir, identity: request.identity, how: request.how === "git" ? "git" : "plain" })) as Handler,
     "project:choose": ((request: { mode?: "open" | "init" } | undefined) =>
       service.chooseProject(request?.mode ?? "open")) as Handler,
     "project:inspect": ((request: { dir: string }) => service.inspect(request.dir)) as Handler,

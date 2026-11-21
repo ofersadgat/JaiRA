@@ -10,6 +10,7 @@ import {
   folderNote,
   forgeOfUrl,
   jobBlocks,
+  machinePlacesOf,
   needWords,
   placeGroupsOf,
   planSentence,
@@ -18,7 +19,9 @@ import {
   sourceName,
   standingOf,
   standingWords,
+  withRecentFolder,
   withStep,
+  workspaceDirsOn,
   workspacesOfSource,
   type WorkspaceJob,
 } from "../src/renderer/openProjectModel";
@@ -258,7 +261,8 @@ describe("where a chosen project stands among the person's (the person, 2026-11-
     expect(standingOf(forge("mistlabs/jaira"), groups, "m-desk", jaira)).toMatchObject({ kind: "joins" });
     expect(standingOf(folder("m-desk", "/Users/ofer/Code/jaira", ID), groups, "m-desk", jaira)).toMatchObject({ kind: "workspace" });
     expect(standingOf(folder("m-desk", "/Users/ofer/Code/mist", "gitlab.com/mistlabs/mist"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "mist is a workspace of mist, not jaira." });
-    expect(standingOf(folder("m-desk", "/tmp/scratch"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "scratch has no git remote, so it isn't jaira (gitlab.com/mistlabs/jaira)." });
+    // No remote: nothing says what it is, so Add asks (the person, 2026-11-21).
+    expect(standingOf(folder("m-desk", "/tmp/scratch"), groups, "m-desk", jaira)).toEqual({ kind: "unconnected", group: jaira, name: "scratch" });
     expect(standingOf(folder("m-desk", "/tmp/fork", "github.com/someone/jaira"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "fork is github.com/someone/jaira, not jaira (gitlab.com/mistlabs/jaira)." });
     expect(standingOf(forge("mistlabs/mist"), groups, "m-desk", jaira)).toMatchObject({ kind: "other" });
     // A project with no remote: only its own workspaces are it.
@@ -279,6 +283,52 @@ describe("where a chosen project stands among the person's (the person, 2026-11-
     expect(standingWords({ kind: "workspace", group: jaira }, here, false, true)?.text).toBe("Already a workspace of jaira: opening it goes to it.");
     expect(standingWords({ kind: "other", reason: "no." }, here, true, false)).toEqual({ text: "no.", tone: "bad" });
     expect(standingWords({ kind: "new" }, here, false, true)).toBeUndefined();
+  });
+
+  it("says a folder with no remote is asked about where it is, and is not copied", () => {
+    const scratch = folder("m-desk", "/tmp/scratch");
+    expect(standingWords({ kind: "unconnected", group: jaira, name: "scratch" }, scratch, true, true)).toEqual({
+      text: "scratch has no git remote, so nothing says it is jaira (gitlab.com/mistlabs/jaira). Adding it asks whether to connect it to that remote or to add it without git.",
+      tone: "plain",
+    });
+    expect(standingWords({ kind: "unconnected", group: jaira, name: "scratch" }, scratch, true, false)?.tone).toBe("bad");
+  });
+
+  it("lists a machine's places: its projects folder, the folders holding workspaces, recent ones, home, roots", () => {
+    expect(workspaceDirsOn(groups, "m-desk", "m-desk")).toEqual(["/Users/ofer/Code/jaira", "/Users/ofer/Code/notes", "/Users/ofer/Code/mist"]);
+    expect(workspaceDirsOn(groups, "m-mac", "m-desk")).toEqual(["/srv/jaira"]);
+    expect(
+      machinePlacesOf({
+        projectsFolder: "/Users/ofer/Projects",
+        workspaces: ["/Users/ofer/Code/jaira", "/Users/ofer/Code/notes", "/Users/ofer/work/atlas", "/Users/ofer/Projects/x"],
+        recent: ["/Users/ofer/Desktop", "/Users/ofer/Code/"],
+        roots: ["/Users/ofer", "/"],
+      }),
+    ).toEqual([
+      { kind: "projects", label: "Projects", dir: "/Users/ofer/Projects", note: "projects" },
+      { kind: "workspaces", label: "Code", dir: "/Users/ofer/Code", note: "2 workspaces" },
+      { kind: "workspaces", label: "work", dir: "/Users/ofer/work", note: "1 workspace" },
+      { kind: "recent", label: "Desktop", dir: "/Users/ofer/Desktop", note: "recent" },
+      { kind: "home", label: "Home", dir: "/Users/ofer" },
+      { kind: "root", label: "/", dir: "/" },
+    ]);
+    expect(machinePlacesOf({ roots: ["C:\\Users\\o", "C:\\", "D:\\"], workspaces: ["C:\\src\\atlas"] }).map((p) => [p.kind, p.label, p.dir])).toEqual([
+      ["workspaces", "src", "C:\\src"],
+      ["home", "Home", "C:\\Users\\o"],
+      ["root", "C:\\", "C:\\"],
+      ["root", "D:\\", "D:\\"],
+    ]);
+    expect(machinePlacesOf({})).toEqual([]);
+  });
+
+  it("keeps the newest six folders chosen on a machine, each once", () => {
+    let recent = withRecentFolder(undefined, "m", "/a");
+    recent = withRecentFolder(recent, "m", "/b");
+    recent = withRecentFolder(recent, "m", "/a/");
+    expect(recent).toEqual({ m: ["/a/", "/b"] });
+    for (const d of ["/1", "/2", "/3", "/4", "/5", "/6"]) recent = withRecentFolder(recent, "m", d);
+    expect(recent["m"]).toEqual(["/6", "/5", "/4", "/3", "/2", "/1"]);
+    expect(withRecentFolder(recent, "n", "/x")["m"]).toHaveLength(6);
   });
 
   it("chips a folder with the project it is open in, or would join", () => {

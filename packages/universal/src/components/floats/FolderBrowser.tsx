@@ -1,31 +1,28 @@
-import { useEffect, useRef, useState, type JSX } from "react";
-import { ScrollView } from "react-native";
+import { useMemo, useRef, useState, type JSX } from "react";
 import { View, isWeb } from "@tamagui/core";
-import type { FolderListing } from "@jaira/shared/browser";
+import type { FolderListing, MachinesView } from "@jaira/shared/browser";
 import type { BrowseMachine } from "@jaira/ui/folderBrowserTypes";
-import { invoke } from "@jaira/ui/store";
-import { Press, Txt, edge, lengthToken, scrollbarProps } from "../../primitives";
+import { folderChip, machinePlacesOf, workspaceDirsOn, type MachinePlace } from "@jaira/ui/openProjectModel";
+import type { ProjectGroup } from "@jaira/ui/workspaceGroups";
+import { Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { Chip } from "../files/Chip";
 import { Button } from "../settings/Button";
-import { Segmented } from "../settings/controls";
+import { Column, ColumnBrowser, FolderDetail, MachinePlaces, PlaceRow, lastOf } from "./FolderColumns";
 import { ModalBox } from "./Modal";
 
 /**
- * Choosing a folder on a paired machine, read by that machine's engine (`files:browse`) — the machine
- * switcher, the roots and where it is, the folders (a click goes in), and Open (or Make a project)
- * naming the folder and the machine. How it looks:
+ * Choosing a folder on a machine, read by that machine's engine (`files:browse`): the machines down the
+ * left with their places (the folder new workspaces go in, the folders holding workspaces, recent ones,
+ * home, the roots), the folders in columns (`ColumnBrowser`: the folder above, the folder browsed, and
+ * the folder chosen), and the foot's button naming the folder and the machine — as the Open dialog's
+ * Project step has them (docs/ui/assets/add-workspace, proposals 3 and 6; 2026-11-21). How it looks:
  *
- *   the dialog             560 wide (or 90% of the window), a column, gap 10
- *   its title              the heading, no margin: app 17/12.5 700, line 1.35
- *   the roots              row, wrapping, centred, gap 4: each root a `ghost` button, then where it is
- *                          (data 11/12, --dim, 6 in, one line)
- *   the list               at most 320 tall, scrolling; 1px --line, radius --control-radius; padding
- *                          8 10, gap 1
- *   a folder               row, centred, gap 8, padding 6 10, --panel, a --line under all but the last;
- *                          app 13/12.5; hovered --panel-2; a project on --tint-accent; its glyph --dim, 12
- *   the hint               app 11/12.5, line 1.4, --dim; an error in --bad
- *   the foot               row, centred, gap 8: the rest, Cancel (`ghost`), Open (`primary`)
+ *   the dialog             min(1000px, 94vw) wide, 600 tall, a column
+ *   its title              padding 14 20, a --line under: app 15/12.5 700
+ *   the body               row: the column (232, --bg) and the pane (padding 14 18, gap 10)
+ *   the foot               row, padding 12 20, a --line above: Cancel (`ghost`), the primary
+ *
+ * Without the machines' view (`view`), one column of the machines given, by name.
  */
 export function FolderBrowser({
   machines,
@@ -35,6 +32,9 @@ export function FolderBrowser({
   onChosen,
   staged = false,
   startDir,
+  view,
+  groups = [],
+  recent,
 }: {
   machines: readonly BrowseMachine[];
   initial: string;
@@ -43,113 +43,134 @@ export function FolderBrowser({
   onClose: () => void;
   onChosen: (machine: BrowseMachine, dir: string) => void;
   staged?: boolean;
-  /** Where the listing opens, on the first machine shown; its roots when absent or unreadable. */
+  /** Where the listing opens, on the first machine shown; its home when absent or unreadable. */
   startDir?: string | undefined;
+  /** The machines as Settings → Machines has them: their icons, and the folders their new workspaces go in. */
+  view?: MachinesView | undefined;
+  /** The person's projects: the folders that hold their workspaces are places, and a folder says which it is. */
+  groups?: readonly ProjectGroup[];
+  /** The folders lately chosen, by machine. */
+  recent?: Readonly<Record<string, readonly string[]>> | undefined;
 }): JSX.Element {
   const t = useTokens();
+  const selfId = view?.self.id;
+  // The machines it can browse: the ones given, and this machine when the view says it.
+  const browsable = useMemo(() => {
+    const out = [...machines];
+    if (view !== undefined && mode !== "folder" && !out.some((m) => m.id === view.self.id)) out.unshift({ id: view.self.id, label: view.self.label });
+    return out;
+  }, [machines, view, mode]);
   const [machineId, setMachineId] = useState(initial);
+  const machine = browsable.find((m) => m.id === machineId) ?? browsable[0]!;
   const [listing, setListing] = useState<FolderListing | undefined>(undefined);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const machine = machines.find((m) => m.id === machineId) ?? machines[0]!;
-  const go = (dir?: string): void => {
-    setError(undefined);
-    invoke("files:browse", { machine: machine.id, ...(dir !== undefined ? { dir } : {}) }).then(setListing, (e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  const [selected, setSelected] = useState<string | undefined>(undefined);
+  const [jump, setJump] = useState<{ dir: string; n: number } | undefined>(undefined);
+  const [rootsBy, setRootsBy] = useState<Record<string, string[]>>({});
+  const firstMachine = useRef(machine.id);
+  const placesOf = (id: string): MachinePlace[] => {
+    const at = id === selfId ? view?.self : view?.machines.find((m) => m.id === id);
+    return machinePlacesOf({
+      projectsFolder: at?.projectsFolder,
+      workspaces: workspaceDirsOn(groups, id, selfId),
+      ...(recent?.[id] !== undefined ? { recent: recent[id] } : {}),
+      ...(rootsBy[id] !== undefined ? { roots: rootsBy[id] } : {}),
+    });
   };
-  const started = useRef(false);
-  useEffect(() => {
-    setListing(undefined);
-    const from = started.current ? undefined : startDir;
-    started.current = true;
-    if (from === undefined) go();
-    else {
-      // A folder that is not there (yet) opens on the roots instead.
-      setError(undefined);
-      invoke("files:browse", { machine: machine.id, dir: from }).then(setListing, () => go());
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [machineId]);
-  const chosen = listing?.dir;
+  const same = (a: string | undefined, b: string): boolean => a !== undefined && a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+  // What the foot acts on: the folder chosen in the folder browsed, else the folder browsed.
+  const picked = listing?.entries.find((e) => same(selected, e.path));
+  const target = picked?.path ?? listing?.dir;
+  const targetName = target !== undefined ? lastOf(target) : "";
   const title = mode === "init" ? "New project" : mode === "folder" ? "Choose a folder" : "Open a project";
-  const hint = { voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const;
-  const rows: JSX.Element[] = [];
-  if (listing?.parent !== undefined) rows.push(<FolderRow key=".." glyph="↑" name=".." onPress={() => go(listing.parent)} />);
-  for (const entry of listing?.entries ?? []) {
-    rows.push(<FolderRow key={entry.path} glyph="▸" name={entry.name} project={entry.project} {...(entry.project ? { chip: "JaiRA project" } : entry.git ? { chip: "git" } : {})} onPress={() => go(entry.path)} />);
-  }
+  const verb = mode === "init" ? "Make a project of" : mode === "folder" ? "Use" : "Open";
+  const shown = view !== undefined ? { ...view, machines: view.machines.filter((m) => browsable.some((b) => b.id === m.id)) } : undefined;
   return (
-    <ModalBox staged={staged} onDismiss={onClose} label={title} width={isWeb ? "min(560px, 90vw)" : "90%"}>
-      <View flexDirection="column" gap={10}>
-        <Txt spec={{ voice: "app", scale: 17 / 12.5, weight: 700, lineHeight: 1.35 }}>{title}</Txt>
-        {machines.length > 1 ? <Segmented label="Machine" value={machine.id} options={machines.map((m) => [m.label, m.id] as const)} onChange={setMachineId} /> : null}
-        <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={4} minWidth={0}>
-          {listing?.roots.map((root) => (
-            <Button key={root} kind="ghost" onPress={() => go(root)}>
-              {root}
-            </Button>
-          ))}
-          {listing !== undefined ? (
-            <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} ellip marginLeft={6} minWidth={0} flexShrink={1}>
-              {listing.dir}
-            </Txt>
-          ) : null}
+    <ModalBox staged={staged} onDismiss={onClose} label={title} width={isWeb ? "min(1000px, 94vw)" : "96%"}>
+      <View flexDirection="column" height={isWeb ? 600 : undefined} margin={-16} minHeight={0}>
+        <View paddingVertical={14} paddingHorizontal={20} {...(edge(t, { bottom: 1 }) as object)}>
+          <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }}>{title}</Txt>
         </View>
-        <ScrollView
-          {...(scrollbarProps(t) as object)}
-          style={{ maxHeight: 320, borderRadius: lengthToken(t, "control-radius", 7) as number, ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object) } as never}
-          contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10, gap: 1 } as never}
-        >
-          {rows.map((row, i) => (
-            <View key={row.key ?? i} {...(i < rows.length - 1 ? (edge(t, { bottom: 1 }) as object) : {})}>
-              {row}
-            </View>
-          ))}
-          {listing === undefined && error === undefined ? (
-            <Txt spec={hint} padding={10}>
-              Reading {machine.label}…
-            </Txt>
-          ) : null}
-          {listing?.entries.length === 0 ? (
-            <Txt spec={hint} padding={10}>
-              No folders here.
-            </Txt>
-          ) : null}
-        </ScrollView>
-        <Txt spec={{ ...hint, ...(error !== undefined ? { color: "bad" } : {}) }}>
-          {error !== undefined ? error : `Folders on ${machine.label}, read by its engine.${mode === "open" ? " A folder that is not a project yet can be set up there." : ""}`}
-        </Txt>
-        <View flexDirection="row" alignItems="center" gap={8}>
+        <View flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
+          <Column>
+            {shown !== undefined ? (
+              <MachinePlaces
+                machines={shown}
+                chosen={machine.id}
+                at={listing?.dir}
+                placesOf={placesOf}
+                onMachine={(id) => {
+                  setSelected(undefined);
+                  setJump(undefined);
+                  setMachineId(id);
+                }}
+                onPlace={(id, dir) => {
+                  if (id !== machine.id) setMachineId(id);
+                  setSelected(undefined);
+                  setJump((j) => ({ dir, n: (j?.n ?? 0) + 1 }));
+                }}
+              />
+            ) : (
+              browsable.map((m) => <PlaceRow key={m.id} label={m.label} chosen={m.id === machine.id} onPress={() => setMachineId(m.id)} />)
+            )}
+          </Column>
+          <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} gap={10} paddingVertical={14} paddingHorizontal={18}>
+            <ColumnBrowser
+              key={machine.id}
+              machineId={machine.id}
+              self={false}
+              label={machine.label}
+              start={machine.id === firstMachine.current ? startDir : undefined}
+              jump={jump}
+              chosen={selected}
+              chipOf={(e) => (groups.length > 0 && selfId !== undefined ? folderChip(e, machine.id, groups, selfId) : e.project ? "JaiRA project" : e.git ? "git" : undefined)}
+              onChoose={(f) => setSelected(f.path)}
+              onListing={(l) => {
+                setListing(l);
+                setRootsBy((was) => (was[machine.id]?.join("\n") === l.roots.join("\n") ? was : { ...was, [machine.id]: l.roots }));
+              }}
+              detail={(focus, open, narrow) => (
+                <FolderDetail
+                  focus={focus}
+                  narrow={narrow}
+                  pill={focus.project ? { text: "JaiRA project", tone: "accent" } : focus.git ? { text: "git", tone: "dim" } : undefined}
+                  lines={
+                    <Txt spec={{ voice: "app", scale: 11.5 / 12.5, lineHeight: 1.45, color: "dim" }}>
+                      {mode === "folder"
+                        ? "New workspaces go in a folder of their own inside it."
+                        : focus.project
+                          ? "Already a JaiRA project: it opens as it is."
+                          : focus.git
+                            ? "A git clone: it is set up as a project where it is."
+                            : "A folder: it is set up as a project where it is."}
+                    </Txt>
+                  }
+                  actions={
+                    open !== undefined ? (
+                      <Button kind="ghost" onPress={open}>
+                        Open ›
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+              hint={
+                <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }} padding={4}>
+                  {`Folders on ${machine.label}, read by its engine. A press chooses a folder; › or a second press goes in.${mode === "open" ? " A folder that is not a project yet can be set up there." : ""}`}
+                </Txt>
+              }
+            />
+          </View>
+        </View>
+        <View flexDirection="row" alignItems="center" gap={8} paddingVertical={12} paddingHorizontal={20} {...(edge(t, { top: 1 }) as object)}>
           <View flexGrow={1} />
           <Button kind="ghost" onPress={onClose}>
             Cancel
           </Button>
-          <Button kind="primary" disabled={chosen === undefined} onPress={() => chosen !== undefined && onChosen(machine, chosen)}>
-            {`${mode === "init" ? "Make a project" : mode === "folder" ? "Use" : "Open"} ${chosen !== undefined ? `${chosen.split(/[\\/]/).filter(Boolean).pop() ?? chosen} on ${machine.label}` : ""}`}
+          <Button kind="primary" disabled={target === undefined} onPress={() => target !== undefined && onChosen(machine, target)}>
+            {target !== undefined ? `${verb} ${targetName} on ${machine.label}` : verb}
           </Button>
         </View>
       </View>
     </ModalBox>
-  );
-}
-
-function FolderRow({ glyph, name, chip, project = false, onPress }: { glyph: string; name: string; chip?: string; project?: boolean; onPress: () => void }): JSX.Element {
-  const t = useTokens();
-  return (
-    <Press
-      onPress={onPress}
-      flexDirection="row"
-      alignItems="center"
-      gap={8}
-      paddingVertical={6}
-      paddingHorizontal={10}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : project ? t.v("tint-accent") : t.v("panel") })}
-    >
-      <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} width={12} flexShrink={0}>
-        {glyph}
-      </Txt>
-      <Txt spec={{ voice: "app", scale: 13 / 12.5 }} ellip flexGrow={1} flexShrink={1} minWidth={0}>
-        {name}
-      </Txt>
-      {chip !== undefined ? <Chip>{chip}</Chip> : null}
-    </Press>
   );
 }

@@ -183,6 +183,11 @@ export interface JairaUiState {
    * §4). Absent means yes; `false` lists each workspace on its own.
    */
   groupWorkspaces?: boolean;
+  /**
+   * The folders lately chosen in the Open dialog and the folder chooser, by machine id, the newest
+   * first: the `recent` places under a machine (the person, 2026-11-21). Six each at most.
+   */
+  recentFolders?: Record<string, string[]>;
 }
 
 export interface JairaSettings {
@@ -906,6 +911,13 @@ export function parseUiState(raw: unknown): JairaUiState {
     if (typeof at === "number" && Number.isFinite(at) && at > 0) ui.noticesRead[id] = at;
   }
   if (doc["groupWorkspaces"] === false) ui.groupWorkspaces = false;
+  const recent: Record<string, string[]> = {};
+  for (const [machine, dirs] of Object.entries(objectOf(doc["recentFolders"]))) {
+    if (!Array.isArray(dirs)) continue;
+    const kept = [...new Set(dirs.filter((d): d is string => typeof d === "string" && d.length > 0 && d.length < 4096))].slice(0, 6);
+    if (kept.length > 0) recent[machine] = kept;
+  }
+  if (Object.keys(recent).length > 0) ui.recentFolders = recent;
   return ui;
 }
 

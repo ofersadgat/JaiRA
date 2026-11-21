@@ -430,9 +430,14 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         machines={machinesView.machines.filter((m) => m.state === "online").map((m) => ({ id: m.id, label: m.label }))}
         initial={browsing.machineId}
         mode={browsing.mode}
+        view={machinesView}
+        groups={groups}
+        recent={ui.recentFolders}
         onClose={() => setBrowsing(null)}
         onChosen={(machine, dir) => {
           setBrowsing(null);
+          const was = dir.replace(/[\\/]+$/, "").replace(/[\\/][^\\/]*$/, "");
+          if (was !== "") actions.rememberFolder(machine.id, was);
           void actions.openOnMachine(machine.id, dir, browsing.mode);
         }}
       />
@@ -468,8 +473,11 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         onCreate={actions.createWorkspace}
         onCancelJob={actions.cancelWorkspace}
         onOpenThere={(machine, dir) => void actions.openOnMachine(machine, dir, "open")}
+        onJoin={(machine, dir, identity, how) => void actions.joinAndOpen(machine, dir, identity, how)}
         placesOf={bringPlaces}
         groups={groups}
+        recent={ui.recentFolders}
+        onRemember={actions.rememberFolder}
       />
     ) : null}
     {healthAt !== null ? (
