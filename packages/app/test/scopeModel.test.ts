@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { remoteProjectKey, type JairaUiState, type ProjectSummary } from "@jaira/shared";
 import { groupProjects } from "../src/renderer/workspaceGroups";
-import { chooseMachine, chooseWorkspace, crumbFit, inScope, machineOfKey, machinesOf, machinesWithout, placesOf, runTargetOf, scopeModes, scopeOf, SELF_MACHINE } from "../src/renderer/scopeModel";
+import { addTargetsOf, addWorkspaceQuestion, chooseMachine, chooseWorkspace, crumbFit, inScope, machineOfKey, machinesOf, machinesWithout, placesOf, runTargetOf, scopeModes, scopeOf, SELF_MACHINE } from "../src/renderer/scopeModel";
 
 const ID = "github.com/ofersadgat/jaira";
 const self = { id: "m-desk", label: "ofer-desk", state: "online" as const, self: true as const };
@@ -51,6 +51,43 @@ describe("the machine menu's Add rows", () => {
       { id: "m-old", label: "old-mini", online: false, self: false },
     ]);
     expect(machinesWithout(paired, new Set(machinesOf(group).map((m) => m.id))).map((m) => m.id)).toEqual(["m-old"]);
+  });
+});
+
+describe("Add a workspace, with no machine chosen", () => {
+  const paired = [
+    { id: "m-box", label: "build-box", online: true },
+    { id: "m-old", label: "old-mini", online: false },
+  ];
+
+  it("asks among every machine: this one first, then those holding a workspace, then the rest", () => {
+    expect(addTargetsOf(machinesOf(group), paired).map((m) => [m.id, m.holds])).toEqual([
+      [SELF_MACHINE, 2],
+      ["m-box", 1],
+      ["m-old", 0],
+    ]);
+    const lone = groupProjects([onBox], true)[0]!;
+    expect(addTargetsOf(machinesOf(lone), paired).map((m) => [m.label, m.holds])).toEqual([
+      ["This machine", 0],
+      ["build-box", 1],
+      ["old-mini", 0],
+    ]);
+  });
+
+  it("adds on the machine picked, dims one that is offline, and ends with the full form", () => {
+    const picked: string[] = [];
+    let full = 0;
+    const items = addWorkspaceQuestion(addTargetsOf(machinesOf(group), paired), (m) => picked.push(m.id), () => full++);
+    expect(items.map((i) => [i.label, i.note ?? "", i.disabled === true])).toEqual([
+      ["ofer-desk", "this machine · 2 workspaces", false],
+      ["build-box", "1 workspace", false],
+      ["old-mini", "offline · no workspace", true],
+      ["More options…", "", false],
+    ]);
+    items[1]!.onSelect();
+    items[3]!.onSelect();
+    expect(picked).toEqual(["m-box"]);
+    expect(full).toBe(1);
   });
 });
 

@@ -139,6 +139,7 @@
     "plugin:list",
     "plugin:remove",
     "project:choose",
+    "project:close",
     "project:current",
     "project:init",
     "project:inspect",

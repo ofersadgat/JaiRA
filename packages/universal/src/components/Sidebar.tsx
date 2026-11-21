@@ -3,7 +3,7 @@ import { View, isWeb } from "@tamagui/core";
 import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
 import type { SidebarAct, SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { SIDEBAR_RAIL } from "@jaira/ui/uiState";
-import { crumbFit, machinesWithout, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
+import { addTargetsOf, addWorkspaceQuestion, crumbFit, machinesWithout, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
@@ -72,6 +72,8 @@ export type SidebarProps = {
   onTheme: (theme: "light" | "dark") => void;
   onChooseProject: (mode: "open" | "init") => void;
   onProjectSettings: (project: SidebarProject) => void;
+  /** A project's own verbs, at the point its tile or its name was right-clicked (held, on a touch screen). */
+  onProjectMenu?: (project: SidebarProject, at: { x: number; y: number }) => void;
   /** What stands over Settings in the rail (`true`), and at the panel's foot (`false`). */
   update?: ((collapsed: boolean) => ReactNode) | undefined;
   /** Paired machines a project can be opened or made on (decision 0013 §8). */
@@ -156,6 +158,7 @@ function Column({
   onTheme,
   onChooseProject,
   onProjectSettings,
+  onProjectMenu,
   update,
   machines = [],
   onBrowse,
@@ -233,6 +236,7 @@ function Column({
       width={panelWidth}
       paired={machines}
       {...(onAddWorkspace !== undefined ? { onAddWorkspace } : {})}
+      {...(onProjectMenu !== undefined ? { onMenu: (at: { x: number; y: number }) => onProjectMenu(project, at) } : {})}
     />
   ) : (
     <RootPane room={room ?? roots.find((v) => v.id === view) ?? roots[0]} />
@@ -285,7 +289,14 @@ function Column({
             const on = p.project === at;
             return (
               <View key={p.project} alignItems="center" gap={2} flexShrink={0}>
-                <RailItem on={on && !settingsOpen && room === undefined} label={p.label} caption={p.label} title={p.project} onPress={() => goProject(p)}>
+                <RailItem
+                  on={on && !settingsOpen && room === undefined}
+                  label={p.label}
+                  caption={p.label}
+                  title={p.project}
+                  onPress={() => goProject(p)}
+                  {...(onProjectMenu !== undefined ? { onMenu: (at: { x: number; y: number }) => onProjectMenu(p, at) } : {})}
+                >
                   {() => <ProjectTile p={p} on={on} />}
                 </RailItem>
                 {collapsed && on
@@ -348,6 +359,7 @@ function RailItem({
   onPress,
   disabled,
   haspopup = false,
+  onMenu,
   children,
 }: {
   on: boolean;
@@ -358,12 +370,15 @@ function RailItem({
   onPress: (e: unknown) => void;
   disabled?: boolean;
   haspopup?: boolean;
+  /** Its own menu, at the point it was right-clicked or held. */
+  onMenu?: ((at: { x: number; y: number }) => void) | undefined;
   children: (on: boolean) => ReactNode;
 }): JSX.Element {
   const t = useTokens();
   return (
     <Press
       onPress={onPress}
+      {...menuProps(onMenu)}
       label={label}
       title={title ?? label}
       {...((on ? { "aria-current": "page" } : {}) as object)}
@@ -386,6 +401,22 @@ function RailItem({
       <Badge counts={counts} />
     </Press>
   );
+}
+
+/** A control's own menu: on a right-click (web) and on a hold (a touch screen), at the pointer. */
+function menuProps(onMenu: ((at: { x: number; y: number }) => void) | undefined): Record<string, unknown> {
+  if (onMenu === undefined) return {};
+  return {
+    onLongPress: (e: { nativeEvent: { pageX: number; pageY: number } }) => onMenu({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }),
+    ...(isWeb
+      ? {
+          onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {
+            e.preventDefault();
+            onMenu({ x: e.clientX, y: e.clientY });
+          },
+        }
+      : {}),
+  };
 }
 
 /** A root room's icon, ringed while it is the room you are in. */
@@ -561,9 +592,11 @@ function ProjectPane({
   width,
   paired,
   onAddWorkspace,
+  onMenu,
 }: {
   paired: NonNullable<SidebarProps["machines"]>;
   onAddWorkspace?: (machineId?: string, at?: { x: number; y: number }) => void;
+  onMenu?: (at: { x: number; y: number }) => void;
   project: SidebarProject;
   views: readonly SidebarView[];
   view: string;
@@ -579,7 +612,7 @@ function ProjectPane({
   return (
     <>
       <PaneHead acts={[settingsAct]}>
-        <Crumb project={project} scope={scope} width={width - 12 - 8 - ACT_WIDTH - 8} paired={paired} {...(onAddWorkspace !== undefined ? { onAddWorkspace } : {})} />
+        <Crumb project={project} scope={scope} width={width - 12 - 8 - ACT_WIDTH - 8} paired={paired} {...(onAddWorkspace !== undefined ? { onAddWorkspace } : {})} {...(onMenu !== undefined ? { onMenu } : {})} />
       </PaneHead>
       <View {...(isWeb ? { role: "tablist" } : {})} flexDirection="row" gap={2} padding={2} marginHorizontal={8} marginBottom={6} borderRadius={8} flexShrink={0} backgroundColor={t.v("panel-3") as never}>
         {views.map((v) => {
@@ -722,12 +755,15 @@ function Crumb({
   width,
   paired = [],
   onAddWorkspace,
+  onMenu,
 }: {
   project: SidebarProject;
   scope: SidebarProps["scope"];
   width: number;
   paired?: NonNullable<SidebarProps["machines"]>;
   onAddWorkspace?: (machineId?: string, at?: { x: number; y: number }) => void;
+  /** The project's own verbs, on a right-click of its name. */
+  onMenu?: (at: { x: number; y: number }) => void;
 }): JSX.Element {
   const t = useTokens();
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -753,9 +789,11 @@ function Crumb({
         ];
   if (scope === undefined) {
     return (
-      <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
-        {project.label}
-      </Txt>
+      <View flexShrink={1} minWidth={0} {...(menuProps(onMenu) as object)}>
+        <Txt register="data-title" ellip {...({ title: project.project } as object)}>
+          {project.label}
+        </Txt>
+      </View>
     );
   }
   const { machines, scope: now, onScope } = scope;
@@ -787,10 +825,36 @@ function Crumb({
       ],
     });
   };
+  // Add a workspace (the person, 2026-11-20): on the machine the pill is narrowed to, else asked which.
+  const addTo = (m: { id: string; self: boolean }, at: { x: number; y: number }): void => onAddWorkspace?.(m.self ? SELF_ADD : m.id, at);
+  const addWorkspace = (at: { x: number; y: number }): MenuItem[] =>
+    onAddWorkspace === undefined
+      ? []
+      : [
+          machine !== undefined
+            ? {
+                label: "Add a workspace…",
+                note: `on ${machine.label}`,
+                separator: true,
+                disabled: machine.state !== "online",
+                onSelect: () => addTo(machine, at),
+              }
+            : {
+                label: "Add a workspace…",
+                separator: true,
+                onSelect: () =>
+                  setMenu({
+                    ...at,
+                    title: "Add a workspace on which machine?",
+                    items: addWorkspaceQuestion(addTargetsOf(machines, paired), (m) => addTo(m, at), () => onAddWorkspace()),
+                  }),
+              },
+        ];
   const workspaceMenu = (e: unknown): void => {
     const shown = machine === undefined ? machines : [machine];
+    const at = anchor(e);
     setMenu({
-      ...anchor(e),
+      ...at,
       items: [
         { label: "All workspaces", checked: now.workspace === undefined, ...(machine !== undefined ? { note: `on ${machine.label}` } : {}), onSelect: () => onScope(machine !== undefined ? { machine: machine.id } : {}) },
         ...shown.flatMap((m, i) =>
@@ -802,6 +866,7 @@ function Crumb({
             onSelect: () => onScope({ machine: m.id, workspace: w.project }),
           })),
         ),
+        ...addWorkspace(at),
       ],
     });
   };
@@ -830,6 +895,7 @@ function Crumb({
     <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={2} style={NO_DRAG as never} {...((isWeb ? { overflow: "hidden" } : {}) as object)}>
       <Press
         onPress={() => onScope({})}
+        {...menuProps(onMenu)}
         disabled={!narrowed}
         label={narrowed ? `${project.label}: show every machine` : project.label}
         title={project.project}

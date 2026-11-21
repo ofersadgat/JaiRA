@@ -4285,6 +4285,25 @@ export class AppService {
   }
 
   /**
+   * Take a workspace out of the app (`project:close`, the project menu's Delete): forgotten first, so a
+   * close that fails half way does not come back at the next start, then its session closed as a quit
+   * closes it — a run under way is set down, and picked up where it was when the folder is opened
+   * again. Nothing on disk is touched. The shared root and JaiRA's own project are not the person's to
+   * take out: every window stands on them.
+   */
+  async closeProject(project: string): Promise<{ closed: boolean }> {
+    const key = sessionKey(project);
+    const session = this.sessions.get(key);
+    if (session !== undefined && session.kind !== "user") throw this.refusal("project", `${session.dir} is JaiRA's own, and stays open`);
+    const kept = this.readSettings().projects;
+    if (kept.some((at) => sessionKey(at) === key)) this.writeSettings({ projects: kept.filter((at) => sessionKey(at) !== key) });
+    if (session === undefined) return { closed: false };
+    await this.closeSession(key);
+    this.publish({ type: "store:invalidate", scope: "tasks" });
+    return { closed: true };
+  }
+
+  /**
    * Recover what a crashed run's DELEGATED calls actually said, from the agent's own session files.
    *
    * The streamed partial in the record is bounded by the last flush; the agent's file is not
@@ -5533,8 +5552,12 @@ export class AppService {
     // What git ignores is named and not walked (`IgnoredPaths`): the folders a checkout piles up —
     // builds, caches, worktrees — are listed when they are opened (`filesList`).
     // Every project's ignored folders asked of git at once, and nothing else held up while it answers.
-    const ignored = await Promise.all(sessions.map((session) => gitIgnoredPaths(session.project.paths.projectDir)));
-    const trees = sessions.map((session, i) => fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config), ignored[i]));
+    const asked = await Promise.all(sessions.map(async (session) => ({ session, ignored: await gitIgnoredPaths(session.project.paths.projectDir) })));
+    // Only what is still open once git has answered: a project taken out meanwhile (`closeProject`)
+    // has a closed database, and reading it threw for the whole tree.
+    const still = asked.filter(({ session }) => this.sessions.get(session.key) === session);
+    if (still.length === 0) return baseTree();
+    const trees = still.map(({ session, ignored }) => fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config), ignored));
     // What ships closes every tree (decision 0006): it is behind all of them, it has no sidebar row
     // to be reached by, and it is where an override starts. Listed ONCE, with its `shadowed` marks
     // reduced across the projects shown, as the shared root's were when it was listed here.
@@ -5542,7 +5565,7 @@ export class AppService {
     // The settings' newer layers (decision 0023, amended 2026-11-18): each project's own two after it —
     // the project on this machine, you in the project — and Just you and this machine once, their marks
     // reduced across the projects shown as what ships' are. A replica's are its owner's, not here.
-    const local = trees.filter((_, i) => parseRemoteProjectKey(sessions[i]!.key) === undefined);
+    const local = trees.filter((_, i) => parseRemoteProjectKey(still[i]!.session.key) === undefined);
     const once = (layer: WorkflowLayer): FileRoot[] => {
       const root = local[0]?.roots.find((one) => one.layer === layer);
       return root === undefined ? [] : [{ ...root, nodes: layerShadows(local, layer) }];
@@ -5551,7 +5574,7 @@ export class AppService {
       roots: [
         ...trees.flatMap((tree, i) =>
           (["project", "projectMachine", "projectYou"] as const).flatMap((layer) =>
-            tree.roots.filter((root) => root.layer === layer && (layer === "project" || parseRemoteProjectKey(sessions[i]!.key) === undefined)),
+            tree.roots.filter((root) => root.layer === layer && (layer === "project" || parseRemoteProjectKey(still[i]!.session.key) === undefined)),
           ),
         ),
         ...once("you"),

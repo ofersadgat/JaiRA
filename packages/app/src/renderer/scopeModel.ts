@@ -10,6 +10,7 @@
  */
 import { parseRemoteProjectKey, projectNameOf, type JairaUiState, type ProjectSummary, type RunTarget } from "@jaira/shared/browser";
 import { dirOf, type ProjectGroup } from "./workspaceGroups";
+import type { MenuItem } from "./menuTypes";
 
 /** The machine id a workspace this machine holds is filed under. */
 export const SELF_MACHINE = "self";
@@ -182,6 +183,40 @@ export function machinesWithout(paired: readonly MenuMachine[], holding: Readonl
   return [
     ...(holding.has(SELF_MACHINE) ? [] : [{ id: SELF_MACHINE, label: "This machine", online: true, self: true }]),
     ...paired.filter((m) => !holding.has(m.id)).map((m) => ({ ...m, self: false })),
+  ];
+}
+
+/** A machine a workspace can be added on, as "Add a workspace on which machine?" lists it. */
+export interface AddTarget extends AddableMachine {
+  /** How many of the project's workspaces it holds already. */
+  holds: number;
+}
+
+/**
+ * Every machine a workspace of the project could be added on: this machine first, then the machines
+ * that hold one of its workspaces, then the other paired ones — each with how many it holds.
+ */
+export function addTargetsOf(machines: readonly ScopeMachine[], paired: readonly MenuMachine[]): AddTarget[] {
+  const holding = machines.map((m): AddTarget => ({ id: m.id, label: m.label, online: m.state === "online", self: m.self, holds: m.workspaces.length }));
+  const rest = machinesWithout(paired, new Set(machines.map((m) => m.id))).map((m): AddTarget => ({ ...m, holds: 0 }));
+  return [...holding.filter((m) => m.self), ...rest.filter((m) => m.self), ...holding.filter((m) => !m.self), ...rest.filter((m) => !m.self)];
+}
+
+/**
+ * The question asked when a workspace is added with no machine chosen: each machine a row (one that is
+ * offline dimmed), choosing it adds there; the last row opens the full form at Where it goes.
+ */
+export function addWorkspaceQuestion(targets: readonly AddTarget[], onPick: (target: AddTarget) => void, onFull: () => void): MenuItem[] {
+  return [
+    ...targets.map(
+      (m): MenuItem => ({
+        label: m.label,
+        note: [m.self ? "this machine" : undefined, m.online ? undefined : "offline", m.holds === 0 ? "no workspace" : `${m.holds} workspace${m.holds === 1 ? "" : "s"}`].filter((x) => x !== undefined).join(" · "),
+        disabled: !m.online,
+        onSelect: () => onPick(m),
+      }),
+    ),
+    { label: "More options…", separator: true, onSelect: onFull },
   ];
 }
 

@@ -1807,6 +1807,13 @@ export interface IpcContract {
   "project:inspect": { request: { dir: string; machine?: string }; response: { dir: string; exists: boolean; project: boolean; open: boolean } };
   "project:current": { request: void; response: { dir: string } | null };
   /**
+   * Take a workspace out of the app (the project menu's Delete): its session is closed as a quit closes
+   * it — a run under way is set down and picked up when the folder is opened again — and it is
+   * forgotten, so the next start does not open it. Its folder and its history stay on disk. Another
+   * machine's workspace is closed and forgotten there.
+   */
+  "project:close": { request: { project: string }; response: { closed: boolean } };
+  /**
    * One project's tasks. Absent `project` ⇒ the focused one, and no project open is an ERROR.
    *
    * `project` is how the Files view reads a shared workflow's runs: those are recorded in the
@@ -2830,6 +2837,7 @@ export const IPC_CHANNELS = [
   "project:choose",
   "project:inspect",
   "project:current",
+  "project:close",
   "task:list",
   "task:all",
   "sync:since",

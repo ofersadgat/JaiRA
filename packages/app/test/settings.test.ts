@@ -315,6 +315,42 @@ describe("remembering the projects that were open", () => {
     }
   });
 
+  it("takes a project out on Delete: closed, forgotten, not re-opened, and its folder left as it was", async () => {
+    const second = mkdtempSync(join(tmpdir(), "jaira-app-delete-"));
+    try {
+      initProject(second, testHome());
+      await service.open(dir);
+      await service.open(second);
+
+      expect(await service.closeProject(second)).toEqual({ closed: true });
+      expect(service.readSettings().projects).toEqual([dir]);
+      expect(service.listProjects().map((p) => p.project)).not.toContain(second);
+      expect(service.inspect(second)).toMatchObject({ exists: true, project: true, open: false });
+      // Twice is no error: nothing open, nothing remembered.
+      expect(await service.closeProject(second)).toEqual({ closed: false });
+      await service.close();
+
+      const restarted = new AppService({ baseDir, watchWorkflows: false, keychain: fakeKeychain() });
+      try {
+        expect(await restarted.restore()).toEqual({ opened: [dir], forgotten: [] });
+        // Opened again, it is back.
+        await restarted.open(second);
+        expect(restarted.readSettings().projects).toEqual([dir, second]);
+      } finally {
+        await restarted.close();
+      }
+    } finally {
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it("will not take out the shared root, which every window stands on", async () => {
+    await service.open(dir);
+    const shared = service.listProjects().find((p) => p.kind === "shared");
+    expect(shared).toBeDefined();
+    await expect(service.closeProject(shared!.project)).rejects.toThrow(/JaiRA's own/);
+  });
+
   it("keeps a project whose whole filesystem is missing, rather than forgetting a drive that is offline", async () => {
     // The distinction `existsSync` on the project alone cannot draw: an unmounted drive and a
     // deleted folder both answer "no". Asking the PARENT separates them — a project deleted out of a

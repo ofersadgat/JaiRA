@@ -3021,6 +3021,23 @@ export function useApp() {
           fail(e);
         }
       },
+      /**
+       * Take a project out of the app (the project menu's Delete): each of its workspaces closed and
+       * forgotten on the machine that holds it, its folders left on disk. A window standing in it goes
+       * to the root. Each workspace is its own request: one on a machine that is offline is said, and
+       * the rest still go.
+       */
+      removeProject: async (workspaces: readonly string[]) => {
+        const was = ref.current.at;
+        const to = was !== null && workspaces.includes(was) ? null : was;
+        if (to !== was) actionsRef.current.standOn(to);
+        const done = await Promise.allSettled(workspaces.map((project) => invoke("project:close", { project })));
+        const failed = done.flatMap((d) => (d.status === "rejected" ? [d.reason as unknown] : []));
+        await refreshAll();
+        // `refreshAll` sets the address to the engine's last-opened project: put it back where it goes.
+        actionsRef.current.standOn(to);
+        if (failed.length > 0) fail(failed[0]);
+      },
       /** Send a task waiting for a workspace to one, by hand (decision 0013 §5, ruled "4a"). */
       runQueuedOn: async (taskId: string, project: string, target: string) => {
         try {

@@ -132,6 +132,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       service.chooseProject(request?.mode ?? "open")) as Handler,
     "project:inspect": ((request: { dir: string }) => service.inspect(request.dir)) as Handler,
     "project:current": (() => service.current()) as Handler,
+    "project:close": ((request: { project: string }) => service.closeProject(request.project)) as Handler,
     "task:list": ((request: { project?: string } | undefined) => service.listTasks(request?.project)) as Handler,
     "task:detail": ((request: { taskId: string; project?: string }) => service.taskDetail(request.taskId, request.project)) as Handler,
     "task:create": ((request: Parameters<typeof service.createTask>[0]) => service.createTask(request)) as Handler,

@@ -427,6 +427,15 @@ export class App {
     await sleep(150);
   }
 
+  /** A right-click at a point, as a mouse makes one: the browser raises `contextmenu` there. */
+  async rightClickAt(x: number, y: number): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await this.send("Input.dispatchMouseEvent", { type, x, y, button: "right", clickCount: 1, buttons: type === "mousePressed" ? 2 : 0 });
+    }
+    await sleep(150);
+  }
+
   /**
    * Press a key, with REAL input events — the only way to reach an editor keybinding.
    *

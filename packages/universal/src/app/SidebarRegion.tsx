@@ -17,7 +17,9 @@ import { TaskListPanel } from "../components/tasks/TaskListPanel";
 import { AskDialog } from "../components/files/AskDialog";
 import { copyText } from "../clipboard";
 import { keepDraft } from "@jaira/ui/composerDrafts";
-import { homeOf, inScope, machineOf, machinesOf, placesOf, runTargetOf, scopeModes, scopeOf, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
+import { addTargetsOf, addWorkspaceQuestion, homeOf, inScope, machineOf, machinesOf, placesOf, runTargetOf, scopeModes, scopeOf, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
+import { projectMenuItems, removeAsk } from "@jaira/ui/projectMenuModel";
+import type { ProjectGroup } from "@jaira/ui/workspaceGroups";
 import type { RunTarget } from "@jaira/shared/browser";
 import { CHAT_GROUPS, CHAT_SORTS, CHAT_WHENS, CHAT_WHEN_MODE, PINNED_MODE, pinnedOf, withPinned, type ChatGroup } from "@jaira/ui/chatListModel";
 import { settingsPageProblems } from "@jaira/ui/settingsSections";
@@ -143,6 +145,70 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
             if (to !== undefined && to !== state.at) actions.standOn(to);
           },
         };
+  /** Where another workspace of a project is made from (decision 0027): its remote, else one of its workspaces. */
+  const sourceOf = (g: ProjectGroup) => sourceForProject(g.members, g.identity !== undefined ? `https://${g.identity}.git` : undefined, machinesView?.self.id);
+  /**
+   * Another workspace of a project (decision 0027): its remote, cloned — or, with none, a copy of one
+   * of its workspaces — on the machine named (Add's card, where the menu stood), or on one chosen in
+   * the full form.
+   */
+  const addWorkspace = (g: ProjectGroup, machineId?: string, at?: { x: number; y: number }): void => {
+    const selfId = machinesView?.self.id;
+    const source = sourceOf(g);
+    if (source === undefined) return;
+    const machine = machineId === SELF_ADD ? selfId : machineId;
+    if (machine !== undefined && at !== undefined) setAdding({ at: pointRect(at.x, at.y), name: g.label, source, machine });
+    else actions.openProjectDialog({ mode: "add", name: g.label, source, ...(machine !== undefined ? { machine, step: "how" as const } : { step: "where" as const }) });
+  };
+  const paired = (machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }));
+  /** Stand in a project where its title was left: the workspace it is narrowed to, else its machine's first. */
+  const goTo = (g: ProjectGroup): void => {
+    const kept = scopeOf(ui, g);
+    const to = kept.workspace ?? (kept.machine !== undefined ? g.members.find((m) => machineOf(m) === kept.machine)?.project : undefined);
+    actions.standOn(to ?? g.key);
+  };
+  // A project's own menu: its tile in the rail or its name at the panel's head, right-clicked or held.
+  const [projectMenu, setProjectMenu] = useState<MenuAt | null>(null);
+  const [projectAsk, setProjectAsk] = useState<AskSpec | null>(null);
+  const openProjectMenu = (g: ProjectGroup, at: { x: number; y: number }): void => {
+    const unseen = sidebarProjectsOf([g], projectHues, ui.seen, actions.markProjectSeen)[0];
+    setProjectMenu({
+      ...at,
+      title: g.label,
+      items: projectMenuItems(g, state.at, {
+        newChat: () => {
+          goTo(g);
+          startChat(undefined);
+        },
+        ...(g.kind === "user" && sourceOf(g) !== undefined
+          ? {
+              addWorkspace: () =>
+                setProjectMenu({
+                  ...at,
+                  title: "Add a workspace on which machine?",
+                  items: addWorkspaceQuestion(
+                    addTargetsOf(machinesOf(g), paired),
+                    (m) => addWorkspace(g, m.self ? SELF_ADD : m.id, at),
+                    () => addWorkspace(g),
+                  ),
+                }),
+            }
+          : {}),
+        settings: () => {
+          actions.standOn(g.key);
+          actions.setConfigLayer(g.kind === "shared" ? "base" : "project");
+          actions.setView("settings");
+        },
+        reveal: (dir) => void actions.revealFile(dir),
+        copy: (text) => void copyText(text),
+        ...(unseen !== undefined && Object.values(unseen.counts).some((n) => typeof n === "number" && n > 0) ? { markSeen: () => unseen.onSeen?.() } : {}),
+        ...(g.kind === "user" ? { remove: () => setProjectAsk(removeAsk(g, () => {
+          setProjectAsk(null);
+          void actions.removeProject(g.members.map((m) => m.project));
+        })) } : {}),
+      }),
+    });
+  };
   const find = (id: string): SidebarAct => ({
     id: "find",
     glyph: "⌕",
@@ -318,29 +384,23 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
       // never disagree.
       onProject={(project) => {
         const g = project === null ? undefined : groups.find((x) => x.key === project);
-        const kept = g === undefined ? {} : scopeOf(ui, g);
-        const to = kept.workspace ?? (kept.machine !== undefined ? g?.members.find((m) => machineOf(m) === kept.machine)?.project : undefined);
-        actions.standOn(to ?? project);
+        if (g !== undefined) goTo(g);
+        else actions.standOn(project);
       }}
       busy={state.busy}
       theme={appearance.scheme}
       onTheme={actions.setTheme}
       onChooseProject={(mode) => void actions.chooseProject(mode)}
-      machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
+      machines={paired}
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
       onOpenProject={() => actions.openProjectDialog({ mode: "open" })}
       onAddWorkspace={(machineId, at) => {
-        // Another workspace of the open project (decision 0027): its remote, cloned — or, with none, a
-        // copy of one of its workspaces — on the machine whose Add was pressed (Add's card, where the
-        // menu stood), or on one chosen in the full form.
         const g = groupOf(groups, state.at);
-        if (g === undefined) return;
-        const selfId = machinesView?.self.id;
-        const source = sourceForProject(g.members, g.identity !== undefined ? `https://${g.identity}.git` : undefined, selfId);
-        if (source === undefined) return;
-        const machine = machineId === SELF_ADD ? selfId : machineId;
-        if (machine !== undefined && at !== undefined) setAdding({ at: pointRect(at.x, at.y), name: g.label, source, machine });
-        else actions.openProjectDialog({ mode: "add", name: g.label, source, ...(machine !== undefined ? { machine, step: "how" as const } : { step: "where" as const }) });
+        if (g !== undefined) addWorkspace(g, machineId, at);
+      }}
+      onProjectMenu={(p, at) => {
+        const g = groups.find((x) => x.key === p.project);
+        if (g !== undefined) openProjectMenu(g, at);
       }}
       // The Update row above Settings (`UpdateRow`). It opens About, where a failure or a download is
       // said in full — with the release notes open, from its menu (`aboutNotes`).
@@ -360,6 +420,8 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
     {startMenu !== null ? <ContextMenu anchor={startMenu} onClose={() => setStartMenu(null)} /> : null}
+    {projectMenu !== null ? <ContextMenu anchor={projectMenu} onClose={() => setProjectMenu(null)} /> : null}
+    {projectAsk !== null ? <AskDialog spec={projectAsk} onCancel={() => setProjectAsk(null)} /> : null}
     {/* The window's right-click menu for content (web only): mounted with the sidebar, which the shell
         always draws, so it is there once for the window whatever room is open. */}
     <PointerMenus />
