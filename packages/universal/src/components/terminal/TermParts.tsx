@@ -12,7 +12,7 @@ import { Icon } from "../panel/Icon";
 
 /**
  * The pieces of a terminal's screen (decision 0028), shared by the agents' terminal (`TerminalView`)
- * and an install's output in Settings → Connections (`InstallLog.tsx`): the command line taken apart,
+ * and the logs drawn as one (`TermLog.tsx`): the command line taken apart,
  * a line of the screen in its colours, and the Following and Copy buttons over it.
  */
 
@@ -41,11 +41,12 @@ export function CommandLine({ command, dialect, t }: { command: string; dialect:
   );
 }
 
-/** One line of the screen, its spans in their colours. */
-export function ScreenLine({ line, t }: { line: TermLine; t: Tokens }): JSX.Element {
+/** One line of the screen, its spans in their colours: clipped at the edge as a terminal's, or (`wrap`) wrapped. */
+export function ScreenLine({ line, t, wrap = false }: { line: TermLine; t: Tokens; wrap?: boolean }): JSX.Element {
   const base = font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object;
+  const shape = wrap ? (isWeb ? { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } : {}) : isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 };
   return (
-    <Text {...base} color={TERM_INK.text} {...(isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 })}>
+    <Text {...base} color={TERM_INK.text} minWidth={0} {...(shape as object)}>
       {line.length === 0
         ? " "
         : line.map((span, i) => (

@@ -70,6 +70,24 @@ export function appendJobText(job: WorkspaceJob, text: string): WorkspaceJob {
   return { ...job, text: all.length > KEEP ? all.slice(all.length - KEEP) : all };
 }
 
+/**
+ * A job's output as its log draws it (`TermLog`): a block a command — each `$ …` line the service
+ * printed starts one — and what was said before the first in a block of its own.
+ */
+export function jobBlocks(text: string): { command?: string; text: string }[] {
+  const blocks: { command?: string; text: string }[] = [{ text: "" }];
+  const commandLine = /^\$ (.*?)\r?(?:\n|$)/gm;
+  let from = 0;
+  for (let match = commandLine.exec(text); match !== null; match = commandLine.exec(text)) {
+    blocks[blocks.length - 1]!.text += text.slice(from, match.index);
+    blocks.push({ command: match[1]!, text: "" });
+    from = commandLine.lastIndex;
+    if (match[0].length === 0) commandLine.lastIndex++;
+  }
+  blocks[blocks.length - 1]!.text += text.slice(from);
+  return blocks.filter((block, i) => i > 0 || block.text.length > 0);
+}
+
 /** A step event folded into the job: a running step is replaced by how it ended. */
 export function withStep(job: WorkspaceJob, step: WorkspaceStepEvent): WorkspaceJob {
   const steps = job.steps.filter((s) => s.index !== step.index);

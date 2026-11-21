@@ -8,6 +8,7 @@ import {
   bringPlacesOf,
   folderNote,
   forgeOfUrl,
+  jobBlocks,
   needWords,
   placeGroupsOf,
   planSentence,
@@ -198,5 +199,18 @@ describe("Add's card, in four lines", () => {
     const bare = addLines(forge, "build-01", plan({ bring: [] }), undefined);
     expect(bare.bring).toEqual({ text: "nothing git ignores", patterns: [] });
     expect(bare.then).toEqual({ text: "nothing to set up", tone: "dim", count: 0 });
+  });
+});
+
+describe("a job's output as its log draws it", () => {
+  it("starts a block at each command line, keeping what was said before the first and the progress redrawn", () => {
+    const text = "Packing /src on mac…\n\r  9%\r  100%\nCopying /src\n$ git clone --branch x git@h:o/r.git C:\\Code\\r\nCloning into 'C:\\Code\\r'...\nfatal: no\nTrying again.\n$ git clone https://h/o/r.git C:\\Code\\r\n";
+    expect(jobBlocks(text)).toEqual([
+      { text: "Packing /src on mac…\n\r  9%\r  100%\nCopying /src\n" },
+      { command: "git clone --branch x git@h:o/r.git C:\\Code\\r", text: "Cloning into 'C:\\Code\\r'...\nfatal: no\nTrying again.\n" },
+      { command: "git clone https://h/o/r.git C:\\Code\\r", text: "" },
+    ]);
+    expect(jobBlocks("")).toEqual([]);
+    expect(jobBlocks("$ a\r\n$ b")).toEqual([{ command: "a", text: "" }, { command: "b", text: "" }]);
   });
 });

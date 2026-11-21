@@ -42,7 +42,7 @@ async function git(args: string[], cwd: string | undefined, options: MakeOptions
   const result = await options.exec.run("git", args, {
     ...(cwd !== undefined ? { cwd } : {}),
     env,
-    stdin: "",
+    stdin: extra.stdin ?? "",
     ...(options.abortSignal !== undefined ? { abortSignal: options.abortSignal } : {}),
     ...(extra.onOutput !== undefined ? { onOutput: extra.onOutput } : {}),
     ...(extra.timeoutMs !== undefined ? { timeoutMs: extra.timeoutMs } : {}),
@@ -176,6 +176,12 @@ export interface CheckoutPack {
   untracked: { path: string; data: string; mode: number }[];
   bytes: number;
   /**
+   * The upstream the source's branch follows (`origin/task/x`) when the remote no longer has it — deleted
+   * there after a merge, the source's own copy of it never pruned. `state.upstream` is then absent, and
+   * the commits counted and bundled are those the remote's branches lack.
+   */
+  upstreamGone?: string;
+  /**
    * The host keys the source trusts for its remote's ssh host (`type blob`, from its `known_hosts`) —
    * public, and what lets a machine that has never seen the host trust it (`sshLadder`).
    */
@@ -190,6 +196,18 @@ export async function packCheckout(dir: string, options: MakeOptions): Promise<C
   const state = await checkoutState(dir, options);
   const hostKeys = await trustedHostKeys(state.remote, options.exec);
   const pack: CheckoutPack = { format: 1, state, untracked: [], bytes: 0, ...(hostKeys.length > 0 ? { hostKeys } : {}) };
+  // What the source's own refs say the remote has can be stale: a branch deleted there after a merge is
+  // still `origin/…` here until a fetch prunes it. Where the remote answers, its branches bound the bundle.
+  const there = state.remote !== undefined ? await remoteHeads(dir, state.remote, options) : undefined;
+  if (there !== undefined) {
+    const upstreamBranch = state.upstream?.replace(/^[^/]+\//, "");
+    if (state.upstream !== undefined && upstreamBranch !== undefined && !there.heads.has(upstreamBranch)) {
+      pack.upstreamGone = state.upstream;
+      delete state.upstream;
+    }
+    const count = await git(["rev-list", "--count", "HEAD", "--stdin"], dir, options, { stdin: there.bases.map((sha) => `^${sha}\n`).join("") });
+    if (count.code === 0) state.ahead = Number(count.stdout.trim()) || 0;
+  }
   const scratch = await mkdtemp(join(tmpdir(), "jaira-pack-"));
   try {
     const bundleFile = join(scratch, "commits.bundle");
@@ -198,6 +216,9 @@ export async function packCheckout(dir: string, options: MakeOptions): Promise<C
     if (state.remote === undefined) {
       await gitOk(["bundle", "create", bundleFile, "--all"], dir, options, "packing the commits");
       pack.bundleAll = true;
+      made = true;
+    } else if (state.ahead > 0 && there !== undefined) {
+      await gitOk(["bundle", "create", bundleFile, ref, "--stdin"], dir, options, "packing the commits the remote lacks", { stdin: there.bases.map((sha) => `^${sha}\n`).join("") });
       made = true;
     } else if (state.ahead > 0) {
       const not = state.upstream !== undefined ? [`^${state.upstream}`] : ["--not", "--remotes"];
@@ -228,6 +249,34 @@ export async function packCheckout(dir: string, options: MakeOptions): Promise<C
 }
 
 /**
+ * The remote's branches as it answers now (`git ls-remote --heads`), and those of their commits this
+ * checkout has — what a bundle can be bounded by, since a clone of the remote has them all. Undefined
+ * when the remote cannot be asked from here: the source's tracking refs are trusted then.
+ */
+async function remoteHeads(dir: string, remote: string, options: MakeOptions): Promise<{ heads: Map<string, string>; bases: string[] } | undefined> {
+  const listed = await git(["ls-remote", "--heads", remote], dir, options, { timeoutMs: 30_000 });
+  if (listed.aborted || listed.code !== 0) return undefined;
+  const heads = new Map<string, string>();
+  for (const line of listed.stdout.split(/\r?\n/)) {
+    const match = /^([0-9a-f]{40,64})\trefs\/heads\/(.+)$/.exec(line.trim());
+    if (match !== null) heads.set(match[2]!, match[1]!);
+  }
+  const shas = [...new Set(heads.values())];
+  if (shas.length === 0) return { heads, bases: [] };
+  const checked = await git(["cat-file", "--batch-check"], dir, options, { stdin: `${shas.join("\n")}\n` });
+  if (checked.code !== 0) return undefined;
+  const bases = checked.stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim().split(" "))
+    .filter((parts) => parts[1] === "commit")
+    .map((parts) => parts[0]!);
+  return { heads, bases };
+}
+
+/** Git's answer to `clone --branch` for a branch the remote does not have. */
+const NO_SUCH_BRANCH = /Remote branch \S+ not found in upstream/;
+
+/**
  * Make `dir` from a pack (this machine is the target): the same branch, commits, changes and new files.
  *
  * The history comes from the source's remote as the source names it. That name is the source's: an ssh
@@ -254,11 +303,25 @@ export async function unpackCheckout(
       await git(["remote", "remove", "origin"], dir, options);
       if (state.branch !== undefined) await gitOk(["checkout", state.branch], dir, options, `switching to ${state.branch}`);
     } else {
-      const upstreamBranch = state.upstream?.replace(/^[^/]+\//, "");
-      const clone = (url: string, env?: Record<string, string>): Promise<string> => {
-        say?.(`$ git clone ${upstreamBranch !== undefined ? `--branch ${upstreamBranch} ` : ""}${url} ${dir}\n`);
-        const args = ["clone", "--progress", ...(upstreamBranch !== undefined ? ["--branch", upstreamBranch] : []), url, dir];
+      // The branch the clone checks out; dropped when the remote turns out not to have it.
+      let upstreamBranch = state.upstream?.replace(/^[^/]+\//, "");
+      const cloneAt = (url: string, env: Record<string, string> | undefined, branch: string | undefined): Promise<string> => {
+        say?.(`$ git clone ${branch !== undefined ? `--branch ${branch} ` : ""}${url} ${dir}\n`);
+        const args = ["clone", "--progress", ...(branch !== undefined ? ["--branch", branch] : []), url, dir];
         return gitOk(args, undefined, env !== undefined ? { ...options, env: { ...(options.env ?? {}), ...env } } : options, "cloning", streaming(options));
+      };
+      // A remote that answers that it has no such branch was reached: the way in works, the branch is
+      // gone (deleted there after a merge). Its default branch is cloned the same way, and the commits
+      // not pushed come from the pack as ever.
+      const clone = async (url: string, env?: Record<string, string>): Promise<string> => {
+        try {
+          return await cloneAt(url, env, upstreamBranch);
+        } catch (error) {
+          if (upstreamBranch === undefined || !(error instanceof MakeError) || error.result === undefined || !NO_SUCH_BRANCH.test(`${error.result.stderr}\n${error.result.stdout}`)) throw error;
+          say?.(`${url} has no branch ${upstreamBranch}; cloning its default branch instead.\n`);
+          upstreamBranch = undefined;
+          return cloneAt(url, env, undefined);
+        }
       };
       const ladder = options.routes?.(state.remote);
       let attempt: RemoteRoute | undefined;
@@ -272,7 +335,7 @@ export async function unpackCheckout(
           failures.push(attempt === undefined ? error.message : `${attempt.url} ${attempt.how} failed too: ${error.message.replace(/^Cloning failed: /, "")}`);
           if (attempt === undefined) say?.(`${state.remote} cannot be reached from this machine as the source names it (${error.message.replace(/^Cloning failed: /, "")})\n`);
           const next = tries < 8 ? await ladder.next(`${error.result.stderr}\n${error.result.stdout}`) : undefined;
-          if (next === undefined) throw new MakeError(failures.join(" "), error.result);
+          if (next === undefined) throw new MakeError(failures.join("\n"), error.result);
           say?.(next.url === state.remote ? `Trying ${next.url} again, ${next.how}.\n` : `Cloning ${next.url} ${next.how} instead.\n`);
           attempt = next;
         }
@@ -281,10 +344,23 @@ export async function unpackCheckout(
       const branch = state.branch;
       if (pack.bundle !== undefined) {
         say?.("$ git fetch <the commits not pushed>\n");
-        await gitOk(["fetch", bundleFile, branch ?? "HEAD"], dir, options, "adding the commits not pushed");
+        const fetched = await git(["fetch", bundleFile, branch ?? "HEAD"], dir, options);
+        if (fetched.aborted) throw new MakeError("Stopped while adding the commits not pushed.", fetched);
+        if (fetched.code !== 0) {
+          const missing = /lacks these prerequisite commits/.test(fetched.stderr);
+          throw new MakeError(
+            missing
+              ? `The commits not pushed build on ${pack.upstreamGone ?? state.upstream ?? "commits"} that ${state.remote} does not have. Push ${branch ?? "the branch"} from the source machine (or fetch there, so its copy of the remote is current), then copy it again.`
+              : `Adding the commits not pushed failed: ${reasonOf(fetched.stderr || fetched.stdout) ?? `git exited ${String(fetched.code)}`}`,
+            fetched,
+          );
+        }
         await gitOk(["checkout", "-B", branch ?? "jaira-copied", "FETCH_HEAD"], dir, options, "switching to the copied branch");
-      } else if (branch !== undefined && branch !== upstreamBranch) {
-        await gitOk(["checkout", "-B", branch, state.upstream ?? "HEAD"], dir, options, `switching to ${branch}`);
+      } else if (branch !== undefined) {
+        // Nothing to add: the source's commit is on the remote, on this branch or another.
+        const has = (await git(["cat-file", "-e", `${state.head}^{commit}`], dir, options)).code === 0;
+        const at = has ? state.head : upstreamBranch !== undefined ? `origin/${upstreamBranch}` : undefined;
+        if (at !== undefined && (branch !== upstreamBranch || has)) await gitOk(["checkout", "-B", branch, at], dir, options, `switching to ${branch}`);
       }
       if (branch !== undefined && upstreamBranch !== undefined) await git(["branch", `--set-upstream-to=origin/${upstreamBranch}`, branch], dir, options);
     }

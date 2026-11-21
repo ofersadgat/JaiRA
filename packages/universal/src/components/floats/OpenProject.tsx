@@ -19,6 +19,7 @@ import {
   needWords,
   placeGroupsOf,
   planSentence,
+  jobBlocks,
   readinessWords,
   sourceName,
   type BringPlace,
@@ -33,6 +34,9 @@ import { Chip } from "../files/Chip";
 import { Button } from "../settings/Button";
 import { TextField } from "../settings/fields";
 import { ModalBox } from "./Modal";
+import { TermLog, plainOf } from "../terminal/TermLog";
+import { IconButton } from "../terminal/TermParts";
+import { copyText } from "../../clipboard";
 
 type Source = WorkspaceSource & { label: string };
 type Place = { kind: "machine"; id: string; label: string } | { kind: "forge"; host: string; label: string };
@@ -890,7 +894,8 @@ function Fact({ title, sub }: { title: string; sub: string }): JSX.Element {
 // --- 4 · go ------------------------------------------------------------------------------------------
 
 function GoStep({ job, onCancel }: { job: WorkspaceJob | undefined; onCancel: () => void }): JSX.Element {
-  const t = useTokens();
+  const text = job?.text ?? "";
+  const blocks = useMemo(() => jobBlocks(text), [text]);
   if (job === undefined) return <Hint>Starting…</Hint>;
   const phases: { key: WorkspaceJob["phase"]; label: string }[] = [
     { key: "fetch", label: job.request.source.kind === "forge" ? "Clone" : "Copy" },
@@ -900,11 +905,12 @@ function GoStep({ job, onCancel }: { job: WorkspaceJob | undefined; onCancel: ()
   const at = phases.findIndex((p) => p.key === job.phase);
   const done = job.finished;
   return (
-    <View flexDirection="column" flexGrow={1} gap={12} paddingVertical={16} paddingHorizontal={28} minHeight={0}>
+    <View flexDirection="column" flexGrow={1} gap={12} paddingVertical={16} paddingHorizontal={28} minHeight={0} minWidth={0}>
       <View flexDirection="row" alignItems="center" gap={10}>
-        <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} flexGrow={1}>
+        <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} flexGrow={1} flexShrink={1} minWidth={0} ellip>
           {done === undefined ? `Making ${job.label}` : done.ok ? `${job.label} is ready` : `${job.label} stopped`}
         </Txt>
+        <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(blocks.map((b) => [...(b.command !== undefined ? [`$ ${b.command}`] : []), plainOf(b.text)].join("\n").replace(/\n+$/, "")).join("\n"))} />
         {done === undefined ? (
           <Button kind="danger" onPress={onCancel}>
             Stop
@@ -941,13 +947,7 @@ function GoStep({ job, onCancel }: { job: WorkspaceJob | undefined; onCancel: ()
       </View>
       {done !== undefined && !done.ok ? <Note tone="warn">{done.reason ?? "It stopped."}</Note> : null}
       {done?.setup !== undefined && !done.setup.ok ? <Note tone="warn">{`It is made and open; its setup stopped: ${done.setup.reason ?? "a step failed"}.`}</Note> : null}
-      <ScrollView
-        {...(scrollbarProps(t) as object)}
-        style={{ flexGrow: 1, flexShrink: 1, minHeight: 120, borderRadius: lengthToken(t, "control-radius", 7) as number, backgroundColor: t.v("panel-2"), ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object) } as never}
-        contentContainerStyle={{ padding: 10 } as never}
-      >
-        <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>{job.text.split("\n").slice(-200).join("\n")}</Txt>
-      </ScrollView>
+      <TermLog blocks={blocks} reset={job.jobId} fill minHeight={120} />
     </View>
   );
 }
@@ -1034,9 +1034,17 @@ function Note({ children, tone }: { children: string; tone: "ok" | "warn" | "pla
       paddingVertical={9}
       paddingHorizontal={12}
       borderRadius={8}
+      minWidth={0}
+      flexShrink={0}
       backgroundColor={t.v(tone === "ok" ? "tint-ok" : tone === "warn" ? "tint-warn" : "panel-2") as never}
     >
-      <Txt spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.45, color: tone === "ok" ? "ok" : tone === "warn" ? "warn" : "text" }}>{children}</Txt>
+      <Txt
+        spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.45, color: tone === "ok" ? "ok" : tone === "warn" ? "warn" : "text" }}
+        minWidth={0}
+        {...((isWeb ? { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } : {}) as object)}
+      >
+        {children}
+      </Txt>
     </View>
   );
 }

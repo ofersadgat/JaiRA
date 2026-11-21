@@ -532,8 +532,10 @@ export class WorkspaceMaker {
       const { data } = (await peer.invoke("workspace:packChunk", { id, offset: text.length })) as { data: string };
       if (data.length === 0) break;
       text += data;
-      say(`  ${Math.round((text.length / size) * 100)}%\n`);
+      // One line, redrawn: the log draws it as a terminal would.
+      say(`\r  ${Math.round((text.length / size) * 100)}%`);
     }
+    say("\n");
     return JSON.parse(text) as CheckoutPack;
   }
 
@@ -832,6 +834,7 @@ function describePack(pack: CheckoutPack): string {
   const s = pack.state;
   const parts = [s.branch !== undefined ? `branch ${s.branch}` : "a detached HEAD"];
   if (s.ahead > 0) parts.push(`${s.ahead} commit${s.ahead === 1 ? "" : "s"} not pushed`);
+  if (pack.upstreamGone !== undefined) parts.push(`${pack.upstreamGone} no longer on the remote`);
   if (s.changed > 0) parts.push(`${s.changed} changed file${s.changed === 1 ? "" : "s"}`);
   if (s.untracked > 0) parts.push(`${s.untracked} new file${s.untracked === 1 ? "" : "s"}`);
   return parts.join(", ");

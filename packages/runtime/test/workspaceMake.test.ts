@@ -141,8 +141,64 @@ describe("a copy whose source names its remote in a way this machine cannot use"
     pack.state.remote = join(scratch(), "gone.git");
     const second = join(scratch(), "also-gone.git");
     const failed = unpackCheckout(pack, join(scratch(), "copy"), { exec, routes: ladderOf({ url: second, how: "a second way" }).routes });
-    await expect(failed).rejects.toThrow(/^Cloning failed: .*gone\.git.* a second way failed too: /);
+    await expect(failed).rejects.toThrow(/^Cloning failed: .*gone\.git.*\n.* a second way failed too: /);
     await expect(unpackCheckout(pack, join(scratch(), "copy"), { exec, routes: ladderOf().routes })).rejects.toThrow(/^Cloning failed: (?!.*failed too)/);
+  });
+});
+
+describe("a copy of a branch the remote no longer has", () => {
+  // mist-server's task/01-ios-build-and-platform followed origin/task/01-…, deleted on GitLab after its
+  // merge; the Mac's own origin/… was never pruned. Every route was tried and each failed "Remote branch
+  // task/01-ios-build-and-platform not found in upstream origin".
+  it("bounds the commits it packs by the branches the remote has now, not the source's stale copy of them", async () => {
+    const { bare, work } = forgeAndClone();
+    git(work, "checkout", "-q", "-b", "task/01");
+    writeFileSync(join(work, "one.txt"), "1\n");
+    git(work, "add", ".");
+    git(work, "commit", "-q", "-m", "one");
+    git(work, "push", "-q", "-u", "origin", "task/01");
+    writeFileSync(join(work, "two.txt"), "2\n");
+    git(work, "add", ".");
+    git(work, "commit", "-q", "-m", "two");
+    git(bare, "branch", "-D", "task/01");
+    expect(git(work, "rev-parse", "--abbrev-ref", "@{u}")).toBe("origin/task/01");
+
+    const pack = await packCheckout(work, { exec });
+    expect(pack.upstreamGone).toBe("origin/task/01");
+    expect(pack.state.upstream).toBeUndefined();
+    expect(pack.state.ahead).toBe(2);
+    const said: string[] = [];
+    const told: string[] = [];
+    const target = join(scratch(), "copy");
+    await unpackCheckout(JSON.parse(JSON.stringify(pack)), target, { exec, onOutput: (t) => said.push(t), routes: () => ({ next: (failure) => (told.push(failure), Promise.resolve(undefined)) }) });
+    expect(told).toEqual([]);
+    expect(said.join("")).not.toContain("--branch");
+    expect(git(target, "symbolic-ref", "--short", "HEAD")).toBe("task/01");
+    expect(git(target, "rev-parse", "HEAD")).toBe(git(work, "rev-parse", "HEAD"));
+    expect(readFileSync(join(target, "one.txt"), "utf8")).toBe("1\n");
+  });
+
+  it("clones the default branch on the same route when the remote answers it has no such branch", async () => {
+    const { bare, work } = forgeAndClone();
+    git(work, "checkout", "-q", "-b", "task/02");
+    writeFileSync(join(work, "two.txt"), "2\n");
+    git(work, "add", ".");
+    git(work, "commit", "-q", "-m", "two");
+    git(work, "push", "-q", "-u", "origin", "task/02");
+    const pack = await packCheckout(work, { exec });
+    expect(pack.state.upstream).toBe("origin/task/02");
+    expect(pack.bundle).toBeUndefined();
+    // Merged and deleted on the forge after the pack was made.
+    git(work, "push", "-q", "origin", "task/02:main", ":task/02");
+
+    const said: string[] = [];
+    const told: string[] = [];
+    const target = join(scratch(), "copy");
+    await unpackCheckout(pack, target, { exec, onOutput: (t) => said.push(t), routes: () => ({ next: (failure) => (told.push(failure), Promise.resolve(undefined)) }) });
+    expect(told).toEqual([]);
+    expect(said.join("")).toContain(`${bare} has no branch task/02; cloning its default branch instead.`);
+    expect(git(target, "symbolic-ref", "--short", "HEAD")).toBe("task/02");
+    expect(git(target, "rev-parse", "HEAD")).toBe(pack.state.head);
   });
 });
 

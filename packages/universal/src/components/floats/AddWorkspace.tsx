@@ -662,6 +662,8 @@ function Progress({ job }: { job: WorkspaceJob }): JSX.Element {
             scale: 12 / 12.5,
             color: done.ok && done.setup?.ok !== false ? "ok" : "warn",
           }}
+          minWidth={0}
+          {...((isWeb ? { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } : {}) as object)}
         >
           {done.ok
             ? done.setup !== undefined && !done.setup.ok
