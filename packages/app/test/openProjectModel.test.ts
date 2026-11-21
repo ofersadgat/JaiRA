@@ -6,6 +6,7 @@ import {
   appendJobText,
   bringChoices,
   bringPlacesOf,
+  folderChip,
   folderNote,
   forgeOfUrl,
   jobBlocks,
@@ -15,10 +16,14 @@ import {
   readinessWords,
   sourceForProject,
   sourceName,
+  standingOf,
+  standingWords,
   withStep,
   workspacesOfSource,
   type WorkspaceJob,
 } from "../src/renderer/openProjectModel";
+import { groupProjects } from "../src/renderer/workspaceGroups";
+import { remoteProjectKey } from "@jaira/shared";
 
 function plan(over: Partial<WorkspacePlan> = {}): WorkspacePlan {
   return {
@@ -212,5 +217,76 @@ describe("a job's output as its log draws it", () => {
     ]);
     expect(jobBlocks("")).toEqual([]);
     expect(jobBlocks("$ a\r\n$ b")).toEqual([{ command: "a", text: "" }, { command: "b", text: "" }]);
+  });
+});
+
+describe("where a chosen project stands among the person's (the person, 2026-11-21)", () => {
+  const ID = "gitlab.com/mistlabs/jaira";
+  const self = { id: "m-desk", label: "desk", state: "online" as const, self: true as const };
+  const mac = { id: "m-mac", label: "mac-mini", state: "online" as const };
+  const ws = (project: string, machine: ProjectSummary["machine"], identity?: string): ProjectSummary => ({
+    project,
+    label: project.split(/[\\/]/).pop()!,
+    kind: "user",
+    tasks: 0,
+    running: 0,
+    statuses: {},
+    waiting: 0,
+    ended: [],
+    ...(identity !== undefined ? { identity } : {}),
+    machine,
+  });
+  const groups = groupProjects(
+    [ws("/Users/ofer/Code/jaira", self, ID), ws(remoteProjectKey("m-mac", "/srv/jaira"), mac, ID), ws("/Users/ofer/Code/notes", self), ws("/Users/ofer/Code/mist", self, "gitlab.com/mistlabs/mist")],
+    true,
+  );
+  const jaira = groups.find((g) => g.identity === ID)!;
+  const notes = groups.find((g) => g.label === "notes")!;
+  const folder = (machine: string, dir: string, identity?: string) => ({ kind: "machine" as const, machine, dir, label: `x · ${dir}`, ...(identity !== undefined ? { identity } : {}) });
+  const forge = (project: string) => ({ kind: "forge" as const, host: "gitlab.com", project, url: `https://gitlab.com/${project}.git`, label: project });
+
+  it("Open: a folder or repository of a project the person has joins it; one already open is that workspace; anything else is new", () => {
+    expect(standingOf(folder("m-desk", "/Users/ofer/src/jaira-2", ID), groups, "m-desk")).toMatchObject({ kind: "joins", group: { key: jaira.key } });
+    expect(standingOf(forge("mistlabs/jaira"), groups, "m-desk")).toMatchObject({ kind: "joins", group: { key: jaira.key } });
+    expect(standingOf(folder("m-mac", "/srv/jaira/", ID), groups, "m-desk")).toMatchObject({ kind: "workspace", group: { key: jaira.key } });
+    expect(standingOf(folder("m-desk", "/Users/ofer/src/other", "github.com/x/other"), groups, "m-desk")).toEqual({ kind: "new" });
+    expect(standingOf(folder("m-desk", "/Users/ofer/src/scratch"), groups, "m-desk")).toEqual({ kind: "new" });
+  });
+
+  it("Add: a folder of the project not yet open joins it; one of its workspaces is copied; anything else is refused, saying why", () => {
+    expect(standingOf(folder("m-mac", "/home/ofer/jaira", ID), groups, "m-desk", jaira)).toMatchObject({ kind: "joins" });
+    expect(standingOf(forge("mistlabs/jaira"), groups, "m-desk", jaira)).toMatchObject({ kind: "joins" });
+    expect(standingOf(folder("m-desk", "/Users/ofer/Code/jaira", ID), groups, "m-desk", jaira)).toMatchObject({ kind: "workspace" });
+    expect(standingOf(folder("m-desk", "/Users/ofer/Code/mist", "gitlab.com/mistlabs/mist"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "mist is a workspace of mist, not jaira." });
+    expect(standingOf(folder("m-desk", "/tmp/scratch"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "scratch has no git remote, so it isn't jaira (gitlab.com/mistlabs/jaira)." });
+    expect(standingOf(folder("m-desk", "/tmp/fork", "github.com/someone/jaira"), groups, "m-desk", jaira)).toEqual({ kind: "other", reason: "fork is github.com/someone/jaira, not jaira (gitlab.com/mistlabs/jaira)." });
+    expect(standingOf(forge("mistlabs/mist"), groups, "m-desk", jaira)).toMatchObject({ kind: "other" });
+    // A project with no remote: only its own workspaces are it.
+    expect(standingOf(folder("m-desk", "/Users/ofer/Code/notes"), groups, "m-desk", notes)).toMatchObject({ kind: "workspace" });
+    expect(standingOf(folder("m-desk", "/tmp/notes-2"), groups, "m-desk", notes)).toMatchObject({ kind: "other" });
+  });
+
+  it("says a join where it is, and nothing for what Add always did", () => {
+    const here = folder("m-desk", "/Users/ofer/src/jaira-2", ID);
+    expect(standingWords({ kind: "joins", group: jaira }, here, false, true)).toEqual({
+      text: "The same repository as jaira: it becomes another of its workspaces, where it is. Nothing is copied.",
+      tone: "ok",
+    });
+    expect(standingWords({ kind: "joins", group: jaira }, here, true, false)?.text).toBe("The same repository as jaira: the copy becomes another of its workspaces.");
+    expect(standingWords({ kind: "joins", group: jaira }, forge("mistlabs/jaira"), false, false)?.text).toBe("jaira's repository: the clone becomes another of its workspaces.");
+    expect(standingWords({ kind: "joins", group: jaira }, forge("mistlabs/jaira"), true, false)).toBeUndefined();
+    expect(standingWords({ kind: "workspace", group: jaira }, here, true, false)).toBeUndefined();
+    expect(standingWords({ kind: "workspace", group: jaira }, here, false, true)?.text).toBe("Already a workspace of jaira: opening it goes to it.");
+    expect(standingWords({ kind: "other", reason: "no." }, here, true, false)).toEqual({ text: "no.", tone: "bad" });
+    expect(standingWords({ kind: "new" }, here, false, true)).toBeUndefined();
+  });
+
+  it("chips a folder with the project it is open in, or would join", () => {
+    expect(folderChip({ path: "/srv/jaira", project: true, git: true, identity: ID }, "m-mac", groups, "m-desk")).toBe("jaira · open");
+    expect(folderChip({ path: "/srv/jaira-2", project: false, git: true, identity: ID }, "m-mac", groups, "m-desk")).toBe("jaira");
+    expect(folderChip({ path: "/srv/other", project: false, git: true }, "m-mac", groups, "m-desk")).toBe("git");
+    expect(folderChip({ path: "/srv/x", project: true, git: false }, "m-mac", groups, "m-desk")).toBe("JaiRA project");
+    const root = groupProjects([{ ...ws("/Users/ofer/.jaira", self), kind: "shared", label: "~/.jaira" }], true);
+    expect(folderChip({ path: "/Users/ofer/.jaira", project: true, git: false }, "m-desk", root, "m-desk")).toBe("open");
   });
 });

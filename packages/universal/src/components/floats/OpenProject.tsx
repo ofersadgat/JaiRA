@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type {
@@ -11,10 +11,12 @@ import type {
   WorkspacePlan,
   WorkspaceSource,
 } from "@jaira/shared/browser";
+import { parseRemoteProjectKey } from "@jaira/shared/browser";
 import {
   OPEN_STEPS,
   OPEN_STEP_LABELS,
   bringChoices,
+  folderChip,
   folderNote,
   needWords,
   placeGroupsOf,
@@ -22,23 +24,28 @@ import {
   jobBlocks,
   readinessWords,
   sourceName,
+  standingOf,
+  standingWords,
   type BringPlace,
+  type ChosenSource,
   type OpenFlowStart,
   type OpenStep,
   type WorkspaceJob,
 } from "@jaira/ui/openProjectModel";
 import { invoke } from "@jaira/ui/store";
+import { dirOf, groupOf, type ProjectGroup } from "@jaira/ui/workspaceGroups";
 import { Press, Txt, edge, lengthToken, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "../files/Chip";
 import { Button } from "../settings/Button";
 import { TextField } from "../settings/fields";
 import { ModalBox } from "./Modal";
+import { Icon } from "../panel/Icon";
 import { TermLog, plainOf } from "../terminal/TermLog";
 import { IconButton } from "../terminal/TermParts";
 import { copyText } from "../../clipboard";
 
-type Source = WorkspaceSource & { label: string };
+type Source = ChosenSource;
 type Place = { kind: "machine"; id: string; label: string } | { kind: "forge"; host: string; label: string };
 type PlanState = WorkspacePlan | { error: string } | "loading";
 
@@ -61,6 +68,10 @@ type PlanState = WorkspacePlan | { error: string } | "loading";
  *
  * Opened to add a workspace, it starts at Where it goes with the project chosen, and its primary says
  * `Add <machine>` from that step on: everything after it is filled in.
+ *
+ * A project chosen is said against the person's (`standingOf`), in a note above the foot: a folder or
+ * repository of a project they have joins it as another workspace — a folder of it not yet open is added
+ * where it is, nothing copied — and Add takes nothing that is not the project it adds to.
  */
 export function OpenProject({
   start,
@@ -71,10 +82,13 @@ export function OpenProject({
   onCancelJob,
   onOpenThere,
   placesOf,
+  groups = [],
   staged = false,
 }: {
   start: OpenFlowStart;
   machines: MachinesView | undefined;
+  /** The person's projects, as the sidebar groups them: what a chosen project is said against. */
+  groups?: readonly ProjectGroup[];
   jobs: Record<string, WorkspaceJob>;
   /** The machines holding a workspace of the project a source is: where Bring can take files from. */
   placesOf?: (source: Source) => readonly BringPlace[];
@@ -129,13 +143,25 @@ export function OpenProject({
   const targetPlan = (chosenFolder !== undefined ? customPlan : target !== undefined ? plans[target] : undefined) as PlanState | undefined;
   const plan = isPlan(targetPlan) ? targetPlan : undefined;
   const adding = start.mode === "add";
-  // A folder taken to the machine it is on opens there — unless it is a workspace of the project being
-  // added to: that machine then takes a second workspace, a copy of it beside it.
-  const openThere = !adding && source?.kind === "machine" && target === source.machine && chosenFolder === undefined;
+  // The project a workspace is added to, as the sidebar has it now.
+  const addingTo = adding && start.project !== undefined ? groupOf(groups, start.project) : undefined;
+  const standingFor = (s: Source) => standingOf(s, groups, selfId, addingTo);
+  const standing = source !== undefined ? standingFor(source) : undefined;
+  // A folder taken to the machine it is on opens there — unless it is already a workspace of the project
+  // being added to: that machine then takes a second workspace, a copy of it beside it.
+  const stays = source?.kind === "machine" && standing !== undefined && standing.kind !== "other" && !(adding && standing.kind === "workspace");
+  const openThere = stays && source?.kind === "machine" && target === source.machine && chosenFolder === undefined;
   const job = jobId !== undefined ? jobs[jobId] : undefined;
   // The project's name while it is the one the dialog was opened for; another chosen at Project, that one's.
-  const projectName = source === undefined ? undefined : ((source === start.source ? start.name : undefined) ?? plan?.name ?? sourceName(source));
-  const title = adding ? `Add a workspace to ${projectName ?? "the project"}` : "Open a project";
+  const projectName =
+    addingTo?.label ?? (source === undefined ? undefined : ((source === start.source ? start.name : undefined) ?? plan?.name ?? sourceName(source)));
+  const title = adding ? `Add a workspace to ${projectName ?? start.name ?? "the project"}` : "Open a project";
+  const refused = standing?.kind === "other";
+  // A folder already on a machine is looked for beside the project's workspace there, where its other
+  // clones most likely sit; with none there, from the machine's home.
+  const held = start.browse !== undefined ? addingTo?.members.find((m) => (parseRemoteProjectKey(m.project)?.machineId ?? m.machine?.id ?? selfId) === start.browse) : undefined;
+  const browseFrom = held !== undefined ? parentOf(dirOf(held.project)) : undefined;
+  const said = source !== undefined && standing !== undefined && step !== "go" ? standingWords(standing, source, adding, openThere) : undefined;
   // Where Bring takes the files git ignores from: the one chosen, else the first it would take them from —
   // sent either way, so How it gets there says what happens.
   const choices = source !== undefined && target !== undefined ? bringChoices(source, target, placesOf?.(source) ?? []) : [];
@@ -163,19 +189,29 @@ export function OpenProject({
 
   const verb = source?.kind === "forge" ? "Clone" : "Copy";
   const name = plan?.name ?? source?.label.split("/").pop() ?? "it";
+  const folderName = source?.kind === "machine" ? (source.dir.split(/[\\/]/).filter(Boolean).pop() ?? source.dir) : name;
+  // Opening a folder where it is: added to the project it joins, gone to when it is open already.
+  const openLabel =
+    standing?.kind === "joins"
+      ? `Add ${folderName} to ${standing.group.label}`
+      : standing?.kind === "workspace"
+        ? `Go to ${folderName}`
+        : `Open ${name} on ${machineLabel(target)}`;
   const secondary: { label: string; onPress: () => void } | undefined =
     step === "where" && adding && target !== undefined && !openThere ? { label: "Next: how it gets there", onPress: () => setStep("how") } : undefined;
   const primary: { label: string; disabled: boolean; onPress: () => void } =
     step === "project"
-      ? { label: "Next: where it goes", disabled: source === undefined, onPress: () => setStep("where") }
+      ? adding && openThere
+        ? { label: openLabel, disabled: false, onPress: () => void go() }
+        : { label: "Next: where it goes", disabled: source === undefined || refused, onPress: () => setStep("where") }
       : step === "where"
         ? openThere
-          ? { label: `Open ${name} on ${machineLabel(target)}`, disabled: false, onPress: () => void go() }
+          ? { label: openLabel, disabled: false, onPress: () => void go() }
           : adding && target !== undefined
-            ? { label: `Add ${machineLabel(target)}`, disabled: plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
-            : { label: "Next: how it gets there", disabled: target === undefined, onPress: () => setStep("how") }
+            ? { label: `Add ${machineLabel(target)}`, disabled: refused || plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
+            : { label: "Next: how it gets there", disabled: refused || target === undefined, onPress: () => setStep("how") }
         : step === "how"
-          ? { label: adding ? `Add ${machineLabel(target)}` : `${verb} ${name} to ${machineLabel(target)}`, disabled: plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
+          ? { label: adding ? `Add ${machineLabel(target)}` : `${verb} ${name} to ${machineLabel(target)}`, disabled: refused || plan === undefined || plan.setup.readiness === "cannot", onPress: () => void go() }
           : job?.finished !== undefined
             ? { label: "Done", disabled: false, onPress: onClose }
             : { label: "Hide — it carries on", disabled: false, onPress: onClose };
@@ -193,16 +229,27 @@ export function OpenProject({
         <Stepper step={step} answers={answers} onStep={(s) => (s !== "go" && OPEN_STEPS.indexOf(s) < OPEN_STEPS.indexOf(step) ? setStep(s) : undefined)} />
         <View flexDirection="row" flexGrow={1} flexShrink={1} minHeight={0}>
           {step === "project" ? (
-            <ProjectStep machines={machines} source={source} onSource={(s) => {
-              setSource(s);
-              setPlans({});
-            }} />
+            <ProjectStep
+              machines={machines}
+              source={source}
+              projects={groups}
+              {...(start.browse !== undefined ? { browse: start.browse } : {})}
+              {...(browseFrom !== undefined ? { from: browseFrom } : {})}
+              {...(addingTo !== undefined ? { addingTo } : {})}
+              onSource={(s) => {
+                setSource(s);
+                setPlans({});
+                setFolder(undefined);
+                // A folder of the project being added to, not yet one of its workspaces: added where it is.
+                if (adding && s.kind === "machine" && standingFor(s).kind === "joins") setTarget(s.machine);
+              }}
+            />
           ) : null}
           {step === "where" && source !== undefined ? (
             <WhereStep
               machines={machines}
               source={source}
-              adding={adding}
+              stays={stays}
               target={target}
               plans={plans}
               folder={folder}
@@ -218,6 +265,11 @@ export function OpenProject({
           ) : null}
           {step === "go" ? <GoStep job={job} onCancel={() => jobId !== undefined && onCancelJob(jobId)} /> : null}
         </View>
+        {said !== undefined ? (
+          <View paddingHorizontal={20} paddingBottom={10}>
+            <Note tone={said.tone === "bad" ? "warn" : said.tone}>{said.text}</Note>
+          </View>
+        ) : null}
         <Foot
           back={step === "where" ? "‹ Project" : step === "how" ? "‹ Where it goes" : undefined}
           onBack={() => setStep(step === "how" ? "where" : "project")}
@@ -393,11 +445,32 @@ function PlaceRow({
 
 // --- 1 · the project ---------------------------------------------------------------------------------
 
-function ProjectStep({ machines, source, onSource }: { machines: MachinesView | undefined; source: Source | undefined; onSource: (s: Source) => void }): JSX.Element {
+function ProjectStep({
+  machines,
+  source,
+  projects,
+  browse,
+  from,
+  addingTo,
+  onSource,
+}: {
+  machines: MachinesView | undefined;
+  source: Source | undefined;
+  projects: readonly ProjectGroup[];
+  /** The machine whose folders it opens at, whatever is chosen. */
+  browse?: string;
+  /** The folder on `browse` it opens at. */
+  from?: string;
+  addingTo?: ProjectGroup;
+  onSource: (s: Source) => void;
+}): JSX.Element {
   // It opens where the project chosen is — its forge, or the machine its folder is on — so going back to
-  // it shows that choice; with none, this machine's folders.
+  // it shows that choice; with none, this machine's folders. Asked for a folder already on a machine, that
+  // machine's.
   const [place, setPlace] = useState<Place | undefined>(
-    source?.kind === "forge"
+    browse !== undefined
+      ? { kind: "machine", id: browse, label: labelOf(machines, browse) }
+      : source?.kind === "forge"
       ? { kind: "forge", host: source.host, label: source.host }
       : source?.kind === "machine"
         ? { kind: "machine", id: source.machine, label: labelOf(machines, source.machine) }
@@ -460,7 +533,20 @@ function ProjectStep({ machines, source, onSource }: { machines: MachinesView | 
         ) : null}
       </Column>
       <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} gap={10} paddingVertical={14} paddingHorizontal={18}>
-        {place?.kind === "machine" ? <FolderPane machineId={place.id} self={place.id === machines?.self.id} label={place.label} source={source} onSource={onSource} /> : null}
+        {place?.kind === "machine" ? (
+          <FolderPane
+            key={place.id}
+            machineId={place.id}
+            self={place.id === machines?.self.id}
+            selfId={machines?.self.id}
+            label={place.label}
+            source={source}
+            groups={projects}
+            {...(from !== undefined && place.id === browse ? { from } : {})}
+            {...(addingTo !== undefined ? { addingTo } : {})}
+            onSource={onSource}
+          />
+        ) : null}
         {place?.kind === "forge" && forges !== undefined ? (
           <RepoPane
             host={place.host}
@@ -475,7 +561,28 @@ function ProjectStep({ machines, source, onSource }: { machines: MachinesView | 
   );
 }
 
-function FolderPane({ machineId, self, label, source, onSource }: { machineId: string; self: boolean; label: string; source: Source | undefined; onSource: (s: Source) => void }): JSX.Element {
+function FolderPane({
+  machineId,
+  self,
+  selfId,
+  label,
+  source,
+  groups,
+  from,
+  addingTo,
+  onSource,
+}: {
+  machineId: string;
+  self: boolean;
+  selfId: string | undefined;
+  label: string;
+  source: Source | undefined;
+  groups: readonly ProjectGroup[];
+  /** The folder it opens at, when nothing chosen is here. */
+  from?: string;
+  addingTo?: ProjectGroup;
+  onSource: (s: Source) => void;
+}): JSX.Element {
   const [listing, setListing] = useState<FolderListing | undefined>(undefined);
   const [error, setError] = useState<string | undefined>(undefined);
   const browse = (dir?: string): void => {
@@ -485,10 +592,12 @@ function FolderPane({ machineId, self, label, source, onSource }: { machineId: s
   const chosenHere = source?.kind === "machine" && source.machine === machineId ? source.dir : undefined;
   useEffect(() => {
     setListing(undefined);
-    browse(chosenHere !== undefined ? parentOf(chosenHere) : undefined);
+    browse(chosenHere !== undefined ? parentOf(chosenHere) : from);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
-  const choose = (dir: string): void => onSource({ kind: "machine", machine: machineId, dir, label: `${label} · ${dir.split(/[\\/]/).filter(Boolean).pop() ?? dir}` });
+  const choose = (dir: string, identity: string | undefined): void =>
+    onSource({ kind: "machine", machine: machineId, dir, label: `${label} · ${dir.split(/[\\/]/).filter(Boolean).pop() ?? dir}`, ...(identity !== undefined ? { identity } : {}) });
+  const hereName = listing !== undefined ? (listing.dir.split(/[\\/]/).filter(Boolean).pop() ?? listing.dir) : "";
   return (
     <>
       <View flexDirection="row" alignItems="center" gap={8}>
@@ -497,6 +606,11 @@ function FolderPane({ machineId, self, label, source, onSource }: { machineId: s
           {listing?.dir ?? ""}
         </Txt>
         <View flexGrow={1} />
+        {listing?.here?.git === true ? (
+          <Button kind={chosenHere === listing.dir ? "primary" : "ghost"} onPress={() => choose(listing.dir, listing.here?.identity)}>
+            {chosenHere === listing.dir ? `${hereName} chosen` : `Choose ${hereName}`}
+          </Button>
+        ) : null}
         {listing?.roots.map((root) => (
           <Button key={root} kind="ghost" onPress={() => browse(root)}>
             {root}
@@ -511,16 +625,19 @@ function FolderPane({ machineId, self, label, source, onSource }: { machineId: s
             glyph="▸"
             name={entry.name}
             chosen={chosenHere === entry.path}
-            chip={entry.project ? "JaiRA project" : entry.git ? "git" : undefined}
+            chip={folderChip(entry, machineId, groups, selfId)}
             onPress={() => browse(entry.path)}
-            action={{ label: chosenHere === entry.path ? "Chosen" : "Choose", onPress: () => choose(entry.path) }}
+            action={{ label: chosenHere === entry.path ? "Chosen" : "Choose", onPress: () => choose(entry.path, entry.identity) }}
           />
         ))}
         {listing === undefined && error === undefined ? <Hint>Reading {label}…</Hint> : null}
         {listing?.entries.length === 0 ? <Hint>No folders here.</Hint> : null}
       </List>
       <Hint bad={error !== undefined}>
-        {error ?? `A folder on ${label} is copied as it is: everything git doesn't ignore, with its commits and changes. Chosen and taken to ${label} itself, it opens there.`}
+        {error ??
+          (addingTo !== undefined
+            ? `A folder of ${addingTo.label} on ${label} that isn't one of its workspaces yet is added where it is, nothing copied. One that is already a workspace is copied to make another.`
+            : `A folder on ${label} is copied as it is: everything git doesn't ignore, with its commits and changes. Chosen and taken to ${label} itself, it opens there. A folder of a project you have becomes another of its workspaces.`)}
       </Hint>
     </>
   );
@@ -618,7 +735,7 @@ function parentOf(dir: string): string | undefined {
 function WhereStep({
   machines,
   source,
-  adding,
+  stays,
   target,
   plans,
   folder,
@@ -627,8 +744,8 @@ function WhereStep({
 }: {
   machines: MachinesView | undefined;
   source: Source;
-  /** Adding a workspace of the project: the machine a copied folder is on takes a second, like any other. */
-  adding: boolean;
+  /** The folder opens where it is when taken to its own machine — not one Add copies to make another. */
+  stays: boolean;
   target: string | undefined;
   plans: Record<string, PlanState>;
   folder: { parent: string; name: string } | undefined;
@@ -636,9 +753,9 @@ function WhereStep({
   onFolder: (f: { parent: string; name: string } | undefined) => void;
 }): JSX.Element {
   const groups = placeGroupsOf(machines);
-  // Opening a folder: the machine it is on opens it where it is. Adding a workspace of the project: that
-  // folder is already one, so its machine is a place a copy goes, with its status like the rest.
-  const itIs = !adding && source.kind === "machine" ? source.machine : undefined;
+  // A folder that stays (`stays`): the machine it is on opens it where it is. One Add copies — already a
+  // workspace of the project — has its machine as a place a copy goes, with its status like the rest.
+  const itIs = stays && source.kind === "machine" ? source.machine : undefined;
   const statusOf = (id: string, onlineNow: boolean): { text: string; tone: string } | undefined => {
     if (!onlineNow) return { text: "offline", tone: "dim" };
     const plan = plans[id];
@@ -697,6 +814,32 @@ function labelOf(machines: MachinesView | undefined, id: string): string {
   return id === machines?.self.id ? machines.self.label : (machines?.machines.find((m) => m.id === id)?.label ?? id);
 }
 
+/**
+ * Where on the chosen machine the workspace's folder is made: the folder it goes in, browsed in columns
+ * (the folder above it, it, and the folder being made), with the path across the top. How it looks:
+ *
+ *   a note           only when the machine can't simply take it (password, can't): --tint-warn
+ *   the path         row, centred, gap 2, one line: each folder from the root a button (padding 3 6,
+ *                    radius 6, --dim; hovered --panel-2), a "›" in --rule between; the folder it goes in
+ *                    --text 600 on --panel-2; last, the new folder's name in --accent on --tint-accent
+ *   the columns      row, filling the pane, 1px --line, radius 9, clipped; three columns 1 : 1 : 1.05,
+ *                    a --line between
+ *   a folder column  its folder's name (caps, 10.5 600, --dim, padding 8 10 6), then its folders,
+ *                    scrolling: rows 27 tall, padding 0 8, gap 8, a 15 folder glyph (--dim), the name
+ *                    (app 1, cut with "…"), a git or JaiRA project mark (12; JaiRA --accent), a "›"
+ *                    (--dim); hovered --fill-ghost-hover. The left column is the folder above, the one
+ *                    it goes in on --tint-accent with its glyph --accent; at a root, the machine's roots.
+ *                    The middle column is the folder it goes in, the new folder among its folders where
+ *                    it sorts: --tint-accent, a 2px --accent bar at its left, a folder-with-plus glyph,
+ *                    its name --accent 600
+ *   the new folder   padding 18 16, gap 10, a --panel-2 wash: the glyph at 40 in --accent, its name (app
+ *                    15/12.5 700; while renaming a field), `made here` (--accent ground, --on-accent
+ *                    600), why it's named so (folderNote, or "taken" in --warn when the folder it goes in
+ *                    has one of that name already), its whole path (data, --text, wrapping anywhere),
+ *                    and Rename at the foot
+ *
+ * In a pane narrower than 560 it is one column at a time: the folder it goes in, the new folder under it.
+ */
 function WherePane({
   machineId,
   self,
@@ -712,70 +855,224 @@ function WherePane({
   folder: { parent: string; name: string } | undefined;
   onFolder: (f: { parent: string; name: string } | undefined) => void;
 }): JSX.Element {
-  const [listing, setListing] = useState<FolderListing | undefined>(undefined);
+  const t = useTokens();
+  const [here, setHere] = useState<FolderListing | undefined>(undefined);
+  const [up, setUp] = useState<FolderListing | undefined>(undefined);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [renaming, setRenaming] = useState(false);
+  const [narrow, setNarrow] = useState(false);
+  // Only the answer to the latest click is shown: an earlier one arriving late is dropped.
+  const asked = useRef(0);
   const defaultName = plan.dir.split(/[\\/]/).filter(Boolean).pop() ?? plan.name;
   const name = folder?.name ?? defaultName;
   const parent = folder?.parent ?? plan.projectsFolder;
-  const browse = (dir: string): void => {
-    invoke("files:browse", { ...(self ? {} : { machine: machineId }), dir }).then(
+  const ask = (dir: string): Promise<FolderListing> => invoke("files:browse", { ...(self ? {} : { machine: machineId }), dir });
+  const go = (dir: string): void => {
+    const n = ++asked.current;
+    setError(undefined);
+    ask(dir).then(
       (l) => {
-        setListing(l);
+        if (n !== asked.current) return;
+        setHere(l);
         onFolder(l.dir === plan.projectsFolder && name === defaultName ? undefined : { parent: l.dir, name });
+        if (l.parent === undefined) setUp(undefined);
+        else
+          ask(l.parent).then(
+            (p) => n === asked.current && setUp(p),
+            () => n === asked.current && setUp(undefined),
+          );
       },
-      () => setListing(undefined),
+      (e: unknown) => n === asked.current && setError(e instanceof Error ? e.message : String(e)),
     );
   };
   useEffect(() => {
-    browse(parent);
+    go(parent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machineId]);
-  const words = readinessWords(plan);
-  const full = joinPath(listing?.dir ?? parent, name);
+  const rename = (v: string): void => onFolder({ parent: here?.dir ?? parent, name: v });
+  const dir = here?.dir ?? parent;
+  const full = joinPath(dir, name);
+  const taken = here?.entries.some((e) => e.name === name) === true;
+  const hereName = lastOf(dir);
+  // The folder it goes in, with the new one where it sorts among its folders.
+  const rows: ({ kind: "folder"; entry: FolderListing["entries"][number] } | { kind: "new" })[] = (here?.entries ?? []).map((entry) => ({ kind: "folder" as const, entry }));
+  if (!taken) {
+    const at = rows.findIndex((r) => r.kind === "folder" && r.entry.name.localeCompare(name, undefined, { sensitivity: "base" }) > 0);
+    rows.splice(at === -1 ? rows.length : at, 0, { kind: "new" });
+  } else rows.push({ kind: "new" });
+  const middle = (
+    <FolderColumn title={hereName} grow={1}>
+      {rows.map((r) =>
+        r.kind === "new" ? (
+          <FolderCell key="+new" name={name} made onPress={() => setRenaming(true)} />
+        ) : (
+          <FolderCell key={r.entry.path} name={r.entry.name} git={r.entry.git} project={r.entry.project} onPress={() => go(r.entry.path)} />
+        ),
+      )}
+      {here === undefined && error === undefined ? <Hint>Reading {label}…</Hint> : null}
+    </FolderColumn>
+  );
+  const made = (
+    <View
+      flexBasis={0}
+      flexGrow={narrow ? 0 : 1.05}
+      flexShrink={1}
+      minWidth={0}
+      gap={10}
+      paddingVertical={narrow ? 12 : 18}
+      paddingHorizontal={16}
+      backgroundColor={t.v("panel-2") as never}
+      {...(narrow ? (edge(t, { top: 1 }) as object) : {})}
+    >
+      {narrow ? null : <Icon name="folderAdd" size={40} color={String(t.v("accent"))} />}
+      {renaming ? (
+        <TextField value={name} mono autoFocus label="Folder name" width="100%" onChange={rename} onSubmit={() => setRenaming(false)} onBlur={() => setRenaming(false)} />
+      ) : (
+        <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} ellip minWidth={0}>
+          {name}
+        </Txt>
+      )}
+      <View flexDirection="row">
+        <View paddingHorizontal={7} borderRadius={99} backgroundColor={t.v("fill-accent") as never}>
+          <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 600, color: "on-accent", lineHeight: 1.55 }}>made here</Txt>
+        </View>
+      </View>
+      <Txt spec={{ voice: "app", scale: 11.5 / 12.5, lineHeight: 1.45, color: taken ? "warn" : "dim" }}>
+        {taken ? `${hereName} already has a ${name}: rename it, or choose another folder.` : folder === undefined ? `A new folder: ${folderNote(plan)}.` : "A new folder, where you chose."}
+      </Txt>
+      <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.45 }} minWidth={0} {...((isWeb ? { style: { overflowWrap: "anywhere" } } : {}) as object)}>
+        {full}
+      </Txt>
+      <View flexGrow={1} />
+      <View flexDirection="row">
+        <Button kind="ghost" onPress={() => setRenaming(true)}>
+          Rename
+        </Button>
+      </View>
+    </View>
+  );
   return (
     <>
-      <View flexDirection="row" alignItems="center" gap={8}>
-        <Txt spec={{ voice: "app", scale: 1, weight: 600 }} flexShrink={0} whiteSpace="nowrap">
-          {label}
-        </Txt>
-        {words !== undefined ? (
-          <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: words.tone }} flexShrink={0}>
-            {words.text}
-          </Txt>
-        ) : null}
-        <View flexGrow={1} />
-        <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} ellip flexShrink={1} minWidth={0}>
-          {listing?.dir ?? parent}
-        </Txt>
-      </View>
-      {plan.setup.readiness === "ready" ? <Note tone="ok">{`Ready for ${plan.name}: what it needs is already on ${label}.`}</Note> : null}
       {plan.setup.readiness === "password" ? <Note tone="warn">{`Something ${plan.name} needs is installed with a password on ${label}; you'll be told the command.`}</Note> : null}
       {plan.setup.readiness === "cannot" ? <Note tone="warn">{`${label} can't set ${plan.name} up: ${plan.setup.steps.find((s) => s.status === "cannot")?.detail ?? "a step cannot run there"}.`}</Note> : null}
-      <List>
-        {listing?.parent !== undefined ? <ListRow glyph="↑" name=".." onPress={() => browse(listing.parent!)} /> : null}
-        {(listing?.entries ?? []).map((entry) => (
-          <ListRow key={entry.path} glyph="▸" name={entry.name} chip={entry.project ? "JaiRA project" : entry.git ? "git" : undefined} onPress={() => browse(entry.path)} />
+      <View flexDirection="row" alignItems="center" gap={2} minWidth={0} overflow="hidden">
+        {crumbsOf(dir).map((c, i, all) => (
+          <View key={c.path} flexDirection="row" alignItems="center" gap={2} flexShrink={i === all.length - 1 ? 0 : 1} minWidth={0}>
+            {i > 0 ? <Txt spec={{ voice: "app", scale: 1, color: "rule" }}>›</Txt> : null}
+            <Press
+              onPress={() => go(c.path)}
+              label={c.path}
+              paddingVertical={3}
+              paddingHorizontal={6}
+              borderRadius={6}
+              minWidth={0}
+              box={({ hovered }) => ({ backgroundColor: i === all.length - 1 || hovered ? t.v("panel-2") : "transparent" })}
+            >
+              <Txt spec={{ voice: "app", scale: 1, weight: i === all.length - 1 ? 600 : 400, color: i === all.length - 1 ? "text" : "dim" }} ellip minWidth={0}>
+                {c.label}
+              </Txt>
+            </Press>
+          </View>
         ))}
-        <ListRow glyph="+" name={`${name} — made here`} chosen dashed onPress={() => undefined} />
-      </List>
-      <View flexDirection="row" alignItems="center" gap={10}>
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} width={84}>
-          Folder name
-        </Txt>
-        <TextField value={name} mono onChange={(v) => onFolder({ parent: listing?.dir ?? parent, name: v })} label="Folder name" width={240} />
+        <Txt spec={{ voice: "app", scale: 1, color: "rule" }}>›</Txt>
+        <Press onPress={() => setRenaming(true)} label={`Rename ${name}`} paddingVertical={3} paddingHorizontal={6} borderRadius={6} flexShrink={0} box={() => ({ backgroundColor: t.v("tint-accent") })}>
+          <Txt spec={{ voice: "app", scale: 1, weight: 600, color: "accent" }}>{name}</Txt>
+        </Press>
       </View>
-      <View flexDirection="row" alignItems="center" gap={10}>
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} width={84}>
-          Full path
-        </Txt>
-        <Txt spec={{ voice: "data", scale: 11.5 / 12 }} ellip flexShrink={1} minWidth={0}>
-          {full}
-        </Txt>
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} ellip flexShrink={1} minWidth={0}>
-          {folder === undefined ? `· ${folderNote(plan)}` : "· a folder of your own"}
-        </Txt>
+      <View
+        flexDirection={narrow ? "column" : "row"}
+        flexGrow={1}
+        flexShrink={1}
+        minHeight={0}
+        borderRadius={9}
+        overflow="hidden"
+        {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
+        onLayout={(e: { nativeEvent: { layout: { width: number } } }) => setNarrow(e.nativeEvent.layout.width < 560)}
+      >
+        {narrow ? null : (
+          <FolderColumn title={up !== undefined ? lastOf(up.dir) : label} grow={1}>
+            {up !== undefined
+              ? up.entries.map((e) => <FolderCell key={e.path} name={e.name} git={e.git} project={e.project} chosen={e.path === here?.dir} onPress={() => go(e.path)} />)
+              : (here?.roots ?? []).map((root) => <FolderCell key={root} name={root} chosen={root === here?.dir} onPress={() => go(root)} />)}
+          </FolderColumn>
+        )}
+        {middle}
+        {made}
       </View>
-      <Hint>To put it somewhere else, open any folder above. {label}'s projects folder is set in Settings → Machines.</Hint>
+      {error !== undefined ? <Hint bad>{error}</Hint> : null}
     </>
+  );
+}
+
+/** A folder's own name, as a column heads it: `/srv/work` → `work`; a root is itself. */
+function lastOf(dir: string): string {
+  return dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
+}
+
+/** Each folder from the root down to `dir`, to go to: `/srv/work` → `/`, `srv`, `work`; `C:\src` → `C:`, `src`. */
+function crumbsOf(dir: string): { label: string; path: string }[] {
+  const windows = /^[A-Za-z]:/.test(dir);
+  const sep = windows ? "\\" : "/";
+  const parts = dir.split(/[\\/]/).filter(Boolean);
+  const out: { label: string; path: string }[] = windows ? [] : [{ label: "/", path: "/" }];
+  let at = windows ? "" : "";
+  parts.forEach((p, i) => {
+    at = windows ? (i === 0 ? `${p}${sep}` : joinPath(at, p)) : `${at}${sep}${p}`;
+    out.push({ label: p, path: at });
+  });
+  return out;
+}
+
+function FolderColumn({ title, grow, children }: { title: string; grow: number; children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexBasis={0} flexGrow={grow} flexShrink={1} minWidth={0} minHeight={0} {...(edge(t, { right: 1 }) as object)}>
+      <Txt spec={HEAD} paddingTop={8} paddingHorizontal={10} paddingBottom={6} ellip>
+        {title}
+      </Txt>
+      <ScrollView {...(scrollbarProps(t) as object)} style={{ flexGrow: 1, flexShrink: 1 } as never} contentContainerStyle={{ paddingBottom: 6 } as never}>
+        {children}
+      </ScrollView>
+    </View>
+  );
+}
+
+function FolderCell({
+  name,
+  git = false,
+  project = false,
+  chosen = false,
+  made = false,
+  onPress,
+}: {
+  name: string;
+  git?: boolean;
+  project?: boolean;
+  chosen?: boolean;
+  made?: boolean;
+  onPress: () => void;
+}): JSX.Element {
+  const t = useTokens();
+  const lit = chosen || made;
+  return (
+    <Press
+      onPress={onPress}
+      label={made ? `Rename ${name}` : name}
+      flexDirection="row"
+      alignItems="center"
+      gap={8}
+      height={27}
+      paddingHorizontal={8}
+      {...(made ? { borderLeftWidth: 2, borderLeftColor: t.v("accent"), borderStyle: "solid" } : {})}
+      box={({ hovered }) => ({ backgroundColor: lit ? t.v("tint-accent") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      <Icon name={made ? "folderAdd" : "folder"} size={15} color={String(t.v(lit ? "accent" : "dim"))} />
+      <Txt spec={{ voice: "app", scale: 1, weight: made ? 600 : 400, color: made ? "accent" : "text" }} ellip flexGrow={1} flexShrink={1} minWidth={0}>
+        {name}
+      </Txt>
+      {project ? <Icon name="diamond" size={12} color={String(t.v("accent"))} /> : git ? <Icon name="git" size={12} color={String(t.v("dim"))} /> : null}
+      {made ? null : <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>›</Txt>}
+    </Press>
   );
 }
 

@@ -2,7 +2,7 @@
 id: engineering/decisions/0027-open-anywhere-and-project-setup
 type: decision
 status: built
-updated: 2026-11-20
+updated: 2026-11-21
 decides_for: [engineering/decisions/0013-machines, engineering/decisions/0026-settings-follow-the-person, engineering/units/forge-integrations, engineering/units/tool-policy, engineering/units/project-config]
 ---
 
@@ -100,6 +100,29 @@ it there`; `‹ Project` is in the foot, and Project opens at the project chosen
 that hold a workspace of the project, says the one it will take the files from, and the window sends that
 one (`bringFrom`, the copy's own folder when it names the copy's machine), so what it says is what
 happens.
+
+**A folder already there joins as it is** (amended 2026-11-21). The person: "the add workspace flow
+should also allow adding an existing workspace. i.e. if you navigate to a project folder and that folder
+belongs to the same project (i.e. has a same git remote) then you should be able to add that workspace to
+the existing project. also, if you add a new project and that project has the same git remote as an
+existing project, it should be added to the existing project." What a project is stays decision 0013 §4's
+identity (`upstream` over `origin`, normalized), so what joins here is what the sidebar groups as one.
+
+- A folder listing (`files:browse`, on any machine) says each clone's identity (`FolderEntry.identity`,
+  read many at a time by `readRepositoryIdentities`), and the folder browsed to itself (`here`), so a
+  folder can be chosen from inside it (`Choose <name>`). Project's list chips a folder with the project it
+  is open in (`jaira · open`) or would join (`jaira`).
+- Where the chosen project stands (`standingOf`): `joins` — the same repository as a project the person
+  has, not yet one of its workspaces; `workspace` — already one; `new`; and, adding, `other` with why
+  (another project's workspace, no remote, another remote). A note above the foot says it
+  (`standingWords`), except for what Add always did.
+- **Adding**, a folder of the project not yet open is taken to its own machine and opened there, nothing
+  copied: Project's primary is `Add <folder> to <project>`. A workspace of it is copied as before. Anything
+  else is refused, saying why — Add takes only the project it adds to. Add's card has a last line, `Or ·
+  use a folder already on <machine>`, opening the dialog at Project on that machine's folders.
+- **Opening**, a folder or repository of a project the person has is said to join it (a folder opened where
+  it is says `Add <folder> to <project>`; one already open says `Go to <folder>`); opened, the sidebar
+  groups it with the project's other workspaces.
 
 ### 3. Each machine has a projects folder
 
@@ -245,7 +268,8 @@ container. `use: "docker"` (an `image`, or a Dockerfile as `file`) and `use: "de
   `@jaira/service` `WorkspaceMaker.environmentFor` and the engine's `recordWorkspaceEnv` and
   `keepContainerUp`; Settings' Where commands run row (`containerLine`).
 - The window: `OpenProject.tsx` (the dialog), `AddWorkspace.tsx` (Add's card), `openProjectModel.ts`
-  (`addLines`), the store's `opening` and `workspaceJobs`, menu rows with an action under the pointer.
+  (`addLines`, `standingOf`, `standingWords`, `folderChip`), the store's `opening` and `workspaceJobs`,
+  menu rows with an action under the pointer.
 
 ## Not yet
 

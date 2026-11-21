@@ -2,7 +2,7 @@
 id: ui/surfaces/open-project
 type: ui-surface
 status: shipped
-updated: 2026-11-20
+updated: 2026-11-21
 kind: dialog
 realizes: [ux/patterns/button-says-what-will-happen, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/all-projects-in-one-place, product/parallel-work-without-collisions]
@@ -29,7 +29,19 @@ designs it was chosen from.
 - **The foot.** A row padded 12 20 under a `--line`: the step before (`‹ Project`, `‹ Where it goes`) as a
   ghost button, then `Cancel`, then the step's primary, which says what it will do — `Next: where it goes`,
   `Next: how it gets there`, `Clone atlas to build-01`, `Copy atlas to build-01`, `Open atlas on
-  studio-mini`, `Add build-01`, and at Go `Hide — it carries on` or `Done`.
+  studio-mini`, `Add atlas-2 to atlas`, `Go to atlas`, `Add build-01`, and at Go `Hide — it carries on` or
+  `Done`.
+- **Where it stands.** Above the foot, padded 0 20 10, a note says where the project chosen stands among the
+  person's (`standingOf`, the person, 2026-11-21) — on `--tint-ok` when it joins one, `--tint-warn` when Add
+  refuses it, `--panel-2` otherwise; nothing for a project of its own:
+  - a folder of a project the person has, opened where it is: `The same repository as atlas: it becomes
+    another of its workspaces, where it is. Nothing is copied.` (copied elsewhere, `the copy becomes another
+    of its workspaces`; a repository, `atlas's repository: the clone becomes another of its workspaces.`);
+  - a folder already open: `Already a workspace of atlas: opening it goes to it.`;
+  - adding, anything that is not the project: why — `mist is a workspace of mist, not atlas.`, `scratch has
+    no git remote, so it isn't atlas (github.com/acme/atlas).`, `fork is github.com/me/atlas, not atlas
+    (github.com/acme/atlas).` — and the primary is disabled.
+  The same repository is the identity the sidebar groups workspaces by (decision 0013 §4).
 
 ## 1 · Project: a place, then what is in it
 
@@ -38,8 +50,13 @@ designs it was chosen from.
   offline machine is dimmed with `offline` at its right. Rows are padded 5 8 with radius 6; the chosen one on
   `--tint-accent` at 600.
 - **A machine.** Its folders, read by its engine (`files:browse`): roots as ghost buttons, the folder it is
-  in, `..`, and each folder with its `JaiRA project` or `git` chip and a `Choose` button (a press on the row
-  goes in). A folder chosen is copied **as it is** — everything git does not ignore — or opened where it is.
+  in, `..`, and each folder with its chip and a `Choose` button (a press on the row goes in). The chip names
+  the project it is open in (`atlas · open`), else the project of the person's it would join (`atlas`), else
+  `JaiRA project` or `git`. Inside a clone, `Choose atlas-2` beside the roots chooses the folder itself. A
+  folder chosen is copied **as it is** — everything git does not ignore — or opened where it is.
+- **Adding, a folder already there.** A folder of the project that is not yet one of its workspaces is added
+  where it is, nothing copied: choosing it takes the target to its machine, and the primary reads `Add
+  atlas-2 to atlas` at once. One that is already a workspace is copied to make another, as before.
 - **A forge.** Its repositories (`forge:repositories`), most recently changed first, each with `private`
   when it is; a field finds one; the chosen one's branches (`forge:branches`) as buttons under the list, the
   default branch chosen.
@@ -105,6 +122,9 @@ menu stood, in the sidebar's tokens: 400 wide (the window less 16 at most), padd
     `.env*.local: no other workspace of it to bring them from`, or `nothing git ignores` in `--dim`. `▾` opens the patterns under it.
   - `THEN` — the first two steps and `· 2 more`, or `nothing to set up` in `--dim`. `▾` opens every step
     under it, numbered, with what it takes there at its right.
+  - `OR` — `use a folder already on build-01` in `--dim`, `›`: the dialog at Project, on build-01's
+    folders, where a folder of the project not yet open is added as it is. Shown until Add is pressed,
+    whether or not the plan could be read.
 - **The foot.** Under a `--line`: `More…` (the dialog at How it gets there), then `Cancel` and `Add
   build-01`, disabled until the plan is read or when the setup cannot run there.
 - **Once pressed.** Bring and Then give way to the job: `Clone` (or `Copy`), `Open`, `Set up` in a row,

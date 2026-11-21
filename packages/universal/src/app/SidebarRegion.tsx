@@ -87,7 +87,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
   const [browsing, setBrowsing] = useState<{ machineId: string; mode: "open" | "init" } | null>(null);
   const [healthAt, setHealthAt] = useState<{ at: FloatRect | null } | null>(null);
   // Add's card (decision 0027): another workspace of the open project on the machine whose Add was pressed.
-  const [adding, setAdding] = useState<{ at: FloatRect; name: string; source: NonNullable<ReturnType<typeof sourceForProject>>; machine: string } | null>(null);
+  const [adding, setAdding] = useState<{ at: FloatRect; name: string; project: string; source: NonNullable<ReturnType<typeof sourceForProject>>; machine: string } | null>(null);
   const openHealthCard = (from: unknown): void => setHealthAt((was) => (was !== null ? null : { at: anchorRectOf(from, "What needs attention") }));
   // Emptied — dismissed or cleared by itself — the card has nothing to be placed against: its pills are gone.
   useEffect(() => {
@@ -157,8 +157,8 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
     const source = sourceOf(g);
     if (source === undefined) return;
     const machine = machineId === SELF_ADD ? selfId : machineId;
-    if (machine !== undefined && at !== undefined) setAdding({ at: pointRect(at.x, at.y), name: g.label, source, machine });
-    else actions.openProjectDialog({ mode: "add", name: g.label, source, ...(machine !== undefined ? { machine, step: "how" as const } : { step: "where" as const }) });
+    if (machine !== undefined && at !== undefined) setAdding({ at: pointRect(at.x, at.y), name: g.label, project: g.key, source, machine });
+    else actions.openProjectDialog({ mode: "add", name: g.label, project: g.key, source, ...(machine !== undefined ? { machine, step: "how" as const } : { step: "where" as const }) });
   };
   const paired = (machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }));
   /** Stand in a project where its title was left: the workspace it is narrowed to, else its machine's first. */
@@ -450,7 +450,11 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         onCancelJob={actions.cancelWorkspace}
         onFull={(step, job) => {
           setAdding(null);
-          actions.openProjectDialog({ mode: "add", name: adding.name, source: adding.source, machine: adding.machine, step, ...(job !== undefined ? { job } : {}) });
+          actions.openProjectDialog({ mode: "add", name: adding.name, project: adding.project, source: adding.source, machine: adding.machine, step, ...(job !== undefined ? { job } : {}) });
+        }}
+        onExisting={() => {
+          setAdding(null);
+          actions.openProjectDialog({ mode: "add", name: adding.name, project: adding.project, source: adding.source, step: "project", browse: adding.machine });
         }}
         onClose={() => setAdding(null)}
       />
@@ -465,6 +469,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         onCancelJob={actions.cancelWorkspace}
         onOpenThere={(machine, dir) => void actions.openOnMachine(machine, dir, "open")}
         placesOf={bringPlaces}
+        groups={groups}
       />
     ) : null}
     {healthAt !== null ? (

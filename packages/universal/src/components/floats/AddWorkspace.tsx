@@ -46,6 +46,8 @@ interface AddProps {
   onCancelJob: (jobId: string) => void;
   /** The full form at a step, everything filled in — or at Go, following the job. */
   onFull: (step: "project" | "where" | "how", job?: string) => void;
+  /** The full form at Project, at the machine's folders: a folder of the project already there, added as it is. */
+  onExisting?: () => void;
   onClose: () => void;
   /** The plan, given (the gallery): nothing is asked of the engine. */
   plan?: WorkspacePlan;
@@ -64,6 +66,9 @@ interface AddProps {
  *                  (app 10.5 600 caps, --dim), its answer (icons 14, app 12.5; the place --dim, a path in
  *                  data 11.5), at its right › (Project, Where: the full form at that step, filled in) or
  *                  ▾ (Bring, Then: open under the line)
+ *   or             a last line, `Or` in the name column: `use a folder already on <machine>` (--dim), ›
+ *                  — the full form at Project, on that machine's folders, where a folder of the project
+ *                  not yet open is added as it is (the person, 2026-11-21)
  *   the foot       row, gap 6, padding 8 4 2, a --line above: More… (`ghost`: the full form at How), then
  *                  Cancel and `Add <machine>` (`primary`) at the right
  *
@@ -93,6 +98,7 @@ function AddCard({
   onCreate,
   onCancelJob,
   onFull,
+  onExisting,
   onClose,
   plan: given,
   job: givenJob,
@@ -388,6 +394,13 @@ function AddCard({
             <Progress job={job} />
           )}
         </>
+      ) : null}
+      {job === undefined && onExisting !== undefined ? (
+        <Line name="Or" end="›" title={`Choose a folder of ${name} already on ${label}`} onPress={onExisting}>
+          <Txt spec={{ voice: "app", scale: 1, color: "dim" }} ellip flexShrink={1} minWidth={0}>
+            {`use a folder already on ${label}`}
+          </Txt>
+        </Line>
       ) : null}
       <View
         flexDirection="row"

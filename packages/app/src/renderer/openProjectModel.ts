@@ -19,6 +19,7 @@ import type {
   WorkspaceStepEvent,
 } from "@jaira/shared/browser";
 import { parseRemoteProjectKey, repositoryIdentity } from "@jaira/shared/browser";
+import { dirOf, type ProjectGroup } from "./workspaceGroups";
 
 export type OpenStep = "project" | "where" | "how" | "go";
 
@@ -38,13 +39,115 @@ export interface OpenFlowStart {
   /** The step it opens at. */
   step?: OpenStep;
   /** The project, already chosen. */
-  source?: WorkspaceSource & { label: string };
+  source?: ChosenSource;
   /** The project's name, for the title of Add. */
   name?: string;
+  /** Adding: one of the project's workspaces (its group's key), which says which project it is. */
+  project?: string;
+  /** The machine whose folders Project opens at: a folder already there, added as it is. */
+  browse?: string;
   /** The machine it goes to, already chosen. */
   machine?: string;
   /** A workspace being made already (Add's popover, "Details"): the dialog opens at Go, following it. */
   job?: string;
+}
+
+/** A project as Open and Add carry it: what is sent, its words, and — a folder's — its repository. */
+export type ChosenSource = WorkspaceSource & { label: string; identity?: string };
+
+/**
+ * Where a chosen project stands among the person's (the person, 2026-11-21: "if you navigate to a
+ * project folder and that folder belongs to the same project (i.e. has a same git remote) then you
+ * should be able to add that workspace to the existing project. also, if you add a new project and that
+ * project has the same git remote as an existing project, it should be added to the existing project"):
+ *
+ *   `new`        a project of its own (Open only)
+ *   `joins`      the same repository as `group` and not yet one of its workspaces: it becomes one — a
+ *                folder where it is, a repository cloned
+ *   `workspace`  already one of `group`'s workspaces: Open goes to it, Add copies it to make another
+ *   `other`      Add only: not the project being added to, and why
+ *
+ * The same repository is the identity workspaces are grouped by (decision 0013 §4), so what joins here
+ * is what the sidebar shows as one project.
+ */
+export type SourceStanding =
+  | { kind: "new" }
+  | { kind: "joins"; group: ProjectGroup }
+  | { kind: "workspace"; group: ProjectGroup }
+  | { kind: "other"; reason: string };
+
+/** The repository a chosen project is: a forge's from its URL, a folder's as its listing read it. */
+export function identityOfSource(source: ChosenSource): string | undefined {
+  return source.kind === "forge" ? repositoryIdentity(source.url) : source.identity;
+}
+
+/** The person's project a folder on a machine is a workspace of, if it is one. */
+export function groupHolding(groups: readonly ProjectGroup[], machine: string, dir: string, selfId: string | undefined): ProjectGroup | undefined {
+  const same = (a: string, b: string): boolean => a.replace(/[\\/]+$/, "") === b.replace(/[\\/]+$/, "");
+  return groups.find((g) =>
+    g.members.some((m) => (parseRemoteProjectKey(m.project)?.machineId ?? m.machine?.id ?? selfId) === machine && same(dirOf(m.project), dir)),
+  );
+}
+
+/** The person's project of a repository: one of their own, never the shared root. */
+export function groupOfIdentity(groups: readonly ProjectGroup[], identity: string | undefined): ProjectGroup | undefined {
+  return identity === undefined ? undefined : groups.find((g) => g.kind === "user" && g.identity === identity);
+}
+
+/** `adding`: the project a workspace is being added to; absent, Open. */
+export function standingOf(source: ChosenSource, groups: readonly ProjectGroup[], selfId: string | undefined, adding?: ProjectGroup): SourceStanding {
+  const identity = identityOfSource(source);
+  const holder = source.kind === "machine" ? groupHolding(groups, source.machine, source.dir, selfId) : undefined;
+  if (adding === undefined) {
+    if (holder !== undefined) return { kind: "workspace", group: holder };
+    const group = groupOfIdentity(groups, identity);
+    return group !== undefined ? { kind: "joins", group } : { kind: "new" };
+  }
+  if (holder !== undefined && holder.key === adding.key) return { kind: "workspace", group: adding };
+  if (identity !== undefined && identity === adding.identity) return { kind: "joins", group: adding };
+  const name = source.kind === "forge" ? source.project : (source.dir.split(/[\\/]/).filter(Boolean).pop() ?? source.dir);
+  if (holder !== undefined) return { kind: "other", reason: `${name} is a workspace of ${holder.label}, not ${adding.label}.` };
+  if (adding.identity === undefined) return { kind: "other", reason: `${adding.label} has no git remote, so nothing else can be told to be it: only a copy of one of its workspaces can be added.` };
+  if (source.kind === "forge") return { kind: "other", reason: `${name} is another repository: ${adding.label} is ${adding.identity}.` };
+  if (identity === undefined) return { kind: "other", reason: `${name} has no git remote, so it isn't ${adding.label} (${adding.identity}).` };
+  return { kind: "other", reason: `${name} is ${identity}, not ${adding.label} (${adding.identity}).` };
+}
+
+/**
+ * What the dialog says of a chosen project's standing, above its foot: nothing for a project of its
+ * own, nor — adding, where the title says the project — for the project's own repository or one of its
+ * workspaces copied, which is what Add always did. `stays`: the folder opens where it is.
+ */
+export function standingWords(standing: SourceStanding, source: ChosenSource, adding: boolean, stays: boolean): { text: string; tone: "plain" | "ok" | "bad" } | undefined {
+  switch (standing.kind) {
+    case "new":
+      return undefined;
+    case "other":
+      return { text: standing.reason, tone: "bad" };
+    case "workspace":
+      return adding
+        ? undefined
+        : stays
+          ? { text: `Already a workspace of ${standing.group.label}: opening it goes to it.`, tone: "plain" }
+          : { text: `A workspace of ${standing.group.label}: the copy becomes another of its workspaces.`, tone: "ok" };
+    case "joins":
+      if (adding && source.kind === "forge") return undefined;
+      return source.kind === "forge"
+        ? { text: `${standing.group.label}'s repository: the clone becomes another of its workspaces.`, tone: "ok" }
+        : stays
+          ? { text: `The same repository as ${standing.group.label}: it becomes another of its workspaces, where it is. Nothing is copied.`, tone: "ok" }
+          : { text: `The same repository as ${standing.group.label}: the copy becomes another of its workspaces.`, tone: "ok" };
+  }
+}
+
+/** A folder's chip in Project's list: the project it is a workspace of, or would join, before what it is. */
+export function folderChip(entry: { path: string; project: boolean; git: boolean; identity?: string }, machine: string, groups: readonly ProjectGroup[], selfId: string | undefined): string | undefined {
+  const holder = groupHolding(groups, machine, entry.path, selfId);
+  // The shared root is named by its whole path, too long for a chip: it is only said to be open.
+  if (holder !== undefined) return holder.kind === "user" ? `${holder.label} · open` : "open";
+  const same = groupOfIdentity(groups, entry.identity);
+  if (same !== undefined) return same.label;
+  return entry.project ? "JaiRA project" : entry.git ? "git" : undefined;
 }
 
 /** A workspace being made, as the window follows it. */

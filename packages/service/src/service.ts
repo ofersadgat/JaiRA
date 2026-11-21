@@ -870,7 +870,7 @@ import type {
   ToolChoice,
 } from "@jaira/shared";
 import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
-import { ensureLocalSettingsIgnored, personalProjectSettingsFileOf, readRepositoryIdentity } from "@jaira/persistence";
+import { ensureLocalSettingsIgnored, personalProjectSettingsFileOf, readRepositoryIdentities, readRepositoryIdentity } from "@jaira/persistence";
 import { CONFIG_LAYERS, isProjectLayer } from "@jaira/shared";
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
@@ -3935,7 +3935,7 @@ export class AppService {
   }
 
   /** One folder's folders, for the picker: this machine's, or — forwarded — a paired one's. */
-  browseDirectory(dir?: string): FolderListing {
+  async browseDirectory(dir?: string): Promise<FolderListing> {
     const at = dir !== undefined && dir.trim() !== "" ? resolvePath(dir) : homedir();
     let names: Dirent[];
     try {
@@ -3950,6 +3950,14 @@ export class AppService {
         return { name: d.name, path, project: existsSync(join(path, ".jaira")), git: existsSync(join(path, ".git")) };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
+    // Each clone's repository, read as its workspace would be grouped by: so Open and Add can say which
+    // folder is a workspace of a project the person has (the person, 2026-11-21).
+    const here = { project: existsSync(join(at, ".jaira")), git: existsSync(join(at, ".git")) };
+    const identities = await readRepositoryIdentities([...(here.git ? [at] : []), ...entries.filter((e) => e.git).map((e) => e.path)]);
+    const identified = <T extends object>(entry: T, path: string): T & { identity?: string } => {
+      const identity = identities.get(path);
+      return identity !== undefined ? { ...entry, identity } : entry;
+    };
     const parent = dirname(at);
     const roots = [homedir()];
     if (process.platform === "win32") {
@@ -3957,7 +3965,7 @@ export class AppService {
     } else {
       roots.push("/");
     }
-    return { dir: at, ...(parent !== at ? { parent } : {}), entries, roots };
+    return { dir: at, ...(parent !== at ? { parent } : {}), entries: entries.map((e) => identified(e, e.path)), here: identified(here, at), roots };
   }
 
   /** What another machine asks of this one about placement: its capacity, and rules changed there. */

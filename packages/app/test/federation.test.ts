@@ -104,8 +104,12 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
     initProject(dir, b.base);
     const bId = b.service.fleet.identity().id;
     const parent = join(dir, "..");
-    const listing = (await a.call("files:browse", { machine: bId, dir: parent })) as { dir: string; entries: Array<{ path: string; project: boolean; git: boolean }> };
-    expect(listing.entries.find((e) => e.path === dir)).toMatchObject({ project: true, git: true });
+    const listing = (await a.call("files:browse", { machine: bId, dir: parent })) as { dir: string; entries: Array<{ path: string; project: boolean; git: boolean; identity?: string }> };
+    // Each clone says the repository it is, as its workspaces are grouped by (the person, 2026-11-21).
+    expect(listing.entries.find((e) => e.path === dir)).toMatchObject({ project: true, git: true, identity: "github.com/ofersadgat/jaira" });
+    // And the folder browsed to says what it is itself, so it can be chosen from inside it.
+    const inside = (await a.call("files:browse", { machine: bId, dir })) as { here?: { git: boolean; identity?: string } };
+    expect(inside.here).toMatchObject({ git: true, identity: "github.com/ofersadgat/jaira" });
     expect(b.service.inspect(dir).open).toBe(false);
     await a.call("project:open", { dir, machine: bId });
     expect(b.service.inspect(dir).open).toBe(true);

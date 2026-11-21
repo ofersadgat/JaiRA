@@ -511,9 +511,23 @@ export interface FolderListing {
   dir: string;
   /** The folder above, absent at a root. */
   parent?: string;
-  entries: Array<{ name: string; path: string; project: boolean; git: boolean }>;
+  entries: Array<FolderEntry>;
+  /** The folder itself, as an entry says each folder in it — so the folder browsed to can be chosen. */
+  here?: Omit<FolderEntry, "name" | "path">;
   /** The machine's roots to jump to: its home, and its drives on Windows. */
   roots: string[];
+}
+
+/** A folder as a listing says it. */
+export interface FolderEntry {
+  name: string;
+  path: string;
+  /** It holds a `.jaira`. */
+  project: boolean;
+  /** It holds a `.git`. */
+  git: boolean;
+  /** Its repository identity (`repositoryIdentity`), as a workspace of it is grouped by; absent with no remote, or from an older engine. */
+  identity?: string;
 }
 
 /** An answer waiting for a machine that is offline (decision 0013 §7). */

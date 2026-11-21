@@ -3,7 +3,7 @@
  * clones of one repository, and what the person's settings and files for a project are keyed by
  * (`projectSettingsKey`), the same on every machine.
  */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { repositoryIdentity } from "@jaira/shared";
 
 /** Each project's repository identity, read once from git: a remote added later is seen at the next start. */
@@ -34,3 +34,49 @@ export function readRepositoryIdentity(dir: string): string | undefined {
   return identity ?? undefined;
 }
 
+/** A folder's identity from `git config --get-regexp` of its remotes: `upstream`'s, else `origin`'s. */
+function identityOfRemotes(listed: string): string | null {
+  const urls = new Map<string, string>();
+  for (const line of listed.split(/\r?\n/)) {
+    const match = /^remote\.(upstream|origin)\.url\s+(.+)$/.exec(line.trim());
+    if (match !== null && !urls.has(match[1]!)) urls.set(match[1]!, match[2]!);
+  }
+  for (const remote of ["upstream", "origin"]) {
+    const url = urls.get(remote);
+    const found = url !== undefined ? repositoryIdentity(url) : undefined;
+    if (found !== undefined) return found;
+  }
+  return null;
+}
+
+/**
+ * Many folders' repository identities at once, without holding the process up: each read as
+ * {@link readRepositoryIdentity} reads it and kept with its readings, so a folder listed by this groups
+ * as it will once it is open. A few at a time: a folder of a hundred clones is a hundred gits.
+ */
+export async function readRepositoryIdentities(dirs: readonly string[]): Promise<Map<string, string | undefined>> {
+  const out = new Map<string, string | undefined>();
+  const todo = dirs.filter((dir) => {
+    const known = identities.get(dir);
+    if (known === undefined) return true;
+    out.set(dir, known ?? undefined);
+    return false;
+  });
+  const read = (dir: string): Promise<string | null> =>
+    new Promise((resolve) => {
+      execFile("git", ["-C", dir, "config", "--get-regexp", "^remote\\.(upstream|origin)\\.url$"], { encoding: "utf8", windowsHide: true, timeout: 5000 }, (_error, stdout) =>
+        resolve(identityOfRemotes(stdout ?? "")),
+      );
+    });
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < todo.length) {
+      const dir = todo[next++]!;
+      const identity = await read(dir);
+      identities.set(dir, identity);
+      out.set(dir, identity ?? undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, todo.length) }, worker));
+  return out;
+}
