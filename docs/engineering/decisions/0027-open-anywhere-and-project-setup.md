@@ -88,9 +88,10 @@ Where (the machine and the folder, numbered when taken), Bring and Then — and 
 and Where open the dialog at that step with everything filled in; Bring and Then open under their line;
 More… opens it at How it gets there. Once pressed, the card follows the job in place (Details opens the
 dialog at Go). **Add a workspace…** at the bottom opens the dialog at Where it goes. The project's remote is cloned, or — with no remote — one of its
-workspaces is copied, this machine's first. A project of one workspace has the same menu on its name, the
-machine that workspace is on ticked — another machine, when the project lives only there — and every
-machine with none, this one among them, offering Add.
+workspaces is copied, this machine's first. A project of one workspace has the same crumb, pill and
+all — the machine that workspace is on listed (another machine, when the project lives only there), and
+every machine with none, this one among them, offering Add. The person, 2026-11-20: "it should always be
+there. thats how you can add new workspaces or switch between them".
 
 The person, 2026-11-20: adding a local workspace of a project that lives on another machine asks only
 where it goes; the dialog shows the project and lets the person go back and change it, but what it says

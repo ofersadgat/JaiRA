@@ -159,7 +159,7 @@ export function workspaceIn(view: EnvironmentView | undefined, project: string |
   return undefined;
 }
 
-/** How many workspaces a view holds. One is no choice: nothing is placed, and the bar offers no list. */
+/** How many workspaces a view holds. One is no choice of placement: nothing is placed. */
 export function workspaceCount(view: EnvironmentView | undefined): number {
   return (view?.machines ?? []).reduce((n, m) => n + m.workspaces.length, 0);
 }
@@ -179,7 +179,15 @@ export interface BarFacts {
   /** After the slash: the workspace's folder, or what is happening instead of one. */
   workspace?: { text: string; icon: "folder" | "clock" | "spinner"; dim?: boolean };
   git?: GitFacts;
-  /** The list may be opened: there is more than one workspace, and nothing has started. */
+  /** The workspace whose checkout {@link git} is, by its project key: where the branch menu switches. */
+  checkout?: string;
+  /** The machine named, by its id: the workspace list it opens lists that machine's. */
+  machineId?: string;
+  /**
+   * The machine, the workspace and the chip open their lists (the person, 2026-11-20: "wherever you see
+   * the machine/workspace chip … you should be able to click on it to switch"): before it starts, while
+   * it waits, and once it runs — a move. Not while a workspace is being chosen for it.
+   */
   open: boolean;
   /** For the icon's tooltip and a reader: everything, in a sentence. */
   title: string;
@@ -203,31 +211,32 @@ export function barFactsOf(view: EnvironmentView | undefined, stage: Environment
     }
     const git = gitFactsOf(at.workspace.git);
     const name = machineNameOf(at.machine);
-    return { face: faceOf(at.machine), machine: name, workspace: { text: at.workspace.label, icon: "folder" }, ...(git !== undefined ? { git } : {}), open: false, title: `${name} / ${at.workspace.label}`, chip: `${name} / ${at.workspace.label}` };
+    return { face: faceOf(at.machine), machine: name, machineId: at.machine.id, workspace: { text: at.workspace.label, icon: "folder" }, ...(git !== undefined ? { git } : {}), checkout: at.workspace.project, open: true, title: `${name} / ${at.workspace.label}`, chip: `${name} / ${at.workspace.label}` };
   }
   const only = !many ? view.machines[0]!.workspaces[0] : undefined;
   const target = stage.kind === "choosing" ? stage.target : stage.queued.target;
   const choice: Choice = only !== undefined ? { kind: "workspace", machine: view.machines[0]!, workspace: only } : choiceOf(view, target);
   const face = choice.kind === "auto" ? AUTO_FACE : faceOf(choice.machine);
   const machine = choice.kind === "auto" ? "automatic" : machineNameOf(choice.machine);
-  const open = many;
+  const open = true;
+  const machineId = choice.kind === "auto" ? undefined : choice.machine.id;
   if (stage.kind === "placing") {
     return { face, machine, workspace: { text: "choosing a workspace", icon: "spinner", dim: true }, open: false, title: `${machine} — choosing a workspace`, chip: `${machine} · choosing` };
   }
   if (stage.kind === "waiting") {
     const words = waitingWords(choice);
-    return { face, machine, workspace: { text: words, icon: "clock", dim: true }, open, title: `${machine} — ${words}`, chip: `${machine} · waiting for room` };
+    return { face, machine, ...(machineId !== undefined ? { machineId } : {}), workspace: { text: words, icon: "clock", dim: true }, open, title: `${machine} — ${words}`, chip: `${machine} · waiting for room` };
   }
   if (choice.kind === "workspace") {
     const git = gitFactsOf(choice.workspace.git);
-    return { face, machine, workspace: { text: choice.workspace.label, icon: "folder" }, ...(git !== undefined ? { git } : {}), open, title: `${machine} / ${choice.workspace.label}`, chip: `${machine} / ${choice.workspace.label}` };
+    return { face, machine, machineId: choice.machine.id, workspace: { text: choice.workspace.label, icon: "folder" }, ...(git !== undefined ? { git } : {}), checkout: choice.workspace.project, open, title: `${machine} / ${choice.workspace.label}`, chip: `${machine} / ${choice.workspace.label}` };
   }
   if (choice.kind === "machine") {
     const n = choice.machine.workspaces.length;
     // A machine with one workspace is that workspace: its checkout is already known.
     const git = n === 1 ? gitFactsOf(choice.machine.workspaces[0]!.git) : undefined;
     const words = n === 1 ? choice.machine.workspaces[0]!.label : `the first of ${n} workspaces with room`;
-    return { face, machine, workspace: { text: words, icon: "folder", dim: n !== 1 }, ...(git !== undefined ? { git } : {}), open, title: `${machine} / ${words}`, chip: n === 1 ? `${machine} / ${words}` : machine };
+    return { face, machine, machineId: choice.machine.id, workspace: { text: words, icon: "folder", dim: n !== 1 }, ...(git !== undefined ? { git } : {}), ...(n === 1 ? { checkout: choice.machine.workspaces[0]!.project } : {}), open, title: `${machine} / ${words}`, chip: n === 1 ? `${machine} / ${words}` : machine };
   }
   // The ones it could go to now: a machine that cannot be reached is asked nothing.
   const n = view.machines.filter((m) => m.state === "online").reduce((sum, m) => sum + m.workspaces.length, 0);
@@ -267,7 +276,20 @@ export function startSentenceOf(view: EnvironmentView | undefined, target: RunTa
 /** One line of the list. */
 export type ListRow =
   | { kind: "auto"; on: boolean }
-  | { kind: "machine"; machine: EnvironmentMachine; face: MachineFace; name: string; what: string; note?: { text: string; tone: "warn" | "bad" }; meters: Meter[]; on: boolean; usable: boolean; target: RunTarget }
+  | {
+      kind: "machine";
+      machine: EnvironmentMachine;
+      face: MachineFace;
+      name: string;
+      what: string;
+      note?: { text: string; tone: "warn" | "bad" };
+      meters: Meter[];
+      on: boolean;
+      /** Ticked because the workspace chosen is on it, not because the machine itself was chosen. */
+      holds?: true;
+      usable: boolean;
+      target: RunTarget;
+    }
   | { kind: "workspace"; machine: EnvironmentMachine; workspace: EnvironmentWorkspace; work: number; workTitle: string; git?: GitFacts; on: boolean; usable: boolean; target: RunTarget };
 
 /** How much is going on in a workspace, in words: "3 tasks: 1 at work, 2 waiting". */
@@ -276,14 +298,29 @@ export function workTitleOf(running: number, queued: number): string {
   return `${total} ${total === 1 ? "task" : "tasks"}: ${running} at work, ${queued} waiting`;
 }
 
-/** The list the bar opens: Automatic, then every machine and under it its workspaces. */
-export function listRowsOf(view: EnvironmentView, target: RunTarget | undefined): ListRow[] {
+/** Which of the list's rows a press opens: the machine's (machines alone), the workspace's (workspaces, one machine's when it names one), or the chip's (all). */
+export interface ListScope {
+  only?: "machines" | "workspaces";
+  /** With `only: "workspaces"`: that machine's alone. */
+  machine?: string;
+  /** Whether Automatic is offered: not for a conversation that runs somewhere already. */
+  automatic?: boolean;
+}
+
+/**
+ * The list the bar opens: Automatic, then every machine and under it its workspaces — or, from the
+ * bar's machine, the machines alone, and from its workspace, the workspaces (of its machine, when it
+ * names one: the machine is switched from its own button).
+ */
+export function listRowsOf(view: EnvironmentView, target: RunTarget | undefined, scope: ListScope = {}): ListRow[] {
   const choice = choiceOf(view, target);
-  const rows: ListRow[] = [{ kind: "auto", on: choice.kind === "auto" }];
+  const rows: ListRow[] = scope.automatic === false || scope.only === "workspaces" ? [] : [{ kind: "auto", on: choice.kind === "auto" }];
+  const oneMachine = scope.only === "workspaces" ? scope.machine : undefined;
   for (const machine of view.machines) {
+    if (oneMachine !== undefined && machine.id !== oneMachine) continue;
     const usable = machine.state === "online";
     const note = machineNoteOf(machine);
-    rows.push({
+    if (oneMachine === undefined) rows.push({
       kind: "machine",
       machine,
       face: faceOf(machine),
@@ -291,10 +328,13 @@ export function listRowsOf(view: EnvironmentView, target: RunTarget | undefined)
       what: machineKindOf(machine),
       ...(note !== undefined ? { note } : {}),
       meters: usable ? metersOf(machine) : [],
-      on: choice.kind === "machine" && choice.machine.id === machine.id,
+      // From the machine's own button, the machine it is on is ticked whatever workspace it is in.
+      on: choice.kind !== "auto" && choice.machine.id === machine.id && (choice.kind === "machine" || scope.only === "machines"),
+      ...(choice.kind === "workspace" && choice.machine.id === machine.id && scope.only === "machines" ? { holds: true as const } : {}),
       usable,
       target: { machine: machine.id },
     });
+    if (scope.only === "machines") continue;
     for (const workspace of machine.workspaces) {
       const git = gitFactsOf(workspace.git);
       rows.push({

@@ -159,17 +159,17 @@ describe("the bar under the composer", () => {
     expect(barFactsOf(VIEW, { kind: "waiting", queued: queued({ target: { project: HERE } }) })).toMatchObject({ workspace: { text: "waiting for room in mist-server-3" } });
   });
 
-  it("running, it only says: where, and the checkout", () => {
+  it("running, it says where and the checkout, and opens to move it (the person, 2026-11-20)", () => {
     const bar = barFactsOf(VIEW, { kind: "running", project: HERE })!;
-    expect(bar).toMatchObject({ machine: "this machine", workspace: { text: "mist-server-3" }, open: false });
+    expect(bar).toMatchObject({ machine: "this machine", machineId: "m-self", workspace: { text: "mist-server-3" }, checkout: HERE, open: true });
     expect(bar.git?.request?.label).toBe("!17");
     // On another machine, by that machine's name.
     expect(barFactsOf(VIEW, { kind: "running", project: "jaira-remote:m-mac:/Users/o/code/mist-server" })).toMatchObject({ machine: "mac-mini", face: { shape: "mini", mark: "mac" } });
   });
 
-  it("with one workspace there is nothing to choose: the bar says it and opens nothing", () => {
-    expect(barFactsOf(ONE, { kind: "choosing" })).toMatchObject({ machine: "this machine", workspace: { text: "solo" }, git: { branch: "main" }, open: false });
-    expect(barFactsOf(ONE, { kind: "running", project: "/src/solo" })).toMatchObject({ machine: "this machine", workspace: { text: "solo" }, open: false });
+  it("with one workspace it names that workspace from the start, and still opens: the chip is always a button", () => {
+    expect(barFactsOf(ONE, { kind: "choosing" })).toMatchObject({ machine: "this machine", workspace: { text: "solo" }, git: { branch: "main" }, checkout: "/src/solo", open: true });
+    expect(barFactsOf(ONE, { kind: "running", project: "/src/solo" })).toMatchObject({ machine: "this machine", workspace: { text: "solo" }, open: true });
   });
 
   it("is not drawn before the engine has answered, and falls back to the placement's own note for a workspace since closed", () => {
@@ -182,7 +182,7 @@ describe("the bar under the composer", () => {
 
   it("is repeated by the chip beside the title, dashed while nothing is decided", () => {
     expect(titleChipOf(barFactsOf(VIEW, { kind: "choosing" }))).toEqual({ face: AUTO_FACE, text: "automatic", dashed: true, open: true });
-    expect(titleChipOf(barFactsOf(VIEW, { kind: "running", project: HERE }))).toMatchObject({ text: "this machine / mist-server-3", dashed: false, open: false });
+    expect(titleChipOf(barFactsOf(VIEW, { kind: "running", project: HERE }))).toMatchObject({ text: "this machine / mist-server-3", dashed: false, open: true });
     expect(titleChipOf(undefined)).toBeUndefined();
   });
 });
@@ -242,6 +242,23 @@ describe("the list of where a conversation can run", () => {
     // Something named that is no longer there is no choice.
     expect(choiceOf(VIEW, { project: "/nowhere" })).toEqual({ kind: "auto" });
     expect(choiceOf(VIEW, { machine: "m-gone" })).toEqual({ kind: "auto" });
+  });
+
+  it("from the bar's machine is the machines alone, the one it is on ticked whatever its workspace", () => {
+    const rows = listRowsOf(VIEW, { project: HERE }, { only: "machines" });
+    expect(rows.map((r) => r.kind)).toEqual(["auto", "machine", "machine", "machine"]);
+    expect(rows.flatMap((r, i) => (r.on ? [i] : []))).toEqual([1]);
+    // Ticked for the workspace on it — it says what it is, not "any workspace".
+    expect(rows[1]).toMatchObject({ holds: true });
+    // A conversation that runs somewhere already is moved, not placed: no Automatic.
+    expect(listRowsOf(VIEW, { project: HERE }, { only: "machines", automatic: false }).map((r) => r.kind)).toEqual(["machine", "machine", "machine"]);
+  });
+
+  it("from the bar's workspace is that machine's workspaces, or every machine's under its line", () => {
+    const one = listRowsOf(VIEW, { project: HERE }, { only: "workspaces", machine: "m-self" });
+    expect(one.map((r) => (r.kind === "workspace" ? r.workspace.label : r.kind))).toEqual(["mist-server", "mist-server-3"]);
+    expect(one.flatMap((r, i) => (r.on ? [i] : []))).toEqual([1]);
+    expect(listRowsOf(VIEW, undefined, { only: "workspaces" }).map((r) => r.kind)).toEqual(["machine", "workspace", "workspace", "machine", "workspace", "machine", "workspace"]);
   });
 });
 

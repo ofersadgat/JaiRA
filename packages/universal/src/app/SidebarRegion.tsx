@@ -123,8 +123,9 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
   // The machines holding a workspace of the project a source is — where Bring can take the files git
   // ignores from, as the engine finds them (decision 0027).
   const bringPlaces = (source: WorkspaceSource): BringPlace[] => bringPlacesOf(workspacesOfSource(state.projects, source, machinesView?.self.id), machinesView?.self.id);
+  // Every project has the pill, one workspace or many: it is how another is added and one switched to.
   const scope =
-    group === undefined || group.members.length < 2
+    group === undefined
       ? undefined
       : {
           machines: machinesOf(group),

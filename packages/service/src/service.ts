@@ -142,6 +142,12 @@ import {
   loadLayeredConfig,
   openProject,
   exportChanges,
+  exportTask,
+  readBlobs,
+  importMovedTask,
+  moveTaskLocally,
+  releaseMovedTask,
+  type TaskBundle,
   autoArchive,
   snapshotFiles,
   type ReplicaKnown,
@@ -372,6 +378,7 @@ import {
   registerSmartFunction,
   type PermissionFunctionRunner,
   Git,
+  ExecError,
   NodeExec,
   onMachine,
   type ExecEnv,
@@ -535,6 +542,10 @@ import {
   type EnvironmentMachine,
   type EnvironmentView,
   type WorkspaceGit,
+  type WorkspaceBranches,
+  type WorkspaceSwitchRequest,
+  type WorkspaceSwitchResult,
+  type ConversationMoveOut,
   type PlacementAsk,
   type PlacementNote,
   type PlacementView,
@@ -3530,6 +3541,72 @@ export class AppService {
     return entry.looking;
   }
 
+  /** A workspace's git, as its own commands run there. */
+  private workspaceGitOf(session: ProjectSession, timeoutMs = 30_000): Git {
+    const config = session.project.config;
+    return new Git({ exec: new NodeExec({ execEnv: config.execEnvironment }), repoDir: session.project.paths.projectDir, execEnv: config.execEnvironment, timeoutMs });
+  }
+
+  /**
+   * The conversations and tasks at work in a workspace now, other than `except`: running, and not a
+   * conversation sitting idle until its next message (decision 0029 §2).
+   */
+  private busyIn(session: ProjectSession, except?: string): Array<{ taskId: string; title: string }> {
+    const idle = new Set<string>();
+    for (const request of session.hub.list()) {
+      const taskId = request.taskId ?? session.requestTask.get(request.requestId);
+      if (request.component === INPUT_FUNCTION && taskId !== undefined) idle.add(taskId);
+    }
+    return taskSummaries(session.project)
+      .filter((t) => t.status === "running" && t.taskId !== except && !idle.has(t.taskId))
+      .map((t) => ({ taskId: t.taskId, title: t.title }));
+  }
+
+  /**
+   * A workspace's branches for the composer's branch menu (`workspace:branches`): its own and the
+   * remotes', what is not committed — the person is asked what becomes of it before a switch — and who
+   * else is at work there.
+   */
+  async workspaceBranches(project: string, asking?: string): Promise<WorkspaceBranches> {
+    const session = this.session(project);
+    const git = this.workspaceGitOf(session);
+    if (!(await git.isRepo())) throw this.refusal("project", `${session.dir} is not a git checkout`);
+    const [list, status] = await Promise.all([git.branches(), git.status()]);
+    return { ...list, dirty: status.slice(0, 20).map((e) => e.path), dirtyCount: status.length, busy: this.busyIn(session, asking) };
+  }
+
+  /**
+   * Switch a workspace's branch (`workspace:switchBranch`). With uncommitted changes and no word on
+   * them, nothing moves: the answer says so, and the window asks the person — carry them (git refuses,
+   * naming the files, where it cannot) or stash them first. The checkout is looked at again after, so
+   * every bar says the new branch, and the setup's again steps run off the moved commit as after a pull.
+   */
+  async switchWorkspaceBranch(request: WorkspaceSwitchRequest): Promise<WorkspaceSwitchResult> {
+    const session = this.session(request.project);
+    const branch = request.branch.trim();
+    if (branch === "") throw this.refusal("project", "a branch needs a name");
+    const git = this.workspaceGitOf(session);
+    const status = await git.status();
+    if (status.length > 0 && request.dirty === undefined) return { switched: false, needs: "dirty", dirty: status.slice(0, 20).map((e) => e.path), dirtyCount: status.length };
+    let stashed: string | undefined;
+    try {
+      if (status.length > 0 && request.dirty === "stash") {
+        const from = (await git.currentBranch()) ?? "a detached HEAD";
+        stashed = `JaiRA: uncommitted on ${from}, before switching to ${branch}`;
+        await git.stash(stashed);
+      }
+      await git.switchBranch(branch, request.create === true ? { create: true } : {});
+    } catch (e) {
+      const said = e instanceof ExecError ? (e.result.stderr.trim() || e.message) : (e as Error).message;
+      throw this.refusal("project", `git could not switch ${session.dir} to ${branch}${stashed !== undefined ? " (your changes are on the stash)" : ""}: ${said}`, { project: session.key });
+    }
+    const now = (await git.currentBranch()) ?? branch;
+    this.log({ level: "info", source: "project", message: `${session.dir} is on ${now}${stashed !== undefined ? `; its uncommitted changes are on the stash ("${stashed}")` : ""}`, project: session.key });
+    void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    void this.checkHeads().catch(() => undefined);
+    return { switched: true, branch: now, ...(stashed !== undefined ? { stashed } : {}) };
+  }
+
   /**
    * The open merge request of a branch, asked of the forge its remote is on — at most once a minute
    * for one branch, and every five when the forge could not be asked (no connection, a refused token),
@@ -3635,6 +3712,171 @@ export class AppService {
       };
     });
     return { ...(identity !== undefined ? { identity } : {}), machines };
+  }
+
+  // --- a conversation moved to another workspace (decision 0013 ruling 7, built 2026-11-20) -------------
+
+  /**
+   * Move a started conversation to another workspace of its project (`task:relocate`), here or on
+   * another machine; the person: "move it there". It keeps its id, its history and what it was asking.
+   * A conversation waiting for its next message is set down (as a close sets it down), carried, and
+   * picked up there, waiting again; one that has ended is carried and answers its next message there.
+   * One answering now is refused: what its agent is doing happens in the folder it is in. Its agent
+   * cannot resume its own session in another folder, so the next reply there is replayed from the
+   * record (`forgetPlace`). Run on the machine whose window asked, which reaches both ends.
+   */
+  async relocateConversation(request: { taskId: string; project: string; target: RunTarget; /** Tests: the model the run is picked up with. */ fake?: JsonValue }): Promise<{ taskId: string; project: string }> {
+    const { taskId } = request;
+    const from = request.project;
+    const to = await this.moveTargetOf(from, request.target);
+    // Still waiting for a workspace: sent to this one, as a choice made before it starts is.
+    if (this.placement.queue().some((q) => q.taskId === taskId)) return this.runQueuedOn(taskId, from, to);
+    if (to === from || (parseRemoteProjectKey(to) === undefined && parseRemoteProjectKey(from) === undefined && sessionKey(to) === sessionKey(from))) return { taskId, project: from };
+    const here = (key: string): boolean => parseRemoteProjectKey(key) === undefined;
+    if (here(from) && here(to)) {
+      const source = this.session(from);
+      const target = this.session(to);
+      const resume = await this.setDownForMove(source, taskId);
+      const snapshot = source.project.runtime.get(taskId)?.snapshotHash;
+      try {
+        moveTaskLocally(
+          source.project.db,
+          taskId,
+          { workspace: source.project.workspace, tasksDir: source.project.paths.tasksDir, snapshotsDir: source.project.paths.snapshotsDir },
+          { workspace: target.project.workspace, tasksDir: target.project.paths.tasksDir, snapshotsDir: target.project.paths.snapshotsDir },
+          snapshot,
+        );
+      } catch (e) {
+        if (resume) await this.resumeTask({ taskId, project: from }).catch(() => undefined);
+        throw this.refusal("run", `the conversation could not be moved: ${(e as Error).message}`, { taskId });
+      }
+      this.letGoOfMoved(source, taskId);
+      this.publishFor(target, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(target, { type: "store:invalidate", scope: "board" });
+      if (resume) await this.resumeTask({ taskId, project: to, ...(request.fake !== undefined ? { fake: request.fake as never } : {}) });
+    } else {
+      const out = (await this.atWorkspace("task:moveOut", { taskId, project: from }, () => this.moveConversationOut({ taskId, project: from }))) as ConversationMoveOut;
+      try {
+        const into = { ...out, project: to, ...(request.fake !== undefined ? { fake: request.fake } : {}) };
+        await this.atWorkspace("task:moveIn", into, () => this.moveConversationIn(into));
+      } catch (e) {
+        await this.atWorkspace("task:moveBack", { taskId, project: from }, () => this.moveConversationBack({ taskId, project: from })).catch(() => undefined);
+        throw this.refusal("run", `the conversation could not be moved: ${(e as Error).message}`, { taskId });
+      }
+      await this.atWorkspace("task:moveDone", { taskId, project: from }, () => this.moveConversationDone({ taskId, project: from }));
+    }
+    this.log({ level: "info", source: "machines", message: `moved conversation ${taskId} from ${from} to ${to}`, taskId });
+    this.publish({ type: "store:invalidate", scope: "tasks" });
+    this.placementChanged([{ taskId, project: from, to: { taskId, project: to } }]);
+    return { taskId, project: to };
+  }
+
+  /** A request answered where its workspace is: forwarded to another machine's, else answered here. */
+  private atWorkspace(channel: string, request: { project: string; [key: string]: unknown }, here: () => Promise<unknown>): Promise<unknown> {
+    return this.federation.route(channel, request) ?? here();
+  }
+
+  /** The workspace a move goes to: the one named, else the machine's first with room (its first, with none). */
+  private async moveTargetOf(from: string, target: RunTarget): Promise<string> {
+    const summary = this.listProjects().find((p) => p.project === from || (parseRemoteProjectKey(p.project) === undefined && parseRemoteProjectKey(from) === undefined && sessionKey(p.project) === sessionKey(from)));
+    const identity = summary?.identity;
+    const members = identity !== undefined ? this.workspacesOf(identity) : summary !== undefined ? [summary] : [];
+    const me = this.fleet.identity().id;
+    if (target.project !== undefined) {
+      const named = members.find((m) => m.project === target.project);
+      if (named === undefined) throw this.refusal("run", "that workspace is not one of this conversation's project");
+      return named.project;
+    }
+    if (target.machine === undefined) throw this.refusal("run", "a move names a workspace or a machine");
+    const on = members.filter((m) => (m.machine?.id ?? me) === target.machine);
+    if (on.length === 0) throw this.refusal("run", "that machine has no workspace of this project");
+    const chosen = identity !== undefined && on.length > 1 ? (await this.placement.choose(identity, on, [], me)).chosen : undefined;
+    return (chosen ?? on[0]!).project;
+  }
+
+  /**
+   * Set a conversation down to be carried (`true` when it is to be picked up again where it lands):
+   * waiting for its next message, its run is unwound the way a close unwinds it, its question kept;
+   * already set down by a close, it is picked up as that close would have it. Refused while it answers.
+   */
+  private async setDownForMove(session: ProjectSession, taskId: string): Promise<boolean> {
+    if ([...this.replicaSessions.values()].includes(session)) throw this.refusal("run", "a copy of another machine's conversation cannot be moved from here");
+    const row = session.project.runtime.get(taskId);
+    if (row === undefined) throw this.refusal("run", `there is no conversation '${taskId}' here`);
+    const worktree = row.worktreePath;
+    if (worktree !== undefined && !(await new Git({ exec: new NodeExec(), repoDir: worktree }).isClean().catch(() => true))) {
+      throw this.refusal("run", `its worktree ${worktree} has changes that are not committed: commit them, or move it once they are gone`, { taskId });
+    }
+    const live = session.live.get(taskId);
+    if (live !== undefined) {
+      const ask = session.hub.list().find((r) => r.component === INPUT_FUNCTION && (r.taskId ?? session.requestTask.get(r.requestId)) === taskId);
+      if (ask === undefined || session.liveCalls.ofTask(taskId).length > 0) {
+        throw this.refusal("run", `it is answering now: move it once it waits for your next message, or stop it first`, { taskId });
+      }
+      session.suspendedAtClose.add(taskId);
+      session.liveFlush.get(taskId)?.();
+      session.hub.abandon(ask.requestId, "the conversation is moving to another workspace");
+      live.abort.abort();
+      await live.done;
+    }
+    const after = session.project.runtime.get(taskId);
+    const reason = after !== undefined && after.status === "canceled" ? reasonOf(after.failureJson) : undefined;
+    return reason === SUSPENDED_WAITING || reason === SUSPENDED_FORWARDING || reason === SUSPENDED_UPDATE;
+  }
+
+  /** What the workspace a conversation left holds of it in memory, let go. */
+  private letGoOfMoved(session: ProjectSession, taskId: string): void {
+    session.suspendedAtClose.delete(taskId);
+    this.dropRecoveredAsks(session, (r) => r.taskId === taskId);
+    this.shells.forget(taskId);
+    for (const [requestId, owner] of [...session.requestTask]) if (owner === taskId) session.requestTask.delete(requestId);
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(session, { type: "store:invalidate", scope: "board" });
+  }
+
+  /** The leaving end of a move between machines (`task:moveOut`): set down, and everything it is, sent. */
+  async moveConversationOut(request: { taskId: string; project: string }): Promise<ConversationMoveOut> {
+    const session = this.session(request.project);
+    const resume = await this.setDownForMove(session, request.taskId);
+    const bundle = exportTask(session.project, request.taskId);
+    if (bundle === undefined) throw this.refusal("run", `there is no conversation '${request.taskId}' here`);
+    const blobs = readBlobs(session.project.db, bundle.blobs);
+    const snapshot = bundle.snapshot !== undefined ? snapshotFiles(session.project, bundle.snapshot) : undefined;
+    return { taskId: request.taskId, bundle: bundle as unknown as JsonValue, blobs, ...(snapshot !== undefined ? { snapshot } : {}), resume };
+  }
+
+  /** The arriving end (`task:moveIn`): taken in as this workspace's own, and picked up when it was set down waiting. */
+  async moveConversationIn(request: ConversationMoveOut & { project: string; fake?: JsonValue }): Promise<{ taskId: string; project: string }> {
+    const session = this.session(request.project);
+    const bundle = request.bundle as unknown as TaskBundle;
+    if (bundle.taskId !== request.taskId) throw this.refusal("run", "the conversation sent is not the one named");
+    importMovedTask(session.project.db, session.project.workspace, bundle, request.blobs, { tasksDir: session.project.paths.tasksDir, snapshotsDir: session.project.paths.snapshotsDir }, request.snapshot, (workspace) => {
+      const row = session.project.db.prepare(`SELECT machine FROM workspaces WHERE id = ?`).get(workspace) as { machine: string | null } | undefined;
+      return row?.machine != null ? this.replicator.dirsOf(row.machine, workspace) : undefined;
+    });
+    this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(session, { type: "store:invalidate", scope: "board" });
+    if (request.resume) await this.resumeTask({ taskId: request.taskId, project: session.dir, ...(request.fake !== undefined ? { fake: request.fake as never } : {}) });
+    return { taskId: request.taskId, project: session.dir };
+  }
+
+  /** The leaving end, once the other has it (`task:moveDone`): it is not here any more. */
+  async moveConversationDone(request: { taskId: string; project: string }): Promise<{ taskId: string }> {
+    const session = this.session(request.project);
+    this.letGoOfMoved(session, request.taskId);
+    const done = await this.deleteTask(request.taskId, request.project);
+    releaseMovedTask(session.project.db, session.project.workspace, request.taskId);
+    return done;
+  }
+
+  /** The leaving end, when the other could not take it (`task:moveBack`): picked up again where it was. */
+  async moveConversationBack(request: { taskId: string; project: string }): Promise<{ taskId: string }> {
+    const session = this.session(request.project);
+    session.suspendedAtClose.delete(request.taskId);
+    const row = session.project.runtime.get(request.taskId);
+    const reason = row !== undefined && row.status === "canceled" ? reasonOf(row.failureJson) : undefined;
+    if (reason === SUSPENDED_WAITING) await this.resumeTask({ taskId: request.taskId, project: request.project });
+    return { taskId: request.taskId };
   }
 
   /** What is being placed now, then what waits, oldest first. */

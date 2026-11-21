@@ -69,6 +69,15 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
    conversations that happened elsewhere."
    - Moving a session between machines is a later improvement. It needs the LLM session id plus a way
      to transfer the workspace.
+   - **Amended 2026-11-20, built:** a started conversation moves to any workspace of its project, on
+     this machine or another (the person: "move it there, but most of the pieces necessary to do this
+     should already exist"). `task:relocate`, run on the machine whose window asked: a conversation
+     waiting for its next message is set down as a close sets it down, carried — within a machine by
+     re-pointing its owner row; between machines as a replica's `TaskBundle` (`task:moveOut`,
+     `task:moveIn`, `task:moveDone`, `task:moveBack`), the arriving workspace its owner — and picked up
+     there, waiting again. It keeps its id and its history. The agent's own session handle is dropped
+     (`forgetPlace`): its session file is in the folder it left, so the next reply replays the record. One
+     answering now is refused; one still waiting for a workspace is placed as a choice before its start is.
 8. **A run uses the workflows of the clone it lands in:** "6a".
 9. **Screen verbs:**
    - The folder picker browses the remote machine.

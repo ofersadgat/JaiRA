@@ -237,3 +237,63 @@ describe("error surfaces", () => {
     expect(await git.tryRun(["frobnicate"])).toBeUndefined();
   });
 });
+
+describe("branches and switching (the composer's branch menu)", () => {
+  /** A bare remote with `main` and `feature` pushed, and this checkout tracking `main` only. */
+  async function withRemote(): Promise<void> {
+    const bare = join(dir, "remote.git");
+    await git.run(["init", "--bare", "--initial-branch=main", bare]);
+    await git.run(["remote", "add", "origin", bare]);
+    await git.run(["push", "-u", "origin", "main"]);
+    await git.run(["switch", "-c", "feature"]);
+    writeFileSync(join(dir, "repo", "feature.txt"), "f\n", "utf8");
+    await git.run(["add", "."]);
+    await git.run(["commit", "-m", "the feature"]);
+    await git.run(["push", "origin", "feature"]);
+    await git.run(["switch", "main"]);
+    await git.run(["branch", "-D", "feature"]);
+  }
+
+  it("lists its own branches, and the remotes' that none of its own tracks", async () => {
+    await withRemote();
+    await git.run(["branch", "local-only"]);
+    const list = await git.branches();
+    expect(list.current).toBe("main");
+    expect(list.local.map((b) => b.name).sort()).toEqual(["local-only", "main"]);
+    expect(list.local.find((b) => b.name === "main")?.upstream).toBe("origin/main");
+    // origin/main is tracked by main; origin/HEAD is a pointer, not a branch.
+    expect(list.remote.map((b) => b.name)).toEqual(["origin/feature"]);
+    expect(list.remote[0]!.subject).toBe("the feature");
+  });
+
+  it("switches to its own branch, to a remote's (tracking it), and to a new one", async () => {
+    await withRemote();
+    await git.switchBranch("origin/feature");
+    expect(await git.currentBranch()).toBe("feature");
+    expect((await git.branches()).local.find((b) => b.name === "feature")?.upstream).toBe("origin/feature");
+    await git.switchBranch("main");
+    expect(await git.currentBranch()).toBe("main");
+    await git.switchBranch("brand-new", { create: true });
+    expect(await git.currentBranch()).toBe("brand-new");
+  });
+
+  it("carries uncommitted changes where git can, refuses where it cannot, and stashes on asking", async () => {
+    await git.run(["switch", "-c", "other"]);
+    writeFileSync(join(dir, "repo", "README.md"), "# other\n", "utf8");
+    await git.run(["commit", "-am", "other readme"]);
+    await git.run(["switch", "main"]);
+    // A new file comes along.
+    writeFileSync(join(dir, "repo", "notes.txt"), "mine\n", "utf8");
+    await git.switchBranch("other");
+    expect(existsSync(join(dir, "repo", "notes.txt"))).toBe(true);
+    // A change to a file the other branch changes too does not: nothing moves.
+    writeFileSync(join(dir, "repo", "README.md"), "# edited\n", "utf8");
+    await expect(git.switchBranch("main")).rejects.toThrow();
+    expect(await git.currentBranch()).toBe("other");
+    await git.stash("before main");
+    await git.switchBranch("main");
+    expect(await git.currentBranch()).toBe("main");
+    expect(await git.status()).toEqual([]);
+    expect(await git.run(["stash", "list"])).toContain("before main");
+  });
+});

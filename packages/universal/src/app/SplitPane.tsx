@@ -393,9 +393,11 @@ export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: P
   // What the room stands on, as a path's entry: by key, so the same place drawn again moves nothing.
   const at = useRef(here);
   at.current = here;
+  // And by where it is: a conversation moved to another workspace keeps its key, and is drawn there now.
+  const whose = (here as { project?: string }).project;
   useEffect(() => {
     if (!phone) splitView.set(roomMoved(splitView.get(), at.current));
-  }, [here.key, where, phone]);
+  }, [here.key, whose, where, phone]);
   // The window's buttons are drawn over the top row's right end: the side panel's head keeps them clear
   // while it stands open; else the last pane's head does (less the folded panel's rail under them).
   const fit = useColumnsFit();

@@ -7,6 +7,7 @@ export * from "./project";
 export * from "./fileStorage";
 export * from "./workspace";
 export * from "./replica";
+export * from "./taskMove";
 export * from "./archive";
 export * from "./journalFile";
 export * from "./conversationFile";

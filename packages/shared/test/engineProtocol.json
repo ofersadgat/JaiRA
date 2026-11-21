@@ -229,6 +229,13 @@
     "workspace:cancel",
     "workspace:create",
     "workspace:inspect",
-    "workspace:plan"
+    "workspace:plan",
+    "workspace:branches",
+    "workspace:switchBranch",
+    "task:relocate",
+    "task:moveOut",
+    "task:moveIn",
+    "task:moveDone",
+    "task:moveBack"
   ]
 }

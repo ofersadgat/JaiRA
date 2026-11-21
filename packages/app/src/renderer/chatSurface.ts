@@ -125,6 +125,11 @@ export interface ChatSurface {
   runOn?: RunTarget | undefined;
   /** Choose it. For a conversation that waits, this changes what it waits for. */
   onRunOn: (target: RunTarget | undefined) => void;
+  /**
+   * Move a conversation that has started to another workspace or machine (decision 0013 ruling 7) —
+   * the one named, so a split's pane moves the conversation it shows.
+   */
+  onMove: (taskId: string, project: string, target: RunTarget) => void;
   /** Change what a waiting conversation's first message runs under — the composer's chips, before the start. */
   onQueuedSettings: (overrides: ChatSettings) => void;
   /** Take a waiting conversation back to the start page, with where it was sent and what it ran under. */
@@ -251,6 +256,7 @@ export function chatSurfaceOf(
     queued,
     runOn: queued !== undefined ? queued.target : state.chat.runOn,
     onRunOn: (target) => (queued !== undefined ? void actions.changeQueued(queued.taskId, queued.project, { runOn: target ?? null }) : actions.setRunOn(target)),
+    onMove: (taskId, project, target) => void actions.relocateConversation(taskId, project, target),
     onQueuedSettings: (overrides) => {
       if (queued !== undefined) void actions.changeQueued(queued.taskId, queued.project, { overrides });
     },

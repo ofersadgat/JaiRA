@@ -280,6 +280,14 @@ export class InteractionHub {
   }
 
   /**
+   * Let one parked request go without answering it — its run is being set down to be picked up
+   * elsewhere (a conversation moved to another workspace). The host keeps its question, as at a close.
+   */
+  abandon(requestId: string, reason: string): boolean {
+    return this.settle(requestId, { error: failureOf(new Error(reason)) }, "abandoned");
+  }
+
+  /**
    * Fail every parked request — used when a run is canceled or the window
    * closes, so a workflow never hangs on a gate nobody can answer any more.
    *

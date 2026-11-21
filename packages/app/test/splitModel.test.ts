@@ -138,6 +138,13 @@ describe("the room", () => {
     expect(roomMoved(NO_SPLIT, ROOM)).toBe(NO_SPLIT);
   });
 
+  it("standing on a conversation that moved to another workspace, its pane draws it where it is now", () => {
+    const there = roomMoved(NO_SPLIT, taskPaneEntryOf("c", "/src/a"));
+    const moved = roomMoved(there, taskPaneEntryOf("c", "/src/b"));
+    expect(moved.panes[0]!.entries).toEqual([taskPaneEntryOf("c", "/src/b")]);
+    expect(moved.here).toEqual(taskPaneEntryOf("c", "/src/b"));
+  });
+
   it("standing on a conversation, its pane's path is that conversation's own entry — the same as any pane's", () => {
     const onChat = roomMoved(NO_SPLIT, task("c"));
     expect(paths(onChat)).toEqual([["task:c"]]);

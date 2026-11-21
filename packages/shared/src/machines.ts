@@ -2,6 +2,7 @@
  * The fleet as the window sees it (decision 0013 §1–§3): this machine, the machines it is paired with,
  * and the pairing code it is showing, for Settings → Machines.
  */
+import type { JsonValue } from "@declarative-ai/json";
 import type { ChatSettings } from "./operationVocabulary";
 import type { SettingsSyncView } from "./settingsSync";
 
@@ -403,6 +404,66 @@ export interface WorkspaceGit {
   removed?: number;
   /** The open merge request (or pull request) of the branch, when its forge has one and can be asked. */
   mergeRequest?: { provider: "gitlab" | "github"; number: number; url: string; state: "open" | "merged" | "closed"; draft?: true };
+}
+
+/** A branch of a workspace's checkout, as the composer's branch menu lists it. */
+export interface WorkspaceBranch {
+  /** What a switch takes: `feature`, or a remote's `origin/feature`. */
+  name: string;
+  /** The remote branch it tracks, for one of the checkout's own. */
+  upstream?: string;
+  /** When its newest commit was made, in ms. */
+  at?: number;
+  subject?: string;
+}
+
+/**
+ * What switching a workspace's branch would meet (`workspace:branches`): its branches, what is not
+ * committed (the person is asked what to do with it), and the other conversations at work there.
+ */
+export interface WorkspaceBranches {
+  current?: string;
+  local: WorkspaceBranch[];
+  /** The remotes' branches none of its own tracks: switching to one makes the branch that tracks it. */
+  remote: WorkspaceBranch[];
+  /** Files changed or new since the last commit, the first 20; `dirtyCount` is all of them. */
+  dirty: string[];
+  dirtyCount: number;
+  /** Conversations and tasks at work in the workspace now, other than the one asking. */
+  busy: Array<{ taskId: string; title: string }>;
+}
+
+/** Switch a workspace's branch. `dirty` says what becomes of uncommitted changes; absent, there must be none. */
+export interface WorkspaceSwitchRequest {
+  project: string;
+  branch: string;
+  /** A new branch at the current commit. */
+  create?: boolean;
+  /** `carry`: they come along where git can carry them; `stash`: put aside first. */
+  dirty?: "carry" | "stash";
+  /** The conversation asking, by task id: not counted among the others at work. Not `taskId`, which
+   * would send the request to that task's home instead of the workspace named. */
+  asking?: string;
+}
+
+/** A switch made, or what it needs the person to decide first. */
+export type WorkspaceSwitchResult =
+  | { switched: true; branch: string; stashed?: string }
+  | { switched: false; needs: "dirty"; dirty: string[]; dirtyCount: number };
+
+/**
+ * A conversation on its way between two machines' workspaces: everything it is, as the leaving machine
+ * exports it (`task:moveOut`), and whether it is to be picked up again waiting where it lands.
+ */
+export interface ConversationMoveOut {
+  taskId: string;
+  /** The task, as a replica is sent it (persistence's `TaskBundle`). */
+  bundle: JsonValue;
+  /** Every blob its records name. */
+  blobs: Record<string, string>;
+  /** The files of the snapshot it runs under, when it has one. */
+  snapshot?: Record<string, string>;
+  resume: boolean;
 }
 
 /** One workspace a conversation could run in. */

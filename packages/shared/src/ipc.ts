@@ -42,7 +42,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget } from "./machines";
+import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget, WorkspaceBranches, WorkspaceSwitchRequest, WorkspaceSwitchResult, ConversationMoveOut } from "./machines";
 import type { CliCommandStatus, EngineStatus, QuitChoice, QuitState, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -2757,6 +2757,10 @@ export interface IpcContract {
   "forge:repositories": { request: { search?: string; machine?: string }; response: ForgeRepositoriesView };
   /** A forge repository's branches. */
   "forge:branches": { request: { host: string; project: string; machine?: string }; response: ForgeBranch[] };
+  /** A workspace's branches, what is uncommitted in it, and who else is at work there (the composer's branch menu). */
+  "workspace:branches": { request: { project: string; asking?: string }; response: WorkspaceBranches };
+  /** Switch a workspace's branch. Uncommitted changes and no `dirty` answer: `needs: "dirty"`, nothing moved. */
+  "workspace:switchBranch": { request: WorkspaceSwitchRequest; response: WorkspaceSwitchResult };
   /** A folder's git state on the machine that holds it — what copying it would bring. */
   "workspace:inspect": { request: { dir: string; machine?: string }; response: WorkspaceCheckout };
   /** Where a new workspace would go and what its setup would take there, before anything happens. */
@@ -2773,6 +2777,19 @@ export interface IpcContract {
   "placement:queue": { request: void; response: QueuedPlacement[] };
   /** Send a queued task to a workspace by hand, before it starts; `target` absent puts it back to waiting. */
   "placement:runOn": { request: { taskId: string; project: string; target: string }; response: { taskId: string; project: string } };
+  /**
+   * Move a started conversation to another workspace of its project, here or on another machine
+   * (decision 0013 ruling 7): it keeps its id and history, and is answered where it lands.
+   */
+  "task:relocate": { request: { taskId: string; project: string; target: RunTarget; fake?: JsonValue }; response: { taskId: string; project: string } };
+  /** A move's leaving end, between machines: the conversation set down and exported. */
+  "task:moveOut": { request: { taskId: string; project: string }; response: ConversationMoveOut };
+  /** A move's arriving end: the conversation taken in as this workspace's own. */
+  "task:moveIn": { request: ConversationMoveOut & { project: string; fake?: JsonValue }; response: { taskId: string; project: string } };
+  /** A move's leaving end, once it has arrived: let go. */
+  "task:moveDone": { request: { taskId: string; project: string }; response: { taskId: string } };
+  /** A move's leaving end, when it could not arrive: picked up again where it was. */
+  "task:moveBack": { request: { taskId: string; project: string }; response: { taskId: string } };
   /**
    * Change what a waiting task waits FOR, before it starts: where it may run (`runOn`; `null` is
    * anywhere) and what its first message runs under (`overrides`). It is asked for again at once.
@@ -3024,6 +3041,8 @@ export const IPC_CHANNELS = [
   "files:browse",
   "forge:repositories",
   "forge:branches",
+  "workspace:branches",
+  "workspace:switchBranch",
   "workspace:inspect",
   "workspace:plan",
   "workspace:create",
@@ -3034,6 +3053,11 @@ export const IPC_CHANNELS = [
   "placement:queue",
   "placement:runOn",
   "placement:change",
+  "task:relocate",
+  "task:moveOut",
+  "task:moveIn",
+  "task:moveDone",
+  "task:moveBack",
   "environment:view",
   "machines:form",
   "machines:projectsFolder",

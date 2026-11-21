@@ -2,7 +2,7 @@ import { useState, type JSX, type ReactNode } from "react";
 import { Linking, View as RNView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { View } from "@tamagui/core";
 import type { EnvironmentView, RunTarget } from "@jaira/shared/browser";
-import { AUTO_FACE, barFactsOf, gitAtDrop, gitDropOf, listRowsOf, type EnvironmentStage, type GitDrop, type GitFacts, type ListRow, type Meter } from "@jaira/ui/environmentModel";
+import { AUTO_FACE, barFactsOf, gitAtDrop, gitDropOf, listRowsOf, type EnvironmentStage, type GitDrop, type GitFacts, type ListRow, type ListScope, type Meter } from "@jaira/ui/environmentModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { NO_STACK, Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -11,6 +11,7 @@ import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
 import { Icon } from "../panel/Icon";
 import { BrandIcon } from "../settings/bits";
+import { BranchMenu } from "./BranchMenu";
 import { useAnchorRect } from "./ComposerCards";
 import { Spinner } from "./Spinner";
 
@@ -19,9 +20,12 @@ import { Spinner } from "./Spinner";
  * 0013 §5, ruled 2026-10-02). On the left the machine's icon and `machine / workspace`; on the right
  * the checkout — its branch, what is unpushed (`↑2`), the lines changed since the last commit
  * (`+128 −34`), and its merge request (`!17 open`). The right is empty until a workspace is decided.
- * Before a conversation starts, and while it waits, the left opens the list of where it can run
- * (`EnvironmentList`); once it runs the bar only says. What it says is `environmentModel.ts`'s. How it
- * looks:
+ * The machine and the workspace are each a button (the person, 2026-11-20: "the machine is separate
+ * from the workspace, so they should be individual buttons"): the machine opens the machines, the
+ * workspace that machine's workspaces (`EnvironmentList`). Before a conversation starts, and while it
+ * waits, a choice is where it will run; once it runs, a choice MOVES it there (decision 0013 ruling 7).
+ * The branch opens the workspace's branches (`BranchMenu`). What it says is `environmentModel.ts`'s.
+ * How it looks:
  *
  *   the tray           the composer's width, its top 22 under the composer's frame; row, centred, gap
  *                      10; padding 28 16 6; 1px --line but the top; radius 0 0 20 20; --accent 3% into
@@ -37,10 +41,27 @@ import { Spinner } from "./Spinner";
  *                      +a −d tabular (+ --ok, − --bad), a 1 × 13 --rule, the forge's mark 12 with the
  *                      request's number --text and its state in its tone
  */
-export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentView | undefined; stage: EnvironmentStage; /** Absent: the bar says and does not open. */ onChoose?: ((target: RunTarget | undefined) => void) | undefined }): JSX.Element | null {
+export function EnvironmentBar({
+  view,
+  stage,
+  onChoose,
+  automatic = true,
+  asking,
+}: {
+  view: EnvironmentView | undefined;
+  stage: EnvironmentStage;
+  /** Absent: the bar says and does not open. */
+  onChoose?: ((target: RunTarget | undefined) => void) | undefined;
+  /** Whether the lists offer Automatic: not once the conversation runs somewhere. */
+  automatic?: boolean;
+  /** The conversation the bar is under, by task id: the branch menu does not count it among those at work. */
+  asking?: string | undefined;
+}): JSX.Element | null {
   const t = useTokens();
   const [ref, measure] = useAnchorRect();
-  const [open, setOpen] = useState<FloatRect | null>(null);
+  const [wsRef, measureWs] = useAnchorRect();
+  const [open, setOpen] = useState<{ at: FloatRect; scope: ListScope } | null>(null);
+  const [branchAt, setBranchAt] = useState<FloatRect | null>(null);
   // One line at every width: the bar's width, the left's as written out, and the checkout's with each
   // number of its facts dropped (`gitDropOf`) — the last two measured off screen, in the ruler below.
   const [width, setWidth] = useState(0);
@@ -55,7 +76,9 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
   const drop: GitDrop = width === 0 || ruler["left"] === undefined ? 0 : gitDropOf(width - 32 - ruler["left"] - 10, [0, 1, 2].map((d) => ruler[`git:${d}`] ?? Infinity));
   const wash = String(t.mix(t.v("accent"), 3, t.v("panel")));
   const opens = bar.open && onChoose !== undefined;
-  const target = stage.kind === "choosing" ? stage.target : stage.kind === "running" ? undefined : stage.queued.target;
+  // Running, the choice is where it runs: ticked in the lists.
+  const target = stage.kind === "choosing" ? stage.target : stage.kind === "running" ? { project: stage.project } : stage.queued.target;
+  const toggle = (scope: ListScope) => (at: FloatRect) => setOpen((was) => (was === null ? { at, scope: { ...scope, automatic } } : null));
   const machine = (hovered: boolean): ReactNode => (
     <>
       <MachineIcon face={bar.face} size={16} ground={wash} />
@@ -98,7 +121,7 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
       </View>
       <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
         {opens ? (
-          <Press onPress={() => measure((at) => setOpen((was) => (was === null ? at : null)))} label="Where this conversation runs" {...({ "aria-expanded": open !== null } as object)} flexDirection="row" alignItems="center" gap={7}>
+          <Press onPress={() => measure(toggle({ only: "machines" }))} label={stage.kind === "running" ? "Move this conversation to another machine" : "The machine this conversation runs on"} {...({ "aria-expanded": open?.scope.only === "machines", "aria-haspopup": "listbox" } as object)} flexDirection="row" alignItems="center" gap={7}>
             {({ hovered }) => machine(hovered)}
           </Press>
         ) : (
@@ -112,25 +135,51 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
           <Txt spec={FACE} opacity={0.45} flexShrink={0}>
             /
           </Txt>
-          <View flexDirection="row" alignItems="center" gap={6} minWidth={0} flexShrink={1}>
-            {bar.workspace.icon === "spinner" ? <Spinner size={12} color={String(t.v("dim"))} /> : <Icon name={bar.workspace.icon} size={13} color={String(t.v("dim"))} />}
-            <Txt spec={{ ...FACE, color: bar.workspace.dim === true ? "dim" : "text" }} ellip minWidth={0} flexShrink={1}>
-              {bar.workspace.text}
-            </Txt>
-          </View>
+          <RNView ref={wsRef} collapsable={false} style={{ minWidth: 0, flexShrink: 1, ...NO_STACK } as never}>
+            {opens ? (
+              <Press
+                onPress={() => measureWs(toggle({ only: "workspaces", ...(bar.machineId !== undefined ? { machine: bar.machineId } : {}) }))}
+                label={stage.kind === "running" ? "Move this conversation to another workspace" : "The workspace this conversation runs in"}
+                {...({ "aria-expanded": open?.scope.only === "workspaces", "aria-haspopup": "listbox" } as object)}
+                flexDirection="row"
+                alignItems="center"
+                gap={6}
+                minWidth={0}
+              >
+                {({ hovered }) => (
+                  <>
+                    <Icon name={bar.workspace!.icon === "spinner" ? "folder" : bar.workspace!.icon} size={13} color={String(t.v("dim"))} />
+                    <Txt spec={{ ...FACE, color: bar.workspace!.dim === true ? "dim" : "text" }} ellip minWidth={0} flexShrink={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                      {bar.workspace!.text}
+                    </Txt>
+                    <Icon name="chevron" size={12} color={String(t.v("dim"))} />
+                  </>
+                )}
+              </Press>
+            ) : (
+              <View flexDirection="row" alignItems="center" gap={6} minWidth={0} flexShrink={1}>
+                {bar.workspace.icon === "spinner" ? <Spinner size={12} color={String(t.v("dim"))} /> : <Icon name={bar.workspace.icon} size={13} color={String(t.v("dim"))} />}
+                <Txt spec={{ ...FACE, color: bar.workspace.dim === true ? "dim" : "text" }} ellip minWidth={0} flexShrink={1}>
+                  {bar.workspace.text}
+                </Txt>
+              </View>
+            )}
+          </RNView>
         </>
       ) : null}
       {/* The checkout at the right end, with as many of its facts as the line has room for. */}
       {bar.git !== undefined ? (
         <View marginLeft="auto" minWidth={0} flexShrink={1}>
-          <GitLine t={t} git={gitAtDrop(bar.git, drop)} />
+          <GitLine t={t} git={gitAtDrop(bar.git, drop)} {...(bar.checkout !== undefined ? { onBranch: (at: FloatRect) => setBranchAt((was) => (was === null ? at : null)) } : {})} />
         </View>
       ) : null}
+      {branchAt !== null && bar.checkout !== undefined ? <BranchMenu anchor={branchAt} project={bar.checkout} workspace={bar.workspace?.text ?? "the workspace"} asking={asking} onClose={() => setBranchAt(null)} /> : null}
       {open !== null && onChoose !== undefined ? (
         <EnvironmentList
-          anchor={open}
+          anchor={open.at}
           view={view}
           target={target}
+          scope={open.scope}
           onChoose={(next) => {
             setOpen(null);
             onChoose(next);
@@ -149,8 +198,25 @@ const SMALL = { voice: "app" as const, scale: 11 / 12.5, color: "dim" };
  * A checkout's facts on one line, as the bar and the list both write them. `dim`: of a workspace that
  * cannot be chosen — its branch is not lit.
  */
-export function GitLine({ t, git, dim = false, face = FACE, link = true }: { t: Tokens; git: GitFacts; dim?: boolean; face?: typeof FACE; /** The request opens in the browser (not inside a row that is itself pressed). */ link?: boolean }): JSX.Element {
+export function GitLine({
+  t,
+  git,
+  dim = false,
+  face = FACE,
+  link = true,
+  onBranch,
+}: {
+  t: Tokens;
+  git: GitFacts;
+  dim?: boolean;
+  face?: typeof FACE;
+  /** The request opens in the browser (not inside a row that is itself pressed). */
+  link?: boolean;
+  /** The branch is a button: it opens the branch menu, under it. */
+  onBranch?: ((at: FloatRect) => void) | undefined;
+}): JSX.Element {
   const num = { ...face, tabular: true };
+  const [branchRef, measureBranch] = useAnchorRect();
   const request = (hovered: boolean): ReactNode =>
     git.request === undefined ? null : (
       <>
@@ -164,7 +230,21 @@ export function GitLine({ t, git, dim = false, face = FACE, link = true }: { t: 
   return (
     // Squeezed, the branch's name is what is cut.
     <View flexDirection="row" alignItems="center" gap={9} flexShrink={1} minWidth={0}>
-      {git.branch !== undefined ? (
+      {git.branch !== undefined && onBranch !== undefined ? (
+        <RNView ref={branchRef} collapsable={false} style={{ minWidth: 0, flexShrink: 1, ...NO_STACK } as never}>
+          <Press onPress={() => measureBranch(onBranch)} label={`Branch: ${git.branch}. Switch branch`} title="Switch branch" {...({ "aria-haspopup": "listbox" } as object)} flexDirection="row" alignItems="center" gap={6} minWidth={0}>
+            {({ hovered }) => (
+              <>
+                <Icon name="git" size={13} color={String(t.v("dim"))} />
+                <Txt spec={{ ...face, color: dim ? "dim" : "text" }} ellip minWidth={0} flexShrink={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                  {git.branch}
+                </Txt>
+                <Icon name="chevron" size={12} color={String(t.v("dim"))} />
+              </>
+            )}
+          </Press>
+        </RNView>
+      ) : git.branch !== undefined ? (
         <View flexDirection="row" alignItems="center" gap={6} flexShrink={1} minWidth={0}>
           <Icon name="git" size={13} color={String(t.v("dim"))} />
           <Txt spec={{ ...face, color: dim ? "dim" : "text" }} ellip minWidth={0} flexShrink={1}>
@@ -224,7 +304,22 @@ export function GitLine({ t, git, dim = false, face = FACE, link = true }: { t: 
  *   the choice         --accent 10% into --panel, and a ✓ in --accent at its end (12 wide, kept on
  *                      every row so the columns line up); hovered --fill-ghost-hover
  */
-export function EnvironmentList({ anchor, view, target, onChoose, onClose }: { anchor: FloatRect; view: EnvironmentView; target: RunTarget | undefined; onChoose: (target: RunTarget | undefined) => void; onClose: () => void }): JSX.Element {
+export function EnvironmentList({
+  anchor,
+  view,
+  target,
+  scope,
+  onChoose,
+  onClose,
+}: {
+  anchor: FloatRect;
+  view: EnvironmentView;
+  target: RunTarget | undefined;
+  /** Which rows: the machines, the workspaces (of one machine), or all (`listRowsOf`). */
+  scope?: ListScope | undefined;
+  onChoose: (target: RunTarget | undefined) => void;
+  onClose: () => void;
+}): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
   return (
@@ -243,18 +338,19 @@ export function EnvironmentList({ anchor, view, target, onChoose, onClose }: { a
         backgroundColor={t.v("panel") as never}
         {...({ boxShadow: String(t.v("lift")), role: "listbox" } as object)}
       >
-        <EnvironmentRows view={view} target={target} onChoose={onChoose} />
+        <EnvironmentRows view={view} target={target} scope={scope} onChoose={onChoose} />
       </Float>
     </MenuLayer>
   );
 }
 
 /** The list's rows, in their blocks: Automatic, then a block for each machine. */
-export function EnvironmentRows({ view, target, onChoose }: { view: EnvironmentView; target: RunTarget | undefined; onChoose: (target: RunTarget | undefined) => void }): JSX.Element {
+export function EnvironmentRows({ view, target, scope, onChoose }: { view: EnvironmentView; target: RunTarget | undefined; scope?: ListScope | undefined; onChoose: (target: RunTarget | undefined) => void }): JSX.Element {
   const t = useTokens();
   const blocks: ListRow[][] = [];
-  for (const row of listRowsOf(view, target)) {
-    if (row.kind === "workspace") blocks.at(-1)?.push(row);
+  for (const row of listRowsOf(view, target, scope)) {
+    // One machine's workspaces have no machine line to hang under: they are one block.
+    if (row.kind === "workspace" && blocks.length > 0) blocks.at(-1)!.push(row);
     else blocks.push([row]);
   }
   return (
@@ -316,7 +412,7 @@ function Row({ t, row, onChoose }: { t: Tokens; row: ListRow; onChoose: (target:
           {row.name}
         </Txt>
         <Txt spec={SMALL} ellip minWidth={0} flexShrink={1}>
-          {row.on ? "any workspace · the first with room" : row.what}
+          {row.on && row.holds !== true ? "any workspace · the first with room" : row.what}
         </Txt>
         <View flex={1} minWidth={0} />
         {row.note !== undefined ? <Txt spec={{ ...SMALL, color: row.note.tone }}>{row.note.text}</Txt> : row.meters.map((meter) => <MeterBar key={meter.label} t={t} meter={meter} />)}

@@ -2,7 +2,7 @@
 id: ui/components/environment-bar
 type: ui-component
 status: shipped
-updated: 2026-10-02
+updated: 2026-11-20
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/live-facts-and-unseen-counts, ux/patterns/absence-is-stated, ux/patterns/say-what-it-is-doing-and-for-how-long]
 serves: [product/chat-with-agents, product/parallel-work-without-collisions, product/nothing-stalls-in-silence]
 surfaces: [ui/surfaces/chat-view]
@@ -26,9 +26,9 @@ A shallow tray tucked under the composer, in a faint accent wash with a hairline
 ## The machine and workspace read on the left and the checkout on the right
 
 - **Tray.** The composer's width. Its top lies 22px under the composer's ring, behind it, so it reads as part of the box. Padding 28px above, 16px at the sides, 6px below; a 1px `--line` edge on every side but the top; 20px bottom corners; a 3% wash of `--accent` over `--panel`. The app face at 11.5/12.5 in `--dim`.
-- **Machine.** The [machine-icon](machine-icon.md) at 16px, then the machine's name in `--text`: `this machine` for the machine the engine is on, another machine's own name, or `automatic` with the dashed screen while nothing is chosen. A 12px chevron follows while the list can be opened.
-- **Workspace.** After a `/` at 45% opacity: a 13px folder and the workspace's folder name in `--text`. Where no workspace is decided, the same place says what stands instead, in `--dim`: `the first of {n} workspaces with room`, a turning spinner and `choosing a workspace`, or a clock and what it waits for.
-- **Checkout.** Pushed to the right edge, only once a workspace is decided: a 13px branch glyph and the branch in `--text`; `↑{n}` for commits not pushed; `+{a}` in `--ok` and `−{d}` in `--bad` for lines changed since the last commit; a 1px by 13px `--rule`; the forge's mark at 12px, the request's number in `--text` and its state in its tone. Counts are tabular. A count of zero is left out.
+- **Machine.** A button: the [machine-icon](machine-icon.md) at 16px, then the machine's name in `--text`: `this machine` for the machine the engine is on, another machine's own name, or `automatic` with the dashed screen while nothing is chosen. A 12px chevron follows. It opens the machines alone (the person, 2026-11-20: "the machine is separate from the workspace, so they should be individual buttons").
+- **Workspace.** After a `/` at 45% opacity, a second button: a 13px folder, the workspace's folder name in `--text` and a 12px chevron. It opens the workspaces of the machine named (all of them, under their machines, while none is). Where no workspace is decided, the same place says what stands instead, in `--dim`: `the first of {n} workspaces with room`, a turning spinner and `choosing a workspace`, or a clock and what it waits for.
+- **Checkout.** Pushed to the right edge, only once a workspace is decided: a 13px branch glyph, the branch in `--text` and a 12px chevron — a button that opens the [branch menu](#the-branch-menu-switches-the-workspaces-branch); `↑{n}` for commits not pushed; `+{a}` in `--ok` and `−{d}` in `--bad` for lines changed since the last commit; a 1px by 13px `--rule`; the forge's mark at 12px, the request's number in `--text` and its state in its tone. Counts are tabular. A count of zero is left out.
 
 ## The bar follows the conversation from a choice to a fact
 
@@ -39,10 +39,10 @@ A shallow tray tucked under the composer, in a faint accent wash with a hairline
 | partial | A machine chosen: its icon and name, and `the first of {n} workspaces with room`; a machine with one workspace names that workspace and shows its checkout. A workspace chosen: the machine, the folder, the checkout. | [default.html](../assets/environment-bar/default.html) |
 | placing | While the conversation's workspaces are asked for the first time: the choice's machine, a spinner and `choosing a workspace`. The bar opens nothing. | [default.html](../assets/environment-bar/default.html) |
 | waiting | Nothing it may run on has room: the choice's machine, a clock and `waiting for a workspace with room`, `waiting for room on {machine}` or `waiting for room in {workspace}`. The list still opens, and a choice made there changes what the conversation waits for. | [default.html](../assets/environment-bar/default.html) |
-| success | Running: the machine, the workspace and its checkout, with no chevron. The checkout is read again when a run, a turn or a call ends in that workspace. | [default.html](../assets/environment-bar/default.html) |
+| success | Running: the machine, the workspace and its checkout, each a button. A machine or workspace chosen now MOVES the conversation there (decision 0013 ruling 7): it keeps its id and history and waits there for its next message; one answering now is refused, and the composer says so. The checkout is read again when a run, a turn or a call ends in that workspace. | [default.html](../assets/environment-bar/default.html) |
 | error | A machine that cannot be reached keeps its place with its dot in `--warn` or `--bad`. A workspace the project no longer holds is named from the record of where the conversation was placed, with no checkout. | |
 
-A project with one workspace has nothing to choose: the bar names that workspace from the start and never opens.
+A project with one workspace names that workspace from the start, and its buttons still open: the chips are always buttons (the person, 2026-11-20: "wherever you see the machine/workspace chip … you should be able to click on it").
 
 ## The list offers automatic, a machine, or one workspace
 
@@ -66,6 +66,12 @@ The list opens under the machine it was opened from, start edges aligned, 10px a
 | The merge request | Opens it in the browser | |
 
 A choice with no room is still the choice. The conversation waits for it; it is not sent elsewhere and it does not fail.
+
+## The branch menu switches the workspace's branch
+
+Under the branch, end edges aligned, 8px away, 360px wide: a field (`Find or name a branch`), then the checkout's own branches under `On this checkout`, newest commit first, the one it is on ticked, then the remotes' branches none of its own tracks under `From the remote` (switching to one makes the branch that tracks it). A name typed that is no branch offers `New branch ‘{name}’ from here`.
+
+A switch with files not committed asks first, in place of the list (the person, 2026-11-20: "if dirty, ask the user what to do"): `{n} files are not committed in {workspace}. What becomes of them on {branch}?`, the first six files, then `Cancel`, `Stash them, then switch` and `Bring them to {branch}` (git brings them where it can; where it cannot, nothing moves and the menu says git's reason). Other conversations at work in the workspace are named first: `{n} other conversations are at work in {workspace}: … Switching to {branch} changes the files under them.`, with `Switch anyway` when nothing is uncommitted.
 
 ## The copy names the place, or says what stands in for one
 

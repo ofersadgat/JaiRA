@@ -203,7 +203,14 @@ export function roomMoved(split: SplitState, here: PaneEntry): SplitState {
   const moved = { ...split, here };
   if (held === null) return openInPane(moved, Math.min(split.focus, split.panes.length - 1), here);
   const path = split.panes[held.pane]!;
-  if (split.here.key === here.key && held.at === path.entries.length - 1 && path.ahead.length === 0) return split.here === here ? split : moved;
+  if (split.here.key === here.key && held.at === path.entries.length - 1 && path.ahead.length === 0) {
+    if (split.here === here) return split;
+    // The same subject somewhere else — a conversation moved to another workspace keeps its id: the pane
+    // draws it where it is now.
+    const panes = [...split.panes];
+    panes[held.pane] = { ...path, entries: [...path.entries.slice(0, held.at), here] };
+    return { ...moved, panes };
+  }
   const panes = withoutRoomElsewhere(split.panes, held.pane, here);
   panes[held.pane] = { entries: [...path.entries.slice(0, held.at), here], ahead: [] };
   return { ...moved, panes };

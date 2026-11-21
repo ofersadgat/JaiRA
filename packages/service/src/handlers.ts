@@ -74,6 +74,9 @@ export function serviceHandlers(service: AppService, options: { local?: boolean;
   // request made here: one forwarded from another machine was placed there already.
   routed["task:start"] = ((request: Parameters<typeof service.startTask>[0]) =>
     service.federation.route("task:start", request) ?? service.placeAndStart(request)) as Handler;
+  // A conversation moved is moved from HERE, the machine whose window asked: it reaches both ends,
+  // where the machine the conversation is on may not reach the one it goes to.
+  routed["task:relocate"] = ((request: Parameters<typeof service.relocateConversation>[0]) => service.relocateConversation(withHome(service, request) as Parameters<typeof service.relocateConversation>[0])) as Handler;
   // The root's lists span every machine: each online one's, keyed for forwarding, and each offline
   // one's from this machine's copy of it.
   routed["task:all"] = (async (request: unknown) => {
@@ -347,6 +350,13 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "forge:repositories": ((request: { search?: string } | undefined) => service.workspaces.repositories(request ?? {})) as Handler,
     "forge:branches": ((request: { host: string; project: string }) => service.workspaces.branches(request)) as Handler,
     "workspace:inspect": ((request: { dir: string }) => service.workspaces.inspect(request)) as Handler,
+    "task:relocate": ((request: Parameters<typeof service.relocateConversation>[0]) => service.relocateConversation(request)) as Handler,
+    "task:moveOut": ((request: { taskId: string; project: string }) => service.moveConversationOut(request)) as Handler,
+    "task:moveIn": ((request: Parameters<typeof service.moveConversationIn>[0]) => service.moveConversationIn(request)) as Handler,
+    "task:moveDone": ((request: { taskId: string; project: string }) => service.moveConversationDone(request)) as Handler,
+    "task:moveBack": ((request: { taskId: string; project: string }) => service.moveConversationBack(request)) as Handler,
+    "workspace:branches": ((request: { project: string; asking?: string }) => service.workspaceBranches(request.project, request.asking)) as Handler,
+    "workspace:switchBranch": ((request: Parameters<typeof service.switchWorkspaceBranch>[0]) => service.switchWorkspaceBranch(request)) as Handler,
     "workspace:plan": ((request: Parameters<typeof service.workspaces.plan>[0]) => service.workspaces.plan(request)) as Handler,
     "workspace:create": ((request: Parameters<typeof service.workspaces.create>[0]) => service.workspaces.create(request)) as Handler,
     "workspace:cancel": ((request: { jobId: string }) => service.workspaces.cancel(request)) as Handler,

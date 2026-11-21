@@ -86,6 +86,12 @@ export class Replicator {
     return join(this.options.baseDir, "remote", machineId, workspace);
   }
 
+  /** Where a remote workspace's copy keeps its task files and snapshots. */
+  dirsOf(machineId: string, workspace: string): ReplicaDirs {
+    const paths = jairaPaths(this.replicaDir(machineId, workspace), this.options.baseDir);
+    return { tasksDir: paths.tasksDir, snapshotsDir: paths.snapshotsDir };
+  }
+
   /** The remote workspace a machine's directory is, once a pull has learned it. */
   workspaceOf(machineId: string, dir: string): string | undefined {
     const row = this.database().prepare(`SELECT id FROM workspaces WHERE machine = ? AND dir = ?`).get(machineId, dir) as { id: string } | undefined;

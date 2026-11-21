@@ -3,7 +3,7 @@ import { View, isWeb } from "@tamagui/core";
 import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
 import type { SidebarAct, SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { SIDEBAR_RAIL } from "@jaira/ui/uiState";
-import { SELF_MACHINE, crumbFit, machineOfKey, machinesWithout, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
+import { crumbFit, machinesWithout, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
@@ -85,7 +85,8 @@ export type SidebarProps = {
   width: number;
   /**
    * The open project's machines and workspaces, and what its title narrows the panel to
-   * (`scopeModel.ts`). Absent for a project of one workspace: its title is its name alone.
+   * (`scopeModel.ts`). Every project has it, however many workspaces: its pill is where one is
+   * chosen and where another is added. Absent only outside a project.
    */
   scope?: { machines: readonly ScopeMachine[]; scope: Scope; onScope: (scope: Scope) => void } | undefined;
 };
@@ -709,7 +710,8 @@ function RoomBar({ acts, room }: { acts: readonly SidebarAct[]; room: string }):
  * you are on is the title, large; short of room the steps before it shrink to their icons, oldest
  * first (`crumbFit`), and only then does its name trim. The machine and the workspace are two halves
  * of one pill, each its own menu; a workspace is on one machine, so choosing it chooses that machine.
- * The ✕ lets the narrowing go; so does pressing the project.
+ * The ✕ lets the narrowing go; so does pressing the project. A project of one workspace has the pill
+ * too: it is how a second is added (the machine menu's Add) and how one is switched to.
  */
 /** "This machine", as {@link Crumb} names it to whoever adds a workspace: the region knows its id. */
 export const SELF_ADD = "@self";
@@ -750,42 +752,10 @@ function Crumb({
           { label: "Add a workspace…", separator: true, onSelect: () => onAddWorkspace() },
         ];
   if (scope === undefined) {
-    const title = (
+    return (
       <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
         {project.label}
       </Txt>
-    );
-    if (onAddWorkspace === undefined) return title;
-    const lone = (e: unknown): void => {
-      const box = isWeb ? (e as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
-      const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
-      const at = { x: box?.left ?? touch?.pageX ?? 0, y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0) };
-      // The machine the one workspace is on — this one, or the paired machine its key names — ticked.
-      const home = machineOfKey(project.project);
-      const there = home === SELF_MACHINE ? undefined : paired.find((m) => m.id === home);
-      const online = home === SELF_MACHINE || there?.online === true;
-      setMenu({
-        ...at,
-        title: "Workspaces",
-        items: [
-          {
-            label: home === SELF_MACHINE ? "This machine" : (there?.label ?? home),
-            checked: true,
-            note: online ? "this workspace" : "this workspace · offline",
-            onSelect: () => undefined,
-            ...(online ? { action: { label: "Add", onSelect: () => onAddWorkspace(home === SELF_MACHINE ? SELF_ADD : home, at) } } : {}),
-          },
-          ...adding(new Set([home]), at),
-        ],
-      });
-    };
-    return (
-      <>
-        <Press onPress={lone} label={`${project.label} — workspaces`} title="Workspaces" flexShrink={1} minWidth={0} fill={false} borderRadius={6} paddingHorizontal={4} marginHorizontal={-4} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
-          {title}
-        </Press>
-        {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
-      </>
     );
   }
   const { machines, scope: now, onScope } = scope;

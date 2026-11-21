@@ -3499,6 +3499,21 @@ export function useApp() {
         }
       },
 
+      /**
+       * Move a STARTED conversation to another workspace of its project, here or on another machine
+       * (`task:relocate`, decision 0013 ruling 7). The window follows it there on the `placement:changed`
+       * the engine sends; a refusal (it is answering now) is said where the composer says errors.
+       */
+      relocateConversation: async (taskId: string, project: string, target: RunTarget) => {
+        try {
+          const moved = await invoke("task:relocate", { taskId, project, target });
+          if (ref.current.chat.taskId === taskId) patch({ chat: { ...ref.current.chat, project: moved.project, error: null } });
+          await store.refresh("placement:queue", undefined);
+        } catch (e) {
+          patch({ chat: { ...ref.current.chat, error: (e as Error).message } });
+        }
+      },
+
       /** Name a conversation — or any task. The title is metadata; nothing about the run depends on it. */
       renameTask: async (taskId: string, title: string, project?: string) => {
         try {

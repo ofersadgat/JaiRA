@@ -238,6 +238,32 @@ export class Git implements GitRead, GitLifecycle {
     return stat === undefined ? undefined : parseShortstat(stat);
   }
 
+  /**
+   * The branches a checkout could be switched to: its own, newest commit first, and the remotes'
+   * that have no branch here tracking them (switching to one makes the branch that tracks it).
+   */
+  async branches(): Promise<BranchList> {
+    const out = await this.tryRun(["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(upstream)%00%(committerdate:unix)%00%(subject)", "refs/heads", "refs/remotes"]);
+    return parseBranchRefs(out ?? "", await this.currentBranch());
+  }
+
+  /**
+   * Switch the checkout to `branch`: one of its own, else a remote's (`origin/x`, made as `x` tracking
+   * it), else — with `create` — a new one at HEAD. Uncommitted changes come along where git can carry
+   * them; where it cannot, it refuses and nothing moves (the error says which files).
+   */
+  async switchBranch(branch: string, options: { create?: boolean } = {}): Promise<void> {
+    if (options.create === true) return void (await this.run(["switch", "-c", branch]));
+    if (await this.branchExists(branch)) return void (await this.run(["switch", branch]));
+    if ((await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/remotes/${branch}`])) !== undefined) return void (await this.run(["switch", "--track", branch]));
+    await this.run(["switch", branch]);
+  }
+
+  /** Put uncommitted changes, new files too, aside on the stash; `message` names the entry. */
+  async stash(message: string): Promise<void> {
+    await this.run(["stash", "push", "--include-untracked", "-m", message]);
+  }
+
   async branchExists(branch: string): Promise<boolean> {
     return (await this.tryRun(["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`])) !== undefined;
   }
@@ -382,7 +408,8 @@ export class Git implements GitRead, GitLifecycle {
   async status(): Promise<StatusEntry[]> {
     // `-uall` lists untracked FILES rather than collapsing a new directory to one `?? dir/` row —
     // a changeset is per file, and a collapsed row would hide every file but the directory name.
-    const out = await this.tryRun(["status", "--porcelain", "-z", "-uall"]);
+    // Untrimmed: a first row starting with a space (changed, not staged) would lose its path's first letter.
+    const out = await this.tryRunRaw(["status", "--porcelain", "-z", "-uall"]);
     if (out === undefined || out === "") return [];
     const entries: StatusEntry[] = [];
     const fields = out.split("\0");
@@ -399,6 +426,49 @@ export class Git implements GitRead, GitLifecycle {
     }
     return entries;
   }
+}
+
+/** A branch of a checkout, as the composer's branch menu lists it. */
+export interface BranchRow {
+  /** What `switchBranch` takes: `feature`, or a remote's `origin/feature`. */
+  name: string;
+  /** The remote branch it tracks (`origin/feature`), for one of the checkout's own. */
+  upstream?: string;
+  /** When its newest commit was made, in ms. */
+  at?: number;
+  /** Its newest commit's subject. */
+  subject?: string;
+}
+
+/** A checkout's branches: its own, and the remotes' none of its own tracks. */
+export interface BranchList {
+  current?: string;
+  local: BranchRow[];
+  remote: BranchRow[];
+}
+
+/** `git for-each-ref` rows (refname, upstream, date, subject, NUL-separated) as {@link BranchList}. */
+export function parseBranchRefs(out: string, current: string | undefined): BranchList {
+  const local: BranchRow[] = [];
+  const remote: BranchRow[] = [];
+  const tracked = new Set<string>();
+  for (const line of out.split("\n")) {
+    const [ref, upstream, date, ...subject] = line.split("\0");
+    if (ref === undefined || ref === "") continue;
+    const at = date !== undefined && /^\d+$/.test(date) ? Number(date) * 1000 : undefined;
+    const row = (name: string, up?: string): BranchRow => ({ name, ...(up !== undefined ? { upstream: up } : {}), ...(at !== undefined ? { at } : {}), ...(subject.length > 0 && subject.join("\0") !== "" ? { subject: subject.join("\0") } : {}) });
+    if (ref.startsWith("refs/heads/")) {
+      const up = upstream !== undefined && upstream.startsWith("refs/remotes/") ? upstream.slice("refs/remotes/".length) : undefined;
+      if (up !== undefined) tracked.add(up);
+      local.push(row(ref.slice("refs/heads/".length), up));
+    } else if (ref.startsWith("refs/remotes/")) {
+      const name = ref.slice("refs/remotes/".length);
+      // `origin/HEAD` is a pointer to another of them, not a branch.
+      if (name.endsWith("/HEAD")) continue;
+      remote.push(row(name));
+    }
+  }
+  return { ...(current !== undefined ? { current } : {}), local, remote: remote.filter((r) => !tracked.has(r.name)) };
 }
 
 /**

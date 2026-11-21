@@ -442,7 +442,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             : m.plan === null && m.thread === null
               ? { disabled: "This conversation cannot be continued." }
               : {})}
-          tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
+          tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} automatic={env.automatic} asking={surface.taskId ?? undefined} />}
           head={m.status !== null && place === "composer" && runs.walkedIn === null ? <LiveStatusLine status={m.status} {...jumpIf} /> : undefined}
           usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
           stack={{ project: m.project, ...(surface.taskId !== null ? { taskId: surface.taskId } : {}) }}
