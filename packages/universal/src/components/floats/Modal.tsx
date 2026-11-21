@@ -26,7 +26,7 @@ export function ModalBox({
   width,
   children,
 }: {
-  /** The dialog's own width, where it has one (the folder browser's min(560px, 90vw)). */
+  /** The dialog's own width, where it has one (the folder browser's min(560px, 90vw)): its cap too, in place of 720. */
   width?: number | string;
   wide?: boolean;
   staged?: boolean;
@@ -49,7 +49,7 @@ export function ModalBox({
         ? { minWidth: 0, maxWidth: "100%", ...(wide ? { alignSelf: "stretch" } : { alignSelf: "flex-start" }) }
         : wide
           ? { width: isWeb ? "min(1100px, 94vw)" : "94%", maxWidth: isWeb ? "min(1100px, 94vw)" : "94%", maxHeight: isWeb ? "90vh" : "90%" }
-          : { minWidth: 380, maxWidth: isWeb ? "min(720px, 90vw)" : "90%" })}
+          : { minWidth: 380, maxWidth: !isWeb ? "90%" : width === undefined ? "min(720px, 90vw)" : typeof width === "number" ? `min(${width}px, 90vw)` : width })}
       {...(width !== undefined ? { width } : {})}
       {...((staged ? {} : { boxShadow: t.v("lift") }) as object)}
       {...(testID !== undefined ? { testID } : {})}

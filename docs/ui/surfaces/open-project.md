@@ -73,10 +73,18 @@ designs it was chosen from.
   second, copied beside it), each with its status for this project at its right, from its `workspace:plan`: `ready`
   (`--ok`), `installs node` (`--accent`), `password` (`--warn`), `can't` or `offline` (`--dim`), `…` while it
   is asked.
-- **The pane.** The machine's name and status; a note when it is ready, needs a password or cannot set the
-  project up; its folders at its projects folder with the new folder as a dashed `+ atlas — made here` row;
-  `Folder name` (prefilled: the project's name, or `atlas-1` when `atlas` is taken there); `Full path` with
-  why it is named so. Opening another folder puts it there instead.
+- **The pane** (proposal 3 of [the eight](../assets/add-workspace/index.html), chosen 2026-11-21). A note
+  only when the machine needs a password or cannot set the project up (its readiness is already in the
+  column). The path to where it goes, from `~` when under the machine's home, else the root, past four
+  folders the middle folded to `…`, each folder a button; the folder it goes in bold on `--panel-2`, then the
+  new folder's name in `--accent`. Under it, three columns in one bordered box: the folder above (the folder
+  it goes in marked; at a root, the machine's roots), the folder it goes in (its folders, each with a git or
+  JaiRA project mark and a `›`, and the new folder among them where it sorts, tinted, with a 2px `--accent`
+  bar), and the new folder: its glyph, its name (`atlas`, or `atlas-1` when `atlas` is taken there), `made
+  here`, why it is named so (or, `--warn`, that the folder it goes in has one of that name), its whole path,
+  and `Rename`, which makes the name a field. A click on a folder in either column puts it there; the plan is
+  asked again for that folder (after a pause, so typing a name asks once), and Add waits for it. A pane
+  narrower than 560 is one column: the folder it goes in, the new folder under it.
 
 ## 3 · How it gets there: what is copied, Bring, Then
 

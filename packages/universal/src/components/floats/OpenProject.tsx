@@ -128,15 +128,25 @@ export function OpenProject({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, step, online.join(",")]);
 
-  // A folder of the person's own: the target's plan again, for that folder.
+  // A folder of the person's own: the target's plan again, for that folder — from Where it goes, where
+  // Add is pressed, not only How it gets there. Asked once the browsing or typing pauses; only the last
+  // folder's answer is kept.
   const [customPlan, setCustomPlan] = useState<PlanState | undefined>(undefined);
   const chosenFolder = folder !== undefined ? joinPath(folder.parent, folder.name) : undefined;
   useEffect(() => {
-    if (source === undefined || target === undefined || chosenFolder === undefined || step !== "how") return;
+    if (source === undefined || target === undefined || chosenFolder === undefined || (step !== "where" && step !== "how")) return;
+    let live = true;
     setCustomPlan("loading");
-    invoke("workspace:plan", { source, folder: chosenFolder, ...(target !== selfId ? { machine: target } : {}) }).then(setCustomPlan, (e: unknown) =>
-      setCustomPlan({ error: e instanceof Error ? e.message : String(e) }),
-    );
+    const wait = setTimeout(() => {
+      invoke("workspace:plan", { source, folder: chosenFolder, ...(target !== selfId ? { machine: target } : {}) }).then(
+        (p) => live && setCustomPlan(p),
+        (e: unknown) => live && setCustomPlan({ error: e instanceof Error ? e.message : String(e) }),
+      );
+    }, 300);
+    return () => {
+      live = false;
+      clearTimeout(wait);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, target, chosenFolder, step]);
 
@@ -253,6 +263,7 @@ export function OpenProject({
               target={target}
               plans={plans}
               folder={folder}
+              {...(chosenFolder !== undefined && customPlan !== undefined && customPlan !== "loading" && "error" in customPlan ? { refusal: customPlan.error } : {})}
               onTarget={(id) => {
                 setTarget(id);
                 setFolder(undefined);
@@ -741,6 +752,7 @@ function WhereStep({
   folder,
   onTarget,
   onFolder,
+  refusal,
 }: {
   machines: MachinesView | undefined;
   source: Source;
@@ -751,6 +763,8 @@ function WhereStep({
   folder: { parent: string; name: string } | undefined;
   onTarget: (id: string) => void;
   onFolder: (f: { parent: string; name: string } | undefined) => void;
+  /** Why the folder chosen can't take it, when its plan said so. */
+  refusal?: string | undefined;
 }): JSX.Element {
   const groups = placeGroupsOf(machines);
   // A folder that stays (`stays`): the machine it is on opens it where it is. One Add copies — already a
@@ -802,7 +816,7 @@ function WhereStep({
           ) : "error" in plan ? (
             <Hint bad>{plan.error}</Hint>
           ) : (
-            <WherePane machineId={target} self={target === machines?.self.id} label={label ?? ""} plan={plan} folder={folder} onFolder={onFolder} />
+            <WherePane machineId={target} self={target === machines?.self.id} label={label ?? ""} plan={plan} folder={folder} onFolder={onFolder} {...(refusal !== undefined ? { refusal } : {})} />
           )
         ) : null}
       </View>
@@ -819,7 +833,8 @@ function labelOf(machines: MachinesView | undefined, id: string): string {
  * (the folder above it, it, and the folder being made), with the path across the top. How it looks:
  *
  *   a note           only when the machine can't simply take it (password, can't): --tint-warn
- *   the path         row, centred, gap 2, one line: each folder from the root a button (padding 3 6,
+ *   the path         row, centred, gap 2, one line: each folder from ~ (else the root; past four, the
+ *                    middle folded to "…") a button (padding 3 6,
  *                    radius 6, --dim; hovered --panel-2), a "›" in --rule between; the folder it goes in
  *                    --text 600 on --panel-2; last, the new folder's name in --accent on --tint-accent
  *   the columns      row, filling the pane, 1px --line, radius 9, clipped; three columns 1 : 1 : 1.05,
@@ -847,6 +862,7 @@ function WherePane({
   plan,
   folder,
   onFolder,
+  refusal,
 }: {
   machineId: string;
   self: boolean;
@@ -854,6 +870,7 @@ function WherePane({
   plan: WorkspacePlan;
   folder: { parent: string; name: string } | undefined;
   onFolder: (f: { parent: string; name: string } | undefined) => void;
+  refusal?: string | undefined;
 }): JSX.Element {
   const t = useTokens();
   const [here, setHere] = useState<FolderListing | undefined>(undefined);
@@ -914,9 +931,9 @@ function WherePane({
   );
   const made = (
     <View
-      flexBasis={0}
+      flexBasis={narrow ? "auto" : 0}
       flexGrow={narrow ? 0 : 1.05}
-      flexShrink={1}
+      flexShrink={narrow ? 0 : 1}
       minWidth={0}
       gap={10}
       paddingVertical={narrow ? 12 : 18}
@@ -943,7 +960,7 @@ function WherePane({
       <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.45 }} minWidth={0} {...((isWeb ? { style: { overflowWrap: "anywhere" } } : {}) as object)}>
         {full}
       </Txt>
-      <View flexGrow={1} />
+      {narrow ? null : <View flexGrow={1} />}
       <View flexDirection="row">
         <Button kind="ghost" onPress={() => setRenaming(true)}>
           Rename
@@ -956,8 +973,8 @@ function WherePane({
       {plan.setup.readiness === "password" ? <Note tone="warn">{`Something ${plan.name} needs is installed with a password on ${label}; you'll be told the command.`}</Note> : null}
       {plan.setup.readiness === "cannot" ? <Note tone="warn">{`${label} can't set ${plan.name} up: ${plan.setup.steps.find((s) => s.status === "cannot")?.detail ?? "a step cannot run there"}.`}</Note> : null}
       <View flexDirection="row" alignItems="center" gap={2} minWidth={0} overflow="hidden">
-        {crumbsOf(dir).map((c, i, all) => (
-          <View key={c.path} flexDirection="row" alignItems="center" gap={2} flexShrink={i === all.length - 1 ? 0 : 1} minWidth={0}>
+        {crumbsOf(dir, here?.roots[0]).map((c, i, all) => (
+          <View key={c.path} flexDirection="row" alignItems="center" gap={2} flexShrink={i === 0 ? 1 : 0} minWidth={0}>
             {i > 0 ? <Txt spec={{ voice: "app", scale: 1, color: "rule" }}>›</Txt> : null}
             <Press
               onPress={() => go(c.path)}
@@ -992,14 +1009,17 @@ function WherePane({
         {narrow ? null : (
           <FolderColumn title={up !== undefined ? lastOf(up.dir) : label} grow={1}>
             {up !== undefined
-              ? up.entries.map((e) => <FolderCell key={e.path} name={e.name} git={e.git} project={e.project} chosen={e.path === here?.dir} onPress={() => go(e.path)} />)
+              ? // The folder it goes in, among the folders beside it — added where the listing leaves it out (a hidden one).
+                (here !== undefined && !up.entries.some((e) => e.path === here.dir) ? [...up.entries, { name: lastOf(here.dir), path: here.dir, git: false, project: false }] : up.entries).map((e) => (
+                  <FolderCell key={e.path} name={e.name} git={e.git} project={e.project} chosen={e.path === here?.dir} onPress={() => go(e.path)} />
+                ))
               : (here?.roots ?? []).map((root) => <FolderCell key={root} name={root} chosen={root === here?.dir} onPress={() => go(root)} />)}
           </FolderColumn>
         )}
         {middle}
         {made}
       </View>
-      {error !== undefined ? <Hint bad>{error}</Hint> : null}
+      {error !== undefined || refusal !== undefined ? <Hint bad>{error ?? refusal ?? ""}</Hint> : null}
     </>
   );
 }
@@ -1009,18 +1029,36 @@ function lastOf(dir: string): string {
   return dir.split(/[\\/]/).filter(Boolean).pop() ?? dir;
 }
 
-/** Each folder from the root down to `dir`, to go to: `/srv/work` → `/`, `srv`, `work`; `C:\src` → `C:`, `src`. */
-function crumbsOf(dir: string): { label: string; path: string }[] {
+/**
+ * The folders from the root down to `dir`, to go to: from the machine's home (`~`) when it is under it,
+ * else from the root; with more than four, the first, an `…` that goes to the folder before the last
+ * two, and the last two. `/srv/work` → `/`, `srv`, `work`; `C:\src` → `C:`, `src`.
+ */
+function crumbsOf(dir: string, home: string | undefined): { label: string; path: string }[] {
   const windows = /^[A-Za-z]:/.test(dir);
   const sep = windows ? "\\" : "/";
-  const parts = dir.split(/[\\/]/).filter(Boolean);
-  const out: { label: string; path: string }[] = windows ? [] : [{ label: "/", path: "/" }];
-  let at = windows ? "" : "";
-  parts.forEach((p, i) => {
-    at = windows ? (i === 0 ? `${p}${sep}` : joinPath(at, p)) : `${at}${sep}${p}`;
+  const trim = (p: string): string => p.replace(/[\\/]+$/, "");
+  const underHome = home !== undefined && (trim(dir) === trim(home) || trim(dir).startsWith(trim(home) + sep));
+  const out: { label: string; path: string }[] = [];
+  let at: string;
+  let rest: string[];
+  if (underHome) {
+    at = trim(home);
+    out.push({ label: "~", path: home });
+    rest = trim(dir).slice(at.length).split(/[\\/]/).filter(Boolean);
+  } else {
+    const parts = dir.split(/[\\/]/).filter(Boolean);
+    at = windows ? `${parts[0] ?? ""}${sep}` : "/";
+    out.push({ label: windows ? (parts[0] ?? dir) : "/", path: at });
+    rest = windows ? parts.slice(1) : parts;
+  }
+  for (const p of rest) {
+    at = joinPath(at, p);
     out.push({ label: p, path: at });
-  });
-  return out;
+  }
+  if (out.length <= 4) return out;
+  const skipped = out[out.length - 3]!;
+  return [out[0]!, { label: "…", path: skipped.path }, ...out.slice(-2)];
 }
 
 function FolderColumn({ title, grow, children }: { title: string; grow: number; children: ReactNode }): JSX.Element {
@@ -1058,14 +1096,15 @@ function FolderCell({
     <Press
       onPress={onPress}
       label={made ? `Rename ${name}` : name}
+      position="relative"
       flexDirection="row"
       alignItems="center"
       gap={8}
       height={27}
       paddingHorizontal={8}
-      {...(made ? { borderLeftWidth: 2, borderLeftColor: t.v("accent"), borderStyle: "solid" } : {})}
       box={({ hovered }) => ({ backgroundColor: lit ? t.v("tint-accent") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
     >
+      {made ? <View position="absolute" left={0} top={0} bottom={0} width={2} backgroundColor={t.v("accent") as never} /> : null}
       <Icon name={made ? "folderAdd" : "folder"} size={15} color={String(t.v(lit ? "accent" : "dim"))} />
       <Txt spec={{ voice: "app", scale: 1, weight: made ? 600 : 400, color: made ? "accent" : "text" }} ellip flexGrow={1} flexShrink={1} minWidth={0}>
         {name}

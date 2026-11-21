@@ -1,0 +1,104 @@
+/* Proposals for the folder browser in Add a workspace → Where it goes (OpenProject.tsx, WherePane).
+   Prefix `aw-`. Every mockup links the frozen ../styles.css first for its tokens and faces. */
+
+.aw-dialog {
+  width: 860px;
+  height: 600px;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: var(--lift);
+  overflow: hidden;
+  font: 400 var(--size-app) / 1.4 var(--font-app);
+  color: var(--text);
+}
+.aw-dialog svg { width: 15px; height: 15px; flex: none; display: block; }
+.mono { font-family: var(--font-data); font-size: var(--size-data); }
+.dim { color: var(--dim); }
+.acc { color: var(--accent); }
+
+/* stepper */
+.aw-steps { display: flex; align-items: center; gap: 12px; padding: 11px 18px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.aw-step { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.aw-step b { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; border: 1px solid var(--rule); font: 600 11px/1 var(--font-app); color: var(--dim); flex: none; }
+.aw-step.done b { background: var(--ok); border-color: var(--ok); color: #fff; }
+.aw-step.on b { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-accent); }
+.aw-step span { display: flex; flex-direction: column; min-width: 0; font-size: 11px; color: var(--dim); }
+.aw-step span i { font-style: normal; font-size: 12.5px; color: var(--text); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.aw-step.on span { color: var(--accent); }
+.aw-steps hr { flex: 1; min-width: 12px; border: 0; border-top: 1px solid var(--rule); margin: 0; }
+
+/* body */
+.aw-body { display: grid; grid-template-columns: 200px 1fr; min-height: 0; }
+.aw-col { background: color-mix(in srgb, var(--panel-2) 55%, var(--panel)); border-right: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.aw-head { font: 600 10.5px/1 var(--font-app); letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); padding: 10px 8px 6px; }
+.aw-place { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; white-space: nowrap; }
+.aw-place .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aw-place small { font-size: 11px; color: var(--dim); }
+.aw-place.on { background: var(--tint-accent); font-weight: 600; }
+.aw-place.on small.ok { color: var(--ok); font-weight: 500; }
+.aw-place.off { opacity: 0.5; }
+.aw-place.sub { padding-left: 26px; font-size: 12px; }
+.aw-place.sub svg { width: 13px; height: 13px; color: var(--dim); }
+.aw-place.sub.on svg { color: var(--accent); }
+.aw-pane { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* foot */
+.aw-foot { display: flex; align-items: center; gap: 8px; padding: 11px 18px; border-top: 1px solid var(--line); }
+.aw-foot .grow { flex: 1; min-width: 0; }
+.aw-btn { display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--font-app); padding: 7px 12px; border-radius: var(--control-radius); border: 1px solid var(--line); background: var(--panel); color: var(--text); white-space: nowrap; }
+.aw-btn.primary { background: var(--fill-accent); border-color: var(--fill-accent); color: var(--on-accent); font-weight: 600; box-shadow: var(--sheen); }
+.aw-btn.quiet { border-color: transparent; background: transparent; color: var(--dim); }
+.aw-btn.sm { padding: 4px 8px; font-size: 11.5px; }
+.aw-btn.icon { padding: 5px; }
+
+/* shared parts */
+.aw-label { font: 600 11px/1 var(--font-app); color: var(--dim); letter-spacing: 0.02em; }
+.aw-note { font-size: 11.5px; color: var(--dim); line-height: 1.45; }
+.aw-ok { display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--ok); }
+.aw-ok svg { width: 13px; height: 13px; }
+.aw-tag { display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 99px; font-size: 10.5px; line-height: 16px; color: var(--dim); border: 1px solid var(--line); white-space: nowrap; }
+.aw-tag svg { width: 11px; height: 11px; }
+.aw-tag.proj { color: var(--accent); background: var(--tint-accent); border-color: transparent; }
+.aw-tag.new { color: var(--on-accent); background: var(--fill-accent); border-color: transparent; font-weight: 600; }
+.aw-field { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--control-radius); background: var(--panel); padding: 6px 9px; min-width: 0; }
+.aw-field.focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--tint-accent); }
+.aw-field .caret { display: inline-block; width: 1px; height: 1.1em; background: var(--accent); vertical-align: -2px; margin-left: 1px; }
+.aw-field svg { color: var(--dim); }
+
+/* crumbs */
+.aw-crumbs { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.aw-crumbs a { display: inline-flex; align-items: center; gap: 5px; padding: 3px 6px; border-radius: 6px; color: var(--dim); text-decoration: none; white-space: nowrap; }
+.aw-crumbs a:last-child { color: var(--text); font-weight: 600; background: var(--panel-2); }
+.aw-crumbs .sep { color: var(--rule); }
+.aw-crumbs .sep svg { width: 12px; height: 12px; }
+
+/* list */
+.aw-list { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.aw-row { display: flex; align-items: center; gap: 9px; height: 31px; padding: 0 10px; border-bottom: 1px solid color-mix(in srgb, var(--line) 55%, transparent); white-space: nowrap; flex: none; }
+.aw-row:last-child { border-bottom: 0; }
+.aw-row svg { color: var(--dim); }
+.aw-row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.aw-row .go { opacity: 0; color: var(--dim); }
+.aw-row.hover { background: var(--fill-ghost-hover); }
+.aw-row.hover .go { opacity: 1; }
+.aw-row.sel { background: var(--tint-accent); }
+.aw-row.sel svg { color: var(--accent); }
+.aw-row.new { background: var(--tint-accent); box-shadow: inset 2px 0 0 var(--accent); }
+.aw-row.new .name { color: var(--accent); font-weight: 600; }
+.aw-row.new svg { color: var(--accent); }
+.aw-row.muted .name { color: var(--dim); }
+
+/* the line that says where it goes */
+.aw-dest { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.aw-dest .path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aw-dest .path b { color: var(--accent); font-weight: 600; }
+
+/* what changed, under each mock */
+.aw-why { width: 860px; margin: 14px 0 0; font: 12.5px/1.5 var(--font-app); color: var(--text); }
+.aw-why h2 { font-size: 14px; margin: 0 0 4px; }
+.aw-why ul { margin: 0; padding-left: 18px; color: var(--dim); }
+.aw-why li { margin: 2px 0; }
+.aw-why em { font-style: normal; color: var(--warn); }

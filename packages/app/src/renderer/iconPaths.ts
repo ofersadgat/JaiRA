@@ -24,7 +24,7 @@ import type { WorkIconName } from "./transcript";
  */
 export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send" | "clip" | "model" | "shield" | "anthropic" | "openai" | "lock" | "unlocked" | "star" | "pencil" | "plan" | "columns" | "tabs" | "comment" | "choice" | "files" | "form"
   | "sigma" | "clock" | "fold" | "unfold" | "logout" | "refresh"
-  | "folder" | "script"
+  | "folder" | "folderAdd" | "diamond" | "script"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
@@ -61,6 +61,10 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // The composer's permission set cards (decision 0007 §5): a folder is a BUCKET of permission sets, and a sheet
   // with a turned corner is `script` — running a file, as against a command typed on a line.
   folder: ["M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"],
+  // A folder about to be made (Add a workspace → Where it goes): the folder with a plus in it.
+  folderAdd: ["M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z", "M12 10.5v5", "M9.5 13h5"],
+  // A JaiRA project among plain folders (the same browser): a diamond.
+  diamond: ["M12 3.5 20.5 12 12 20.5 3.5 12Z"],
   script: ["M6 3h8l4 4v14H6Z", "M14 3v4h4"],
   // The permission postures, each drawn as what it MEANS rather than as a rank. A shut lock is
   // "ask me every time"; the same lock with its shackle open is "go ahead"; a star is the approver

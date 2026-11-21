@@ -205,6 +205,7 @@ export function TextField({
   onBlur,
   onSubmit,
   secure = false,
+  autoFocus = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -217,6 +218,8 @@ export function TextField({
   onSubmit?: (() => void) | undefined;
   /** `type="password"`, as a secret's value box is: dots, and nothing for the browser to remember. */
   secure?: boolean;
+  /** Takes the caret when it first draws: a field shown by pressing something that edits it. */
+  autoFocus?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const look = useLook();
@@ -235,6 +238,7 @@ export function TextField({
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       {...(onBlur !== undefined ? { onBlur } : {})}
       {...(onSubmit !== undefined ? { onSubmitEditing: onSubmit } : {})}
+      {...(autoFocus ? { autoFocus: true } : {})}
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) } as object)}
       style={
         {
