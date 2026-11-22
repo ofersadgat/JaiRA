@@ -14,6 +14,8 @@ import { openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
 import type { AskSpec } from "@jaira/ui/menuTypes";
 import type { BoardCard, WorkspaceSource } from "@jaira/shared/browser";
 import { TaskListPanel } from "../components/tasks/TaskListPanel";
+import { PROCESS_NESTS, PROCESS_NEST_MODE } from "@jaira/ui/processTaskModel";
+import { useProcessIndex } from "../components/process/ProcessBits";
 import { AskDialog } from "../components/files/AskDialog";
 import { copyText } from "../clipboard";
 import { keepDraft } from "@jaira/ui/composerDrafts";
@@ -632,6 +634,9 @@ function TasksDrawer(): JSX.Element {
   const when = modeOf(ui, TASK_WHEN_MODE, TASK_WHENS, "activity");
   const places = group === undefined ? {} : placesOf(group, scope);
   const sections = arrangeTasks(cards, { group: groupBy, sort, when }, { placeOf: (c) => (c.project === undefined ? undefined : places[c.project]), home: group === undefined ? "" : homeOf(group, scope) });
+  // Process tasks under the task that started them, or rows of their own (decision 0032, board 9).
+  const nest = modeOf(ui, PROCESS_NEST_MODE, PROCESS_NESTS, "nested");
+  const index = useProcessIndex();
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [ask, setAsk] = useState<AskSpec | null>(null);
   const host: BoardMenuHost<{ x: number; y: number }> = {
@@ -660,10 +665,14 @@ function TasksDrawer(): JSX.Element {
           when,
           onWhen: (w) => actions.setMode(TASK_WHEN_MODE, w),
         }}
+        nest={{ mode: nest, onMode: (mode) => actions.setMode(PROCESS_NEST_MODE, mode) }}
+        titleOf={index.titleOf}
         onOpen={(card) => {
           if (openInFocusedPane(card.taskId, projectOf(card), phone)) return;
           actions.setView("tasks");
-          actions.select(card.taskId, projectOf(card));
+          // A process task opens as its task view, which is its card (decision 0032, ruling 5).
+          if (card.type === "process") actions.openTask(card.taskId, projectOf(card), card.workflow);
+          else actions.select(card.taskId, projectOf(card));
         }}
         onMenu={(card, x, y) => openTaskMenu(host, projectOf(card), card, { x, y })}
         onStop={(card) => void actions.cancelTask(card.taskId, projectOf(card))}

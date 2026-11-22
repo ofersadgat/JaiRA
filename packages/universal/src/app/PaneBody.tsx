@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
-import { isConversation } from "@jaira/shared/browser";
+import { isConversation, isProcessTaskId } from "@jaira/shared/browser";
 import type { PanelEntry } from "@jaira/ui/panelStack";
 import { publishedOfEntry, taskOfEntry, taskPaneEntryOf } from "@jaira/ui/splitModel";
 import { useTaskRun } from "@jaira/ui/taskRun";
@@ -47,6 +47,8 @@ export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (en
   }
   if (entry.kind === "preview") return <PreviewCard item={entry.preview} />;
   const task = taskOfEntry(entry);
+  // A process task (decision 0032) has no run or conversation to read: its face is its task view.
+  if (task !== undefined && isProcessTaskId(task.taskId)) return <FaceBody face={face(entry)} />;
   if (task !== undefined && entry.kind !== "subagent" && entry.kind !== "rerun") return <PaneTask key={task.taskId} taskId={task.taskId} project={task.project} face={face} onOpen={onOpen} />;
   return <FaceBody face={face(entry)} />;
 }

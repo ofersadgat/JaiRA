@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX } from "react";
+import { isProcessTaskId, type BoardCard } from "@jaira/shared/browser";
+import { isProcessBoard, processCardOf, processLanesOf, type ProcessScope } from "@jaira/ui/processTaskModel";
+import { processes } from "@jaira/ui/processStore";
+import { ProcessIndexContext, useProcessIndex } from "../components/process/ProcessBits";
+import { ProcessStrip } from "../components/process/ProcessStrip";
+import { ProcessTaskView } from "../components/process/ProcessTaskView";
 import { Animated, ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel";
@@ -133,6 +139,24 @@ export function BoardColumn(): JSX.Element {
     [sticky],
   );
   const moved = (): void => sticky?.moved.forEach((measure) => measure());
+  // The parents' counts and every task's name, for the cards (decision 0032, "The view").
+  const processIndex = useProcessIndex();
+  // How wide the opened `Process` workflow looks (board 7): this project, every project, and with Mine.
+  const [processScope, setProcessScope] = useState<ProcessScope>("project");
+  const [mine, setMine] = useState(false);
+  const wider = useWiderProcesses(processScope, mine, groups.some((g) => isProcessBoard(merged.get(g.key))));
+  // A process task opened (ruling 5): its task view is the column, the task that started it beside it.
+  if (state.processOpen !== null && state.selected === state.processOpen && state.taskFocus !== null) {
+    const project = state.selectedProject ?? state.taskFocus;
+    return (
+      <ProcessIndexContext.Provider value={processIndex}>
+        <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never}>
+          <ProcessTaskView taskId={state.processOpen} project={project} onParent={(taskId) => actions.select(taskId, project)} />
+        </View>
+        {floats}
+      </ProcessIndexContext.Provider>
+    );
+  }
   // A RUN is on the path, so the column shows that run — its executions as cards, or what it said.
   if (state.trail.length > 0 && state.taskFocus !== null) {
     return (
@@ -147,6 +171,8 @@ export function BoardColumn(): JSX.Element {
   }
 
   const pickTask = (project: string, taskId: string, e?: Mods): void => {
+    // A machine process nobody watches (+ Mine) is no task yet: it is not selected, only opened.
+    if (taskId.includes("@")) return;
     const next = pickCard(picked, project, taskId, e, () => boardCardOrderOf(state.boards[project]).map((c) => c.taskId));
     setPicked(next.picked);
     if (next.select !== undefined) actions.select(next.select, project);
@@ -163,6 +189,7 @@ export function BoardColumn(): JSX.Element {
   // On a phone an Animated one, so the headings follow its scroll on the native driver.
   const Scroller = (sticky === null ? ScrollView : Animated.ScrollView) as typeof ScrollView;
   return (
+    <ProcessIndexContext.Provider value={processIndex}>
     <StickyScroll.Provider value={sticky}>
       <Scroller
         {...(scrollbarProps(t) as object)}
@@ -188,7 +215,10 @@ export function BoardColumn(): JSX.Element {
           // (decision 0021); the title bar's "N hidden" brings them back.
           const hidden = ui.shut[SHUT.board(g.key)] ?? [];
           const whole = merged.get(g.key) ?? null;
-          const board = whole !== null && whole.level === "" && hidden.length > 0 ? { ...whole, columns: whole.columns.filter((c) => !hidden.includes(c.stateId)) } : whole;
+          const shut = whole !== null && whole.level === "" && hidden.length > 0 ? { ...whole, columns: whole.columns.filter((c) => !hidden.includes(c.stateId)) } : whole;
+          // The `Process` workflow opened: a lane per state, widened by the scope its head chose.
+          const processBoard = isProcessBoard(shut);
+          const board = processBoard ? processLanesOf(shut, wider) : shut;
           const own = (card: { project?: string }): string => card.project ?? g.key;
           const owner = (taskId: string): string =>
             [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;
@@ -221,6 +251,9 @@ export function BoardColumn(): JSX.Element {
                   onOpenProject={() => void actions.chooseProject("open")}
                 />
               ) : null}
+              {processBoard && board !== null ? (
+                <ProcessStrip cards={board.columns.flatMap((c) => c.cards)} scope={processScope} onScope={setProcessScope} mine={mine} onMine={setMine} />
+              ) : null}
               {board !== null ? (
                 <Board
                   board={board}
@@ -237,7 +270,14 @@ export function BoardColumn(): JSX.Element {
                   onDrill={(level) => {
                     for (const m of g.members) actions.drillProject(m.project, level);
                   }}
-                  onOpenTask={(card) => actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level)}
+                  onOpenTask={(card) => {
+                    // A machine process nobody watches (+ Mine): opening it watches it, and it is a process task.
+                    if (card.type === "process" && !isProcessTaskId(card.taskId) && card.process !== undefined) {
+                      void processes.watch(card.process.pid, own(card)).then((p) => p.processTaskId !== undefined && actions.openTask(p.processTaskId, own(card), card.workflow), () => undefined);
+                      return;
+                    }
+                    actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level);
+                  }}
                   onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
                   // The column's own right-click: the place, and every task standing in it.
                   onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
@@ -266,7 +306,35 @@ export function BoardColumn(): JSX.Element {
         {floats}
       </Scroller>
     </StickyScroll.Provider>
+    </ProcessIndexContext.Provider>
   );
+}
+
+/**
+ * What the opened `Process` workflow adds past this project (board 7): every project's process tasks
+ * (`process:list` scope `projects`), and with + Mine the person's own processes on this machine (`user`),
+ * as cards. Listed when the scope widens, kept current by the pushes the process store hears.
+ */
+function useWiderProcesses(scope: ProcessScope, mine: boolean, shown: boolean): BoardCard[] {
+  useSyncExternalStore(processes.subscribe, processes.version, processes.version);
+  const [mineKeys, setMineKeys] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    if (!shown) return;
+    if (scope === "projects") void processes.list({ scope: "projects" }).catch(() => undefined);
+    if (!mine) {
+      setMineKeys(new Set());
+      return;
+    }
+    void processes
+      .list({ scope: "user" })
+      .then((list) => setMineKeys(new Set(list.map((p) => p.key))))
+      .catch(() => undefined);
+  }, [scope, mine, shown]);
+  if (!shown || (scope === "project" && !mine)) return [];
+  return processes
+    .all()
+    .filter((p) => (scope === "projects" && p.processTaskId !== undefined) || (mine && (mineKeys.has(p.key) || p.origin === "watched")))
+    .map(processCardOf);
 }
 
 /**

@@ -1,7 +1,7 @@
 import { Fragment, createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Animated, PanResponder, Pressable, ScrollView, View as RNView, type View as HostView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { BoardCard, BoardColumn, BoardView, NextMove } from "@jaira/shared/browser";
+import { PROCESS_WORKFLOW, type BoardCard, type BoardColumn, type BoardView, type NextMove } from "@jaira/shared/browser";
 import { canPickUp, columnDropOf, connectDragOf, CONFIRM_YES, type ColumnDrop, type ConnectDrop, type MoveQuestion } from "@jaira/ui/boardDrag";
 import { archivedSplitOf, drillTargetOf, LANE_LABEL, laneRunsOf, type LaneEntry } from "@jaira/ui/boardModel";
 import type { ConnectAsk, ConnectDrag } from "@jaira/ui/connectDrag";
@@ -295,13 +295,15 @@ export function Board({
     const drill = drillOf(card);
     const move = column !== null ? moveFrom(card, column.key) : undefined;
     // Only a card in a column is lifted (the tray's are not), and only where a drop would mean something.
-    const liftable = column !== null && canPickUp(card, dragOffers, onTaskDrop, connectDrop);
+    // A process task is not moved or connected (decision 0032): the engine keeps it, in its state.
+    const liftable = column !== null && card.type !== "process" && canPickUp(card, dragOffers, onTaskDrop, connectDrop);
     const drawn = (
       <TaskCard
         key={card.taskId}
         card={card}
         last={last}
         inTray={tray}
+        inProcessLane={board.level === PROCESS_WORKFLOW}
         selected={isSelected(card)}
         onSelect={(e) => onSelectTask(card.taskId, modsOf(e))}
         {...(onTaskMenu !== undefined ? { onMenu: (e: unknown) => onTaskMenu(card, menuPointOf(e)) } : {})}
@@ -330,13 +332,18 @@ export function Board({
       look={look}
       index={index}
       name={column.label ?? column.key}
-      {...(column.disabledBy !== undefined ? { disabled: true, badge: <DisabledChip stateId={column.stateId} by={column.disabledBy} /> } : {})}
+      {...(column.disabledBy !== undefined
+        ? { disabled: true, badge: <DisabledChip stateId={column.stateId} by={column.disabledBy} /> }
+        : roots && column.stateId === PROCESS_WORKFLOW
+          ? { badge: <Chip title="The built-in Process workflow: every process a task's agent started, in the state it is in (decision 0032)">built in</Chip> }
+          : {})}
       {...(numbered ? { seq: index + 1 } : {})}
       count={column.cards.filter((card) => card.status !== "archived").length}
       empty="—"
       tip={onSelectColumn === undefined ? `double-click to open ${column.stateId}` : `click to describe ${column.stateId}, double-click to open it`}
-      onOpen={() => onDrill(column.stateId)}
-      {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
+      // The `Process` workflow's lanes are its states, with no level below them to open.
+      onOpen={() => (board.level === PROCESS_WORKFLOW ? undefined : onDrill(column.stateId))}
+      {...(onSelectColumn !== undefined && board.level !== PROCESS_WORKFLOW && column.stateId !== PROCESS_WORKFLOW ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
       {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
       selected={column.stateId === selectedColumn}
       {...(dropFor(column) !== undefined ? { drop: dropFor(column)! } : {})}

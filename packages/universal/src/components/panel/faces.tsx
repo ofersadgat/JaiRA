@@ -1,9 +1,12 @@
 import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
-import { isWritableLayer, type ArtifactSummary, type InstanceNode, type PendingInteraction, type StateView, type TaskDetail, type WritableLayer } from "@jaira/shared/browser";
+import { isProcessTaskId, isWritableLayer, type ArtifactSummary, type InstanceNode, type PendingInteraction, type StateView, type TaskDetail, type WritableLayer } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, terminalsTab, type PanelVerb } from "@jaira/ui/panelFaceModel";
 import { crumbOf, pop, push, selectStep, setTab, terminalEntryOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { terminals } from "@jaira/ui/terminalStore";
+import { processes } from "@jaira/ui/processStore";
+import { ProcessGlyph } from "../process/ProcessBits";
+import { ProcessTaskView } from "../process/ProcessTaskView";
 import { TerminalView } from "../terminal/TerminalView";
 import { TerminalsTab } from "../terminal/TerminalsTab";
 import { runningOf } from "../terminal/useTerminal";
@@ -336,6 +339,21 @@ function OwnRun({ host, entry, taskId, project }: { host: FaceHost; entry: Panel
 
 /** The face of any entry. */
 export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): PanelFace {
+  // A process task (decision 0032, "The view", ruling 5): wherever it is held, its face is its task
+  // view, which is its card. It has no run, conversation or tabs to draw, and none is read.
+  if ((entry.kind === "task" || entry.kind === "convo") && isProcessTaskId(entry.taskId)) {
+    const project = entry.project ?? host.project;
+    const title = host.detailOf(entry.taskId)?.title ?? processes.ofTask(entry.taskId)?.name ?? "Process";
+    return {
+      glyph: <ProcessGlyph size={15} />,
+      title,
+      titleText: title,
+      sub: "process",
+      body: <ProcessTaskView taskId={entry.taskId} project={project} onParent={(taskId) => openTask(host, taskId, project)} />,
+      full: true,
+      scroll: false,
+    };
+  }
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
   const loaded = detail !== null && host.detail?.taskId === detail.taskId;
   // A task-shaped entry whose run is not the loaded one draws its body over its own (`OwnRun`).

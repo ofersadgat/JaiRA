@@ -159,7 +159,7 @@ async function layoutOf(): Promise<JairaUiState | undefined> {
 
 const windowIo: WindowIo = { invoke: ((channel: "window:keep" | "window:last", request: never) => invoke(channel, request)) as WindowIo["invoke"] };
 import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
-import { parseUiState, surfaceOf } from "@jaira/shared/browser";
+import { isProcessTaskId, parseUiState, PROCESS_WORKFLOW, surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { configTargetOf, layerOfPath, pathOfLayer, prunedPath, sameTarget, SHARED_PATH, viewKnowsLayer, type ConfigTarget, type SettingsPath, type SettingsPathContext } from "./settingsScope";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
@@ -187,6 +187,7 @@ import {
 } from "./uiState";
 import { noteFold } from "./shellFit";
 import type { RewindOutcome } from "./chatSurface";
+import { ProcessTaskRefused, isProcessTaskRefusal, refusedProcessTask } from "./processTaskModel";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -231,6 +232,10 @@ function bridge(): JairaBridge {
 }
 
 export async function invoke<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
+  // A process task (decision 0032, "The view") has no workflow, run or conversation: the engine refuses
+  // every channel about a task but its detail, cancel, archive and delete. Never sent, and quiet.
+  const refused = refusedProcessTask(channel, request);
+  if (refused !== undefined) throw new ProcessTaskRefused(channel, refused);
   return bridge().invoke(channel, request);
 }
 
@@ -496,6 +501,12 @@ export interface AppState {
    * general case, which is the one the column click has always produced.
    */
   taskWorkflowRun: string | null;
+  /**
+   * The process task opened in the Tasks room's main view (decision 0032, "The view", ruling 5): its
+   * task view, which is its card, under the crumbs project › Process › name. Null when none is; it goes
+   * with the selection, a drill, or a walk back.
+   */
+  processOpen: string | null;
 
   /**
    * Where the open description and the state files stand, and the last proposal.
@@ -977,6 +988,7 @@ const EMPTY: AppState = {
   taskWorkflow: null,
   taskWorkflowProject: null,
   taskWorkflowRun: null,
+  processOpen: null,
   taskState: null,
   doc: null,
   dir: null,
@@ -1284,6 +1296,8 @@ export function useApp() {
   useEffect(() => {
     const taskId = state.selected;
     if (taskId === null) return void store.hold("selected", []);
+    // A process task (decision 0032) has its detail — the process — and nothing else to hold.
+    if (isProcessTaskId(taskId)) return void store.hold("selected", [["task:detail", { taskId }]]);
     const transcripts: Array<readonly [IpcChannel, unknown]> = [
       ...(runsKnown ? [["session:view", { taskId, ...(shownInstance !== null ? { instanceId: shownInstance } : {}) }] as const] : []),
       ...state.sessionsOpen.map((instanceId) => ["session:view", { taskId, instanceId }] as const),
@@ -1358,7 +1372,7 @@ export function useApp() {
     };
   }, [store]);
 
-  const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
+  const fail = useCallback((e: unknown) => patch(isProcessTaskRefusal(e) ? { busy: false } : { error: (e as Error).message, busy: false }), [patch]);
   /** An answer another machine will get when it is back: said, so it is not taken for lost. */
   const waited = useCallback(
     (answer: unknown) => {
@@ -2705,7 +2719,14 @@ export function useApp() {
           // Only on the way IN. Clicking a second task while already on one must not overwrite the
           // state we came from with the task we are leaving — that is what turns Back into a loop.
           ...(taskId !== null && ref.current.inspect === "path" ? { inspectFrom: ref.current.stateId } : {}),
+          // An opened process task stays open while it is the one selected (decision 0032, ruling 5).
+          processOpen: taskId !== null && ref.current.processOpen === taskId ? taskId : null,
         });
+        // A process task has a detail (its process) and nothing else to read: no run, no conversation.
+        if (taskId !== null && isProcessTaskId(taskId)) {
+          void refreshDetail(taskId, at);
+          return;
+        }
         void refreshDetail(taskId, at).then((detail) => seedTrail(detail, from));
         void refreshConversation(taskId, at);
         void refreshSession(taskId, atInstance ?? null, at, from);
@@ -2769,6 +2790,7 @@ export function useApp() {
             sessionInstance: null,
             sessionsOpen: [],
             inspect: "path",
+            processOpen: null,
           });
           return;
         }
@@ -2852,6 +2874,7 @@ export function useApp() {
           taskFocus: project,
           trail: [],
           trailState: null,
+          processOpen: null,
         });
         void refreshProjects();
       },
@@ -2875,6 +2898,30 @@ export function useApp() {
        * crumb standing on an instance that does not exist is worse than one crumb fewer.
        */
       openTask: (taskId: string, project: string, level: string) => {
+        // A process task (decision 0032, ruling 5): its task view is its card, in the `Process` workflow
+        // — the board drilled to it for the crumbs, and nothing read but its detail.
+        if (isProcessTaskId(taskId)) {
+          if (ref.current.levels[project] !== PROCESS_WORKFLOW) {
+            patch({ levels: { ...ref.current.levels, [project]: PROCESS_WORKFLOW } });
+            void refreshProjects();
+          }
+          patch({
+            selected: taskId,
+            selectedProject: project,
+            taskFocus: project,
+            taskWorkflow: null,
+            taskWorkflowProject: null,
+            taskWorkflowRun: null,
+            stream: [],
+            sessionsOpen: [],
+            trail: [],
+            trailState: null,
+            inspect: "path",
+            processOpen: taskId,
+          });
+          void refreshDetail(taskId, project);
+          return;
+        }
         if (ref.current.levels[project] !== level) {
           patch({ levels: { ...ref.current.levels, [project]: level } });
           void refreshProjects();
@@ -2892,6 +2939,7 @@ export function useApp() {
           trail: [],
           trailState: null,
           inspect: "path",
+          processOpen: null,
         });
         void refreshDetail(taskId, project).then((detail) => {
           // A LATE answer for a card that is no longer the one on the path — clicking a second task

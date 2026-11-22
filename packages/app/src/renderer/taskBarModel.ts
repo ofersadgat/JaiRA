@@ -61,6 +61,11 @@ export interface TaskAddressProps {
       }
     | undefined;
   /**
+   * A process task opened in the main view (decision 0032, ruling 5): the crumbs end project › Process ›
+   * its name, and the Process crumb goes back to the workflow.
+   */
+  process?: { taskId: string; title: string } | undefined;
+  /**
    * How far each conversation has been read — see `JairaUiState.seen`.
    *
    * The bar's pills are the same two kinds as everywhere else (SHELL.md §4.3): the active ones are
@@ -86,6 +91,7 @@ export function taskAddressOf({
   boards,
   trail,
   run,
+  process,
   onFocus,
   onDrill,
   onWalkBack,
@@ -143,7 +149,8 @@ export function taskAddressOf({
   // where the FILE lives, and a folder path is the one thing this address is not about. That is the
   // difference between the two bars — Files spells the path out because the path is what it opens,
   // and here `debug/` names nothing you can go to.
-  const walked = trail.length > 0 && run !== undefined;
+  const opened = focus !== null && process !== undefined;
+  const walked = (trail.length > 0 && run !== undefined) || opened;
   for (const [i, level] of levels.entries()) {
     // Never inert while a run is on the path: the last state crumb is then the way back OUT of the
     // walk, exactly as it is in the Files bar.
@@ -161,6 +168,9 @@ export function taskAddressOf({
             : { go: () => onDrill(focus, level.stateId) }),
     });
   }
+
+  // A process task opened: its name, where it stands.
+  if (opened) crumbs.push({ text: process.title, kind: "run", title: `${process.taskId} · process` });
 
   // The tail: one crumb per run walked into, built by the same function the Files address uses.
   //

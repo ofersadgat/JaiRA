@@ -168,6 +168,9 @@ function TasksAddress(): JSX.Element {
       at={atProject}
       boards={state.boards}
       trail={state.trail}
+      {...(state.processOpen !== null && state.selected === state.processOpen
+        ? { process: { taskId: state.processOpen, title: detail !== null && detail.taskId === state.processOpen ? detail.title : state.processOpen } }
+        : {})}
       run={{
         instances: detail?.instances ?? [],
         runs: taskLevelCards,

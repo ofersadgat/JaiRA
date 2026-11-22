@@ -41,8 +41,10 @@ export interface TaskStanding {
 }
 
 /** One status word per task. A task the person is holding up (a gate, an approval, a question) says so first. */
-export function standingOf(card: Pick<BoardCard, "status" | "asking">): TaskStanding {
+export function standingOf(card: Pick<BoardCard, "status" | "asking"> & { process?: BoardCard["process"] }): TaskStanding {
   if (card.asking !== undefined && card.status !== "archived") return { word: "Asks you", tone: "warn", rank: 0 };
+  // A process waiting for input waits on whoever types into it (decision 0032, board 6).
+  if (card.process?.state === "waiting") return { word: "Asks you", tone: "warn", rank: 0 };
   switch (card.status) {
     case "running":
     case "stopping":

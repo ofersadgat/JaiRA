@@ -12,6 +12,8 @@ import { MachineChip } from "./MachineChip";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
 import { Svg } from "./panel/Svg";
+import { CountChip, useProcessIndexHere } from "./process/ProcessBits";
+import { ProcessCardFace } from "./process/ProcessCardFace";
 
 /**
  * A task's card on a board: its name and its status pill, the moves out of where it stands (`NextChips`),
@@ -48,7 +50,11 @@ import { Svg } from "./panel/Svg";
  */
 export const claimed = new WeakSet<object>();
 
-type TaskCardProps = CardProps & { inTray?: boolean };
+type TaskCardProps = CardProps & {
+  inTray?: boolean;
+  /** In the `Process` workflow's own lanes (decision 0032, board 7): the lane says a process's state. */
+  inProcessLane?: boolean;
+};
 type Call<K extends keyof CardProps> = NonNullable<CardProps[K]>;
 
 /**
@@ -102,11 +108,24 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   const look = useLook();
   // A phone's double tap: when this card was last tapped.
   const lastTap = useRef(0);
-  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false } = props;
+  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false, inProcessLane = false } = props;
+  // A process task (decision 0032, "The view"): an ordinary card, drawn from its process; a parent's card
+  // counts its processes, from the window's index.
+  const processFacts = card.type === "process" ? card.process : undefined;
+  const count = useProcessIndexHere().counts.get(card.taskId);
 
   // An ARCHIVED card wears the pill of how it finished.
   // One waiting on the person wears the waiting pill, whatever its run's status says (`BoardCard.asking`).
-  const status = card.archived !== undefined ? card.archived.from : card.asking !== undefined ? "waiting_for_user" : (card.activeStatus ?? card.status);
+  const status =
+    processFacts !== undefined
+      ? processFacts.state === "waiting"
+        ? "waiting_for_user"
+        : card.status
+      : card.archived !== undefined
+        ? card.archived.from
+        : card.asking !== undefined
+          ? "waiting_for_user"
+          : (card.activeStatus ?? card.status);
   const archived = card.archived !== undefined;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
   const { wash, ground, ring, hoverGround, hoverRing, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray });
@@ -204,6 +223,10 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
       {...((archived ? { opacity: selected ? 1 : 0.62 } : {}) as object)}
       hoverStyle={{ backgroundColor: hoverGround as never, ...((hoverRing !== undefined ? { boxShadow: hoverRing } : {}) as object), ...(archived ? { opacity: 1 } : {}) }}
     >
+      {processFacts !== undefined ? (
+        <ProcessCardFace card={{ ...card, process: processFacts }} inLane={inProcessLane} onParent={onOrigin !== undefined ? (taskId, e) => onOrigin(taskId, e as never) : undefined} />
+      ) : (
+      <>
       <View flexDirection="row" alignItems="center" gap={6}>
         <Text
           {...(line(0.96, selected ? 600 : 400) as object)}
@@ -263,6 +286,9 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
         ) : null}
       </View>
       <OriginLine card={card} onGo={onOrigin} />
+      {count !== undefined ? <CountChip count={count} /> : null}
+      </>
+      )}
     </View>
   );
   if (isWeb) return drawn;

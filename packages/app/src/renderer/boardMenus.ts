@@ -13,7 +13,7 @@
  * says so, because "Re-run 3 tasks" doing something to two of them is how trust in a menu dies.
  * Right-clicking outside the selection collapses it to the clicked card first, explorer-style.
  */
-import { isArchivableStatus, isConversation, SHARED_SESSION, type BoardCard } from "@jaira/shared/browser";
+import { isArchivableStatus, isConversation, isProcessTaskId, PROCESS_WORKFLOW, processEnded, SHARED_SESSION, type BoardCard } from "@jaira/shared/browser";
 import { boardCardOrderOf, type BoardPick } from "./boardModel";
 import type { AskSpec, MenuItem } from "./menuTypes";
 import { invoke, type useApp } from "./store";
@@ -89,17 +89,19 @@ export function groupItems<P extends MenuPlace>(host: BoardMenuHost<P>, project:
   const { actions, setTaskAsk, setPicked } = host;
   const n = cards.length;
   const notRunning = cards.filter((c) => c.status !== "running");
+  // A process task (decision 0032) runs again never: it is a process, not a run.
+  const rerunnable = notRunning.filter((c) => c.type !== "process");
   const cancelable = cards.filter((c) => c.status === "queued" || c.status === "running" || c.status === "interrupted");
   const archivable = cards.filter((c) => isArchivableStatus(c.status));
   const archived = cards.filter((c) => c.status === "archived");
   return [
     {
-      label: `Re-run ${plural(notRunning.length)}`,
-      disabled: notRunning.length === 0,
-      ...(notRunning.length < n ? { note: "running skipped" } : {}),
+      label: `Re-run ${plural(rerunnable.length)}`,
+      disabled: rerunnable.length === 0,
+      ...(rerunnable.length < n ? { note: rerunnable.length < notRunning.length ? "running and processes skipped" : "running skipped" } : {}),
       onSelect: () =>
         void actions.rerunTasks(
-          notRunning.map((c) => c.taskId),
+          rerunnable.map((c) => c.taskId),
           project,
         ),
     },
@@ -168,6 +170,12 @@ export function openTaskMenu<P extends MenuPlace>(host: BoardMenuHost<P>, projec
     const byId = new Map(boardCardsOf(host.boards, project).map((c) => [c.taskId, c] as const));
     const cards = set.map((id) => byId.get(id)).filter((c): c is BoardCard => c !== undefined);
     setTaskMenu({ ...at, title: plural(cards.length), items: groupItems(host, project, cards) });
+    return;
+  }
+
+  // A process task (decision 0032): its own verbs, which are the engine's — no re-run, move or chat.
+  if (card.type === "process") {
+    setTaskMenu({ ...at, items: processTaskItems(host, project, card) });
     return;
   }
 
@@ -261,6 +269,51 @@ export function openTaskMenu<P extends MenuPlace>(host: BoardMenuHost<P>, projec
 }
 
 /**
+ * A process task's menu (decision 0032, "The view", ruling 3): open it, go to the task that started it,
+ * Stop it (`task:cancel`, which the engine takes as Stop), copy its id or pid, and Let go — what deleting
+ * or archiving one does: stopped if it runs, and no longer kept. Nothing a run has (re-run, move, chat,
+ * fork, rename) is offered: the engine refuses them for a process.
+ */
+export function processTaskItems<P extends MenuPlace>(host: BoardMenuHost<P>, project: string, card: BoardCard): MenuItem[] {
+  const { actions, setPicked, setTaskAsk } = host;
+  const facts = card.process;
+  const isTask = isProcessTaskId(card.taskId);
+  const live = facts !== undefined && !processEnded(facts.state);
+  if (isTask) {
+    setPicked({ project, ids: [card.taskId], anchor: card.taskId });
+    actions.select(card.taskId, project);
+  }
+  const parent = facts?.parentTaskId;
+  return [
+    { label: "Open", disabled: !isTask, onSelect: () => actions.openTask(card.taskId, project, PROCESS_WORKFLOW) },
+    ...(parent !== undefined ? [{ label: "Open the task that started it", onSelect: () => actions.select(parent, project) }] : []),
+    { label: "Stop", separator: true, disabled: !isTask || !live, note: "and what it started", onSelect: () => void actions.cancelTask(card.taskId, project) },
+    { label: "Copy task id", separator: true, disabled: !isTask, onSelect: () => host.copy(card.taskId) },
+    ...(facts !== undefined ? [{ label: "Copy pid", note: String(facts.pid), onSelect: () => host.copy(String(facts.pid)) }] : []),
+    {
+      label: "Let go…",
+      separator: true,
+      danger: true,
+      disabled: !isTask,
+      note: live ? "stops it" : "off the board",
+      onSelect: () =>
+        setTaskAsk({
+          title: `Let go of "${card.title}"?`,
+          note: live
+            ? "It is stopped, with what it started, and no longer listed. Its output goes with it."
+            : "It is no longer listed, and its output goes with it.",
+          confirmLabel: live ? "Stop and let go" : "Let go",
+          danger: live,
+          onConfirm: () => {
+            setTaskAsk(null);
+            void actions.deleteTasks([card.taskId], project);
+          },
+        }),
+    },
+  ];
+}
+
+/**
  * Right-clicking a COLUMN — the place, and everything standing in it.
  *
  * A column already had a left-click meaning (describe the state it stands for) and a double-click
@@ -283,12 +336,16 @@ export function openColumnMenu<P extends MenuPlace>(host: BoardMenuHost<P>, proj
   // than no menu. `boardCardsOf` is the same order shift-click measures its ranges in.
   const here = new Set((host.boards[project]?.columns ?? []).filter((c) => c.stateId === stateId).flatMap((c) => c.cards.map((k) => k.taskId)));
   const cards = boardCardsOf(host.boards, project).filter((c) => here.has(c.taskId));
+  // The built-in `Process` workflow (decision 0032) has no file to describe or switch, and its own
+  // lanes are states with nothing below them to open.
+  const inProcess = host.boards[project]?.level === PROCESS_WORKFLOW;
+  const builtIn = inProcess || stateId === PROCESS_WORKFLOW;
   setTaskMenu({
     ...at,
     title: stateId,
     items: [
-      { label: "Open", onSelect: () => actions.drillProject(project, stateId) },
-      { label: "Describe", onSelect: () => actions.selectWorkflow(stateId, project) },
+      ...(inProcess ? [] : [{ label: "Open", onSelect: () => actions.drillProject(project, stateId) }]),
+      ...(builtIn ? [] : [{ label: "Describe", onSelect: () => actions.selectWorkflow(stateId, project) }]),
       {
         label: `Select ${plural(cards.length)}`,
         separator: true,
@@ -300,7 +357,7 @@ export function openColumnMenu<P extends MenuPlace>(host: BoardMenuHost<P>, proj
           actions.select(cards[cards.length - 1]!.taskId, project);
         },
       },
-      ...switchesOf(host, project, stateId),
+      ...(inProcess ? [] : switchesOf(host, project, stateId)),
       ...groupItems(host, project, cards).map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
     ],
   });

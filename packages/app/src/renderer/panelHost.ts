@@ -157,11 +157,17 @@ export const convoEntryOf = (taskId: string, project: string | undefined): Panel
  */
 export function panelRuleOf(
   at: PanelRoom,
-  state: Pick<AppState, "trail" | "detail" | "debug" | "taskFocus" | "stateId" | "doc" | "at" | "taskWorkflow" | "inspect" | "taskWorkflowProject" | "selectedProject">,
+  state: Pick<AppState, "trail" | "detail" | "debug" | "taskFocus" | "stateId" | "doc" | "at" | "taskWorkflow" | "inspect" | "taskWorkflowProject" | "selectedProject"> & { processOpen?: string | null },
   chat: { taskId: string | null; project: string },
   conversationInMain: boolean,
 ): PanelEntry | null {
   const { detail } = state;
+  // A process task (decision 0032, ruling 5): opened in the main view, the task that started it stands
+  // beside it here; only selected, its own card does.
+  if (at === "tasks" && detail !== null && detail.type === "process") {
+    const parent = detail.process?.taskId;
+    return state.processOpen === detail.taskId && parent !== undefined ? taskEntryOf(parent, detail.process?.project ?? state.selectedProject ?? undefined) : taskEntryOf(detail.taskId, state.selectedProject ?? undefined);
+  }
   const trailTail = state.trail.at(-1);
   const selectedProject = state.selectedProject ?? undefined;
   if (at === "chat") {
