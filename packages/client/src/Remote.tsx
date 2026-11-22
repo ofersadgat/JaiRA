@@ -102,7 +102,9 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   useState(() => {
     // This device is the one it pairs as — kept in the keystore on a phone, which has no localStorage —
     // for what the window keeps of its own (where it stood, its layout).
+    // A desktop window is its machine (`device:self`): every JaiRA on it, one device.
     if (!electron) deviceIdFrom(deviceId());
+    else deviceIdFrom(window.jaira!.invoke("device:self", undefined) as Promise<string>);
     if (ungated) setBridge(fleet.bridge, { sources: fleet.sources, ...(phoneMirror !== undefined ? { mirror: phoneMirror } : {}) });
     return true;
   });

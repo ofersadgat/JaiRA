@@ -7413,14 +7413,25 @@ export class AppService {
                 : open.updatingAtClose
                   ? SUSPENDED_UPDATE
                   : undefined;
-        finishTaskRun(project, taskId, status, {
-          outputs: result.value,
-          ...(suspended !== undefined
-            ? { failure: { classification: "canceled", reason: suspended } }
-            : "error" in result && result.error !== undefined
-              ? { failure: result.error }
-              : {}),
-        });
+        // A suspend is no news: the row keeps the clock it had (`restoreClock`), or every conversation
+        // waiting when the app closed read as unread again, and new, on the next open.
+        const clockBefore = suspended !== undefined ? project.runtime.get(taskId)?.updatedAt : undefined;
+        const endedAt = Date.now();
+        finishTaskRun(
+          project,
+          taskId,
+          status,
+          {
+            outputs: result.value,
+            ...(suspended !== undefined
+              ? { failure: { classification: "canceled", reason: suspended } }
+              : "error" in result && result.error !== undefined
+                ? { failure: result.error }
+                : {}),
+          },
+          endedAt,
+        );
+        if (clockBefore !== undefined) project.runtime.restoreClock(taskId, clockBefore, endedAt);
         this.publishFor(open, { type: "run:finished", taskId, status });
         // Its event waits are over unless the close SUSPENDED it (decision 0010 §3): a suspended task
         // keeps its queues' starts so its resume hears what arrived meanwhile. And the tasks
@@ -9962,7 +9973,11 @@ export class AppService {
       if (this.closed || this.sessions.get(session.key) !== session) return;
       try {
         await this.resumeTask({ taskId: row.taskId, project: project.paths.projectDir });
-        const why = reasonOf(row.failureJson) === SUSPENDED_UPDATE ? "it was paused to install an update" : "it was waiting on you when the app closed";
+        // Taken up again by the app opening, not by anyone: the row keeps the clock it had before the
+        // close, as the suspend did (`restoreClock`) — unless the run has already moved it since.
+        const begun = project.runtime.get(row.taskId)?.startedAt;
+        if (begun !== undefined) project.runtime.restoreClock(row.taskId, row.updatedAt, begun);
+        const why =reasonOf(row.failureJson) === SUSPENDED_UPDATE ? "it was paused to install an update" : "it was waiting on you when the app closed";
         this.log({ level: "info", source: "run", message: `resumed ${row.taskId}: ${why}`, project: session.key, taskId: row.taskId });
       } catch (e) {
         this.log({

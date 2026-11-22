@@ -2,7 +2,7 @@
  * Where the window stands survives a reload — `windowAddress.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deviceId, deviceIdFrom, deviceIdReady, lastAddress, readAddress, windowId, writeAddress, type WindowIo } from "../src/renderer/windowAddress";
+import { deviceId, deviceIdFrom, deviceIdReady, profileDeviceId, lastAddress, readAddress, windowId, writeAddress, type WindowIo } from "../src/renderer/windowAddress";
 
 let stored: Map<string, string>;
 let local: Map<string, string>;
@@ -89,5 +89,14 @@ describe("the device", () => {
     deviceIdFrom(Promise.resolve("phone-from-its-keystore"));
     expect(await deviceIdReady()).toBe("phone-from-its-keystore");
     expect(deviceId()).toBe("phone-from-its-keystore");
+  });
+
+  it("is a desktop window's MACHINE, and the id its profile kept is still there to start the machine's layout from", async () => {
+    // Every JaiRA on a machine — the installed app, a build from source, a second window — is one
+    // device (`device:self`); each profile used to be its own, with read marks of its own.
+    local.set("jaira.device", "this-profile");
+    deviceIdFrom(Promise.resolve("the-machine"));
+    expect(await deviceIdReady()).toBe("the-machine");
+    expect(profileDeviceId()).toBe("this-profile");
   });
 });

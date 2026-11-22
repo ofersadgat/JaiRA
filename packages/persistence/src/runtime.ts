@@ -323,6 +323,24 @@ export class RuntimeStore {
   }
 
   /**
+   * Put the row's clock back to `at` — for a stop and a start nobody made: the app closing on a run
+   * that waits on a person (its suspend), and the next open taking it up again (its resume). The clock
+   * is what a window reads as NEWS (a conversation's read mark is compared with it) and sorts its lists
+   * by, so a restart stamping it marked every waiting conversation unread again and moved it to the top
+   * (the person, 2026-11-21: "'single word response' has succeeded … it clears when i click on it, but
+   * sometimes comes back (e.g. when i restart the app)").
+   *
+   * Only while the clock still says `stamped` — the moment the suspend or the resume itself wrote — so
+   * anything that really happened to the task since is never undone.
+   */
+  restoreClock(taskId: string, at: number, stamped: number): void {
+    const res = this.db
+      .prepare(`UPDATE task_runtime SET updated_at = ? WHERE task_id = ? AND updated_at = ? AND ${OWNED_BY}`)
+      .run(at, taskId, stamped, this.workspace);
+    if (res.changes > 0) this.logTask(taskId);
+  }
+
+  /**
    * Workflow-level crash recovery (DESIGN §4.3 as revised by §1a item 1): a task
    * still `running` at open time is marked `interrupted`. Returns the recovered task ids.
    *

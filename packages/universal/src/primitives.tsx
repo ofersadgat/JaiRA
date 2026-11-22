@@ -236,6 +236,7 @@ export function Press({
   if (isWeb) for (const k of CORNERS) if (inner[k] !== undefined) outer[k] = inner[k];
   const { role, ...said } = control;
   const host = useRef<unknown>(null);
+  const noDrag = useNoDrag();
   useLayoutEffect(() => {
     const el = host.current as { setAttribute?: (name: string, value: string) => void } | null;
     if (isWeb && typeof el?.setAttribute === "function") el.setAttribute("role", typeof role === "string" ? role : "button");
@@ -250,7 +251,7 @@ export function Press({
       role="button"
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       {...(said as object)}
-      style={{ ...PLAIN_PRESS, ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
+      style={{ ...PLAIN_PRESS, ...(outer as object), ...noDrag, ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
     >
       {(s: { hovered?: boolean; pressed: boolean }) => {
         const state = { hovered: s.hovered === true, pressed: s.pressed };
@@ -305,6 +306,26 @@ export function edge(
  */
 export const DRAG_REGION: Record<string, unknown> = isWeb ? { WebkitAppRegion: "drag", userSelect: "none" } : {};
 export const NO_DRAG: Record<string, unknown> = isWeb ? { WebkitAppRegion: "no-drag" } : {};
+
+/**
+ * A whole strip the window is moved by — the title bar, the head of a pane at the window's top: the
+ * strip itself says {@link DRAG_REGION}, and everything pressed inside it takes itself out of the region
+ * ({@link Press} does on its own, through {@link useNoDrag}). So the window moves from anywhere in the
+ * strip that is not a control: the padding, the gaps between crumbs, a title's words — not only an empty
+ * filler at its end, which a wide address left a few pixels of (the person, 2026-11-21: "clicking and
+ * dragging the title bar still doesnt result in dragging the window … anything but the text should
+ * result in a drag").
+ */
+const InDragStrip = createContext(false);
+
+export function DragStrip({ on = true, children }: { on?: boolean; children: ReactNode }): JSX.Element {
+  return <InDragStrip.Provider value={on}>{children}</InDragStrip.Provider>;
+}
+
+/** {@link NO_DRAG} for a control standing in a {@link DragStrip}; nothing elsewhere. */
+export function useNoDrag(): Record<string, unknown> {
+  return useContext(InDragStrip) ? NO_DRAG : {};
+}
 
 /**
  * `user-select: none` for a whole strip a drag region stands in (the title bar, a pane's head): a press

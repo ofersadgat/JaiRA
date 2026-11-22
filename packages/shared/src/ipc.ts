@@ -2750,6 +2750,15 @@ export interface IpcContract {
   /** Where this window's engine runs (decision 0012 §5). */
   "engine:status": { request: void; response: EngineStatus };
   /**
+   * The device a desktop window is, for what the engine keeps per device (decision 0018 §9: its layout,
+   * its read marks, where its windows stood): this MACHINE — its id in `<base>/system/machine.json` —
+   * so every JaiRA on it shares one, the installed app, a build run from source and a second window
+   * alike. Each had its own before, kept in its Chromium profile's `localStorage`, and a conversation
+   * read in one was unread in the others. A home of its own (`--home`, `JAIRA_HOME`, a test's) is
+   * another machine.json, so another device. A window's own; a browser or a phone names itself.
+   */
+  "device:self": { request: void; response: string };
+  /**
    * This machine and the ones it is paired with (decision 0013 §1–§3). `machine` asks a paired machine
    * for its own view, there (Settings → Machines with that machine in the path); rename, tags and what
    * it is take it too, and change that machine.
@@ -3086,6 +3095,7 @@ export const IPC_CHANNELS = [
   "cli:status",
   "cli:install",
   "engine:status",
+  "device:self",
   "machines:view",
   "machines:rename",
   "machines:tags",

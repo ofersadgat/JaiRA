@@ -189,6 +189,34 @@ describe("a gate parked when the app closes", () => {
     await until(() => statusOf(taskId) === "running", "the suspended task to be running again");
   });
 
+  it("keeps the task's clock through the close and the open — a restart is no news", async () => {
+    // The clock is what a window compares a read mark with and sorts by: stamped by the suspend and the
+    // resume, every conversation waiting when the app closed came back unread, and first, on the next
+    // open (the person, 2026-11-21).
+    const taskId = await start();
+    await nextGate();
+    const clockOf = (): number => {
+      const project = openProject(dir, { baseDir: testHome() });
+      try {
+        return project.runtime.get(taskId)!.updatedAt;
+      } finally {
+        project.close();
+      }
+    };
+    const before = clockOf();
+    await new Promise((r) => setTimeout(r, 20));
+    await quitAndReopen();
+    expect(statusOf(taskId)).toBe("running");
+    expect(clockOf()).toBe(before);
+
+    // A real change after it still moves the clock.
+    service.submitInteraction(service.pendingInteractions()[0]!.requestId, { decision: "left" });
+    const second = await nextGate();
+    service.submitInteraction(second.requestId, { decision: "go" });
+    await until(() => statusOf(taskId) === "completed", "the task to complete");
+    expect(clockOf()).toBeGreaterThan(before);
+  });
+
   it("continues the task when the re-parked gate is answered", async () => {
     const taskId = await start();
     await nextGate(); // the first gate, left unanswered

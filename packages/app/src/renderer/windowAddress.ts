@@ -73,6 +73,11 @@ export function deviceIdFrom(source: Promise<string>): void {
  * or held for the run where nothing keeps it.
  */
 export const deviceId = (): string => device ?? idIn(globalThis.localStorage, DEVICE);
+/**
+ * The id this browser profile kept for itself (`localStorage`), whatever the host names the device: what
+ * a desktop window was before it was its machine (`device:self`), whose layout the machine starts from.
+ */
+export const profileDeviceId = (): string => idIn(globalThis.localStorage, DEVICE);
 /** This device's id, once the host has said what it is. */
 export async function deviceIdReady(): Promise<string> {
   if (deviceFrom !== undefined) await deviceFrom;

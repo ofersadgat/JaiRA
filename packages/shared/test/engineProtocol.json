@@ -33,6 +33,7 @@
     "config:write",
     "desktop:driving",
     "desktop:stop",
+    "device:self",
     "draft:get",
     "draft:put",
     "engine:status",

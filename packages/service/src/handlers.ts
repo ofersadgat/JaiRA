@@ -44,6 +44,7 @@ export const HOST_CHANNELS = [
   "cli:status",
   "cli:install",
   "engine:status",
+  "device:self",
 ] as const satisfies readonly IpcChannel[];
 
 export type HostChannel = (typeof HOST_CHANNELS)[number];

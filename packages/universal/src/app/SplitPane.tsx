@@ -37,7 +37,7 @@ import { ContextMenu, type MenuAt } from "../components/Menu";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { PanelEmpty } from "../components/panel/PanelViews";
 import { SpIcon } from "../components/panel/SidePanel";
-import { DRAG_REGION, NO_SELECT, Press, Txt, WINDOW_GUTTER, edge } from "../primitives";
+import { DRAG_REGION, DragStrip, NO_SELECT, Press, Txt, WINDOW_GUTTER, edge } from "../primitives";
 import { useTokens } from "../tokens";
 import { useColumnsFit, useRoomWidth } from "./columnsFit";
 import { PaneBody } from "./PaneBody";
@@ -181,7 +181,7 @@ interface Crumb {
  * A pane's head (boards 07 and 09): ‹ › and the pane's path as crumbs, what is on top's own controls,
  * then ⋯ and (split) ✕. The same for every pane.
  */
-function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, onMenu, onClose }: {
+function PaneHead({ pane, path, crumbs, closable, lead, gutter, strip, onStep, onPath, onMenu, onClose }: {
   pane: number;
   path: PanePath;
   crumbs: readonly Crumb[];
@@ -190,6 +190,12 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, 
   lead: boolean;
   /** Where the OS draws the window's buttons over this head (`WINDOW_GUTTER`), kept clear. */
   gutter: number | string;
+  /**
+   * The head is the window's top row (not under the narrow room's tabs): the whole of it moves the
+   * window but for its controls (`DragStrip`) — the address in it took all its width, and the filler
+   * after it was left 8 wide.
+   */
+  strip: boolean;
   onStep: (step: (path: PanePath) => PanePath) => void;
   onPath: (e: GestureResponderEvent) => void;
   onMenu: (e: GestureResponderEvent) => void;
@@ -197,7 +203,8 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, 
 }): JSX.Element {
   const t = useTokens();
   return (
-    <View role="toolbar" aria-label="Pane" {...((isWeb ? { "data-pane-head": String(pane) } : {}) as object)} flexDirection="row" alignItems="center" gap={4} minHeight={40} paddingHorizontal={6} flexShrink={0} minWidth={0} {...(edge(t, { bottom: 1 }) as object)} style={NO_SELECT as never}>
+    <View role="toolbar" aria-label="Pane" {...((isWeb ? { "data-pane-head": String(pane) } : {}) as object)} flexDirection="row" alignItems="center" gap={4} minHeight={40} paddingHorizontal={6} flexShrink={0} minWidth={0} {...(edge(t, { bottom: 1 }) as object)} style={(strip ? DRAG_REGION : NO_SELECT) as never}>
+      <DragStrip on={strip}>
       {lead ? <ShellSidebarToggle /> : null}
       <SpIcon icon="back" label="Back" disabled={path.entries.length <= 1} onPress={() => onStep(paneBack)} onLongPress={onPath} />
       <SpIcon icon="back" flip label="Forward" disabled={path.ahead.length === 0} onPress={() => onStep(paneForward)} />
@@ -241,7 +248,7 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, 
           );
         })}
       </View>
-      {/* What the window is moved by: the head's empty stretch, as the title bar's was. */}
+      {/* The head's empty stretch: what the window is moved by under the narrow room's tabs too. */}
       <View flex={1} minWidth={8} alignSelf="stretch" style={DRAG_REGION as never} />
       <Press onPress={onMenu} label="This pane's menu" title="This pane's menu" {...({ "aria-haspopup": "menu" } as object)} width={26} height={26} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered }) => (hovered ? { backgroundColor: t.v("fill-ghost-hover") } : {})}>
         {({ hovered }) => (
@@ -252,6 +259,7 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, onStep, onPath, 
       </Press>
       {closable ? <SpIcon icon="cross" label="Close this pane" onPress={onClose} /> : null}
       {gutter !== 0 ? <View width={gutter as never} alignSelf="stretch" flexShrink={0} style={DRAG_REGION as never} /> : null}
+      </DragStrip>
     </View>
   );
 }
@@ -360,7 +368,7 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
           along the pane's foot. The panes on one path are the same picture but for this row. */}
       <View height={2} flexShrink={0} backgroundColor={(splitOn && !narrow && split.focus === pane ? t.v("accent") : "transparent") as never} />
       {splitOn && narrow ? <SplitTabs shown={pane} /> : null}
-      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} lead={lead} gutter={gutter} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
+      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} lead={lead} gutter={gutter} strip={!(splitOn && narrow)} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
       <View flex={1} minWidth={0} minHeight={0} position="relative" flexDirection="column">
         {room !== null ? (
           // The room, kept mounted under what is put on top of it: back finds it where it was.

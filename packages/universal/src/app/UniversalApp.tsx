@@ -22,7 +22,7 @@ import { Splitter } from "../components/files/Splitter";
 import { CrashBoundary, LooseErrorBanner } from "../components/floats/CrashScreen";
 import { Disconnected } from "../components/floats/Disconnected";
 import { ShellFloats } from "../components/floats/ShellFloats";
-import { NO_SELECT, edge, landmark } from "../primitives";
+import { DRAG_REGION, DragStrip, edge, landmark } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
 import { TouchRoot, shellTouch } from "../touchElsewhere";
 import { ArtifactInMain } from "./ArtifactInMain";
@@ -198,9 +198,12 @@ function Frame(): JSX.Element {
           minHeight={34}
           backgroundColor={t.v("panel") as never}
           {...(edge(t, { bottom: look.palette === "contrast" ? 1.5 : 1 }, look.palette === "contrast" || look.palette === "blueprint" ? "rule" : "line") as object)}
-          style={NO_SELECT as never}
+          style={DRAG_REGION as never}
         >
-          <ShellTitleBar />
+          {/* The whole bar moves the window but for its controls, which take themselves out (`DragStrip`). */}
+          <DragStrip>
+            <ShellTitleBar />
+          </DragStrip>
         </View>
         )}
         {/* A phone's machine while none is reached (a tablet draws this frame): nothing on the desktop. */}

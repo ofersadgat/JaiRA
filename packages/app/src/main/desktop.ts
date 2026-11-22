@@ -44,6 +44,7 @@ import {
   discoverEngine,
   ENGINE_PROTOCOL,
   hostEngine,
+  machineIdentity,
   machineSettings,
   pidAlive,
   resolveBaseDir,
@@ -691,6 +692,7 @@ const hostHandlers: Record<HostChannel, Handler> = {
   "cli:status": (() => cliCommandStatus(cliContext())) as Handler,
   "cli:install": (() => installCliCommand(cliContext())) as Handler,
   "engine:status": (() => engineStatus()) as Handler,
+  "device:self": (() => machineIdentity(baseDir).id) as Handler,
 };
 const HOST_ONLY = new Set<string>(HOST_CHANNELS);
 

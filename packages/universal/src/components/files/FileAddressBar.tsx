@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { FileSource, FileTree, WorkflowLayer } from "@jaira/shared/browser";
 import { LAYER_LABEL, ROOT_WORD, crumbInputOf, crumbsOf, folderFactsOf, issueCountsOf, runToggleableOf, stateIdsOf, type CrumbInput, type FileSelection } from "@jaira/ui/filesModel";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { NO_STACK, PLAIN_SCROLLER, Press, Txt, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
+import { NO_STACK, PLAIN_SCROLLER, Press, Txt, font, scrollbarProps, useNoDrag, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { CrumbBar } from "../Crumbs";
 import { MenuLayer } from "../MenuLayer";
@@ -85,8 +85,10 @@ function DocBar({
   children?: ReactNode;
 }): JSX.Element {
   const tools = [children].flat().some((c) => c !== null && c !== undefined && c !== false);
+  // Pressed, it inspects the file: out of the title bar's drag strip, as a `Press` is.
+  const noDrag = useNoDrag();
   return (
-    <Pressable onPress={onInspect} {...((isWeb ? { title: LAYER_LABEL[input.layer] } : {}) as object)} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: "row", ...PLAIN_SCROLLER, ...(isWeb ? ({ cursor: "default" } as object) : {}) } as never}>
+    <Pressable onPress={onInspect} {...((isWeb ? { title: LAYER_LABEL[input.layer] } : {}) as object)} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: "row", ...PLAIN_SCROLLER, ...noDrag, ...(isWeb ? ({ cursor: "default" } as object) : {}) } as never}>
       <CrumbBar
         crumbs={crumbsOf(input)}
         trailing={

@@ -137,7 +137,7 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { conversationStartOf, isConversation, titleOf } from "./chatWorkflow";
-import { deviceIdReady, lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
+import { deviceIdReady, profileDeviceId, lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
 
 /** The engine as the window's address module needs it — its copy of where each window stood. */
 /** Keep this device's layout with the engine (decision 0018 §9). Quiet: a cache of gestures. */
@@ -147,11 +147,21 @@ function keepLayout(ui: JairaUiState): void {
     .catch(() => undefined);
 }
 
-/** This device's layout as the engine keeps it, if it has one. */
+/**
+ * This device's layout as the engine keeps it, if it has one. A desktop window is its machine now
+ * (`device:self`); a machine with no layout yet starts from the one this window's profile kept as a
+ * device of its own, read marks and all, and keeps it on as the machine's.
+ */
 async function layoutOf(): Promise<JairaUiState | undefined> {
   try {
-    const kept = await invoke("layout:get", { device: await deviceIdReady() });
-    return kept === null ? undefined : parseUiState(kept);
+    const device = await deviceIdReady();
+    const own = await invoke("layout:get", { device });
+    const profile = profileDeviceId();
+    const kept = own === null && profile !== device ? await invoke("layout:get", { device: profile }) : own;
+    if (kept === null) return undefined;
+    const ui = parseUiState(kept);
+    if (own === null) keepLayout(ui);
+    return ui;
   } catch {
     return undefined;
   }
