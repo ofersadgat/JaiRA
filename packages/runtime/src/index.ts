@@ -43,6 +43,7 @@ export { classifyRequest, type ClassifiedPart } from "./commandParts";
 // chain — how a permission set's effect on an agent is tested (decision 0007).
 export * from "./agentHanded";
 export * from "./tools";
+export * from "./toolProcesses";
 export * from "./shellSessions";
 export * from "./sessionProcesses";
 export * from "./leftRunning";

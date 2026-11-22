@@ -2,13 +2,13 @@
 id: ui/components/terminal-card
 type: ui-component
 status: shipped
-updated: 2026-11-18
+updated: 2026-11-21
 realizes: [ux/patterns/stream-then-settle, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/one-document-several-readings, ux/patterns/context-beside-what-you-stand-on]
 serves: [product/watch-agents-work-live, product/steer-agents-mid-task, product/agents-ask-instead-of-guessing, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/context-panel, ui/surfaces/app-window]
 reuses: [ui/components/work-row, ui/components/context-menu, ui/components/icon]
-implemented_by: [packages/universal/src/components/terminal/TerminalView.tsx, packages/universal/src/components/terminal/TerminalsTab.tsx, packages/universal/src/components/terminal/useTerminal.ts, packages/universal/src/components/panel/WorkRows.tsx, packages/app/src/renderer/terminalModel.ts, packages/app/src/renderer/terminalStore.ts, packages/service/src/terminals.ts]
-verified_by: [packages/app/test/terminalModel.test.ts, packages/service/test/terminalHub.test.ts, packages/runtime/test/shellTerminal.test.ts, packages/app/shots/terminal.mts]
+implemented_by: [packages/universal/src/components/terminal/TerminalView.tsx, packages/runtime/src/toolProcesses.ts, packages/universal/src/components/terminal/TerminalsTab.tsx, packages/universal/src/components/terminal/useTerminal.ts, packages/universal/src/components/panel/WorkRows.tsx, packages/app/src/renderer/terminalModel.ts, packages/app/src/renderer/terminalStore.ts, packages/service/src/terminals.ts]
+verified_by: [packages/app/test/terminalModel.test.ts, packages/runtime/test/toolProcesses.test.ts, packages/service/test/terminalHub.test.ts, packages/runtime/test/shellTerminal.test.ts, packages/app/shots/terminal.mts]
 mockups: []
 siblings: [ui/components/artifact-pane, ui/components/work-row, ui/components/value-view]
 ---
@@ -35,6 +35,14 @@ The canvases it was drawn from are "Agent terminals — 8 designs" (board 1) and
 **Use when.** A tool call ran through JaiRA's `shell`: an agent's `Bash`, `PowerShell` or
 `mcp__dai__shell` while its permission set holds `shell` as `app`, or a command the person ran from the
 Terminals tab. The engine keeps a terminal for it (`TerminalHub`).
+
+**Also use when.** Another of JaiRA's tool calls started a process: `git_push` running `git push`, a
+merge request or CI tool running `git`, `gh` or `glab`, `start` making a worktree (decision 0028,
+amended 2026-11-21). Each process is a terminal of its own, linked to the call (`tool`, `call`). The one
+running is drawn under the call's row once it has run 600 ms, so a quick `git rev-parse` does not
+flash a card. Every one of them is in the row's body, above its arguments and result. Such a terminal
+cannot be typed into: there is no line you type on, no answers, no `Send Ctrl-C` and never
+`waiting`. `Stop` ends the process. Its status adds ` · {tool}`, and so does its line in the Terminals tab.
 
 **Do not use when.** The command ran inside the agent, as Claude's own `Bash` under `native` or Codex's
 sandboxed shell. Then there is only its call and its result, and the row stays a [work row](work-row.md)

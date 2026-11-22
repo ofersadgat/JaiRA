@@ -1,8 +1,8 @@
-import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useContext, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Platform } from "react-native";
 import { Text, View } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, nativeShellDialect, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, nativeShellDialect, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type TerminalSummary, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfValue, type Answer } from "@jaira/ui/choicesModel";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
@@ -32,7 +32,7 @@ import { PublishedList } from "./PublishedList";
 import { Media } from "./ValueReadings";
 import { PlaceButtons } from "./PlaceButtons";
 import { TerminalView } from "../terminal/TerminalView";
-import { useTerminal } from "../terminal/useTerminal";
+import { useCallTerminals, useTerminal } from "../terminal/useTerminal";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
 import { PLACES } from "@jaira/ui/splitModel";
 import { moveEntry, useEntryPlaces, usePlacesHere } from "../../app/places";
@@ -250,6 +250,25 @@ function served(artifacts: ArtifactSurface | undefined): { serve?: ArtifactSurfa
   return { serve: artifacts.serve, ...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {}) };
 }
 
+/** How long a tool call's process runs before its terminal opens under the row: a quick `git rev-parse` does not flash one. */
+const PROCESS_SHOWN_AFTER_MS = 600;
+
+/** Whether `ms` have passed since `since` (epoch ms); false while `since` is undefined. */
+function useAfter(since: number | undefined, ms: number): boolean {
+  const [passed, setPassed] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (since === undefined) return;
+    const left = since + ms - Date.now();
+    if (left <= 0) {
+      setPassed(since);
+      return;
+    }
+    const timer = setTimeout(() => setPassed(since), left);
+    return () => clearTimeout(timer);
+  }, [since, ms]);
+  return since !== undefined && (passed === since || Date.now() - since >= ms);
+}
+
 /** `Tool`: one tool call — a line, both its halves when asked for, and what it made, drawn unasked. */
 function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
   const sub = held.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(held.sidechain) : undefined;
@@ -267,6 +286,11 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const term = useTerminal(shell !== undefined ? artifacts?.taskId : undefined, shell !== undefined ? held.callId : undefined, artifacts?.project ?? undefined);
   const termEntry = term !== undefined ? terminalEntryOf({ taskId: term.summary.taskId, project: artifacts?.project ?? undefined, callId: term.summary.callId, command: term.summary.command, dialect: term.summary.dialect }) : undefined;
   const termLit = useEntryPlaces(termEntry?.key ?? "");
+  // Any other call's processes (`git_push`'s `git push`, a merge request tool's `gh`) are terminals too,
+  // one each: the one running drawn under the row once it has run a moment, all of them in its body.
+  const procs = useCallTerminals(shell === undefined && held.sidechain === undefined && !isHostCall(held) ? artifacts?.taskId : undefined, held.callId, artifacts?.project ?? undefined);
+  const runningProc = [...procs].reverse().find((one) => one.endedAt === undefined);
+  const procShown = useAfter(runningProc?.startedAt, PROCESS_SHOWN_AFTER_MS);
   const phone = usePhone();
   const placesHere = usePlacesHere(phone);
   // What is drawn unasked under the line — a page it produced, its output, a question, an outcome —
@@ -379,12 +403,19 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     if (line.shown === "output") return <ValueView value={entry.output!.value} label={entry.output!.name ?? "output"} {...(entry.output!.schema !== undefined ? { hint: { schema: entry.output!.schema } } : {})} />;
     return undefined;
   })();
+  const procCard = (one: TerminalSummary): JSX.Element => <TerminalView key={one.callId} taskId={one.taskId} project={artifacts?.project ?? undefined} callId={one.callId} command={one.command} dialect={one.dialect} />;
+  const live = runningProc !== undefined && procShown ? procCard(runningProc) : undefined;
   return (
     <Row
       {...head}
-      {...(shown !== undefined ? { shown } : {})}
+      {...(live !== undefined ? { shown: live } : shown !== undefined ? { shown } : {})}
       body={
         <>
+          {procs.length > 0 ? (
+            <View flexDirection="column" gap={6} paddingTop={4} paddingBottom={6} minWidth={0}>
+              {procs.filter((one) => one !== runningProc || live === undefined).map(procCard)}
+            </View>
+          ) : null}
           <Payload label="arguments" value={entry.args} artifacts={artifacts} />
           {unanswered ? (
             <EmptyPayload>{running ? "still running" : "no result was recorded — the conversation went on without this call answering"}</EmptyPayload>

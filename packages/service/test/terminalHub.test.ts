@@ -71,6 +71,14 @@ describe("TerminalHub", () => {
     expect(hub.list("t-1")[0]?.waiting).toBeUndefined();
   });
 
+  it("keeps a tool call's process with its tool and call, and never calls it waiting — nobody can answer it", () => {
+    const terminal = hub.forTask("t-1", "proj").open({ callId: "toolu_9~1", command: "git push origin x", cwd: "/w", dialect: "posix", tool: "git_push", call: "toolu_9" });
+    expect(hub.list("t-1")[0]).toMatchObject({ callId: "toolu_9~1", tool: "git_push", call: "toolu_9", by: "agent" });
+    terminal.output("Username for 'https://github.com': ");
+    vi.advanceTimersByTime(WAITING_AFTER_MS * 2);
+    expect(hub.list("t-1")[0]?.waiting).toBeUndefined();
+  });
+
   it("keeps the last few per task, letting ended ones go before running ones", () => {
     const running = open("running");
     running.attach({ type: () => true, interrupt: () => undefined, stop: () => undefined, endsAt: () => undefined });

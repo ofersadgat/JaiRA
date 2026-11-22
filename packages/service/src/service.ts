@@ -688,6 +688,8 @@ import { TerminalHub } from "./terminals";
 import { agentShellSetting, idleShellVerdict, SHELL_REAP_EVERY_MS } from "./shells";
 import {
   createShellTool,
+  withProcessTerminals,
+  outsideToolCall,
   expandShellWord,
   isContainerEnv,
   isWslEnv,
@@ -6524,8 +6526,15 @@ export class AppService {
    * Get it wrong and nothing visibly breaks: a project-layer sync silently resolves the shared root's
    * models and the shared root's credentials, calls a different model than the project asked for, and
    * reports success.
+   *
+   * A run is never a tool call's, even when one started it (`start`, `move`, a child): its processes are
+   * its own tool calls' terminals, not the caller's (`outsideToolCall`).
    */
-  private async startRun(
+  private startRun(...args: Parameters<AppService["runFromStart"]>): ReturnType<AppService["runFromStart"]> {
+    return outsideToolCall(() => this.runFromStart(...args));
+  }
+
+  private async runFromStart(
     open: ProjectSession,
     taskId: string,
     opts: {
@@ -6813,6 +6822,11 @@ export class AppService {
     // The System tools (decision 0019): this machine. A screenshot is the task's artifact, as a CI download is.
     // The process tools' default scope is this task's own processes (decision 0032, ruling 4).
     registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, taskId), processes: this.processesOf(taskId, open, config) });
+    // Every process a tool call other than `shell` starts is a terminal too, linked to that call
+    // (decision 0028, amended 2026-11-21): `git_push`'s `git push`, a merge request tool's `gh`.
+    // `shell` keeps its own, which can be typed into.
+    const toolTerminals = this.terminals.forTask(taskId, open.key);
+    for (const [name, tool] of registry.tools) if (name !== "shell") registry.tools.set(name, withProcessTerminals(name, tool, toolTerminals));
 
     // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
     // and a run resolves `environment.tools` through the engine instead, so it has to be folded in

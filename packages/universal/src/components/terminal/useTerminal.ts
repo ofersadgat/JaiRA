@@ -37,3 +37,26 @@ export function runningOf(list: readonly TerminalSummary[]): { count: number; wa
   const running = list.filter((one) => one.endedAt === undefined);
   return { count: running.length, waiting: running.filter((one) => one.waiting === true).length };
 }
+
+/**
+ * The processes a tool call other than `shell` started (`TerminalSummary.call`), oldest first — redrawn
+ * when one of them starts or ends, not on every other terminal's change.
+ */
+export function useCallTerminals(taskId: string | undefined, callId: string | undefined, project: string | undefined): TerminalSummary[] {
+  const snapshot = useCallback(
+    () =>
+      taskId === undefined || callId === undefined
+        ? ""
+        : terminals
+            .listOf(taskId)
+            .filter((one) => one.call === callId)
+            .map((one) => `${one.callId}:${one.endedAt ?? ""}`)
+            .join(","),
+    [taskId, callId],
+  );
+  useSyncExternalStore(terminals.subscribe, snapshot, snapshot);
+  useEffect(() => {
+    if (taskId !== undefined && callId !== undefined) terminals.ensureList(taskId, project);
+  }, [taskId, callId, project]);
+  return taskId === undefined || callId === undefined ? [] : terminals.listOf(taskId).filter((one) => one.call === callId);
+}

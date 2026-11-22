@@ -51,6 +51,9 @@ export interface OpenCall {
   dialect: CommandDialect;
   shell?: string;
   by: TerminalBy;
+  /** A process another tool call started (`TerminalSummary.tool`): that tool, and that call. */
+  tool?: string;
+  call?: string;
 }
 
 export class TerminalHub {
@@ -74,6 +77,8 @@ export class TerminalHub {
           cwd: call.cwd,
           dialect: call.dialect,
           ...(call.shell !== undefined ? { shell: call.shell } : {}),
+          ...(call.tool !== undefined ? { tool: call.tool } : {}),
+          ...(call.call !== undefined ? { call: call.call } : {}),
           by: "agent",
         }),
     };
@@ -94,6 +99,8 @@ export class TerminalHub {
       ...(call.cwd !== undefined ? { cwd: call.cwd } : {}),
       ...(call.shell !== undefined ? { shell: call.shell } : {}),
       by: call.by,
+      ...(call.tool !== undefined ? { tool: call.tool } : {}),
+      ...(call.call !== undefined ? { call: call.call } : {}),
       startedAt: this.now(),
       length: 0,
       dropped: 0,
@@ -206,6 +213,8 @@ export class TerminalHub {
       this.flush(kept);
       this.state(kept);
     }
+    // A tool's process cannot be typed into, so it is never waiting on anyone.
+    if (kept.summary.tool !== undefined) return;
     kept.quiet = setTimeout(() => {
       delete kept.quiet;
       if (kept.summary.endedAt !== undefined || !endsMidLine(kept.output)) return;
