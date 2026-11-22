@@ -130,7 +130,9 @@ function callsOf(node: InstanceNode, records: Readonly<Record<string, OperationR
           }
         : read.args;
     // A prompt's answer is `{ value, finishReason, entries, … }`: the value is what the call returned.
-    const answer = kind === "prompt" ? (objectOf(read.result)?.["value"] ?? read.result) : read.result;
+    // Only once it has: a call still going already keeps what it has said so far in its record's result.
+    const answered = read.status === "completed";
+    const answer = !answered ? undefined : kind === "prompt" ? (objectOf(read.result)?.["value"] ?? read.result) : read.result;
     const said = call.site !== undefined ? node.scriptCalls?.[call.site] : undefined;
     const present = presentationOf([...path, node.present, said?.present]);
     // A state that is one call is named by its state; one of several, by what the script called it.
@@ -204,7 +206,8 @@ function toolOf(call: ProgramCall, name: string = call.label): ToolEntry {
     args: call.args as JsonValue,
     ...(call.error !== undefined ? { result: call.error } : call.result !== undefined ? { result: call.result } : {}),
     ...(settled !== undefined ? { ok: settled } : {}),
-    callId: `${PROGRAM_CALL_PREFIX}${call.instanceId}#${call.operationId}`,
+    // A wait for the person is no call to interrupt: its row is named apart, so it offers no Interrupt.
+    callId: call.fn === "input" ? `wait:${call.instanceId}#${call.operationId}` : `${PROGRAM_CALL_PREFIX}${call.instanceId}#${call.operationId}`,
   };
 }
 

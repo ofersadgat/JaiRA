@@ -44,7 +44,7 @@ A gate's prompt is set in the small uppercase `--dim` heading style, its glyph a
 A run whose workflow is a program (decision 0029) is not drawn as a sheet per state: the column is the
 Chat view's own thread and box ([chat-view](chat-view.md)) at `task` detail ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)).
 What chat folds is open — every summary of work starts with its steps showing, and can be folded by hand
-— what chat hides is folded, and **Every step** (a switch over the thread, off at first) draws every call
+— what chat hides is folded, and **Every step** (a switch over the box, off at first) draws every call
 the program made as a row of its own, the waits and the replies among them. The queue, Stop, Interrupt and
 the edits are the Chat view's.
 

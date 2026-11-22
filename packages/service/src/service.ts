@@ -1897,7 +1897,7 @@ export class AppService {
         }
       },
     });
-    this.queued = new QueuedMessages(basePaths.queuedFile, (items) => this.publish({ type: "queued:changed", items }));
+    this.queued = new QueuedMessages(basePaths.queuedFile, (items, taskId) => this.publish({ type: "queued:changed", items, taskId }));
     this.waiting = new WaitingQueue(basePaths.waitingFile, {
       sendMessage: (item) => this.sendWaitingMessage(item),
       resumeRun: async (item) => {
@@ -5016,8 +5016,9 @@ export class AppService {
       case "waiting:changed":
         touch(db, "waiting", "waiting");
         break;
+      // By the task whose queue moved: a window reads a task's queue again when its task is touched.
       case "queued:changed":
-        touch(db, "queued", "queued");
+        touch(db, "queued", message.taskId, message.taskId);
         break;
       case "machines:changed":
         touch(db, "machine", "machines");
@@ -8171,8 +8172,10 @@ export class AppService {
         // Too late to join: it waits for the next `input()` instead.
       }
     }
-    open.hub.seed(taskId, INPUT_FUNCTION, answer);
-    return { ...at, ...PROGRAM_ANSWERED };
+    // "Send now" that could not join (the reply ended as it was pressed, or cannot take a message): it
+    // waits for the next `input()` like any message sent while a call ran — queued, kept and shown.
+    const queued = this.queued.add(open.key, taskId, request.message, request.overrides);
+    return { ...at, ...PROGRAM_ANSWERED, queued };
   }
 
   /**
@@ -9387,6 +9390,8 @@ export class AppService {
     const unsent: ChatUnsent[] = [];
     for (const record of records.slice(from)) {
       if (record.status !== "failed" || landed.has(record.recordId)) continue;
+      // Interrupted (decision 0033 §6): it reached the agent, and was stopped there — no message went unsent.
+      if ((record.error as { interrupted?: unknown } | undefined)?.interrupted !== undefined) continue;
       const call = (record.request ?? {}) as { kind?: unknown; user?: unknown; config?: { model?: unknown } };
       if (call.kind !== "prompt" || typeof call.user !== "string" || call.user.trim() === "") continue;
       const reason = (record.error as { reason?: unknown } | undefined)?.reason;

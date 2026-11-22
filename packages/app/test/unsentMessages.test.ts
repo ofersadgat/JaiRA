@@ -39,6 +39,8 @@ describe("the messages that never reached a conversation", () => {
       prompt("e", "failed", "  "),
       prompt("r", "running", "still going"),
       prompt("s", "interrupted", "stopped"),
+      // Interrupted while it ran (decision 0033 §6): it reached the agent, which was stopped.
+      prompt("i", "failed", "left: both", { error: { classification: "canceled", reason: "interrupted", interrupted: {} } }),
     ];
     expect(AppService.unsentOf(records, new Set())).toEqual([]);
   });

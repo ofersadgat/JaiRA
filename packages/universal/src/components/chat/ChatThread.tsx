@@ -287,13 +287,6 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         <ApprovalAskContext.Provider value={m.askValue}>
         <CallInterruptContext.Provider value={m.interruptCall}>
         <WorkOpenContext.Provider value={surface.density === "task"}>
-        {m.stepsOffered ? (
-          // The program at the level of its calls, among its messages: every step a row of its own.
-          <View flexDirection="row" alignItems="center" justifyContent="flex-end" gap={8} width="100%" maxWidth={900} alignSelf="center" paddingHorizontal={12} paddingTop={6} paddingBottom={4}>
-            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>Every step</Txt>
-            <Switch on={m.everyStep} label="Every step" onChange={m.setEveryStep} />
-          </View>
-        ) : null}
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
             // Not started: the message it will open with, not sent until it has somewhere to run — in
@@ -452,6 +445,14 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
                 </>
               )}
             </View>
+          </View>
+        ) : null}
+        {m.stepsOffered ? (
+          // The program at the level of its calls, among its messages (decision 0033 §1): over the box, where
+          // it stays in reach however far the thread has scrolled.
+          <View flexDirection="row" alignItems="center" justifyContent="flex-end" gap={8} width="100%" maxWidth={900} alignSelf="center" paddingHorizontal={12} paddingTop={6}>
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>Every step</Txt>
+            <Switch on={m.everyStep} label="Every step" onChange={m.setEveryStep} />
           </View>
         ) : null}
         {m.error !== null ? <ChatError text={m.error} route={m.errorRoute} /> : null}

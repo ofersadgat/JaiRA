@@ -74,8 +74,8 @@ There is no other way a message runs: no turn outside a run, no `chat:<host>` ch
 `chat:queue` (`{ taskId, project? }`) answers the conversation's queued messages oldest first, and
 `steerable`: whether a call in flight can take a message now, which is when Send now is offered.
 `chat:queueAct` (`{ id, action: "drop" | "sendNow" }`) deletes one, or sends it now: removed from the queue
-and steered into the call in flight (`chat:send` with `now`); one that could not be sent goes back at the
-head. The queue is kept in `~/.jaira/system/queued.json`; `queued:changed` publishes it; a program parking
+and steered into the call in flight (`chat:send` with `now`, answering `steered`); one the call could no
+longer take is queued again, and one that failed to send goes back. The queue is kept in `~/.jaira/system/queued.json`; `queued:changed` publishes it with the task whose queue moved, and the change log touches that task, which is what reads its `chat:queue` again; a program parking
 at `input()` is answered with the head, after the park's own row is written.
 
 ### `task:interrupt` interrupts the calls a target reaches

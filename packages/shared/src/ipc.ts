@@ -3472,7 +3472,7 @@ export type PushMessage =
   | { type: "limits:changed"; view: LimitsView }
   /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
   | { type: "waiting:changed"; items: WaitingItem[] }
-  | { type: "queued:changed"; items: QueuedMessageView[] }
+  | { type: "queued:changed"; items: QueuedMessageView[]; taskId: string }
   /**
    * The tasks being placed or waiting for a workspace changed — one began, asked again, was sent
    * somewhere or started. The whole list, as `placement:queue` answers it. This machine's.

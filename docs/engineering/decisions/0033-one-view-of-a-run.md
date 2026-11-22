@@ -333,7 +333,21 @@ The person: "implement it".
 - **A program however compiled**: the task detail says so (`TaskDetail.program`, from its pinned bundle), so a
   script compiled as one state is read as its conversation too.
 
-**Not yet:** no parity scene photographs a program's thread at either detail.
+**Seen in the app** (2026-11-22, a studio of its own, fake models; the person: "Yes, do both"): queued
+messages drawn at once with Send now, Edit and Delete — each pressed; Stop asking "Interrupt which?" over a
+program with two calls going, one picked; a running check's row with its own Interrupt, pressed; "Interrupt
+with this message" stopping a reply, the message answered next; Every step at `task` detail. What it
+found, fixed: a queued message was not drawn until the page was read again (the change named no task, and
+a view about a task is read again by its task); a message sent now vanished until the reply it joined
+landed (drawn as sent now); one that could not join fell to the unsaved hand-off (queued now); a running
+call's record already holds what it has said, so its row looked answered and offered no Interrupt; the
+Interrupt was a button inside the row's button (beside it now); a wait offered Interrupt; an interrupted
+call was said "Not sent" under the thread; the Every step switch scrolled away with the thread (over the box
+now).
+
+**Scenes**: `conversation-program` and `task-program` (`parityWorld.mts`) reach a program's thread in chat
+and as its task. Their reference pictures are accepted in the goldens' world
+(`pair.mts --accept --scene conversation-program,task-program`), which this machine does not hold.
 
 ## Revisit when
 

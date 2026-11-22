@@ -223,4 +223,15 @@ describe("reading a line for a background start", () => {
     ];
     expect(descendantsByStart(rows, 10, 2_000).map((p) => p.pid)).toEqual([11, 12]);
   });
+
+  it("leaves out the shell's own console host, still ending, but keeps the one a program it started brought", () => {
+    const at = (ms: number): string => new Date(ms).toISOString();
+    const rows = [
+      { pid: 10, name: "powershell.exe", started: at(2_000) },
+      { pid: 14, parent_pid: 10, name: "conhost.exe", started: at(2_010) },
+      { pid: 11, parent_pid: 10, name: "node.exe", started: at(3_000) },
+      { pid: 15, parent_pid: 11, name: "conhost.exe", started: at(3_010) },
+    ];
+    expect(descendantsByStart(rows, 10, 2_000).map((p) => p.pid)).toEqual([11, 15]);
+  });
 });

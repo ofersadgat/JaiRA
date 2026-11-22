@@ -38,7 +38,7 @@ An agent's `AskUserQuestion` the conversation that asked for a fast-forward answ
 A call a program made that has no renderer of its own — `conversation_digest`, a check it asked a model —
 is a work row ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)): named by its `renderUI` title or its label, its arguments and
 what it returned opening under it, as an agent's tool call's do. While it runs and the thread drawing it
-can interrupt it (`CallInterruptContext`), the row carries **Interrupt** in --bad where its note would be.
+can interrupt it (`CallInterruptContext`), the row carries **Interrupt** in --bad beside the line, outside the button that opens it. A program's wait for the person is a row too, under "Every step", and offers no Interrupt.
 A model's tool call and a program's call of the same function find the same renderer: the model's
 `start_task` and the program's are both the child-run row.
 

@@ -232,7 +232,6 @@ const SHOWS: Partial<Record<string, readonly string[]>> = {
   // The settings pages' (group 7): what the engine holds in memory or in files, logged as it changes.
   "limits:read": ["limits"],
   "waiting:list": ["waiting"],
-  "chat:queue": ["queued"],
   "machines:view": ["machine"],
   "machines:outbox": ["machine"],
   "machines:copies": ["machine", "workspace"],

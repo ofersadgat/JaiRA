@@ -120,6 +120,7 @@ export function Row({
   mark,
   prose = false,
   note,
+  action,
   body,
   shown,
 }: {
@@ -133,6 +134,8 @@ export function Row({
   mark?: RowMark | undefined;
   prose?: boolean;
   note?: ReactNode;
+  /** A control of the row's own (a running call's Interrupt): beside the line, never inside its button. */
+  action?: ReactNode;
   body?: ReactNode;
   shown?: ReactNode;
 }): JSX.Element {
@@ -197,13 +200,18 @@ export function Row({
   const box = { flexDirection: "row", alignItems: "center", gap: 7, width: "100%", minWidth: 0, paddingVertical: 3, paddingHorizontal: 6, borderRadius: 6 } as const;
   return (
     <View borderRadius={6} minWidth={0}>
-      {canOpen ? (
-        <Press onPress={() => setOpen((v) => !v)} {...({ "aria-expanded": open } as object)} {...box} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("accent"), 9, "transparent") : "transparent" })}>
-          {line}
-        </Press>
-      ) : (
-        <View {...box}>{line}</View>
-      )}
+      <View flexDirection="row" alignItems="center" minWidth={0}>
+        <View flex={1} minWidth={0}>
+          {canOpen ? (
+            <Press onPress={() => setOpen((v) => !v)} {...({ "aria-expanded": open } as object)} {...box} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("accent"), 9, "transparent") : "transparent" })}>
+              {line}
+            </Press>
+          ) : (
+            <View {...box}>{line}</View>
+          )}
+        </View>
+        {action !== undefined ? <View flexShrink={0}>{action}</View> : null}
+      </View>
       {open && canOpen ? (
         <View marginTop={1} marginBottom={6} marginLeft={28} paddingLeft={12} minWidth={0} {...(edge(t, { left: 1 }, "rule") as object)}>
           {body}
@@ -348,7 +356,8 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     tone: line.tone,
     mark: line.mark,
     // Who stopped a refused call, in grey before the time (2026-10-24, D+E).
-    ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : interruptible ? { note: <InterruptButton onPress={() => interruptCall!(programState!)} /> } : {}),
+    ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : {}),
+    ...(interruptible ? { action: <InterruptButton onPress={() => interruptCall!(programState!)} /> } : {}),
   };
   // The approval prompt, and a permission check: its line is the whole of it.
   if (isHostCall(entry)) return <Row {...head} />;

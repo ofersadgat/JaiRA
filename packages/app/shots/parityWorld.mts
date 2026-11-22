@@ -687,6 +687,34 @@ export const SCENES: readonly Scene[] = [
     },
   },
   {
+    // A conversation's PROGRAM drawn among its messages (decision 0033): two messages and their answers,
+    // and after the second the program's own steps — reading the conversation, checking for a correction —
+    // folded into the work summary under it, as chat draws them. Made the first time it is reached.
+    name: "conversation-program",
+    reach: async (app) => {
+      await programConversation(app);
+      await app.clickText("Chat");
+      await app.until(says(PROGRAM_CONVERSATION), "the conversation to be listed");
+      await app.clickText(PROGRAM_CONVERSATION);
+      await app.until(says("Checking for a correction"), "the program's steps to be drawn");
+      await settle(800);
+    },
+  },
+  {
+    // The same conversation read as its TASK (decision 0033 §1): the Chat view's thread and composer in the
+    // panel, the program's steps open under the reply, and the Every step switch over the thread.
+    name: "task-program",
+    reach: async (app) => {
+      await programConversation(app);
+      // Its card on the board, which opens the task in the panel (the Chat drawer would open it as a chat).
+      await app.clickText("Tasks");
+      await app.until(says(PROGRAM_CONVERSATION), "the conversation's card");
+      await app.clickText(PROGRAM_CONVERSATION);
+      await app.until(says("Reading the conversation") + ` && document.querySelector('[role="switch"][aria-label="Every step"], [role="switch"][title="Every step"]') !== null`, "the program's steps, open, in the panel, and Every step over the box");
+      await settle(800);
+    },
+  },
+  {
     // A conversation with work in it: the fake model reads, searches, runs a failing command and a
     // passing one, and answers — the tool rows and the work summary above the answer (decision 0015's
     // transcript copy). Made the first time it is reached, as `conversation` is.
@@ -1185,6 +1213,35 @@ async function conversation(app: App, title = CONVERSATION): Promise<void> {
     fake: tools ? TOOLS_FAKE : [{ output: "It checks that **every state** a workflow names exists:\n\n- the `sequence` entries\n- each transition's `to`\n\nRun it with `jaira lint`." }],
   });
   await settle(1500);
+}
+
+/** The conversation the `conversation-program` and `task-program` scenes open (decision 0033). */
+export const PROGRAM_CONVERSATION = "two questions about the lint";
+
+/**
+ * A conversation with two messages, made once: the second message is a turn of the program that checks
+ * for a correction, so the conversation holds the program's own steps — a digest and a check — beside its
+ * replies. Answered by a fake model; a no-op once it exists.
+ */
+async function programConversation(app: App): Promise<void> {
+  const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
+  const project = projects.find((p) => p.kind === "user")?.project;
+  if (project === undefined) throw new Error("the world has no project to talk in");
+  const tasks = await app.ipc<Array<{ title: string }>>("task:list", { project });
+  if (tasks.some((t) => t.title === PROGRAM_CONVERSATION)) return;
+  const made = await app.ipc<{ taskId: string }>("task:create", { title: PROGRAM_CONVERSATION, workflow: "session", conversation: true, inputs: { message: "What does the sync lint check?" }, project });
+  await app.ipc("task:start", {
+    taskId: made.taskId,
+    project,
+    fake: [
+      { promptIncludes: "The person's message", output: JSON.stringify({ verdict: "none", lesson: "", quote: "" }) },
+      { promptIncludes: "What does the sync lint check?", output: "That every state a workflow names exists — the `sequence` entries and each transition's `to`." },
+      { promptIncludes: "how do I run it", output: "Run `jaira lint` from the project's root." },
+    ],
+  });
+  await settle(3000);
+  await app.ipc("chat:send", { taskId: made.taskId, instanceId: "", message: "And how do I run it?", project });
+  await settle(3000);
 }
 
 /** The conversation the `conversation-tools` scene opens. */

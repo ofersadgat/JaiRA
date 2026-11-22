@@ -142,6 +142,9 @@ export function descendantsByStart(rows: readonly ProcessRow[], rootPid: number,
       const started = child.started !== undefined ? Date.parse(child.started) : Number.NaN;
       // Unknown start: not ours — a guess here would stop a stranger's program.
       if (Number.isNaN(started) || started < parent.startedAt) continue;
+      // The call's own console host (Windows): the shell's `conhost`, which ends with it and may still be
+      // ending when the call is looked at. A program the call started brings its own, as its child.
+      if (parent.pid === rootPid && /^conhost(.exe)?$/i.test(child.name ?? "")) continue;
       out.push({ pid: child.pid, name: child.name, parent: parent.pid, started: child.started! });
       queue.push({ pid: child.pid, startedAt: started });
     }

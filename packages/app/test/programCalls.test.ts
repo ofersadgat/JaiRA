@@ -142,6 +142,18 @@ describe("a program's calls", () => {
     expect(rows.map((r) => programCallInstance(r.callId))).toEqual(["i-phase", "i-phase"]);
   });
 
+  it("has no answer for a call still going, though its record already holds what it has said so far", () => {
+    records["r-1"] = { recordId: "r-1", status: "open", request: { kind: "prompt", user: "The person's message: x", input: {} } as never, result: { entries: [{ kind: "message", role: "user", content: "The person's message: x" }] } as never };
+    const going = { ...root, children: [{ ...root.children[4]!, instanceId: "i-going", endedAt: undefined, calls: [{ operationId: "r-1", kind: "prompt" }] }] } as unknown as InstanceNode;
+    const [call] = programCallsOf(going, records);
+    expect(call!.result).toBeUndefined();
+    const [row] = weaveProgramCalls([], [call!], "task");
+    // No answer and no mark: the row is running, which is what offers its own Interrupt.
+    expect(row).toMatchObject({ kind: "tool", name: "notice" });
+    expect((row as ToolEntry).ok).toBeUndefined();
+    expect((row as ToolEntry).result).toBeUndefined();
+  });
+
   it("is nothing for a run that is not a program", () => {
     expect(programCallsOf(undefined, records)).toEqual([]);
     expect(programCallsOf({ ...root, children: [] } as InstanceNode, records)).toEqual([]);
@@ -225,6 +237,9 @@ describe("woven into the thread", () => {
     const calls = programCallsOf(root, records);
     const every = shape(weaveProgramCalls(thread, calls, "task", undefined, true));
     expect(every.filter((e) => e.startsWith("tool:"))).toEqual(["tool:llm", "tool:input", "tool:llm", "tool:conversation_digest", "tool:notice", "tool:start_task", "tool:now", "tool:input"]);
+    // A wait is a row, but no call to interrupt.
+    const waits = weaveProgramCalls(thread, calls, "task", undefined, true).filter((e): e is ToolEntry => e.kind === "tool" && e.name === "input");
+    expect(waits.every((w) => programCallInstance(w.callId) === undefined)).toBe(true);
     // The messages are still the thread's, said once each.
     expect(every.filter((e) => e.startsWith("user:"))).toEqual(["user:one", "user:two", "user:three"]);
   });

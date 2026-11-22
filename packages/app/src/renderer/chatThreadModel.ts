@@ -486,8 +486,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const queuedMessages: QueuedMessageView[] = queueHeld.value?.items ?? NO_QUEUE;
   const steerable = queueHeld.value?.steerable === true;
   const actOnQueued = (id: string, action: "drop" | "sendNow"): void => {
+    const item = queuedMessages.find((one) => one.id === id);
     void invoke("chat:queueAct", { id, action })
-      .then(() => syncCache().refresh("chat:queue", queueRequest))
+      .then((result) => {
+        // Joined to the reply being written: drawn as sent until the reply's record holds it, as a message
+        // sent straight in is — out of the queue, it would otherwise vanish for as long as the reply runs.
+        if (result.steered === true && item !== undefined) setSent((was) => [...was, item.text]);
+        return syncCache().refresh("chat:queue", queueRequest);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   };
   /** Back into the box to be changed, and out of the queue. */

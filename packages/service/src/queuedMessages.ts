@@ -20,7 +20,8 @@ export class QueuedMessages {
 
   constructor(
     private readonly file: string,
-    private readonly changed: (items: QueuedMessageView[]) => void = () => undefined,
+    /** The queue moved, for a task: what to push, and whose (a window reads a task's queue again by its id). */
+    private readonly changed: (items: QueuedMessageView[], taskId: string) => void = () => undefined,
     private readonly now: () => number = Date.now,
   ) {
     this.items = this.load();
@@ -44,7 +45,7 @@ export class QueuedMessages {
     const at = this.now();
     const item: QueuedMessageView = { id: `q-${at.toString(36)}-${(++this.seq).toString(36)}`, project, taskId, text, ...(settings !== undefined && Object.keys(settings).length > 0 ? { settings } : {}), at };
     this.items.push(item);
-    this.save();
+    this.save(taskId);
     return item;
   }
 
@@ -52,8 +53,8 @@ export class QueuedMessages {
   remove(id: string): boolean {
     const at = this.items.findIndex((i) => i.id === id);
     if (at < 0) return false;
-    this.items.splice(at, 1);
-    this.save();
+    const [gone] = this.items.splice(at, 1);
+    this.save(gone!.taskId);
     return true;
   }
 
@@ -61,10 +62,10 @@ export class QueuedMessages {
   dropTask(project: string, taskId: string): void {
     const before = this.items.length;
     for (let i = this.items.length - 1; i >= 0; i--) if (this.items[i]!.project === project && this.items[i]!.taskId === taskId) this.items.splice(i, 1);
-    if (this.items.length !== before) this.save();
+    if (this.items.length !== before) this.save(taskId);
   }
 
-  private save(): void {
+  private save(taskId: string): void {
     try {
       mkdirSync(dirname(this.file), { recursive: true });
       const tmp = `${this.file}.tmp`;
@@ -74,7 +75,7 @@ export class QueuedMessages {
       // A queue that cannot be written still delivers while the app runs; only a restart would lose it.
     }
     try {
-      this.changed(this.list());
+      this.changed(this.list(), taskId);
     } catch {
       // the push is best-effort
     }
