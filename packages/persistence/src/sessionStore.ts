@@ -294,7 +294,15 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     //
     // The SESSION'S OWN column holds the complete resume identity: the opaque provider handle and
     // its owning provider. A row carrying only one of the two is not one — see `sessionHandle`.
-    const atHead = mode === "append" && seq === this.head(id);
+    //
+    // The head is where APPENDING begins and the read head is where the CONVERSATION ends, and an
+    // append at either is at the head. They differ exactly past a stopped (or failed) turn: the stop
+    // released its seat, but what the agent said before it is history — on screen, in `materialize`,
+    // and in the remote, whose handle the stopped call's own flushes already stamped on this row. The
+    // chat's next message asks for the position AFTER that turn, and answering it with no handle
+    // sent the whole conversation as one rendered prompt into a new remote session (t-5uwe4jt33x,
+    // 2026-11-21) — a stop is "stop talking", never "forget what you said".
+    const atHead = mode === "append" && (seq === this.head(id) || seq === this.readHead(id));
     const own = atHead ? this.sessionHandle(id) : undefined;
     // A REWOUND conversation (migration 17, `cutSession`) has a remote that runs past its rows — the
     // provider cannot truncate a conversation — so its own handle is a COPY SOURCE cut at the last
@@ -305,9 +313,18 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // Nothing of our own to resume, but an ancestor has a remote: that is a branch POINT, not an
     // append target. Offered as `forkFrom` so only an adapter that can copy a session server-side
     // acts on it — see `ResolvedSession.forkFrom`.
+    //
+    // An append BEHIND this conversation's own end is a branch point too, on its own remote: copy it
+    // cut at the last message before the position — what a rewind's next call does — rather than
+    // replay. When the seat is live the claim refuses and the automatic fork lands on the same answer
+    // through `ancestorHandle`; this is the free seat (a dead tail) it never reaches. `null` is a remote
+    // of our own that cannot be cut there — the ancestor's would lack our own turns, so it replays.
+    const behind = mode === "append" && !atHead && seq > this.cursorOf(id) ? this.copySource(id, seq) : undefined;
     const forkFrom =
       own === undefined
-        ? this.ancestorHandle(id)
+        ? behind === undefined
+          ? this.ancestorHandle(id)
+          : (behind ?? undefined)
         : cut !== undefined
           ? { handle: own.handle, provider: own.provider, at: cut }
           : undefined;
@@ -1275,30 +1292,38 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     let at = branch?.parent;
     let bound = branch?.cursor ?? 0;
     while (at !== undefined) {
-      const found = this.handleAt(at, bound);
-      const provider = this.sessionHandle(at)?.provider;
-      // Both halves, for the same reason a resume needs both: an adapter may only copy a session it
-      // owns, so a source it cannot attribute is one it must not be offered.
-      if (found !== undefined && provider !== undefined) {
-        // AT THE TIP, a plain copy reproduces this branch. Behind it, the copy has to be cut — and
-        // naming the cut is the store's job, since only it knows which message the branch ends at.
-        // A conversation whose entries carry no provider ids cannot be cut, so it offers no source
-        // and the caller replays: correct, and the only honest answer.
-        if (bound === this.readHead(at)) {
-          // …unless the ancestor was itself rewound: its rows end where its remote does not, and a
-          // plain copy would hand this branch the very turns the rewind deleted.
-          const rewound = this.cutOf(at);
-          return { handle: found, provider, ...(rewound !== undefined ? { at: rewound } : {}) };
-        }
-        const cut = this.messageIdAt(at, bound);
-        return cut === undefined ? undefined : { handle: found, provider, at: cut };
-      }
+      const source = this.copySource(at, bound);
+      if (source !== undefined) return source ?? undefined;
       branch = this.branchOf(at);
       if (branch?.parent === undefined) return undefined;
       bound = branch.cursor;
       at = branch.parent;
     }
     return undefined;
+  }
+
+  /**
+   * What copying `id`'s remote gives a conversation holding `id`'s rows below `bound` and nothing
+   * after them: `undefined` when `id` has no attributable remote there (look further up), `null` when
+   * it has one that cannot be cut there (replay — the only honest answer).
+   */
+  private copySource(id: string, bound: number): ForkSource | null | undefined {
+    const found = this.handleAt(id, bound);
+    const provider = this.sessionHandle(id)?.provider;
+    // Both halves, for the same reason a resume needs both: an adapter may only copy a session it
+    // owns, so a source it cannot attribute is one it must not be offered.
+    if (found === undefined || provider === undefined) return undefined;
+    // AT THE TIP, a plain copy reproduces the prefix. Behind it, the copy has to be cut — and naming
+    // the cut is the store's job, since only it knows which message the prefix ends at. A
+    // conversation whose entries carry no provider ids cannot be cut, so it offers no source.
+    if (bound === this.readHead(id)) {
+      // …unless `id` was itself rewound: its rows end where its remote does not, and a plain copy
+      // would hand the copy the very turns the rewind deleted.
+      const rewound = this.cutOf(id);
+      return { handle: found, provider, ...(rewound !== undefined ? { at: rewound } : {}) };
+    }
+    const cut = this.messageIdAt(id, bound);
+    return cut === undefined ? null : { handle: found, provider, at: cut };
   }
 
   /**

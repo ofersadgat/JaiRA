@@ -519,6 +519,67 @@ describe("assume the append, correct from what comes back", () => {
   });
 });
 
+/**
+ * A stopped turn is history, and the next message continues after it in the same remote.
+ *
+ * t-5uwe4jt33x (2026-11-21): the person stopped a turn, and the chat's next message asked for the
+ * position after it, as it should. The store read that position as "not the head" — the stop had
+ * released its seat — so it handed over no handle, the executor rendered the whole conversation into
+ * one prompt for a brand-new remote session, and the settle then filed the turn on a `diverged` branch.
+ */
+describe("after a stopped turn", () => {
+  const withId = (text: string, uuid: string) => ({ value: { entries: [said(text, "assistant", { uuid })] } }) as never;
+
+  /** A turn that said something and was stopped: its seat released, its remote moved on. */
+  function stopped(s: SqliteSessionStore, id: string, at: { id: string; seq: number }, uuid: string): void {
+    const ref = s.append({ id, source: undefined as never, session: at, startMs: 2 });
+    s.update(ref, { value: withId("half of it", uuid), providerSessionId: "P1" });
+    s.finish(ref, {
+      result: { error: { classification: "interrupted", reason: "the turn was interrupted before it completed" } } as never,
+      sessionOutcome: { providerSessionId: "P1", provider: "test" },
+    });
+  }
+
+  it("resumes the conversation's remote for the next message, and keeps it on the trunk", () => {
+    const s = new SqliteSessionStore(db, { taskId: "t-stop" });
+    const first = s.resolve({ ref: "chat" });
+    s.finish(s.append({ id: "t1", source: undefined as never, session: first.at, startMs: 1 }), {
+      result: withId("one", "msg-1"),
+      sessionOutcome: { providerSessionId: "P1", provider: "test" },
+    });
+    stopped(s, "t2", s.resolve({ ref: "chat" }).at, "msg-2");
+
+    // What the chat asks for: the position after the stopped turn, not the seat it released.
+    const next = s.resolve({ ref: "chat@2" });
+    expect(next.providerSessionId).toBe("P1");
+    expect(next.forkFrom).toBeUndefined();
+
+    s.finish(s.append({ id: "t3", source: undefined as never, session: next.at, startMs: 3 }), {
+      result: withId("three", "msg-3"),
+      sessionOutcome: { providerSessionId: "P1", provider: "test" },
+    });
+    expect(db.prepare(`SELECT COUNT(*) n FROM sessions WHERE parent IS NOT NULL`).get()).toEqual({ n: 0 });
+    expect(db.prepare(`SELECT landed_session_id FROM operation_records WHERE id = 't3'`).get()).toEqual({ landed_session_id: null });
+  });
+
+  it("copies the remote cut at the position when asked behind the end, rather than replaying", () => {
+    const s = new SqliteSessionStore(db, { taskId: "t-behind" });
+    const first = s.resolve({ ref: "chat" });
+    s.finish(s.append({ id: "b1", source: undefined as never, session: first.at, startMs: 1 }), {
+      result: withId("one", "msg-1"),
+      sessionOutcome: { providerSessionId: "P1", provider: "test" },
+    });
+    stopped(s, "b2", s.resolve({ ref: "chat@1" }).at, "msg-2");
+    stopped(s, "b3", s.resolve({ ref: "chat@2" }).at, "msg-3");
+
+    // Seat 2 is free (its turn was stopped) but the conversation runs past it: the remote holds msg-3,
+    // which a call at seat 2 has not seen, so it is a fork of the remote cut after msg-2.
+    const behind = s.resolve({ ref: "chat@2" });
+    expect(behind.providerSessionId).toBeUndefined();
+    expect(behind.forkFrom).toEqual({ handle: "P1", provider: "test", at: "msg-2" });
+  });
+});
+
 describe("operation_records", () => {
   it("refuses a second record claiming an id another already holds", () => {
     // The invariant every join rests on, enforced by the primary key itself now: an id names one
