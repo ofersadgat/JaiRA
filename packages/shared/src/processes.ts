@@ -32,7 +32,7 @@ export function processEnded(state: ProcessState): boolean {
  * How the process came to be shown — a fact of it, never a state:
  *
  *  - `background` — `shell`'s `run_in_background`;
- *  - `this-turn` — a command running in the task now, the agent's or the person's (ended, it leaves);
+ *  - `this-turn` — a command run in the task that ran past a second, the agent's or the person's (ended, it stays);
  *  - `left` — left running by a command, kept as the session's (ruling 5);
  *  - `escaped` — started outside every tree JaiRA follows (WMI, the Task Scheduler) — see `why`;
  *  - `native` — Claude Code's own `Bash`/`PowerShell` `run_in_background` (ruling 6);

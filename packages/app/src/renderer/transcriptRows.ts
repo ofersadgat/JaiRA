@@ -161,8 +161,11 @@ export interface CallSurface {
  * conversation are not steps towards the answer, they are pieces of it. A summary that counted them into
  * "3 commands · 2 edited" would be saying, of work done on request, that it was bookkeeping.
  */
-export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean {
+export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface, liveProcessCalls?: ReadonlySet<string>): boolean {
   if (entry.kind !== "tool") return false;
+  // A call whose process still runs — `run_in_background`, or what it left running or let escape — keeps
+  // its card under its row until the process ends (decision 0032, ruling 2 and "The view").
+  if (entry.callId !== undefined && liveProcessCalls?.has(entry.callId) === true) return true;
   // A subagent's call: its conversation is a child of this one, not a step of it.
   if (entry.sidechain !== undefined) return true;
   if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;

@@ -4,8 +4,8 @@
  * parts show at rest, hovered and opened.
  */
 import { describe, expect, it } from "vitest";
-import type { TerminalSummary } from "@jaira/shared";
-import { pressOf, rowEndOf, shownNodesOf, stopTargetsOf, terminalListOf, terminalNodeOf, terminalTreeOf, toggled } from "../src/renderer/processTreeModel";
+import type { ProcessSummary, ProcessTreeNode as EngineNode, TerminalSummary } from "@jaira/shared";
+import { OTHER_SCOPES, engineTreeOf, pressOf, processNodeOf, rowEndOf, scopeTreeOf, sessionRowsOf, shownNodesOf, stopKeysOf, stopTargetsOf, terminalListOf, terminalNodeOf, terminalTreeOf, toggled } from "../src/renderer/processTreeModel";
 
 const NOW = 1_000_000;
 
@@ -117,5 +117,80 @@ describe("the tab's rows: open, folded, hovered", () => {
     expect(rowEndOf(ended, true, [])).toMatchObject({ places: true, more: true, stop: false });
     expect(rowEndOf(tree.children[0]!, true, [])).toMatchObject({ places: false, more: false, stop: true });
     expect(rowEndOf(tree, false, [])).toMatchObject({ time: false });
+  });
+});
+
+describe("the engine's processes as rows", () => {
+  const proc = (key: string, over: Partial<ProcessSummary> = {}): ProcessSummary => {
+    const [pid, start] = key.split("@").map(Number) as [number, number];
+    return { key, processTaskId: `t-p${pid}-${start}`, taskId: "t1", machine: "m", pid, startedAt: NOW - 240_000, command: "npx one dev --port 8145", name: "one dev", origin: "background", startedBy: "session", state: "listening", states: [], ports: [8145], load: [], output: { source: "spawned" }, ...over };
+  };
+
+  it("draws a process with its pid, origin tag and ports; its terminal is what it opens through", () => {
+    const node = processNodeOf(proc("84456@1", { terminal: "call1" }), NOW, term("call1", { command: "npx one dev --port 8145", dialect: "powershell" }));
+    expect(node).toMatchObject({ id: "process:84456@1", label: "one dev", pid: 84456, tag: { words: "background", tone: "accent" }, ports: [8145], glyph: "run", time: "4m", running: true });
+    expect(node.note).toBeUndefined();
+    expect(node.terminal).toEqual({ taskId: "t1", callId: "call1", command: "npx one dev --port 8145", dialect: "powershell" });
+    expect(pressOf(node)).toBe("open");
+    expect(stopKeysOf(node)).toEqual([]);
+  });
+
+  it("tags where it came from, and how it ended", () => {
+    expect(processNodeOf(proc("1@1", { origin: "left", name: "serve" }), NOW)).toMatchObject({ tag: { words: "left running", tone: "plain" }, glyph: "left" });
+    expect(processNodeOf(proc("2@1", { origin: "escaped", why: "started through WMI by …" }), NOW)).toMatchObject({ tag: { words: "escaped · WMI", tone: "warn" }, glyph: "escaped" });
+    expect(processNodeOf(proc("3@1", { origin: "native", why: "Claude's Bash" }), NOW).tag).toEqual({ words: "Claude's Bash", tone: "plain" });
+    expect(processNodeOf(proc("4@1", { origin: "watched", taskId: undefined }), NOW)).toMatchObject({ tag: { words: "Mine · watched", tone: "plain" }, glyph: "external" });
+    expect(processNodeOf(proc("5@1", { state: "failed", exitCode: 1, told: true, endedAt: NOW }), NOW)).toMatchObject({ tag: { words: "told Claude", tone: "bad" }, time: "exit 1", timeBad: true, glyph: "bad", running: false });
+    expect(processNodeOf(proc("6@1", { state: "waiting" }), NOW)).toMatchObject({ tag: { words: "waiting for you", tone: "warn" }, waiting: true, glyph: "wait" });
+    // A process with no terminal is stopped through the engine.
+    expect(stopKeysOf(processNodeOf(proc("7@1"), NOW))).toEqual(["7@1"]);
+  });
+
+  it("says what a machine's process runs past its name", () => {
+    const child = proc("84460@2", { processTaskId: undefined, taskId: undefined, origin: undefined, name: "cmd.exe", command: "C:\\Windows\\system32\\cmd.exe /c npx one dev", ports: [] });
+    expect(processNodeOf(child, NOW)).toMatchObject({ label: "cmd.exe", note: "/c npx one dev", glyph: "run" });
+    expect(processNodeOf({ ...child, command: "conhost.exe", name: "conhost.exe" }, NOW).note).toBeUndefined();
+    expect(processNodeOf({ ...child, name: "ApplicationFrameHost", command: "C:/WINDOWS/system32/ApplicationFrameHost.exe" }, NOW).note).toBeUndefined();
+    // A parent read only by its pid has no start to age.
+    expect(processNodeOf({ ...child, startedAt: 0 }, NOW).time).toBeUndefined();
+  });
+
+  it("lists the conversation's processes and its other commands, live first, then ended", () => {
+    const procs = [proc("10@1", { terminal: "bg" }), proc("11@1", { origin: "left", name: "serve", startedAt: NOW - 540_000 }), proc("12@1", { state: "failed", exitCode: 1, endedAt: NOW - 1_000 })];
+    const list = [term("bg", { command: "npx one dev --port 8145" }), term("quick", { command: "ls", endedAt: NOW - 500, exitCode: 0 }), term("asks", { waiting: true, startedAt: NOW - 5_000 })];
+    const { live, ended } = sessionRowsOf(list, procs, NOW);
+    expect(live.map((n) => n.id)).toEqual(["terminal:asks", "process:11@1", "process:10@1"]);
+    expect(live[0]!.waiting).toBe(true);
+    expect(ended.map((n) => n.id)).toEqual(["terminal:quick", "process:12@1"]);
+  });
+
+  it("trees the engine's answer: what each started under it, the escaped under the program that started them", () => {
+    const dev = proc("100@1", { terminal: "bg" });
+    const cmd = proc("101@2", { processTaskId: undefined, taskId: undefined, origin: undefined, name: "cmd.exe", command: "cmd.exe /c npx one dev", ports: [] });
+    const wmi = proc("3312@0", { processTaskId: undefined, taskId: undefined, origin: undefined, name: "WmiPrvSE.exe", command: "WmiPrvSE.exe", startedBy: "system", ports: [] });
+    const esc = proc("90212@3", { origin: "escaped", name: "node.exe", ports: [8144] });
+    const gone = proc("77410@4", { state: "failed", exitCode: 1, endedAt: NOW - 100, name: "drizzle-kit studio" });
+    const nodes: EngineNode[] = [
+      { process: dev, children: [{ process: cmd, children: [] }] },
+      { process: wmi, children: [{ process: esc, children: [] }] },
+      { process: gone, children: [] },
+    ];
+    const tree = engineTreeOf({ id: "t1", label: "This conversation" }, nodes, [term("bg"), term("quick", { command: "ls", endedAt: NOW - 50, exitCode: 0 })], NOW);
+    expect(tree).toMatchObject({ kind: "session", note: "2 running · 1 escaped · 2 ended", running: true });
+    expect(tree.children.map((n) => n.id)).toEqual(["process:100@1", "escaped:t1", "process:77410@4", "terminal:quick"]);
+    expect(tree.children[0]!.children.map((n) => n.label)).toEqual(["cmd.exe"]);
+    const escaped = tree.children[1]!;
+    expect(escaped).toMatchObject({ label: "escaped", note: "outside this tree", glyph: "escaped" });
+    expect(escaped.children[0]!.label).toBe("WmiPrvSE.exe");
+    expect(escaped.children[0]!.children[0]).toMatchObject({ label: "node.exe", tag: { words: "escaped", tone: "warn" }, ports: [8144] });
+  });
+
+  it("draws another scope folded, counted once read", () => {
+    const scope = OTHER_SCOPES[0];
+    expect(scopeTreeOf(scope, undefined, NOW)).toMatchObject({ id: "scope:user", label: "Mine", note: "not started by JaiRA", children: [] });
+    const pg = proc("6120@1", { processTaskId: undefined, taskId: undefined, origin: undefined, name: "postgres.exe", command: "postgres.exe", startedBy: "user", ports: [5432] });
+    const read = scopeTreeOf(scope, [{ process: pg, children: [{ process: { ...pg, key: "6121@1", pid: 6121 }, children: [] }] }], NOW, "9 could not be placed");
+    expect(read.note).toBe("not started by JaiRA · 2 · 9 could not be placed");
+    expect(read.children[0]).toMatchObject({ label: "postgres.exe", glyph: "external", ports: [5432] });
   });
 });

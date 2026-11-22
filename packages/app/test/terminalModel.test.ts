@@ -57,6 +57,13 @@ describe("what the card says", () => {
     expect(terminalTitleOf("git add -p src/upload.ts", "posix")).toBe("git add");
     expect(terminalTitleOf("ls -la", "posix")).toBe("ls");
     expect(terminalTitleOf("printf 'checking uploads\\n'; read answer", "posix")).toBe("printf");
+    // A package run through a runner is named with its first word, as a subcommand.
+    expect(terminalTitleOf("npx one dev --port 8145", "posix")).toBe("one dev");
+    expect(terminalTitleOf("npx drizzle-kit studio", "powershell")).toBe("drizzle-kit studio");
+    expect(terminalTitleOf("npx tsc --noEmit", "posix")).toBe("tsc");
+    // PowerShell's own case is kept.
+    expect(terminalTitleOf("Write-Output 'done'", "powershell")).toBe("Write-Output");
+    expect(terminalTitleOf("Set-Location C:/x; Get-ChildItem -Recurse", "powershell")).toBe("Get-ChildItem");
   });
 
   it("lists the line's requests as the approval does", () => {

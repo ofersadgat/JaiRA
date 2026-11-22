@@ -6,12 +6,13 @@ import { crumbOf, pop, push, selectStep, setTab, terminalEntryOf, type PanelEntr
 import { terminals } from "@jaira/ui/terminalStore";
 import { processes } from "@jaira/ui/processStore";
 import { ProcessGlyph } from "../process/ProcessBits";
+import { ProcessCard, useTerminalProcess } from "../process/ProcessCard";
 import { ProcessTaskView } from "../process/ProcessTaskView";
 import { TerminalView } from "../terminal/TerminalView";
 import { TerminalsTab } from "../terminal/TerminalsTab";
 import { runningOf } from "../terminal/useTerminal";
 import { View } from "@tamagui/core";
-import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
+import type { CommandDialect, ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
 import type { ConfigPanelServices } from "@jaira/ui/configPanelModel";
 import { useEffectiveRead } from "@jaira/ui/configPanelModel";
 import type { FileSurfaceContext, UiSurface } from "@jaira/ui/fileTypes";
@@ -598,12 +599,19 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         // The program, as a pane's crumb and tab name it; the whole line is the screen's first.
         title: crumbOf(entry),
         titleText: crumbOf(entry),
-        body: <TerminalView taskId={entry.taskId} project={project} callId={entry.callId} command={entry.command} dialect={entry.dialect} fill />,
+        body: <TerminalFace taskId={entry.taskId} project={project} callId={entry.callId} command={entry.command} dialect={entry.dialect} />,
         full: true,
         scroll: false,
       };
     }
   }
+}
+
+/** A terminal filling a pane: the process card when it is a process's (decision 0032, "The view", ruling 1), else the terminal. */
+function TerminalFace({ taskId, project, callId, command, dialect }: { taskId: string; project: string | undefined; callId: string; command: string; dialect: CommandDialect }): JSX.Element {
+  const process = useTerminalProcess(taskId, callId, project);
+  if (process !== undefined) return <ProcessCard process={process} project={project} />;
+  return <TerminalView taskId={taskId} project={project} callId={callId} command={command} dialect={dialect} fill />;
 }
 
 /** The chat entry's glyph, as the Chat room's panel draws it: an icon, at the glyph's size. */

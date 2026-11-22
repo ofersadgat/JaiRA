@@ -6,6 +6,7 @@ import {
   SCRIPT_SUBJECT,
   SHELL_TOOL,
   SYSTEM_AREAS,
+  SYSTEM_AREA_OF,
   TOOL_CATEGORIES,
   TOOL_SPEC_BY_NAME,
   holdsTool,
@@ -25,6 +26,7 @@ import {
   commandGroupsOf,
   commandSubjectOf,
   elsewhereLabel,
+  flagLinesOf,
   groupHeadOf,
   holdsProgramLine,
   holdsRunners,
@@ -248,7 +250,8 @@ export function PermissionSetCard({
                     />
                   );
                 })
-              : held.map((tool) => {
+              : null}
+            {(category.id === "system" ? held.filter((tool) => !SYSTEM_AREA_OF.has(tool.name)) : held).map((tool) => {
                   const spec = TOOL_SPEC_BY_NAME.get(tool.name);
                   const hint = tool.name === SHELL_TOOL ? SHELL_HINT : spec?.unserved === true ? `${spec.hint} · not served yet` : (spec?.hint ?? tool.name);
                   const unavailable = isUnavailableLine(permissionSet, tool.name);
@@ -269,6 +272,21 @@ export function PermissionSetCard({
                     />
                   );
                 })}
+            {/* A tool's flag lines under it, as a program's subcommands are (decision 0032, ruling 1a). */}
+            {held.flatMap((tool) =>
+              flagLinesOf(permissionSet, tool.name).map((subject) => (
+                <SubjectRow
+                  key={subject}
+                  subject={subject}
+                  mono
+                  mode={headMode(subject)}
+                  readOnly={locked}
+                  places={placesFor(subject, "")}
+                  onRemove={locked ? undefined : () => write(withoutSubject(permissionSet, subject))}
+                  onMode={(next) => write(withSubjectMode(permissionSet, subject, next))}
+                />
+              )),
+            )}
             {groups.map((group) => (
               <CommandGroupRow
                 key={group.program}

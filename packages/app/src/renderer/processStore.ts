@@ -5,7 +5,7 @@
  * terminals are (`terminalStore.ts`): the readings move every couple of seconds, and only a view drawing
  * that process needs to hear of it. Views read it through `useProcess` (`universal`).
  */
-import type { ProcessListRequest, ProcessReadAnswer, ProcessSummary, PushMessage } from "@jaira/shared/browser";
+import { processEnded, type ProcessListRequest, type ProcessReadAnswer, type ProcessSummary, type ProcessTreeNode, type PushMessage } from "@jaira/shared/browser";
 import { invoke, subscribe } from "./store";
 
 export class ProcessStore {
@@ -41,6 +41,64 @@ export class ProcessStore {
   ofTask(taskId: string): ProcessSummary | undefined {
     for (const p of this.byKey.values()) if (p.processTaskId === taskId) return p;
     return undefined;
+  }
+
+  /** A task's processes, as known here, live first, then the newest. */
+  ofSession(taskId: string): ProcessSummary[] {
+    return [...this.byKey.values()].filter((p) => p.taskId === taskId).sort((a, b) => Number(processEnded(a.state)) - Number(processEnded(b.state)) || b.startedAt - a.startedAt);
+  }
+
+  /** What a tool call started that a task keeps: its background process, what it left running or let escape. */
+  ofCall(taskId: string, callId: string): ProcessSummary[] {
+    return this.ofSession(taskId).filter((p) => p.callId === callId || p.terminal === callId);
+  }
+
+  /** The process whose output streams through a terminal. */
+  ofTerminal(taskId: string, callId: string): ProcessSummary | undefined {
+    for (const p of this.byKey.values()) if (p.taskId === taskId && p.terminal === callId) return p;
+    return undefined;
+  }
+
+  /** A watched process (another scope's) running at this pid. */
+  watchedAt(pid: number): ProcessSummary | undefined {
+    for (const p of this.byKey.values()) if (p.pid === pid && p.origin === "watched" && !processEnded(p.state)) return p;
+    return undefined;
+  }
+
+  /** Read a task's processes once (the pushes keep them current after). */
+  ensureSession(taskId: string, project?: string): void {
+    this.hook();
+    const key = `session:${taskId}`;
+    if (this.asked.has(key)) return;
+    this.asked.add(key);
+    void this.list({ scope: "session", taskId, ...(project !== undefined ? { project } : {}) }).catch(() => this.asked.delete(key));
+  }
+
+  /** A scope as a tree; each process in it known here as well. */
+  async tree(request: ProcessListRequest): Promise<ProcessTreeNode[]> {
+    this.hook();
+    const nodes = await this.calls.invoke("process:tree", request);
+    const walk = (list: readonly ProcessTreeNode[]): void => {
+      for (const node of list) {
+        if (node.process.processTaskId !== undefined) this.byKey.set(node.process.key, node.process);
+        walk(node.children);
+      }
+    };
+    walk(nodes);
+    this.changed();
+    return nodes;
+  }
+
+  /** "Tell Claude when it prints…": arm a pattern on a task's process. */
+  async tellWhen(key: string, pattern: string, project?: string): Promise<ProcessSummary> {
+    const p = await this.calls.invoke("process:tellWhen", { key, pattern, ...(project !== undefined ? { project } : {}) });
+    this.know(p);
+    return p;
+  }
+
+  async tellCancel(key: string, project?: string): Promise<void> {
+    const p = await this.calls.invoke("process:tellCancel", { key, ...(project !== undefined ? { project } : {}) });
+    if (p !== null) this.know(p);
   }
 
   /** Read a process task's process once (again after it was let go and came back). */

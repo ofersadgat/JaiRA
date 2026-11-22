@@ -64,6 +64,9 @@ describe("a process's state", () => {
     expect(processDisplayName("npm run storybook")).toBe("storybook");
     expect(processDisplayName("npx drizzle-kit studio")).toBe("drizzle-kit studio");
     expect(processDisplayName("cmd /c npx serve dist -l 5050")).toBe("serve dist");
+    expect(processDisplayName("node C:/Users/o/AppData/Local/Temp/devserver.cjs")).toBe("node devserver.cjs");
+    expect(processDisplayName('"C:\\Program Files\\nodejs\\node.exe" server.js --port 3')).toBe("node server.js");
+    expect(processDisplayName("cmd /c \"npx serve dist -l 5050\"")).toBe("serve dist");
   });
 });
 
@@ -200,7 +203,7 @@ describe("ProcessHub", () => {
     expect(hub.list()).toEqual([]);
   });
 
-  it("makes a command that runs past a second a this-turn process task, gone when it ends", () => {
+  it("makes a command that runs past a second a this-turn process task, kept ended when it ends", () => {
     const t = { taskId: "t-parent0001", project: project.key, callId: "toolu_9", command: "npx tsc --noEmit", dialect: "powershell", by: "agent", pid: 777, startedAt: T0, length: 0, dropped: 0, input: [] } as TerminalSummary;
     terminals.set("t-parent0001/toolu_9", t);
     hub.fromTerminal(t);
@@ -209,6 +212,24 @@ describe("ProcessHub", () => {
     flush();
     expect(hub.list()[0]).toMatchObject({ origin: "this-turn", by: "agent", name: "tsc --noEmit", terminal: "toolu_9" });
     hub.fromTerminal({ ...t, endedAt: T0 + 12_000, exitCode: 0 });
+    flush();
+    expect(hub.list()).toHaveLength(1);
+    expect(hub.list()[0]).toMatchObject({ state: "exited", exitCode: 0, endedAt: T0 + 12_000 });
+    // Stopped, or failing, it stays too, as what it ended as.
+    const failing = { ...t, callId: "toolu_11", pid: 779 };
+    terminals.set("t-parent0001/toolu_11", failing);
+    hub.fromTerminal(failing);
+    vi.advanceTimersByTime(THIS_TURN_AFTER_MS);
+    hub.fromTerminal({ ...failing, endedAt: T0 + 5_000, exitCode: 2 });
+    const stopping = { ...t, callId: "toolu_12", pid: 780 };
+    terminals.set("t-parent0001/toolu_12", stopping);
+    hub.fromTerminal(stopping);
+    vi.advanceTimersByTime(THIS_TURN_AFTER_MS);
+    hub.fromTerminal({ ...stopping, endedAt: T0 + 6_000, exitCode: null, signal: "SIGTERM", stopped: true });
+    expect(hub.get({ key: "779@" + T0 })?.state).toBe("failed");
+    expect(hub.get({ key: "780@" + T0 })?.state).toBe("stopped");
+    // Until its task lets it go.
+    hub.letGoOf("t-parent0001");
     expect(hub.list()).toEqual([]);
     expect(pushes.at(-1)).toMatchObject({ type: "process:gone" });
 

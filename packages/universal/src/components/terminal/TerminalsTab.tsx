@@ -1,26 +1,31 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type JSX } from "react";
 import { TextInput, type GestureResponderEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { TerminalSummary } from "@jaira/shared/browser";
+import { processEnded, type ProcessSummary, type ProcessTreeNode as EngineNode, type TerminalSummary } from "@jaira/shared/browser";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
 import {
+  OTHER_SCOPES,
   TERMINALS_VIEWS,
   TERMINALS_VIEW_MODE,
+  engineTreeOf,
   pressOf,
   rowEndOf,
-  shownNodesOf,
+  sessionRowsOf,
+  scopeTreeOf,
+  stopKeysOf,
   stopTargetsOf,
-  terminalListOf,
   terminalTreeOf,
   toggled,
+  type OtherScope,
   type ProcessGlyph,
   type ProcessTagTone,
   type ProcessTreeNode,
   type TerminalsView,
 } from "@jaira/ui/processTreeModel";
-import { PLACES, type Place } from "@jaira/ui/splitModel";
+import { processes } from "@jaira/ui/processStore";
+import { PLACES, taskPaneEntryOf, type Place } from "@jaira/ui/splitModel";
 import { runYours, signalTerminal, terminals } from "@jaira/ui/terminalStore";
-import { terminalTitleOf } from "@jaira/ui/terminalModel";
+import { TERM_INK, terminalTitleOf } from "@jaira/ui/terminalModel";
 import { modeOf } from "@jaira/ui/uiState";
 import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -32,73 +37,157 @@ import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { Icon, type IconName } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
 import { colourOr } from "../panel/SidePanel";
+import { ProcessCard } from "../process/ProcessCard";
+import { PortChip } from "../process/ProcessParts";
+import { ScreenLine } from "./TermParts";
 import { MoreButton, TerminalView, pressedAt, terminalMenuOf } from "./TerminalView";
 import { useTerminals } from "./useTerminal";
 
 /**
- * The side panel's Terminals tab (decision 0028, ruling 7; decision 0032's view, ruling 2): a line to run
- * a command of your own in the conversation's workspace (0028, ruling 8), then a List | Tree toggle.
+ * The side panel's Terminals tab (decision 0028, ruling 7; decision 0032's view, ruling 2; round 2, boards
+ * 1–3): a line to run a command of your own in the conversation's workspace (0028, ruling 8), then a
+ * List | Tree toggle.
  *
- * List is today's rows — Running (those waiting for the person first), then Ended. Tree goes from the
- * session to its terminals to what started them: a tool call's processes under that call. Both draw one
- * row anatomy (`processTreeModel.ts`'s `ProcessTreeNode`), so the engine's process tree can feed Tree
- * later in place of the window's terminals. Hovered, a row's time gives way to the three place buttons
- * (the place it is in lit), `…` and Stop; pressed, it opens in place as the card, and its head folds it
- * back. More than one can be open. How it looks:
+ * List is the conversation's processes and commands — each process with its pid, its ports and where it
+ * came from (`background`, `left running`, `escaped · WMI`, `Claude's Bash`) — live ones under "This
+ * conversation", then "Ended", then the processes you watch from another scope under "Mine · watched".
+ * Tree is the engine's process tree for the session (`process:tree`): each process and what it started,
+ * the escaped ones under the program that started them, then the other scopes (Mine, JaiRA, System)
+ * folded below, each read when it is opened. Both draw one row anatomy (`processTreeModel.ts`). Hovered,
+ * a row's time gives way to the three place buttons (the place it is in lit), `…` and Stop; pressed, it
+ * opens in place as the card, and its head folds it back — another scope's process is watched first.
+ * A row waiting for the person shows its last two lines and `Answer it`. How it looks:
  *
  *   the run line     row, gap 8, padding 0 6 0 10, height 34, 1px --line, radius 8: `›`, the field
  *                    (data 12/12), Run
  *   the toolbar      the toggle: one joined switch, 1px --line, radius 7; each half 26 tall, padding 0 8,
  *                    app 12.5, --dim on --panel; on: --text 600 on --panel-2
  *   a caption        data 10.5/12, 0.06em, uppercase, --dim; the count at the far end
- *   a row            row, gap 8, height 34 (Tree: 28, a session 32; indented 16 a level), padding 0 8,
- *                    radius 6, a 1px edge that shows only hovered: a chevron (right; Tree: the twisty),
- *                    the state glyph (14), the label (data 12.5 600), the rest of its line (data 11.5
- *                    --dim), its tag (a pill, 19 tall, app 11 600), a spacer, then the places it is in as
- *                    lit chips and its time (data 12 --dim); hovered, on --fill-ghost-hover: the place
+ *   a row            row, gap 8, height 34 (Tree: 28, a session 32; indented 16 a level, a 1px --line
+ *                    guide down each level), padding 0 8, radius 6, a 1px edge that shows only hovered:
+ *                    a chevron (right; Tree: the twisty), the state glyph (14), the label (data 12.5 600),
+ *                    the pid (data 11.5 --dim), the rest of its line (data 11.5 --dim), its tag (a pill,
+ *                    19 tall, app 11 600), its ports (chips), a spacer, then the places it is in as lit
+ *                    chips and its time (data 12 --dim); hovered, on --fill-ghost-hover: the place
  *                    buttons, `…` and Stop
- *   opened           the card (`TerminalView`), its title bar the row's head with a chevron (down);
- *                    margin 2 0 8, indented as its row in Tree
+ *   waiting          under the row, indented to its label: its last two lines (data 11/12 on the
+ *                    terminal's ground, radius 6, padding 4 8) and `Answer it` (app 11.5 600 --warn)
+ *   opened           the card (`ProcessCard`, or `TerminalView` for a command that is no process), its
+ *                    title bar the row's head with a chevron (down); margin 2 0 8, indented as its row
+ *   the foot         app 11 --dim: what Run does
  */
 export function TerminalsTab({ taskId, project, onOpen }: { taskId: string; project: string | undefined; onOpen: (terminal: TerminalSummary) => void }): JSX.Element {
   const list = useTerminals(taskId, project);
+  useSyncExternalStore(processes.subscribe, processes.version, processes.version);
+  useEffect(() => processes.ensureSession(taskId, project), [taskId, project]);
+  const mine = processes.ofSession(taskId);
+  const watched = processes.all().filter((p) => p.origin === "watched" && (project === undefined || p.project === undefined || p.project === project));
   const [view, setView] = useTerminalsView();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
-  const now = useTicking(list.some((one) => one.endedAt === undefined));
-  const rows = useMemo(() => terminalListOf(list, now), [list, now]);
-  const tree = useMemo(() => terminalTreeOf({ id: taskId, label: "This conversation" }, list, now), [taskId, list, now]);
+  const [scopes, setScopes] = useState<ReadonlyMap<string, { nodes?: EngineNode[]; said?: string }>>(() => new Map());
+  const now = useTicking(list.some((one) => one.endedAt === undefined) || mine.some((p) => !processEnded(p.state)));
+  const rows = useMemo(() => sessionRowsOf(list, mine, now), [list, mine, now]);
+  const engine = useSessionTree(view === "tree", taskId, project, `${list.length}:${mine.map((p) => `${p.key}${p.state}${(p.children ?? []).join(",")}`).join("|")}`);
+  const tree = useMemo(
+    () => (engine !== undefined ? engineTreeOf({ id: taskId, label: "This conversation" }, engine, list, now) : terminalTreeOf({ id: taskId, label: "This conversation" }, list, now)),
+    [engine, taskId, list, now],
+  );
+  const others = OTHER_SCOPES.map((scope) => {
+    const read = scopes.get(scope.scope);
+    return scopeTreeOf(scope, read?.nodes, now, read?.said);
+  });
+  const readScope = (scope: OtherScope): void => {
+    setScopes((was) => new Map(was).set(scope.scope, { said: "reading…" }));
+    processes.tree({ scope: scope.scope, ...(project !== undefined ? { project } : {}) }).then(
+      (nodes) => setScopes((was) => new Map(was).set(scope.scope, { nodes })),
+      (e: unknown) => setScopes((was) => new Map(was).set(scope.scope, { said: e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (?:Error: )?/, "") : String(e) })),
+    );
+  };
+  const show = (node: ProcessTreeNode): void => {
+    const p = node.process;
+    if (p !== undefined && p.processTaskId === undefined && !processEnded(p.state)) {
+      // Another scope's process, or a child no task keeps: watched, then opened.
+      void processes.watch(p.pid, project).then(() => setOpen((was) => new Set(was).add(node.id)), () => undefined);
+      return;
+    }
+    setOpen((was) => toggled(was, node.id));
+  };
   const press = (node: ProcessTreeNode): void => {
+    const scope = OTHER_SCOPES.find((one) => `scope:${one.scope}` === node.id);
+    if (scope !== undefined) {
+      if (!opened(node.id) && scopes.get(scope.scope)?.nodes === undefined) readScope(scope);
+      setFolded((was) => toggled(was, node.id));
+      return;
+    }
     const does = pressOf(node);
-    if (does === "open") setOpen((was) => toggled(was, node.id));
+    if (does === "open") show(node);
     else if (does === "fold") setFolded((was) => toggled(was, node.id));
   };
-  const twisty = (node: ProcessTreeNode): void => setFolded((was) => toggled(was, node.id));
+  const twist = (node: ProcessTreeNode): void => (node.id.startsWith("scope:") ? press(node) : setFolded((was) => toggled(was, node.id)));
+  // The other scopes start folded: in `folded`, a scope's id means it was opened.
+  const opened = (id: string): boolean => folded.has(id);
+  const shutOf = (id: string): boolean => (id.startsWith("scope:") ? !opened(id) : folded.has(id));
   const row = (node: ProcessTreeNode, depth: number, tree: boolean, shut = false): JSX.Element => (
-    <ProcessRow key={node.id} node={node} depth={depth} tree={tree} project={project} open={open.has(node.id)} folded={shut} onPress={() => press(node)} onTwisty={() => twisty(node)} />
+    <ProcessRow key={node.id} node={node} depth={depth} tree={tree} project={project} open={open.has(node.id)} folded={shut} onPress={() => press(node)} onTwisty={() => twist(node)} onFold={() => setOpen((was) => toggled(was, node.id))} />
   );
+  const walk = (root: ProcessTreeNode): Array<{ node: ProcessTreeNode; depth: number; folded: boolean }> => {
+    const out: Array<{ node: ProcessTreeNode; depth: number; folded: boolean }> = [];
+    const go = (node: ProcessTreeNode, depth: number): void => {
+      const shut = shutOf(node.id);
+      out.push({ node, depth, folded: shut });
+      if (!shut) for (const child of node.children) go(child, depth + 1);
+    };
+    go(root, 0);
+    return out;
+  };
+  const nothing = list.length === 0 && mine.length === 0;
   return (
     <View flexDirection="column" gap={10} minWidth={0}>
       <RunLine taskId={taskId} project={project} onRan={onOpen} />
       <View flexDirection="row" alignItems="center" gap={8}>
         <ViewToggle view={view} onView={setView} />
       </View>
-      {list.length === 0 ? (
-        <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>No commands yet. The agent's shell commands, and yours, are listed here as they run.</Txt>
-      ) : view === "list" ? (
+      {view === "list" ? (
         <>
-          {rows.running.length > 0 ? <Caption words="Running" count={rows.running.length} /> : null}
-          {rows.running.length > 0 ? <View flexDirection="column" minWidth={0}>{rows.running.map((node) => row(node, 0, false))}</View> : null}
+          {nothing ? <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>No commands yet. The agent's shell commands and processes, and yours, are listed here as they run.</Txt> : null}
+          {rows.live.length > 0 ? <Caption words="This conversation" count={rows.live.length} /> : null}
+          {rows.live.length > 0 ? <View flexDirection="column" minWidth={0}>{rows.live.map((node) => row(node, 0, false))}</View> : null}
           {rows.ended.length > 0 ? <Caption words="Ended" count={rows.ended.length} /> : null}
           {rows.ended.length > 0 ? <View flexDirection="column" minWidth={0}>{rows.ended.map((node) => row(node, 0, false))}</View> : null}
+          {watched.length > 0 ? <Caption words="Mine · watched" count={watched.length} /> : null}
+          {watched.length > 0 ? <View flexDirection="column" minWidth={0}>{sessionRowsOf([], watched, now).live.concat(sessionRowsOf([], watched, now).ended).map((node) => row(node, 0, false))}</View> : null}
         </>
       ) : (
-        <View role="tree" aria-label="This conversation's processes" flexDirection="column" minWidth={0}>
-          {shownNodesOf(tree, folded, open).map(({ node, depth, folded: shut }) => row(node, depth, true, shut))}
+        <View role="tree" aria-label="This conversation's processes, and the machine's" flexDirection="column" minWidth={0}>
+          {walk(tree).map(({ node, depth, folded: shut }) => row(node, depth, true, shut))}
+          {others.flatMap((scope) => walk(scope).map(({ node, depth, folded: shut }) => row(node, depth, true, shut)))}
         </View>
       )}
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} marginTop={4}>
+        Each row is the card folded: press one to open it here, hover it for the three places. What you run above runs as you — permission sets decide what an agent may run, not you — and the agent hears of it with your next message.
+      </Txt>
     </View>
   );
+}
+
+/** The engine's process tree for the session, read while Tree shows and again when what it holds moves (at most every 2 s). */
+function useSessionTree(on: boolean, taskId: string, project: string | undefined, moved: string): EngineNode[] | undefined {
+  const [nodes, setNodes] = useState<EngineNode[] | undefined>(undefined);
+  const read = useCallback(() => {
+    void processes.tree({ scope: "session", taskId, ...(project !== undefined ? { project } : {}) }).then(setNodes, () => undefined);
+  }, [taskId, project]);
+  useEffect(() => {
+    if (!on) return;
+    const timer = setTimeout(read, 150);
+    return () => clearTimeout(timer);
+  }, [on, read, moved]);
+  useEffect(() => {
+    if (!on) return;
+    const timer = setInterval(read, 4_000);
+    return () => clearInterval(timer);
+  }, [on, read]);
+  return on ? nodes : undefined;
 }
 
 /** List or Tree, remembered with the window's other such choices (`uiState.ts`'s modes); held here outside the app. */
@@ -169,29 +258,65 @@ const PLACE_CHIP: Record<Place, { icon: IconName; words: string }> = {
   panel: { icon: "placePanel", words: "side panel" },
 };
 
+/** What a row's place buttons place: its terminal, else its process task's view (a process no task keeps is watched first). */
+function usePlaceable(node: ProcessTreeNode, project: string | undefined): { key: string; place: (target: Place, lit: readonly Place[], phone: boolean) => void } | undefined {
+  const ref = node.terminal;
+  const p = node.process;
+  return useMemo(() => {
+    if (ref !== undefined) {
+      const entry = terminalEntryOf({ ...ref, project });
+      return { key: entry.key, place: (target, lit, phone) => moveEntry(target, entry, lit, phone) };
+    }
+    if (p === undefined) return undefined;
+    if (p.processTaskId !== undefined) {
+      const entry = taskPaneEntryOf(p.processTaskId, p.project ?? project);
+      return { key: entry.key, place: (target, lit, phone) => moveEntry(target, entry, lit, phone) };
+    }
+    return {
+      key: "",
+      place: (target, _lit, phone) =>
+        void processes.watch(p.pid, project).then((w) => {
+          if (w.processTaskId !== undefined) moveEntry(target, taskPaneEntryOf(w.processTaskId, w.project ?? project), [], phone);
+        }, () => undefined),
+    };
+  }, [ref, p?.key, p?.processTaskId, project]);
+}
+
+/** Stop what a row holds: its terminals through themselves, its processes through the engine (one no task keeps, watched first). */
+function stopNode(node: ProcessTreeNode, project: string | undefined): void {
+  for (const one of stopTargetsOf(node)) void signalTerminal(one.taskId, one.callId, "stop", project);
+  const byKey = new Map<string, ProcessSummary>();
+  const walk = (n: ProcessTreeNode): void => {
+    if (n.process !== undefined) byKey.set(n.process.key, n.process);
+    n.children.forEach(walk);
+  };
+  walk(node);
+  for (const key of stopKeysOf(node)) {
+    const p = byKey.get(key);
+    if (p === undefined) continue;
+    if (p.processTaskId !== undefined) void processes.stop(key, "stop", project).catch(() => undefined);
+    else void processes.watch(p.pid, project).then((w) => processes.stop(w.key, "stop", project), () => undefined);
+  }
+}
+
 /** One row of the tab, List or Tree; opened, the card in its place. */
-function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwisty }: { node: ProcessTreeNode; depth: number; tree: boolean; project: string | undefined; open: boolean; folded: boolean; onPress: () => void; onTwisty: () => void }): JSX.Element {
+function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwisty, onFold }: { node: ProcessTreeNode; depth: number; tree: boolean; project: string | undefined; open: boolean; folded: boolean; onPress: () => void; onTwisty: () => void; onFold: () => void }): JSX.Element {
   const t = useTokens();
   const canHover = useCanHover();
   const phone = usePhone();
   const here = usePlacesHere(phone);
   const ref = node.terminal;
-  const entry = useMemo(() => (ref === undefined ? undefined : terminalEntryOf({ ...ref, project })), [ref, project]);
-  const lit = useEntryPlaces(entry?.key ?? "");
+  const placeable = usePlaceable(node, project);
+  const lit = useEntryPlaces(placeable?.key ?? "");
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [hovered, hover] = useHover();
   const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
-  const place = (target: Place): void => {
-    if (entry !== undefined) moveEntry(target, entry, lit, phone);
-  };
-  const stop = (): void => {
-    for (const one of stopTargetsOf(node)) void signalTerminal(one.taskId, one.callId, "stop", project);
-  };
+  const place = (target: Place): void => placeable?.place(target, lit, phone);
+  const stop = (): void => stopNode(node, project);
   const openMenu = (e: GestureResponderEvent): void => {
-    if (ref === undefined) return;
     const at = pressedAt(e);
-    const copy = terminals.get(ref.taskId, ref.callId);
-    const title = terminalTitleOf(ref.command, ref.dialect);
+    const copy = ref !== undefined ? terminals.get(ref.taskId, ref.callId) : undefined;
+    const command = ref?.command ?? node.process?.command ?? node.label;
     setMenu({
       x: at.x - MENU_WIDTH,
       y: at.y,
@@ -200,27 +325,34 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
         lit,
         place,
         running: node.running,
-        typable: copy?.summary.tool === undefined,
+        typable: ref !== undefined && copy?.summary.tool === undefined,
         lines: copy?.screen.count ?? 0,
-        plain: () => terminals.get(ref.taskId, ref.callId)?.screen.plain() ?? "",
-        command: ref.command,
-        title,
+        plain: () => (ref !== undefined ? (terminals.get(ref.taskId, ref.callId)?.screen.plain() ?? "") : ""),
+        command,
+        title: node.process?.name ?? (ref !== undefined ? terminalTitleOf(ref.command, ref.dialect) : node.label),
         stop,
-        interrupt: () => void signalTerminal(ref.taskId, ref.callId, "interrupt", project),
+        interrupt: () => (ref !== undefined ? void signalTerminal(ref.taskId, ref.callId, "interrupt", project) : undefined),
       }),
     });
   };
+  const indent = tree ? 6 + depth * 16 : 0;
 
-  if (open && ref !== undefined) {
+  // Opened in place: the process card (a process another scope's is drawn once watched), or the terminal's.
+  const shown = node.process !== undefined ? (node.process.processTaskId !== undefined ? (processes.get(node.process.key) ?? node.process) : processes.watchedAt(node.process.pid)) : undefined;
+  if (open && (shown !== undefined || ref !== undefined)) {
     return (
-      <View marginTop={2} marginBottom={8} marginLeft={tree ? 6 + depth * 16 : 0} minWidth={0}>
-        <TerminalView taskId={ref.taskId} project={project} callId={ref.callId} command={ref.command} dialect={ref.dialect} onFold={onPress} />
+      <View marginTop={2} marginBottom={8} marginLeft={indent} minWidth={0}>
+        {shown !== undefined ? (
+          <ProcessCard process={shown} project={project} fill={false} onFold={onFold} />
+        ) : (
+          <TerminalView taskId={ref!.taskId} project={project} callId={ref!.callId} command={ref!.command} dialect={ref!.dialect} onFold={onFold} />
+        )}
       </View>
     );
   }
 
   const session = node.kind === "session";
-  const twisty = tree && node.children.length > 0;
+  const twisty = tree && (node.children.length > 0 || node.id.startsWith("scope:"));
   // The row is hovered as a whole; what a press opens is its main part, and the buttons hovering shows
   // stand beside it, not inside it — a button is never inside another.
   const end = rowEndOf(node, hovered || menu !== null, lit);
@@ -229,11 +361,12 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
       <Icon name="chevron" size={11} color={String(t.v("dim"))} />
     </View>
   );
+  const opens = ref !== undefined || node.process !== undefined;
   return (
     <>
       <View
         {...(hover as object)}
-        {...(tree ? { role: "treeitem", "aria-level": depth + 1, ...(node.children.length > 0 ? { "aria-expanded": !folded } : {}) } : {})}
+        {...(tree ? { role: "treeitem", "aria-level": depth + 1, ...(twisty ? { "aria-expanded": !folded } : {}) } : {})}
         flexDirection="row"
         alignItems="center"
         gap={tree ? 6 : 8}
@@ -244,9 +377,15 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
         borderWidth={1}
         borderStyle="solid"
         minWidth={0}
-        backgroundColor={(hovered || menu !== null ? t.v("fill-ghost-hover") : "transparent") as never}
+        position="relative"
+        backgroundColor={(hovered || menu !== null ? t.v("fill-ghost-hover") : node.glyph === "escaped" && node.kind === "call" ? t.tint("warn", 8) : "transparent") as never}
         borderColor={(hovered ? t.v("line") : "transparent") as never}
       >
+        {tree
+          ? Array.from({ length: depth }, (_, level) => (
+              <View key={level} position="absolute" top={-1} bottom={-1} left={4 + level * 16 + 5} width={1} backgroundColor={t.v("line") as never} pointerEvents="none" />
+            ))
+          : null}
         {twisty ? (
           <Press onPress={onTwisty} label={`${folded ? "Unfold" : "Fold"} ${node.label}`} fill={false} width={12} height={16} alignItems="center" justifyContent="center" flexShrink={0}>
             {chevron(folded)}
@@ -254,7 +393,7 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
         ) : null}
         <Press
           onPress={onPress}
-          label={ref !== undefined ? `Open ${node.title ?? node.label} here` : `${folded ? "Unfold" : "Fold"} ${node.label}`}
+          label={opens ? `Open ${node.title ?? node.label} here` : `${folded ? "Unfold" : "Fold"} ${node.label}`}
           title={node.title}
           flexDirection="row"
           alignItems="center"
@@ -265,7 +404,7 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
         >
           {tree && !twisty ? (
             <View width={12} alignItems="center" justifyContent="center" flexShrink={0}>
-              {ref !== undefined ? chevron(true) : null}
+              {opens ? chevron(true) : null}
             </View>
           ) : null}
           {!tree ? (
@@ -273,17 +412,20 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
               {chevron(true)}
             </View>
           ) : null}
-          {session ? <Icon name="comment" size={13} color={String(t.v("dim"))} /> : node.glyph !== undefined ? <StateGlyph glyph={node.glyph} t={t} /> : null}
-          <Txt spec={session ? { voice: "app", scale: 12.5 / 12.5, weight: 600 } : { voice: "data", scale: 12.5 / 12, weight: 600 }} numberOfLines={1} flexShrink={0} maxWidth="60%">
+          {session ? <Icon name={node.id.startsWith("scope:") ? "system" : "comment"} size={13} color={String(t.v("dim"))} /> : node.glyph !== undefined ? <StateGlyph glyph={node.glyph} t={t} /> : null}
+          <Txt spec={session ? { voice: "app", scale: 12.5 / 12.5, weight: 600 } : { voice: "data", scale: 12.5 / 12, weight: 600, ...(node.glyph === "escaped" && node.kind === "call" ? { color: "warn" } : {}) }} numberOfLines={1} flexShrink={0} maxWidth="60%">
             {node.label}
           </Txt>
-          {node.pid !== undefined ? <Txt spec={{ voice: "data", scale: 11.5 / 12, color: "dim", tabular: true }}>{String(node.pid)}</Txt> : null}
+          {node.pid !== undefined ? <Txt spec={{ voice: "data", scale: 11.5 / 12, color: "dim", tabular: true }} flexShrink={0}>{String(node.pid)}</Txt> : null}
           {node.note !== undefined ? (
             <Txt spec={session ? { voice: "app", scale: 12 / 12.5, color: "dim" } : { voice: "data", scale: 11.5 / 12, color: "dim" }} ellip flexShrink={1} minWidth={0}>
               {node.note}
             </Txt>
           ) : null}
           {node.tag !== undefined ? <Tag words={node.tag.words} tone={node.tag.tone} t={t} /> : null}
+          {(node.ports ?? []).slice(0, 1).map((port) => (
+            <PortChip key={port} port={port} />
+          ))}
           <View flex={1} minWidth={0} />
           {end.chips.map((one) => (
             <View key={one} flexDirection="row" alignItems="center" gap={4} height={20} paddingHorizontal={6} borderRadius={6} flexShrink={0} backgroundColor={colourOr(t, "tint-accent", "fill-ghost-selected") as never}>
@@ -297,12 +439,32 @@ function ProcessRow({ node, depth, tree, project, open, folded, onPress, onTwist
             </Txt>
           ) : null}
         </Press>
-        {end.places ? <PlaceButtons offered={offered} lit={lit} onPlace={place} /> : null}
-        {end.more || (!canHover && ref !== undefined) ? <MoreButton open={menu !== null} onPress={openMenu} /> : null}
-        {end.stop ? <StopIcon onPress={stop} t={t} /> : null}
+        {end.places && placeable !== undefined ? <PlaceButtons offered={offered} lit={lit} onPlace={place} /> : null}
+        {end.more || (!canHover && opens) ? <MoreButton open={menu !== null} onPress={openMenu} /> : null}
+        {end.stop && node.process?.protected === undefined ? <StopIcon onPress={stop} t={t} /> : null}
       </View>
+      {node.waiting === true && ref !== undefined ? <Waiting taskId={ref.taskId} callId={ref.callId} indent={tree ? 4 + depth * 16 + 30 : 30} onAnswer={onPress} /> : null}
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </>
+  );
+}
+
+/** Under a row waiting for the person: its last two lines, and `Answer it`, which opens its card here. */
+function Waiting({ taskId, callId, indent, onAnswer }: { taskId: string; callId: string; indent: number; onAnswer: () => void }): JSX.Element | null {
+  const t = useTokens();
+  const snapshot = useCallback(() => terminals.get(taskId, callId)?.version ?? 0, [taskId, callId]);
+  useSyncExternalStore(terminals.subscribe, snapshot, snapshot);
+  const screen = terminals.get(taskId, callId)?.screen;
+  const lines = screen === undefined ? [] : screen.tail(3).filter((line) => line.some((span) => span.text.trim().length > 0)).slice(-2);
+  return (
+    <View flexDirection="row" alignItems="flex-end" gap={8} marginLeft={indent} marginRight={8} marginBottom={6} minWidth={0}>
+      <View flex={1} minWidth={0} paddingVertical={4} paddingHorizontal={8} borderRadius={6} backgroundColor={TERM_INK.ground}>
+        {lines.length > 0 ? lines.map((line, i) => <ScreenLine key={i} line={line} t={t} />) : <Txt spec={{ voice: "data", scale: 11 / 12, color: TERM_INK.dim }}>waiting for input</Txt>}
+      </View>
+      <Press onPress={onAnswer} label="Answer it: open its card here" height={24} paddingHorizontal={8} borderRadius={6} justifyContent="center" flexShrink={0} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, String(t.mix(t.v("warn"), 45, "transparent"))) as object)} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("tint-warn") : "transparent" })}>
+        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 600, color: "warn" }}>Answer it</Txt>
+      </Press>
+    </View>
   );
 }
 
@@ -400,7 +562,7 @@ function RunLine({ taskId, project, onRan }: { taskId: string; project: string |
           <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: text.trim().length === 0 ? "dim" : "accent" }}>Run</Txt>
         </Press>
       </View>
-      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: failed !== null ? "bad" : "dim" }}>{failed ?? "Runs as you: permission sets decide what an agent may run, not you. The agent hears of it with your next message."}</Txt>
+      {failed !== null ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>{failed}</Txt> : null}
     </View>
   );
 }

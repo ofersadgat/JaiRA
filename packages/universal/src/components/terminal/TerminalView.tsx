@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, TextInput, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
-import type { CommandDialect } from "@jaira/shared/browser";
+import { processEnded, type CommandDialect, type ProcessSummary } from "@jaira/shared/browser";
+import { processStatusOf, statusBelow } from "@jaira/ui/processCardModel";
+import { processes } from "@jaira/ui/processStore";
 import { hueOf } from "@jaira/ui/approvalModel";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
 import { PLACES, type Place } from "@jaira/ui/splitModel";
@@ -31,6 +33,7 @@ import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { colorOf } from "../Sidebar";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
+import { PortChip, StatsLine, StatusText, TellClaude, useSampling } from "../process/ProcessParts";
 import { CommandLine, Following, IconButton, ScreenLine } from "./TermParts";
 import { useTerminal } from "./useTerminal";
 
@@ -70,6 +73,15 @@ export interface TerminalViewProps {
    * card's title bar, a chevron (down) at its start, and a press on it folds the card back to the row.
    */
   onFold?: (() => void) | undefined;
+  /**
+   * The engine's process whose output this terminal is (`run_in_background`, a command of this turn): the
+   * card is then the process card (decision 0032, "The view", ruling 1) — named by its short name, its
+   * status said as a process's, its stats line under the title bar (ports as links, pid, CPU, memory,
+   * the load trace), "Tell Claude when it prints…" among the readings, and Stop through the engine.
+   */
+  process?: ProcessSummary | undefined;
+  /** Filling a view whose head already says its status and carries Stop and the places (the process task view): no status row. */
+  bare?: boolean;
 }
 
 type Reading = "terminal" | "text" | "command";
@@ -80,11 +92,15 @@ const FILL_LINES = 3_000;
 
 const TONE: Record<TerminalTone, string> = { accent: "accent", warn: "warn", ok: "dim", bad: "bad", dim: "dim" };
 
-export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback, onFold }: TerminalViewProps): JSX.Element {
+export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback, onFold, process, bare = false }: TerminalViewProps): JSX.Element {
   const t = useTokens();
   const copy = useTerminal(taskId, callId, project);
   const summary = copy?.summary;
-  const running = summary !== undefined && summary.endedAt === undefined;
+  const running = summary !== undefined ? summary.endedAt === undefined : process !== undefined && !processEnded(process.state);
+  useSampling(process !== undefined && running);
+  const [width, setWidth] = useState<number | undefined>(undefined);
+  // Narrow, or opened in place in a row, the status drops under the name rather than being squeezed out.
+  const below = !fill && statusBelow(width, onFold !== undefined);
   const waiting = summary !== undefined && isWaiting(summary);
   // A process another tool call started has no stdin a person can reach: it is watched and stopped.
   const typable = summary?.tool === undefined;
@@ -103,8 +119,8 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
     return screen;
   }, [copy, copy?.version, fallback]);
 
-  const status = summary !== undefined ? terminalStatusOf(summary, waiting, now) : fallback !== undefined ? { text: fallback.exitCode === 0 || fallback.exitCode === undefined ? "ended" : `exit ${String(fallback.exitCode)}`, tone: (fallback.exitCode ?? 0) === 0 ? ("dim" as const) : ("bad" as const) } : { text: "not kept", tone: "dim" as const };
-  const title = terminalTitleOf(command, dialect);
+  const status = process !== undefined ? processStatusOf(process, now) : summary !== undefined ? terminalStatusOf(summary, waiting, now) : fallback !== undefined ? { text: fallback.exitCode === 0 || fallback.exitCode === undefined ? "ended" : `exit ${String(fallback.exitCode)}`, tone: (fallback.exitCode ?? 0) === 0 ? ("dim" as const) : ("bad" as const) } : { text: "not kept", tone: "dim" as const };
+  const title = process?.name ?? terminalTitleOf(command, dialect);
 
   // The three places, as an artifact's (decision 0028, ruling 2).
   const entry = useMemo(() => terminalEntryOf({ taskId, project, callId, command, dialect }), [taskId, project, callId, command, dialect]);
@@ -115,7 +131,8 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
   const place = (target: Place): void => moveEntry(target, entry, lit, phone);
 
   const plain = (): string => kept?.plain() ?? "";
-  const stop = (): void => void signalTerminal(taskId, callId, "stop", project);
+  const stop = (): void => void (process !== undefined ? processes.stop(process.key, "stop", project ?? process.project) : signalTerminal(taskId, callId, "stop", project));
+  const stoppable = running && process?.protected === undefined;
   const interrupt = (): void => void signalTerminal(taskId, callId, "interrupt", project);
   const openMenu = (e: GestureResponderEvent): void => {
     const at = pressedAt(e);
@@ -128,12 +145,13 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
 
   const verbs = (
     <>
-      {running ? <StopButton onPress={stop} /> : null}
+      {stoppable ? <StopButton onPress={stop} /> : null}
       <PlaceButtons offered={offered} lit={lit} onPlace={place} />
       <MoreButton open={menu !== null} onPress={openMenu} />
     </>
   );
 
+  const statusTail = `${summary?.shell !== undefined && summary.shell !== "emulated" && summary.shell !== "background" ? ` · live ${summary.shell}` : ""}${summary?.by === "you" ? " · yours" : ""}${summary?.tool !== undefined ? ` · ${summary.tool}` : ""}`;
   const lines = kept === undefined ? [] : fill ? kept.tail(FILL_LINES) : kept.tail(more ? MORE_LINES : CARD_LINES);
   const earlier = kept === undefined ? 0 : Math.max(0, kept.count - lines.length - (kept.partial().length === 0 ? 1 : 0));
   const choices = waiting && kept !== undefined ? promptChoicesOf(kept.partial()) : [];
@@ -143,6 +161,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
     <View
       flexDirection="column"
       minWidth={0}
+      onLayout={(e) => setWidth(Math.round(e.nativeEvent.layout.width))}
       {...(fill ? { flex: 1, minHeight: 0 } : { borderRadius: 10, overflow: "hidden", backgroundColor: t.v("panel") as never, ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, waiting ? undefined : "line") as object) })}
       {...(!fill && waiting ? { borderWidth: 1, borderStyle: "solid", borderColor: t.mix(t.v("warn"), 45, "transparent") as never } : {})}
     >
@@ -157,31 +176,52 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
             <View width={18} height={18} borderRadius={5} alignItems="center" justifyContent="center" flexShrink={0} backgroundColor={(waiting ? t.mix(t.v("warn"), 14, "transparent") : t.v("panel-3")) as never}>
               <Icon name="terminal" size={12} color={String(t.v(waiting ? "warn" : "accent"))} />
             </View>
-            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0}>
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0} maxWidth="60%" {...((isWeb ? { title: process !== undefined ? `${process.command} · pid ${process.pid}` : command } : {}) as object)}>
               {title}
             </Txt>
-            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
-              {status.text}
-              {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}{summary?.tool !== undefined ? ` · ${summary.tool}` : ""}
-            </Txt>
+            {below ? (
+              <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={6} overflow="hidden">
+                {(process?.ports ?? []).slice(0, 1).map((port) => (
+                  <PortChip key={port} port={port} />
+                ))}
+              </View>
+            ) : (
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
+                {status.text}
+                {statusTail}
+              </Txt>
+            )}
           </FoldHead>
           {verbs}
         </View>
       ) : null}
 
-      {fill ? (
+      {!fill && process !== undefined ? <StatsLine process={process} status={below ? status : undefined} /> : null}
+      {!fill && process === undefined && below ? (
+        <View paddingLeft={12} paddingRight={10} paddingBottom={8} minWidth={0}>
+          <StatusText status={{ text: `${status.text}${statusTail}`, tone: status.tone }} />
+        </View>
+      ) : null}
+
+      {fill && !bare ? (
         // Filling a pane or the panel, the title bar's other half: the status, Stop, the places and `…`.
         <View flexDirection="row" alignItems="center" gap={8} paddingVertical={7} paddingLeft={12} paddingRight={8} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
           <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
             {status.text}
-            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
+            {summary?.shell !== undefined && summary.shell !== "emulated" && summary.shell !== "background" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
           </Txt>
           {verbs}
         </View>
       ) : null}
+      {fill && process !== undefined ? (
+        <View paddingTop={7} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
+          <StatsLine process={process} />
+        </View>
+      ) : null}
 
-      <View flexDirection="row" alignItems="center" gap={6} minWidth={0} {...(fill ? { paddingVertical: 7, paddingHorizontal: 10, ...(edge(t, { bottom: 1 }) as object) } : { paddingLeft: 10, paddingRight: 8, paddingBottom: 8 })}>
+      <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} minWidth={0} {...(fill ? { paddingVertical: 7, paddingHorizontal: 10, ...(edge(t, { bottom: 1 }) as object) } : { paddingLeft: 10, paddingRight: 8, paddingBottom: 8 })}>
         <Readings reading={reading} onReading={setReading} />
+        {process !== undefined ? <TellClaude process={process} project={project ?? process.project} /> : null}
         <View flex={1} />
         {running ? <Following on={following} onPress={() => setFollowing((v) => !v)} /> : null}
         <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(plain())} />

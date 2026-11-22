@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useState, type JSX, type ReactNode } fr
 import { Platform } from "react-native";
 import { Text, View } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, nativeShellDialect, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type TerminalSummary, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, nativeShellDialect, processEnded, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type TerminalSummary, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfValue, type Answer } from "@jaira/ui/choicesModel";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
@@ -32,6 +32,7 @@ import { PublishedList } from "./PublishedList";
 import { Media } from "./ValueReadings";
 import { PlaceButtons } from "./PlaceButtons";
 import { TerminalView } from "../terminal/TerminalView";
+import { ProcessCard, useCallProcesses, useTerminalProcess } from "../process/ProcessCard";
 import { useCallTerminals, useTerminal } from "../terminal/useTerminal";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
 import { PLACES } from "@jaira/ui/splitModel";
@@ -286,6 +287,12 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const term = useTerminal(shell !== undefined ? artifacts?.taskId : undefined, shell !== undefined ? held.callId : undefined, artifacts?.project ?? undefined);
   const termEntry = term !== undefined ? terminalEntryOf({ taskId: term.summary.taskId, project: artifacts?.project ?? undefined, callId: term.summary.callId, command: term.summary.command, dialect: term.summary.dialect }) : undefined;
   const termLit = useEntryPlaces(termEntry?.key ?? "");
+  // What the call started that its task keeps (decision 0032, "The view"): a `run_in_background` call's
+  // process is its terminal's, drawn as the process card, which does not fold when the call answers but
+  // when the process ends; what a foreground call left running or let escape is a one-line card each.
+  const shellTask = shell !== undefined ? artifacts?.taskId : undefined;
+  const termProcess = useTerminalProcess(shellTask, held.callId, artifacts?.project ?? undefined);
+  const callProcesses = useCallProcesses(shellTask, held.callId, artifacts?.project ?? undefined).filter((p) => p !== termProcess && p.terminal === undefined && !processEnded(p.state));
   // Any other call's processes (`git_push`'s `git push`, a merge request tool's `gh`) are terminals too,
   // one each: the one running drawn under the row once it has run a moment, all of them in its body.
   const procs = useCallTerminals(shell === undefined && held.sidechain === undefined && !isHostCall(held) ? artifacts?.taskId : undefined, held.callId, artifacts?.project ?? undefined);
@@ -317,8 +324,21 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   if (isHostCall(entry)) return <Row {...head} />;
   if (term !== undefined && termEntry !== undefined) {
     const { summary } = term;
-    const card = <TerminalView taskId={summary.taskId} project={artifacts?.project ?? undefined} callId={summary.callId} command={summary.command} dialect={summary.dialect} />;
-    const live = summary.endedAt === undefined;
+    const card =
+      termProcess !== undefined ? (
+        <ProcessCard process={termProcess} project={artifacts?.project ?? undefined} fill={false} />
+      ) : (
+        <TerminalView taskId={summary.taskId} project={artifacts?.project ?? undefined} callId={summary.callId} command={summary.command} dialect={summary.dialect} />
+      );
+    const live = termProcess !== undefined ? !processEnded(termProcess.state) : summary.endedAt === undefined;
+    const briefs =
+      callProcesses.length > 0 ? (
+        <View flexDirection="column" gap={6} minWidth={0}>
+          {callProcesses.map((p) => (
+            <ProcessCard key={p.key} process={p} project={artifacts?.project ?? undefined} fill={false} brief />
+          ))}
+        </View>
+      ) : undefined;
     // Shown somewhere else: the row carries the same three buttons, that place lit (the person's
     // amendment to round 2, 2026-11-18), and draws no second copy.
     const elsewhere = termLit.length > 0;
@@ -329,9 +349,9 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     return (
       <Row
         {...head}
-        {...(placed !== undefined ? { note: placed } : {})}
-        {...(live && !elsewhere ? { shown: card } : {})}
-        {...(failed && last.length > 0 && !elsewhere
+        {...(placed !== undefined ? { note: placed } : askedBackground(held) ? { note: <BackgroundTag /> } : {})}
+        {...(live && !elsewhere ? { shown: briefs !== undefined ? <View flexDirection="column" gap={6} minWidth={0}>{card}{briefs}</View> : card } : briefs !== undefined ? { shown: briefs } : {})}
+        {...(failed && last.length > 0 && !elsewhere && briefs === undefined
           ? {
               shown: (
                 <View flexDirection="row" alignItems="center" gap={8} minWidth={0} marginTop={-2}>
@@ -405,10 +425,19 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   })();
   const procCard = (one: TerminalSummary): JSX.Element => <ProcCard key={one.callId} summary={one} project={artifacts?.project ?? undefined} />;
   const live = runningProc !== undefined && procShown ? procCard(runningProc) : undefined;
+  // A shell call with no terminal of JaiRA's (Claude Code's own `Bash`) whose process the task keeps: its card, one line.
+  const kept =
+    callProcesses.length > 0 ? (
+      <View flexDirection="column" gap={6} minWidth={0}>
+        {callProcesses.map((p) => (
+          <ProcessCard key={p.key} process={p} project={artifacts?.project ?? undefined} fill={false} brief />
+        ))}
+      </View>
+    ) : undefined;
   return (
     <Row
       {...head}
-      {...(live !== undefined ? { shown: live } : shown !== undefined ? { shown } : {})}
+      {...(live !== undefined ? { shown: live } : kept !== undefined ? { shown: kept } : shown !== undefined ? { shown } : {})}
       body={
         <>
           {procs.length > 0 ? (
@@ -450,6 +479,24 @@ function ProcCard({ summary, project }: { summary: TerminalSummary; project: str
       </Txt>
       <View flex={1} />
       <PlaceButtons offered={offered} lit={lit} onPlace={(place) => moveEntry(place, entry, lit, phone)} />
+    </View>
+  );
+}
+
+/** Whether a shell call asked to run in the background (`run_in_background`). */
+function askedBackground(entry: ToolEntry): boolean {
+  const args = entry.args as Record<string, unknown> | null | undefined;
+  return args !== null && typeof args === "object" && args["run_in_background"] === true;
+}
+
+/** `background` on a shell row that ran in the background (round 2, board 1): a pill, app 11 600, --accent on its tint. */
+function BackgroundTag(): JSX.Element {
+  const t = useTokens();
+  return (
+    <View height={19} paddingHorizontal={7} borderRadius={999} justifyContent="center" flexShrink={0} backgroundColor={t.v("tint-accent") as never}>
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "accent" }} numberOfLines={1}>
+        background
+      </Txt>
     </View>
   );
 }

@@ -314,10 +314,19 @@ export function requestsOf(command: string, dialect: CommandDialect): ShellReque
  * else the line's first word.
  */
 export function terminalTitleOf(command: string, dialect: CommandDialect): string {
-  const commands = requestsOf(command, dialect).flatMap((request) => (request.kind === "command" && request.opened === undefined ? [request.command] : []));
-  const main = commands.find((one) => !DIRECTORY_CHANGERS.includes(one.program) && one.program !== "export") ?? commands[0];
-  if (main !== undefined) return wordsOf(main);
+  const commands = requestsOf(command, dialect).flatMap((request) => (request.kind === "command" && request.opened === undefined ? [{ command: request.command, text: command.slice(request.span.start, request.span.end), viaRunner: RUN_BY.test(command.slice(0, request.span.start)) }] : []));
+  const main = commands.find((one) => !DIRECTORY_CHANGERS.includes(one.command.program) && one.command.program !== "export") ?? commands[0];
+  if (main !== undefined) return spelledAs(wordsOf(main.command, main.viaRunner), main.text);
   return command.trim().split(/\s+/)[0] ?? command;
+}
+
+/**
+ * The title as the line spells it: PowerShell's parser lower-cases a program (`Write-Output` reads
+ * `write-output`), and a title keeps the case it was typed in.
+ */
+function spelledAs(title: string, text: string): string {
+  const at = text.toLowerCase().indexOf(title.toLowerCase());
+  return at < 0 ? title : text.slice(at, at + title.length);
 }
 
 /**
@@ -331,10 +340,16 @@ const WITH_SUBCOMMANDS = new Set([
   "gcloud", "az", "systemctl", "launchctl", "mix", "gradle", "mvn", "make", "just", "nx", "turbo", "expo", "eas", "xcrun", "swift",
 ]);
 
-/** A command by its program, and its subcommand where the program has them and it is a word. */
-function wordsOf(command: { program: string; subcommand?: string | undefined }): string {
+/**
+ * A package's program run through a runner (`npx one dev`, `pnpm dlx serve dist`): its first word names what it
+ * does as a subcommand would, whatever the program — `one dev`, `serve dist`, `drizzle-kit studio`.
+ */
+const RUN_BY = /(?:^|[\s;&|(])(?:npx|pnpx|bunx|dlx|exec)\s+(?:(?:-y|--yes)\s+)?$/;
+
+/** A command by its program, and its subcommand where the program has them (or a runner ran it) and it is a word. */
+function wordsOf(command: { program: string; subcommand?: string | undefined }, viaRunner = false): string {
   const sub = command.subcommand;
-  return sub !== undefined && WITH_SUBCOMMANDS.has(command.program) && /^[a-z][a-z0-9:_-]*$/i.test(sub) ? `${command.program} ${sub}` : command.program;
+  return sub !== undefined && (viaRunner || WITH_SUBCOMMANDS.has(command.program)) && /^[a-z][a-z0-9:_-]*$/i.test(sub) ? `${command.program} ${sub}` : command.program;
 }
 
 /** One request of the line, for the `Command` reading: its words, and what it asks for. */

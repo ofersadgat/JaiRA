@@ -384,3 +384,21 @@ describe("a program's group takes places like any line (§4.2, §3.4)", () => {
     expect(Object.hasOwn(withoutPlace(layer, "git", "packages").entries, "git")).toBe(false);
   });
 });
+
+describe("a tool's flag lines on the Tools card (decision 0032, ruling 1a)", () => {
+  it("lists them under their tool, the fewest flags first", async () => {
+    const { parsePermissionSet } = await import("@jaira/shared");
+    const { flagLinesOf } = await import("../src/renderer/composerPermissionSet");
+    const { permissionSet, issues } = parsePermissionSet({
+      shell: "auto",
+      "shell --run_in_background npm run dev": "allow",
+      "shell --run_in_background": "ask",
+      "list_processes --scope=user": "allow",
+      git: "allow",
+    });
+    expect(issues.filter((i) => i.severity === "error")).toEqual([]);
+    expect(flagLinesOf(permissionSet, "shell")).toEqual(["shell --run_in_background", "shell --run_in_background npm run dev"]);
+    expect(flagLinesOf(permissionSet, "list_processes")).toEqual(["list_processes --scope=user"]);
+    expect(flagLinesOf(permissionSet, "git")).toEqual([]);
+  });
+});

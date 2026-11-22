@@ -21,6 +21,7 @@ import { Pulse } from "../chat/Pulse";
 import { CompactionLine, GapMark } from "./TranscriptMarks";
 import { Work, WorkColumn, type TranscriptOf } from "./WorkRows";
 import { WorkSummary } from "./WorkSummary";
+import { useLiveProcessCalls } from "../process/ProcessCard";
 import { useTokens } from "../../tokens";
 import { ValueView } from "./ValueView";
 import { Markdown } from "../Markdown";
@@ -359,6 +360,8 @@ function WorkBlockView({
   calls?: CallSurface | undefined;
 }): JSX.Element | null {
   const look = useContext(WorkLookContext);
+  // A call whose process still runs (decision 0032, "The view") keeps its row and card out of the summary.
+  const liveCalls = useLiveProcessCalls(artifacts?.taskId ?? undefined, artifacts?.project ?? undefined);
   // On a rail, an agent's start, its crossover and its return are its lane's rows (`AgentRail.tsx`).
   const marks = useLaneMarks();
   const rowOf = (index: number): ReactNode => {
@@ -372,7 +375,7 @@ function WorkBlockView({
   if (!marked && (look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise.
   if (entries.length === 1) return <WorkColumn>{rowOf(0)}</WorkColumn>;
-  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) || marks?.has(entry) === true ? [index] : []));
+  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls, liveCalls) || marks?.has(entry) === true ? [index] : []));
   return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }
 

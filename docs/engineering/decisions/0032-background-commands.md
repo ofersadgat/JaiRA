@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0032-background-commands
 type: decision
-status: built in part
+status: built
 updated: 2026-11-21
 decides_for: [engineering/decisions/0019-system-tools, engineering/decisions/0028-agent-terminals, engineering/decisions/0030-the-agents-shell, engineering/decisions/0007-permissionSets, engineering/units/host-tools, engineering/units/process-exec, engineering/units/tool-policy]
 ---
@@ -421,7 +421,7 @@ Over [the proposals](../../ui/assets/processes-view/index.html):
 5. **Containment.** The Job Object on Windows, the systemd scope on Linux, and the `escaped` sweep.
 6. **Window.** Mocks for Processes and the card's background state, then the build.
 
-## Built (2026-11-21), in part
+## Built (2026-11-21)
 
 The person, over the build: "build the rest too, including the processes view mocks. shouldnt process
 view just be a terminal view?" Yes: there is no Processes view. A process is a terminal, and the eight
@@ -512,15 +512,57 @@ one is chosen.
     nothing. A watched one is let go, not stopped.
   - The parent's count ("6 processes · 4 running · 1 escaped") is the window's, from the rows it
     holds (`processCount`, `processCountLabel`). The parent's summary is unchanged.
-  - A command of this turn is a process task only while it runs, and only once it has run a second.
-    A command inside a live shell is the shell's, and is not one.
+  - A command of this turn is a process task once it has run a second; ended, it stays ("Ended
+    commands stay" below). A command inside a live shell is the shell's, and is not one.
   - An ended process stays until its task lets it go. A process task's id is `t-p<pid>-<start>`,
     which no stored task's id can be.
+- **The view in the window** (round 2, boards 1–9).
+  - The card is `ProcessCard` (`components/process/`), the one place a process is drawn: in the chat
+    row, opened in place in the Terminals tab, in a split, the main view, the side panel and its task
+    view. It shows the name and status (`running in background · 4m`), the ports as chips and the first
+    as a link, `pid · CPU · MB` and the load trace, the last lines, "Tell Claude when it prints…" (armed,
+    cancelled, `told Claude` once it fired), Stop (none for a protected one) and the three places. Its
+    words are `processCardModel.ts`.
+    - A process with a terminal is its terminal's card given the process (`TerminalView`'s `process`).
+      One without (left running, escaped, Claude's own, watched) follows `process:read`, says where its
+      output is, and a watched one says it is not JaiRA's.
+    - Narrow, or opened in a row, the status drops to the second line instead of being squeezed out.
+    - The process task view draws the card bare: its head keeps Stop and the places, and the card's
+      own status row is gone (they were drawn twice).
+    - While a card is drawn, the engine samples often (`process:sampling`).
+  - The chat row: a `run_in_background` call draws the card under its row, tagged `background`, and
+    it folds when the process ends, not when the call answers. What a foreground call left running or let
+    escape is a one-line card under its row. A call whose process runs is kept out of the turn's summary
+    (`keptUnderSummary`).
+  - The Terminals tab:
+    - List is the conversation's processes and commands (`sessionRowsOf`): each process with its pid,
+      its first port and its origin tag (`background`, `left running`, `escaped · WMI`, `Claude's
+      Bash`, `this turn`, `told Claude`); "This conversation", "Ended", then "Mine · watched".
+    - Tree is the engine's `process:tree` for the session (`engineTreeOf`): what each process started
+      under it, the escaped ones under "escaped · outside this tree" and the program that started them,
+      then Mine, JaiRA and System folded, each read (`process:tree` with that scope) when opened. A
+      process no task keeps (a child, another scope's) is watched when it is opened or placed. Guide
+      lines run down each level.
+    - A row waiting for the person shows its last two lines and `Answer it`. The "Runs as you" line is
+      at the foot of the tab.
+  - Titles keep PowerShell's case (`Write-Output`), and a package run through a runner is named with
+    its first word (`npx one dev` is `one dev`).
+- **Names.** The engine's `processDisplayName` says a path by its last part: `node C:/…/devserver.cjs`
+  is `node devserver.cjs`, and a quoted Windows path to `node.exe` running `server.js` is `node server.js`.
+- **Ended commands stay.** A command of this turn that ran past a second is a process task until its
+  task lets it go, as exited 0, exited ≠ 0 or stopped (it used to leave when it ended). A task keeps its
+  newest 20 ended ones (`ENDED_TURNS_KEPT`).
+- **Permissions on the card.** The Tools card lists a tool's flag lines under it (`flagLinesOf`), and
+  the System card draws `read_process` and `wait_process` as rows of their own beside the areas.
 
-**Not built yet:**
-- the window (the chosen proposal), against the contract above;
-- the Tools card listing flag lines under their tool;
-- `read_process` and `wait_process` on the System card (`SYSTEM_AREAS`).
+**Not as the mocks have them:**
+- The scope switch on the tab's toolbar ("This conversation + Mine ▾") and its search are not built: the
+  other scopes are Tree's folded nodes, and List shows only what is watched from them.
+- A child in the Tree is named by its program alone (`node`, `conhost`): the Windows sample reads no
+  command lines, so `cmd.exe /c npx one dev` is not said. A port's purpose (`HMR`) is not known.
+- The input line names the card (`Type to one`), not the program the line runs (`node`).
+- In the sidebar's Tasks tab, the processes of a conversation (a Chat-room task, not listed there) are
+  not nested under it, as board 9 has them under a task that is.
 
 **Chosen while building:**
 - A flag line alone does not offer its tool: the bare line still does.

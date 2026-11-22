@@ -19,8 +19,8 @@
  * task index reads it as it reads any task (decision 0018). A process task is written nowhere else.
  *
  * An ended process stays until the task that started it lets it go (archived, deleted, moved, the app
- * quit) — a `this-turn` command leaves when it ends (its result is in the transcript), and a watched one
- * when it is unwatched or gone.
+ * quit) — a `this-turn` command too, the newest {@link ENDED_TURNS_KEPT} of a task's — and a watched one only until
+ * it is unwatched or gone.
  */
 import {
   PROCESS_LOAD_SAMPLES,
@@ -58,6 +58,8 @@ export const IDLE_SAMPLE_EVERY_MS = 30_000;
 export const STARTING_MS = 2_000;
 /** How long a command must run before it is a `this-turn` process task: a quick one never is. */
 export const THIS_TURN_AFTER_MS = 1_000;
+/** How many ended commands of a turn a task keeps as process tasks: the newest. */
+export const ENDED_TURNS_KEPT = 20;
 /** How long pushes about one process are gathered. */
 export const PUSH_EVERY_MS = 50;
 /** Lines sent around the one that matched a "Tell Claude when it prints…" pattern. */
@@ -162,24 +164,39 @@ export function deriveProcessState(p: { running: boolean; stopped?: boolean; exi
 
 const RUNNERS = /^(?:(?:npx|bunx|pnpx)\s+(?:-y\s+|--yes\s+)?|(?:npm|pnpm|yarn|bun)\s+(?:run\s+|exec\s+|dlx\s+)?|cmd(?:\.exe)?\s+\/[ck]\s+|(?:ba|z)?sh\s+-c\s+|pwsh(?:\.exe)?\s+(?:-File\s+)?|powershell(?:\.exe)?\s+(?:-File\s+)?)/i;
 
-/** A short name for a command line: its runner (`npx`, `npm run`, `cmd /c`) off, and its first words up to an option — `npx one dev --port 8145` is `one dev`, `npx tsc --noEmit` is `tsc --noEmit`. */
+/**
+ * A short name for a command line: its runner (`npx`, `npm run`, `cmd /c`) off, and its first words up to
+ * an option, a path said by its last part — `npx one dev --port 8145` is `one dev`, `npx tsc --noEmit` is
+ * `tsc --noEmit`, `node C:/x/devserver.cjs` is `node devserver.cjs`.
+ */
 export function processDisplayName(command: string): string {
-  let line = command.trim().replace(/^["']|["']$/g, "");
+  let line = command.trim().replace(/^"([^"]*)"$|^'([^']*)'$/, "$1$2");
   for (let i = 0; i < 3; i++) {
-    const next = line.replace(RUNNERS, "").replace(/^["']/, "");
+    const next = unquoted(line.replace(RUNNERS, ""));
     if (next === line) break;
     line = next;
   }
-  const words = line.split(/\s+/).filter((w) => w.length > 0);
+  const words = (line.match(/"[^"]*"|'[^']*'|\S+/g) ?? []).map((w) => w.replace(/^["']|["']$/g, "")).filter((w) => w.length > 0);
   if (words.length === 0) return command.trim().slice(0, 40);
-  const first = words[0]!.replace(/^.*[\\/]/, "");
-  const plain = [first];
+  const plain = [lastPart(words[0]!).replace(/\.exe$/i, "")];
   for (const word of words.slice(1)) {
     if (word.startsWith("-") || plain.length >= 3) break;
-    plain.push(word);
+    plain.push(lastPart(word));
   }
-  if (plain.length === 1 && words[1] !== undefined) plain.push(words[1]);
+  if (plain.length === 1 && words[1] !== undefined) plain.push(lastPart(words[1]));
   return plain.join(" ").slice(0, 60);
+}
+
+/** A line whose first word is a quoted command (`cmd /c "npx serve dist"`), the quotes off; a quoted path stays one word. */
+function unquoted(line: string): string {
+  const q = line.match(/^(["'])([^"']*)\1(.*)$/s);
+  return q !== null && !/[\\/]/.test(q[2]!) ? `${q[2]!}${q[3]!}` : line;
+}
+
+/** A path's last part (`C:/x/devserver.cjs` is `devserver.cjs`); a word that is no path, as it is (`/c` too). */
+function lastPart(word: string): string {
+  if (!/[\\/]/.test(word) || /^\/[a-z?]$/i.test(word)) return word;
+  return word.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || word;
 }
 
 /** What a session record's command says of it: the program and why, for one left running or escaped. */
@@ -313,12 +330,27 @@ export class ProcessHub {
       this.pendingTurns.set(key, { timer, taskId: t.taskId });
       return;
     }
+    if (!entry.running) return;
     if (t.endedAt !== undefined) {
-      this.drop(entry);
+      // Ended, it stays — exited 0, exited ≠ 0 or stopped — until its task lets it go.
+      entry.running = false;
+      if (t.stopped === true || t.timedOut === true) entry.stopped = true;
+      entry.summary.exitCode = t.exitCode ?? null;
+      entry.summary.signal = t.signal ?? null;
+      entry.summary.endedAt = t.endedAt;
+      this.ended(entry);
+      this.settle(entry, true);
+      this.keepEndedTurns(t.taskId);
       return;
     }
     entry.waiting = t.waiting === true;
     this.settle(entry);
+  }
+
+  /** A task's ended commands of a turn past {@link ENDED_TURNS_KEPT}: the oldest let go. */
+  private keepEndedTurns(taskId: string): void {
+    const ended = [...this.entries.values()].filter((e) => e.source.kind === "terminal" && !e.running && e.summary.taskId === taskId).sort((a, b) => (b.summary.endedAt ?? 0) - (a.summary.endedAt ?? 0));
+    for (const entry of ended.slice(ENDED_TURNS_KEPT)) this.drop(entry);
   }
 
   private addTurn(t: TerminalSummary): void {

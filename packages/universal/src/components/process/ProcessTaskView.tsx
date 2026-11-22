@@ -1,8 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
-import { Linking } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { processEnded, type ProcessSummary } from "@jaira/shared/browser";
-import { factsLineOf, fromLabelOf, nextStatesOf, processStepsOf } from "@jaira/ui/processTaskModel";
+import { fromLabelOf, nextStatesOf, processStepsOf } from "@jaira/ui/processTaskModel";
 import { processes } from "@jaira/ui/processStore";
 import { Press, Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -15,8 +14,9 @@ import { FromLine, OriginChip, ProcessBadge, ProcessGlyph, useProcess, useProces
  * A process task, opened (decision 0032, "The view", ruling 5; round 2's board 8): its task view, which
  * is its card. Above the card, the task's own head — the glyph, the name, its state, its id and type, where
  * it came from, `↰ from` its parent and its machine, Stop and the three places — and under it the states
- * it went through, the way a task shows its steps, with what can come next. Then its ports as links, its
- * pid, CPU and memory, and the card (`ProcessCard`). While it shows, the engine samples readings often
+ * it went through, the way a task shows its steps, with what can come next. Then the card (`ProcessCard`,
+ * filling and bare: the head above carries its Stop and places), from its stats line — ports as links,
+ * pid, CPU, memory, the load trace — down. While it shows, the engine samples readings often
  * (`process:sampling`). How it looks:
  *
  *   the head     column, padding 12 16 10, a --line under; row 1 centred, gap 8: glyph (20), name (app
@@ -25,8 +25,6 @@ import { FromLine, OriginChip, ProcessBadge, ProcessGlyph, useProcess, useProces
  *   the steps    row, wrapping, gap 4, padding 7 16, a --line under: each a chip (data 11/12, 1px --line,
  *                radius 5, padding 1 7; the current on --tint-accent in --accent), `→` between (--dim),
  *                then `next: …` (data 11/12 --dim)
- *   the facts    row, centred, gap 12, padding 6 16, a --line under: each port `localhost:N ↗` (--accent,
- *                a link), then the pid · CPU · memory pushed right (data 11/12 --dim), the load trace (60×14)
  *   the card     the rest
  */
 export function ProcessTaskView({ taskId, project, onParent }: { taskId: string; project?: string | undefined; onParent?: ((taskId: string) => void) | undefined }): JSX.Element {
@@ -48,9 +46,8 @@ export function ProcessTaskView({ taskId, project, onParent }: { taskId: string;
     <View flex={1} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never} testID="process-task-view">
       <ProcessHead process={process} taskId={taskId} project={project} onParent={onParent} />
       <ProcessSteps process={process} />
-      <ProcessFacts process={process} />
       <View flex={1} minHeight={0}>
-        <ProcessCard process={process} project={project} />
+        <ProcessCard process={process} project={project} bare />
       </View>
     </View>
   );
@@ -143,48 +140,6 @@ function ProcessSteps({ process }: { process: ProcessSummary }): JSX.Element {
           {`next: ${next}`}
         </Txt>
       ) : null}
-    </View>
-  );
-}
-
-function ProcessFacts({ process }: { process: ProcessSummary }): JSX.Element {
-  const t = useTokens();
-  const open = (port: number): void => {
-    const url = `http://localhost:${port}/`;
-    if (isWeb) window.open(url, "_blank", "noopener");
-    else void Linking.openURL(url);
-  };
-  return (
-    <View flexDirection="row" alignItems="center" gap={12} paddingVertical={6} paddingHorizontal={16} minWidth={0} {...(edge(t, { bottom: 1 }) as object)}>
-      {process.ports.map((port) => (
-        <Press key={port} onPress={() => open(port)} label={`Open localhost:${port}`} title={`http://localhost:${port}/`}>
-          {({ hovered }) => (
-            <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
-              {`localhost:${port} ↗`}
-            </Txt>
-          )}
-        </Press>
-      ))}
-      <View flex={1} />
-      <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} flexShrink={0}>
-        {factsLineOf(process)}
-      </Txt>
-      <LoadTrace load={process.load} />
-    </View>
-  );
-}
-
-/** The last readings of its CPU as bars, oldest first: 60 wide, 14 tall, --accent. */
-function LoadTrace({ load }: { load: readonly number[] }): JSX.Element | null {
-  const t = useTokens();
-  if (load.length === 0) return null;
-  const top = Math.max(5, ...load);
-  const bars = load.slice(-30);
-  return (
-    <View flexDirection="row" alignItems="flex-end" gap={1} width={60} height={14} flexShrink={0} {...((isWeb ? { title: `CPU over the last ${bars.length} readings` } : {}) as object)}>
-      {bars.map((v, i) => (
-        <View key={i} width={1} flexGrow={1} height={Math.max(1, Math.round((v / top) * 14))} backgroundColor={t.mix(t.v("accent"), 70, "transparent") as never} />
-      ))}
     </View>
   );
 }

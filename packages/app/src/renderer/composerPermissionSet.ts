@@ -700,3 +700,18 @@ export function placeTypedHint(subject: string): string {
   const kind = linePlaceKindOf(subject);
   return kind === undefined ? "" : placeExample(kind);
 }
+
+/**
+ * A tool's flag lines (decision 0032, ruling 1a), as the Tools card lists them under the tool, as it lists
+ * a program's subcommands under the program: `shell --run_in_background`, `shell --run_in_background npm run
+ * dev`, `list_processes --scope=user` — the fewest flags first, then as written.
+ */
+export function flagLinesOf(permissionSet: PermissionSet, tool: string): string[] {
+  const lines: Array<{ subject: string; flags: number }> = [];
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind !== "tool-flag") continue;
+    const parsed = parseToolFlagSubject(subject);
+    if (parsed?.tool === tool) lines.push({ subject, flags: parsed.flags.length + (parsed.command !== undefined ? 1 : 0) });
+  }
+  return lines.sort((a, b) => a.flags - b.flags || (a.subject < b.subject ? -1 : a.subject > b.subject ? 1 : 0)).map((line) => line.subject);
+}
