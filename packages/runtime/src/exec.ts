@@ -30,6 +30,20 @@ const log = createLogger("jaira.runtime.exec");
 /** After a person's signal ended an interactive command's shell, how long what it started has to finish before it is killed. */
 const INTERRUPT_GRACE_MS = 500;
 
+/**
+ * After a command exits, how long its output pipes have to close before it counts as finished anyway.
+ *
+ * A pipe closes only when every process holding its write end has, and what a command starts in the
+ * background inherits those ends: PowerShell's `Start-Process … -RedirectStandardOutput` (measured
+ * 2026-11-21: a dev server started that way kept a tool call "running" long after its shell exited),
+ * or `cmd &` in sh. Waiting for the pipes waited for the server. What the command wrote before it
+ * exited is already in the pipe and is read in this window; what is left running keeps running.
+ *
+ * Longer than {@link INTERRUPT_GRACE_MS}, so an interrupted command's leftovers are killed (and the
+ * pipes close) before this gives up on them.
+ */
+const OUTPUT_DRAIN_MS = 1_000;
+
 export interface ExecOptions {
   cwd?: string;
   env?: Record<string, string>;
@@ -388,12 +402,15 @@ export class NodeExec implements Exec {
       };
 
       child.stdout?.on("data", (chunk: Buffer) => {
+        // Output after the result — from what the command left running — belongs to nobody.
+        if (settled) return;
         stdoutChunks?.push(chunk);
         const text = chunk.toString("utf8");
         stdout += text;
         observeOutput("stdout", text);
       });
       child.stderr?.on("data", (chunk: Buffer) => {
+        if (settled) return;
         const text = chunk.toString("utf8");
         stderr += text;
         observeOutput("stderr", text);
@@ -410,12 +427,28 @@ export class NodeExec implements Exec {
         reject(new Error(`failed to run '${printable}': ${error.message}`));
       });
 
-      child.on("close", (code, signal) => {
+      let drain: ReturnType<typeof setTimeout> | undefined;
+      const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
         if (settled) return;
         settled = true;
+        if (drain !== undefined) clearTimeout(drain);
         cleanup();
         observeExit(code, signal);
         resolve({ code, signal, stdout, ...(stdoutChunks !== undefined ? { stdoutBytes: new Uint8Array(Buffer.concat(stdoutChunks)) } : {}), stderr, command: printable, timedOut, aborted });
+      };
+
+      // Normally the pipes close a moment after the exit, and the command ends there with all it wrote.
+      child.on("close", (code, signal) => finish(code, signal));
+
+      // A command whose pipes are held open by what it started ends at its exit, after a moment to
+      // drain (OUTPUT_DRAIN_MS). The pipes are left open — closing them would break the writes of a
+      // server the command meant to leave running — but no longer hold this process alive.
+      child.on("exit", (code, signal) => {
+        drain = setTimeout(() => {
+          if (settled) return;
+          for (const stream of [child.stdout, child.stderr]) (stream as { unref?: () => void } | null)?.unref?.();
+          finish(code, signal);
+        }, OUTPUT_DRAIN_MS);
       });
 
       if (merged.interactive !== undefined && merged.stdin === undefined) {

@@ -152,6 +152,33 @@ describe("NodeExec (native)", () => {
     }, 30_000);
   });
 
+  // What a command starts in the background inherits its output pipes, and they close only when it
+  // ends: a dev server started by `Start-Process -RedirectStandardOutput` kept a tool call "running"
+  // long after its shell exited (2026-11-21). The command ends at its own exit, with what it wrote.
+  it("finishes at the command's exit while what it left running holds the output open", async () => {
+    const leftRunning = "setTimeout(()=>process.stdout.write('late'),3000);setTimeout(()=>{},30000)";
+    const parent = [
+      "const c=require('node:child_process').spawn(process.execPath,['-e',process.argv[1]],{stdio:'inherit',detached:true});",
+      "c.unref();process.stdout.write('started '+c.pid);",
+    ].join("");
+    const begun = Date.now();
+    const result = await exec.run(process.execPath, ["-e", parent, leftRunning]);
+    const pid = Number(/started (\d+)/.exec(result.stdout)?.[1]);
+    try {
+      expect(Date.now() - begun).toBeLessThan(10_000);
+      expect(result.code).toBe(0);
+      expect(result.stdout).toMatch(/^started \d+$/);
+      // Still running: finishing the command left it alone.
+      expect(() => process.kill(pid, 0)).not.toThrow();
+    } finally {
+      try {
+        process.kill(pid);
+      } catch {
+        // Already gone.
+      }
+    }
+  }, 20_000);
+
   it("rejects when the command cannot start at all", async () => {
     await expect(exec.run("jaira-no-such-binary", [])).rejects.toThrow(/failed to run/);
   });
