@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>processes as terminals · eight proposals</title>
+<link rel="stylesheet" href="processes.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+<style>body{font-family:var(--font-app);color:var(--text);background:var(--bg)} iframe{width:1780px;height:1250px;border:0;display:block;margin:0 0 28px} h1{font-size:18px;margin:0 0 4px} h2{font-size:14px;margin:0 0 2px} p{color:var(--dim);margin:0 0 18px}</style></head>
+<body class="mockup"><h1>Processes as terminals: eight proposals</h1><p>No Processes view: an agent's background, left-running and escaped processes, and any process from another scope, are terminals (decisions 0028 and 0032). Same session on every board: topodiff on win-desk. Add #dark to the address for the dark theme.</p>
+<h2>1 · Sections and a scope switch</h2><p>The Terminals tab grows sections (Background, This turn, Escaped, Ended) and a scope switch at its top; another scope's process opens like any terminal.</p>
+<iframe src="1-sections.html" title="Sections and a scope switch" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>2 · Scope chips over one list</h2><p>Scopes are chips that add to one list (This conversation + Mine); every row is a terminal with a status glyph, and a row opens in place before it is placed.</p>
+<iframe src="2-scope-chips.html" title="Scope chips over one list" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>3 · A strip above the composer</h2><p>What outlives its call sits in a strip over the composer as small live terminals; a process from another scope can be watched there too.</p>
+<iframe src="3-strip.html" title="A strip above the composer" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>4 · A Machine tab</h2><p>The conversation's processes stay in the transcript and the Terminals tab; the rest of the machine is a second tab, Machine, with the same rows.</p>
+<iframe src="4-machine-tab.html" title="A Machine tab" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>5 · A table, like top</h2><p>The Terminals tab opens in the main view as a dense, sortable table across every scope; a row's press opens it as a read-only terminal beside.</p>
+<iframe src="5-table.html" title="A table, like top" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>6 · A tree</h2><p>The Terminals tab as a tree: scope, then the process, then what it started (cmd, node, esbuild, conhost), with escapes hung under the parent that really started them.</p>
+<iframe src="6-tree.html" title="A tree" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>7 · The card carries it</h2><p>The background card stays live in its row with its ports, its URL, its load and a mini log; the Terminals tab shrinks to an index, and another scope's process opens from its last line.</p>
+<iframe src="7-card-centric.html" title="The card carries it" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>8 · A dock below, widened by a ladder</h2><p>My pick: a split laid below the conversation holds the terminals side by side, and its list ends in a ladder that widens the scope one step at a time.</p>
+<iframe src="8-dock-ladder.html" title="A dock below, widened by a ladder" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+</body></html>

@@ -87,6 +87,7 @@ import type { StackedExecutor } from "./executorStack";
 import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
 import { compileClaudePlaceRules, namedPlacesOf } from "./linePlaces";
 import { withCallingAgent } from "./shellSessions";
+import { noticeNativeBackground, type NativeBackgroundListener } from "./nativeBackground";
 
 // --- what each executor declares ----------------------------------------------
 
@@ -471,6 +472,11 @@ export interface AgentPermissionSetOptions {
    * derived per call — there is one executor per setting, and the permission set picks.
    */
   switched?: (switches: Readonly<Record<string, boolean>>, view: PermissionSetView) => StackedExecutor | undefined;
+  /**
+   * Told each time the gate allows the agent's own shell (`Bash`, `PowerShell`) a `run_in_background`
+   * start (decision 0032, ruling 6), so the engine can find what it started and keep it as the session's.
+   */
+  onNativeBackground?: NativeBackgroundListener;
 }
 
 /**
@@ -508,7 +514,7 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       const view = known !== undefined ? viewOfPermissionSet(known) : viewOfServices(ctx);
       // A state that declared no permission set is handed on exactly as the engine built it — see the
       // module header.
-      if (view === undefined) return executor.start(op, ctx);
+      if (view === undefined) return executor.start(op, declaration.channel === "tools" ? noticed(ctx, options.onNativeBackground) : ctx);
       const plan = planAgentTools(view, declaration);
 
       if (declaration.channel === "none") {
@@ -539,10 +545,19 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       const placed = compileClaudePlaceRules(keptPlaces(view, declaration, plan.askNatives), { ...(root !== undefined ? { root, named: namedPlacesOf(root, undefined, declaration) } : {}), declaration });
       return executor.start(
         withAgentRules(op, options.providerOptionsKey ?? "claudeCode", { ask: [...plan.askNatives, ...placed.ask], allow: placed.allow, deny: placed.deny }),
-        servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx), view.lineOf),
+        noticed(servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx), view.lineOf), options.onNativeBackground),
       );
     },
   } as unknown as E;
+}
+
+/**
+ * `ctx` with its gate telling `listener` of each native background start it allows (decision 0032,
+ * ruling 6) — outermost, so the gate is asked by the native's own name (`Bash`), which is how a native
+ * is told from JaiRA's `shell`.
+ */
+function noticed(ctx: ExecServices, listener: NativeBackgroundListener | undefined): ExecServices {
+  return listener === undefined || ctx.gate === undefined ? ctx : { ...ctx, gate: noticeNativeBackground(ctx.gate, listener) };
 }
 
 /**
@@ -552,8 +567,8 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
  * upstream opened at that moment — so `implementation: "native"`, the deny list and the translated
  * gate reach a function call exactly as they reach the route.
  */
-export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: string): <E extends Executor<ExecServices, any>>(executor: E) => E {
-  return (executor) => withAgentPermissionSet(declaration, executor, { label });
+export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: string, onNativeBackground?: NativeBackgroundListener): <E extends Executor<ExecServices, any>>(executor: E) => E {
+  return (executor) => withAgentPermissionSet(declaration, executor, { label, ...(onNativeBackground !== undefined ? { onNativeBackground } : {}) });
 }
 
 /**

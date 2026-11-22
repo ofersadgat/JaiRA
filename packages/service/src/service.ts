@@ -700,8 +700,14 @@ import {
   ShellSessions,
   systemBackendFor,
   treeCpuSeconds,
+  AgentProcesses,
+  attributeNativeBackground,
+  outputSourceFor,
+  procRows,
   type ContainmentGroup,
   type LeftRunningOptions,
+  type NativeBackgroundCall,
+  type NativeBackgroundListener,
   type LiveShell,
   type TaskShells,
 } from "@jaira/runtime";
@@ -6639,6 +6645,10 @@ export class AppService {
       onError: (error, phase) => observe?.onError?.(error, phase),
     };
     const exec = new NodeExec({ execEnv: config.execEnvironment, observer });
+    // The agents' own processes are recorded apart, so what Claude Code's own Bash starts with
+    // run_in_background can be found under them (decision 0032, ruling 6).
+    const agentObserver = this.agentProcessesOf(taskId).observing(observer);
+    const onNativeBackground = this.nativeBackgroundFor(open, taskId, config);
 
     // The events task (decision 0010 §4) is recognised by its marker, not by its caller, so a start, a
     // resume and a supervisor's restart all build it the same way: `start_task` and `notify`, nothing else.
@@ -6654,7 +6664,8 @@ export class AppService {
       // rather than registered and refusing, so a state naming it fails at start rather than midway.
       registerAgentRuntimes(registry, {
         execEnv: config.execEnvironment,
-        observer,
+        observer: agentObserver,
+        onNativeBackground,
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
         adapters: enabledAdapters(config.agents),
@@ -7006,7 +7017,8 @@ export class AppService {
         // agent through a model prefix rather than a `functionRef`, and that difference had come to
         // mean "and is not recorded as a job" — which is invisible until a run is stopped and the
         // process it left behind cannot be found.
-        observer,
+        observer: agentObserver,
+        onNativeBackground,
         // The durable store a definition's `memoize` step writes to. The RECORDING project's, because
         // that is where this run's database is — a memo is part of the run record, not of the config
         // that decided which model to call.
@@ -8342,6 +8354,54 @@ export class AppService {
     return kept;
   }
 
+  /** Each task's live agent processes (claude, codex), as they spawn — the roots of the walk. */
+  private readonly agentProcesses = new Map<string, AgentProcesses>();
+  /** The pids each task's native background starts were answered with, so two calls do not claim one. */
+  private readonly nativeClaimed = new Map<string, Set<number>>();
+
+  private agentProcessesOf(taskId: string): AgentProcesses {
+    let procs = this.agentProcesses.get(taskId);
+    if (procs === undefined) this.agentProcesses.set(taskId, (procs = new AgentProcesses()));
+    return procs;
+  }
+
+  /**
+   * What hears a task's agent start a command with its own `run_in_background` (decision 0032, ruling
+   * 6): a moment later, what it started is found under the task's claude processes and kept as the
+   * task's (`how: native`), its output followed from Claude Code's file where the platform says.
+   */
+  private nativeBackgroundFor(open: ProjectSession, taskId: string, config: JairaConfigOf): NativeBackgroundListener {
+    return (call) => this.attributeNative(open, taskId, config, call);
+  }
+
+  private attributeNative(open: ProjectSession, taskId: string, config: JairaConfigOf, call: NativeBackgroundCall): void {
+    const backend = systemBackendFor();
+    const fallback = backend !== undefined ? () => backend.processes() : process.platform === "linux" ? async () => procRows() : undefined;
+    const lister = this.containment.lister(fallback) ?? fallback;
+    if (lister === undefined) {
+      this.log({ level: "warn", source: "process", message: `could not look for what \`${call.command}\` started: no process list on ${process.platform}`, taskId });
+      return;
+    }
+    let claimed = this.nativeClaimed.get(taskId);
+    if (claimed === undefined) this.nativeClaimed.set(taskId, (claimed = new Set()));
+    const source = outputSourceFor(backend);
+    void attributeNativeBackground(call, {
+      agents: () => this.agentProcesses.get(taskId)?.list() ?? [],
+      lister,
+      ...(source !== undefined ? { outputTargets: (pid: number) => source.targets(pid) } : {}),
+      processes: this.processesOf(taskId, open, config),
+      claimed,
+    }).then(
+      (kept) =>
+        this.log(
+          kept.length > 0
+            ? { level: "info", source: "process", message: `kept ${kept.map((p) => p.pid).join(", ")} as this task's: Claude Code's ${call.tool} started \`${call.command}\` with run_in_background`, taskId }
+            : { level: "warn", source: "process", message: `could not find what Claude Code's ${call.tool} started with run_in_background: \`${call.command}\` (it may have ended already)`, taskId },
+        ),
+      (error: unknown) => this.log({ level: "warn", source: "process", message: `could not look for what \`${call.command}\` started: ${error instanceof Error ? error.message : String(error)}`, taskId }),
+    );
+  }
+
   /** A task's processes if it has any, for the System tools (which do not read the config). */
   private processesIfAny(taskId: string): SessionProcesses | undefined {
     return this.sessionProcesses.get(taskId);
@@ -8370,6 +8430,7 @@ export class AppService {
 
   /** The task lets its processes go: every one still running is stopped, and its group with what is left in it. */
   private letProcessesGo(taskId: string, why: string): void {
+    this.nativeClaimed.delete(taskId);
     const group = this.processGroups.get(taskId);
     if (group !== undefined) {
       this.processGroups.delete(taskId);
@@ -16498,6 +16559,8 @@ export class AppService {
       memoCache?: MemoCache;
       secrets?: SecretResolver;
       observer?: ExecObserver;
+      /** Told of each native background start a claude route's gate allows (decision 0032, ruling 6). */
+      onNativeBackground?: NativeBackgroundListener;
       /** What a session recorded last before a position — see `PresetModelOptions.recorded`. */
       recorded?: (at: { id: string; seq: number }) => string | undefined;
     } = {},
@@ -16522,6 +16585,7 @@ export class AppService {
         // stopped. The CLI has always passed this (`cli.ts`); the app never did, so the two drivers
         // disagreed about what a run leaves behind — and the app is the one with a Stop button.
         ...(opts.observer !== undefined ? { observer: opts.observer } : {}),
+        ...(opts.onNativeBackground !== undefined ? { onNativeBackground: opts.onNativeBackground } : {}),
         startBridge: this.startBridge,
         onOutcome: this.onAgentOutcome,
         sdkCredential: () => sdkCredential(config.agents.claudeCode?.credential, opts.secrets ?? this.secretResolver()),

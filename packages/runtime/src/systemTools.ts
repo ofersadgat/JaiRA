@@ -402,12 +402,45 @@ function sessionRow(p: SessionProcessSummary): Record<string, JsonValue> {
     command: p.command,
     started: new Date(p.startedAt).toISOString(),
     started_by: "session",
-    how: p.how === "background" ? "run_in_background" : "left running by a command",
+    how: HOW_SAID[p.how],
     running: p.running,
     ...(p.running ? {} : { exit_code: p.exitCode ?? null, ...(p.signal ? { signal: p.signal } : {}), ...(p.stopped ? { stopped: true } : {}) }),
     ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
-    readable: p.output === "spawned" ? "whole, from its start" : `no: ${p.unreadableWhy ?? "its output is not kept"}`,
+    readable:
+      p.output === "spawned"
+        ? "whole, from its start"
+        : p.output === "file"
+          ? `from the file it writes to, ${p.outputPath ?? "Claude Code's"}: its last part, then what it adds`
+          : `no: ${p.unreadableWhy ?? "its output is not kept"}`,
   };
+}
+
+const HOW_SAID: Record<SessionProcessSummary["how"], string> = {
+  background: "run_in_background",
+  left: "left running by a command",
+  escaped: "started outside every process tree JaiRA follows",
+  native: "Claude Code's own run_in_background",
+};
+
+/**
+ * A session process whose output JaiRA does not keep (left running, escaped, Claude Code's own), read
+ * as another program's is (decision 0032, ruling 6): followed where it writes to a file or a Windows
+ * console. Undefined where it cannot be: the caller says why, from the record.
+ */
+async function followSession(options: SystemToolOptions, backend: SystemBackend | undefined, p: SessionProcessSummary): Promise<ProcessOutputs | undefined> {
+  if (!p.running) return undefined;
+  const source = outputSourceFor(backend);
+  if (source === undefined) return undefined;
+  let outputs = FOLLOWERS.get(options);
+  if (outputs === undefined) FOLLOWERS.set(options, (outputs = new ProcessOutputs(source)));
+  return outputs;
+}
+
+/** Why a session process's output is not read now. */
+function notReadWhy(p: SessionProcessSummary): string {
+  if (p.output === "file" && !p.running) return `it has ended; what it printed is in ${p.outputPath ?? "Claude Code's output file"}`;
+  if (p.output === "file") return `its file, ${p.outputPath ?? "Claude Code's"}, cannot be followed on this machine (${process.platform})`;
+  return p.unreadableWhy ?? "its output is not kept";
 }
 
 /** A process tool: the session's own need no backend (Linux too); the rest do. */
@@ -650,7 +683,7 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
       "read_process",
       {
         description:
-          "What a running program has printed, stdout and stderr in order: by default what is new since you last read it (pass `since`, the `offset` an answer gave, to read from there, or `tail` for its last lines). The processes this session started are read whole, from their start (the last million characters). Another program (its scope: `user`, `all`, …) is followed from your first read on: when its output goes to a file, that file's last part and then what it adds (`source: file`, with `path`); on Windows, when it writes to a console window, that console's screen and scrollback and then what is new (`source: console`). Output going to a pipe another program holds, or to another app's terminal, cannot be read (`source: unreadable`, with why). `from` says when following began; `whole` is true only for a file read from its start.",
+          "What a running program has printed, stdout and stderr in order: by default what is new since you last read it (pass `since`, the `offset` an answer gave, to read from there, or `tail` for its last lines). The processes this session started with run_in_background are read whole, from their start (the last million characters); those it has otherwise (left running by a command, started by Claude Code's own run_in_background) are followed as another program is, Claude Code's from the file it writes to. Another program (its scope: `user`, `all`, …) is followed from your first read on: when its output goes to a file, that file's last part and then what it adds (`source: file`, with `path`); on Windows, when it writes to a console window, that console's screen and scrollback and then what is new (`source: console`). Output going to a pipe another program holds, or to another app's terminal, cannot be read (`source: unreadable`, with why). `from` says when following began; `whole` is true only for a file read from its start.",
         inputSchema: {
           type: "object",
           properties: {
@@ -691,8 +724,27 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           }
         }
         if (mine === undefined || !mine.has(pid)) throw new SystemToolRefusal(`${pid} is not a process this session started — list_processes lists them`);
+        const record = mine.get(pid)!;
+        if (record.output !== "spawned") {
+          // Not kept here: followed where it writes (Claude Code's file, a console), as another program is.
+          const outputs = await followSession(options, b, record);
+          if (outputs === undefined) return { ...sessionRow(record), output: null, why: notReadWhy(record) };
+          try {
+            const followed = await outputs.read(pid, { ...(tail !== undefined ? { tail } : {}), ...(since !== undefined ? { since } : {}) });
+            if (followed.output === null) return { ...sessionRow(record), output: null, why: followed.why, stdout: followed.stdout, stderr: followed.stderr };
+            const { pid: _pid, running: _running, ...rest } = followed;
+            return {
+              ...sessionRow(mine.get(pid)!),
+              ...(rest as unknown as Record<string, JsonValue>),
+              output: followed.output.length > 50_000 ? `…[${followed.output.length - 50_000} earlier characters; read with tail or since]\n${followed.output.slice(-50_000)}` : followed.output,
+            };
+          } catch (e) {
+            if (e instanceof ProcessOutputRefusal) return { ...sessionRow(mine.get(pid)!), output: null, why: e.message };
+            throw e;
+          }
+        }
         const answer = mine.read(pid, { ...(tail !== undefined ? { tail } : {}), ...(since !== undefined ? { since } : {}) });
-        if (answer.process.output !== "spawned") return { ...sessionRow(answer.process), output: null, why: answer.process.unreadableWhy ?? "its output is not kept" };
+        if (answer.process.output !== "spawned") return { ...sessionRow(answer.process), output: null, why: notReadWhy(answer.process) };
         return {
           ...sessionRow(answer.process),
           output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters; read with tail or since]\n${answer.output.slice(-50_000)}` : answer.output,
@@ -764,6 +816,24 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           }
         }
         if (mine === undefined || !mine.has(pid)) throw new SystemToolRefusal(`${pid} is not a process this session started — list_processes lists them`);
+        const record = mine.get(pid)!;
+        if (pattern !== undefined && record.output !== "spawned") {
+          // Not kept here: waited on where it writes, as read_process follows it.
+          const outputs = await followSession(options, b, record);
+          if (outputs === undefined) throw new SystemToolRefusal(`the output of ${pid} cannot be read (${notReadWhy(record)}); wait for its exit instead (until: exit)`);
+          try {
+            const { timedOut, pid: _pid, running: _running, ...answer } = await outputs.wait(pid, pattern, timeoutMs, ctx?.abortSignal);
+            return {
+              ...sessionRow(mine.get(pid)!),
+              ...(answer as unknown as Record<string, JsonValue>),
+              timed_out: timedOut,
+              output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters]\n${answer.output.slice(-50_000)}` : answer.output,
+            };
+          } catch (e) {
+            if (e instanceof ProcessOutputRefusal) throw new SystemToolRefusal(e.message);
+            throw e;
+          }
+        }
         const answer = await mine.wait(pid, pattern !== undefined ? { pattern } : { exit: true }, timeoutMs, ctx?.abortSignal);
         return {
           ...sessionRow(answer.process),

@@ -55,6 +55,7 @@ import {
 import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CODEX_KEY_VARIABLES, agentSpawn, spawnWithKey, type AgentKey } from "./agents";
 import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
+import type { NativeBackgroundListener } from "./nativeBackground";
 import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, permissionSetViewOf, withAgentPermissionSet } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { AGENT_GENERIC_CLI, bridgesOnly, createGenericCliQuery, genericCliCapsOf, genericCliToolsOf, unbridged } from "./genericAgent";
@@ -214,6 +215,8 @@ export interface AgentRouteOptions {
    * (`./mcpServers`). A generic CLI is handed none: JaiRA knows no way to tell one.
    */
   mcpServers?: Record<string, ResolvedMcpServer>;
+  /** Told of each native background start a claude route's gate allows — {@link AgentRuntimeOptions.onNativeBackground}. */
+  onNativeBackground?: NativeBackgroundListener;
 }
 
 /**
@@ -258,7 +261,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
           query: query ?? sdkQueryOnKey(options.sdkCredential ?? (() => sdkCredential(undefined, undefined))),
           ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
         }),
-        { label: AGENT_SDK },
+        { label: AGENT_SDK, ...(options.onNativeBackground !== undefined ? { onNativeBackground: options.onNativeBackground } : {}) },
       ),
     );
   }
@@ -274,7 +277,7 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
           ...(query !== undefined ? { query } : {}),
           ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
         }),
-        { label: AGENT_CLI },
+        { label: AGENT_CLI, ...(options.onNativeBackground !== undefined ? { onNativeBackground: options.onNativeBackground } : {}) },
       ),
     );
   }

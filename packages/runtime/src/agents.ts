@@ -35,6 +35,7 @@ import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import { isWslEnv, onMachine, type ExecEnv } from "./paths";
 import { primaryNativeOf, TOOL_SPEC_BY_NAME, type AgentToolDeclaration } from "@jaira/shared";
+import type { NativeBackgroundListener } from "./nativeBackground";
 import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction, permissionSetViewOf } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { claudeReplacements } from "./tools";
@@ -340,6 +341,12 @@ export interface AgentRuntimeOptions {
    * set, whether the agent is claude or codex: a function call is handed them as the route is.
    */
   mcpServers?: Record<string, ResolvedMcpServer>;
+  /**
+   * Told each time a claude agent's own shell is allowed a `run_in_background` start (decision 0032,
+   * ruling 6). Hand the same run's agents an {@link observer} that records their processes, so what
+   * the call started can be found under them (`AgentProcesses`).
+   */
+  onNativeBackground?: NativeBackgroundListener;
 }
 
 /**
@@ -377,7 +384,7 @@ export function registerAgentRuntimes(
   const claudeServers = mcpServersOfCall(options.mcpServers ?? {}, permissionSetViewOf);
   const codexServers = mcpServersOfCall(mcpServersIn(options.mcpServers ?? {}, options.execEnv), permissionSetViewOf);
   const claudeWrapper = (label: string) => ({
-    wrapExecutor: agentFunctionWrapper(CLAUDE_TOOLS, label),
+    wrapExecutor: agentFunctionWrapper(CLAUDE_TOOLS, label, options.onNativeBackground),
     ...(claudeServers !== undefined ? { mcpServers: claudeServers } : {}),
   });
 

@@ -407,6 +407,13 @@ one is chosen.
   - The process tools (`systemTools.ts`): `scope` on `list_processes` and `stop_process`, and
     `read_process` and `wait_process` new. Accounts are read from the process token on Windows and
     from `ps` on macOS. Group members come from `Get-LocalGroupMember` or ADSI, and `dscacheutil`.
+  - Claude's own background commands (`nativeBackground.ts`): the gate Claude's callback asks tells
+    the engine when it allows `Bash` or `PowerShell` with `run_in_background`. About 2.5 s later the
+    tops started since under the task's claude processes are found by the walk, and the earliest
+    whose command line runs the call's command is kept as the session's, `how: native`. On Windows,
+    what Git Bash's `exec` left under a dead parent and that writes to the same file is stopped with
+    it. Its output is Claude Code's `tasks\<id>.output` file: `read_process` and `wait_process`
+    follow it, as they now follow every session process whose output is not kept.
 - **Permissions.**
   - Tool flag lines (`toolFlags.ts`, `ToolSpec.flags`, the `tool-flag` subject kind): parsed and
     refused with the spelling the tool offers. They are lowered under their own keys, matched most
@@ -422,10 +429,12 @@ one is chosen.
   - `processes.backgroundLimit`, and `processes.stopIdleAfterMinutes`, whose idle rule can only tell
     on POSIX.
   - The end notes go with the person's next message.
+  - Each task's agent processes are recorded as they spawn (`AgentProcesses`), and its claude routes
+    and functions are handed the notice, so what Claude's own `Bash` starts in the background is
+    found under them and kept as the task's.
 
 **Not built yet:**
 - the window (the chosen proposal);
-- Claude's own `Bash` background processes attributed to the session;
 - the Tools card listing flag lines under their tool;
 - `read_process` and `wait_process` on the System card (`SYSTEM_AREAS`).
 

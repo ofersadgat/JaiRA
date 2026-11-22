@@ -46,6 +46,8 @@ export * from "./tools";
 export * from "./shellSessions";
 export * from "./sessionProcesses";
 export * from "./leftRunning";
+export * from "./nativeBackground";
+export { outputSourceFor, type OutputSource } from "./processOutput";
 export * from "./containment";
 export * from "./liveShell";
 export * from "./shellMarks";

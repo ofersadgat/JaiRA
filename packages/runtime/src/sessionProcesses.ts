@@ -27,9 +27,11 @@ export const PROCESS_WAIT_MAX_MS = 10 * 60_000;
 
 /**
  * How the session came to have it: started with `run_in_background`, left running by a command the
- * session was allowed to keep it from, or started outside every tree JaiRA follows (`escaped`, ruling 7).
+ * session was allowed to keep it from, started outside every tree JaiRA follows (`escaped`, ruling 7),
+ * or started by Claude Code's own `Bash` or `PowerShell` with its `run_in_background` (`native`, ruling 6:
+ * found by the walk from the claude process, `nativeBackground.ts`).
  */
-export type SessionProcessHow = "background" | "left" | "escaped";
+export type SessionProcessHow = "background" | "left" | "escaped" | "native";
 
 export interface SessionProcessSummary {
   pid: number;
@@ -46,8 +48,13 @@ export interface SessionProcessSummary {
   endedAt?: number;
   /** The agent, the person or the task's end stopped it. */
   stopped?: boolean;
-  /** Whether its output is kept here (`spawned`) or cannot be read (`unreadable`, with why). */
-  output: "spawned" | "unreadable";
+  /**
+   * Whether its output is kept here (`spawned`), goes to a file `read_process` follows (`file`, at
+   * `outputPath`: Claude Code's own background output), or cannot be kept (`unreadable`, with why —
+   * `read_process` still follows it while it runs where the platform can say where it writes).
+   */
+  output: "spawned" | "file" | "unreadable";
+  outputPath?: string;
   unreadableWhy?: string;
 }
 
@@ -199,18 +206,37 @@ export class SessionProcesses {
    * A process a foreground call left running, kept as the session's (decision 0032, ruling 5). Its
    * output is not this record's: what it writes went wherever it was pointed.
    */
-  adopt(left: { pid: number; command: string; how?: "left" | "escaped"; callId?: string; cwd?: string; stop: (signal: NodeJS.Signals) => void; alive: () => boolean }): SessionProcessSummary {
+  adopt(left: {
+    pid: number;
+    command: string;
+    how?: "left" | "escaped" | "native";
+    callId?: string;
+    cwd?: string;
+    /** Where it writes, when that is a file (`native`: Claude Code's own output file). */
+    outputFile?: string;
+    /** Why its output cannot be read, when the default does not say it. */
+    unreadableWhy?: string;
+    stop: (signal: NodeJS.Signals) => void;
+    alive: () => boolean;
+  }): SessionProcessSummary {
     const how = left.how ?? "left";
     const kept = this.record(
       {
         pid: left.pid,
         command: left.command,
         how,
-        output: "unreadable",
-        unreadableWhy:
-          how === "escaped"
-            ? "it was started outside every tree JaiRA follows, so its output was never JaiRA's to keep; read_process with scope `user` follows it where it can"
-            : "a command left it running, so its output was never JaiRA's to keep; read_process with scope `user` follows it where it can",
+        ...(left.outputFile !== undefined
+          ? { output: "file" as const, outputPath: left.outputFile }
+          : {
+              output: "unreadable" as const,
+              unreadableWhy:
+                left.unreadableWhy ??
+                (how === "escaped"
+                  ? "it was started outside every tree JaiRA follows, so its output was never JaiRA's to keep; read_process follows it while it runs where it writes to a file or a Windows console"
+                  : how === "native"
+                    ? "Claude Code started it with its own run_in_background, and where it writes could not be found; read_process follows it while it runs where it writes to a file or a Windows console"
+                    : "a command left it running, so its output was never JaiRA's to keep; read_process follows it while it runs where it writes to a file or a Windows console"),
+            }),
         ...(left.cwd !== undefined ? { cwd: left.cwd } : {}),
         ...(left.callId !== undefined ? { callId: left.callId } : {}),
       },
