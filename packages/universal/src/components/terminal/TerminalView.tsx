@@ -26,6 +26,7 @@ import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { moveEntry, useEntryPlaces, usePlacesHere } from "../../app/places";
 import { usePhone } from "../../app/phone";
+import type { MenuItem } from "@jaira/ui/menuTypes";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { colorOf } from "../Sidebar";
 import { Icon } from "../panel/Icon";
@@ -64,6 +65,11 @@ export interface TerminalViewProps {
   fill?: boolean;
   /** For a call the engine no longer keeps: what its result carried. */
   fallback?: { output: string; exitCode?: number | null } | undefined;
+  /**
+   * Opened in place from a row (the Terminals tab, decision 0032's view, ruling 2): the row became the
+   * card's title bar, a chevron (down) at its start, and a press on it folds the card back to the row.
+   */
+  onFold?: (() => void) | undefined;
 }
 
 type Reading = "terminal" | "text" | "command";
@@ -74,12 +80,14 @@ const FILL_LINES = 3_000;
 
 const TONE: Record<TerminalTone, string> = { accent: "accent", warn: "warn", ok: "dim", bad: "bad", dim: "dim" };
 
-export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback }: TerminalViewProps): JSX.Element {
+export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback, onFold }: TerminalViewProps): JSX.Element {
   const t = useTokens();
   const copy = useTerminal(taskId, callId, project);
   const summary = copy?.summary;
   const running = summary !== undefined && summary.endedAt === undefined;
   const waiting = summary !== undefined && isWaiting(summary);
+  // A process another tool call started has no stdin a person can reach: it is watched and stopped.
+  const typable = summary?.tool === undefined;
   const now = useTicking(running);
   const [reading, setReading] = useState<Reading>("terminal");
   const [following, setFollowing] = useState(true);
@@ -114,19 +122,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
     setMenu({
       x: at.x - MENU_WIDTH,
       y: at.y,
-      items: [
-        ...offered.map((one) => ({ label: PLACE_WORDS[one], ...(lit.includes(one) ? { note: "here", disabled: one !== "panel" } : {}), onSelect: () => place(one) })),
-        ...(running ? [{ label: "Follow the output", separator: true, checked: following, onSelect: () => setFollowing((v) => !v) }] : []),
-        { label: "Copy the output", ...(running ? {} : { separator: true }), note: `${kept?.count ?? 0} lines`, onSelect: () => void copyText(plain()) },
-        { label: "Copy the command", onSelect: () => void copyText(command) },
-        { label: "Download the log…", note: `${title.split(" ")[0]}.log`, onSelect: () => void invoke("shell:saveFile", { name: `${title.split(" ")[0]}.log`, data: base64Of(plain()) }).catch(() => undefined) },
-        ...(running
-          ? [
-              { label: "Send Ctrl-C", separator: true, note: "interrupt", onSelect: interrupt },
-              { label: `Stop ${title.split(" ")[0]}`, separator: true, danger: true, note: "ends the process", onSelect: stop },
-            ]
-          : []),
-      ],
+      items: terminalMenuOf({ offered, lit, place, running, typable, following: { on: following, toggle: () => setFollowing((v) => !v) }, lines: kept?.count ?? 0, plain, command, title, stop, interrupt }),
     });
   };
 
@@ -151,17 +147,24 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
       {...(!fill && waiting ? { borderWidth: 1, borderStyle: "solid", borderColor: t.mix(t.v("warn"), 45, "transparent") as never } : {})}
     >
       {!fill ? (
-        <View flexDirection="row" alignItems="center" gap={8} height={38} paddingLeft={10} paddingRight={8} minWidth={0}>
-          <View width={18} height={18} borderRadius={5} alignItems="center" justifyContent="center" backgroundColor={(waiting ? t.mix(t.v("warn"), 14, "transparent") : t.v("panel-3")) as never}>
-            <Icon name="terminal" size={12} color={String(t.v(waiting ? "warn" : "accent"))} />
-          </View>
-          <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0}>
-            {title}
-          </Txt>
-          <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
-            {status.text}
-            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
-          </Txt>
+        <View flexDirection="row" alignItems="center" gap={8} height={38} paddingLeft={onFold !== undefined ? 6 : 10} paddingRight={8} minWidth={0}>
+          <FoldHead onFold={onFold} label={`Fold ${title} back to its row`}>
+            {onFold !== undefined ? (
+              <View width={14} alignItems="center" justifyContent="center" flexShrink={0}>
+                <Icon name="chevron" size={11} color={String(t.v("dim"))} />
+              </View>
+            ) : null}
+            <View width={18} height={18} borderRadius={5} alignItems="center" justifyContent="center" flexShrink={0} backgroundColor={(waiting ? t.mix(t.v("warn"), 14, "transparent") : t.v("panel-3")) as never}>
+              <Icon name="terminal" size={12} color={String(t.v(waiting ? "warn" : "accent"))} />
+            </View>
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0}>
+              {title}
+            </Txt>
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
+              {status.text}
+              {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}{summary?.tool !== undefined ? ` · ${summary.tool}` : ""}
+            </Txt>
+          </FoldHead>
           {verbs}
         </View>
       ) : null}
@@ -247,7 +250,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
         </View>
       ) : null}
 
-      {running ? (
+      {running && typable ? (
         <InputLine
           title={title}
           waiting={waiting}
@@ -264,6 +267,52 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
 
 const PLACE_WORDS: Record<Place, string> = { main: "Open in the main view", split: "Open in a split", panel: "Open in the side panel" };
 
+/**
+ * A terminal's `…`: the same items wherever it is offered — the card's title bar, and a row of the
+ * Terminals tab (decision 0032's view, ruling 2): the places (the one it is in marked), Follow while it
+ * runs (the card only: a row has no screen to follow), copying, the log, and Ctrl-C and Stop while it runs.
+ */
+export function terminalMenuOf(of: {
+  offered: readonly Place[];
+  lit: readonly Place[];
+  place: (place: Place) => void;
+  running: boolean;
+  typable: boolean;
+  following?: { on: boolean; toggle: () => void } | undefined;
+  lines: number;
+  plain: () => string;
+  command: string;
+  title: string;
+  stop: () => void;
+  interrupt: () => void;
+}): MenuItem[] {
+  const program = of.title.split(" ")[0] ?? of.title;
+  const follow = of.running && of.following !== undefined;
+  return [
+    ...of.offered.map((one) => ({ label: PLACE_WORDS[one], ...(of.lit.includes(one) ? { note: "here", disabled: one !== "panel" } : {}), onSelect: () => of.place(one) })),
+    ...(follow ? [{ label: "Follow the output", separator: true, checked: of.following!.on, onSelect: of.following!.toggle }] : []),
+    { label: "Copy the output", ...(follow ? {} : { separator: true }), note: `${of.lines} lines`, onSelect: () => void copyText(of.plain()) },
+    { label: "Copy the command", onSelect: () => void copyText(of.command) },
+    { label: "Download the log…", note: `${program}.log`, onSelect: () => void invoke("shell:saveFile", { name: `${program}.log`, data: base64Of(of.plain()) }).catch(() => undefined) },
+    ...(of.running
+      ? [
+          ...(of.typable ? [{ label: "Send Ctrl-C", separator: true, note: "interrupt", onSelect: of.interrupt }] : []),
+          { label: `Stop ${program}`, separator: true, danger: true, note: "ends the process", onSelect: of.stop },
+        ]
+      : []),
+  ];
+}
+
+/** The title bar's glyph, title and status: a press that folds the card back to its row, when it was opened from one. */
+function FoldHead({ onFold, label, children }: { onFold: (() => void) | undefined; label: string; children: ReactNode }): JSX.Element {
+  if (onFold === undefined) return <>{children}</>;
+  return (
+    <Press onPress={onFold} label={label} {...({ "aria-expanded": true } as object)} flexDirection="row" alignItems="center" gap={8} flex={1} minWidth={0} alignSelf="stretch">
+      {children}
+    </Press>
+  );
+}
+
 /** A second's tick while a command runs, for its elapsed time. */
 function useTicking(running: boolean): number {
   const [now, setNow] = useState(() => Date.now());
@@ -276,7 +325,7 @@ function useTicking(running: boolean): number {
   return running ? now : Date.now();
 }
 
-function pressedAt(e: GestureResponderEvent): { x: number; y: number } {
+export function pressedAt(e: GestureResponderEvent): { x: number; y: number } {
   const el = (e as unknown as { currentTarget?: { getBoundingClientRect?: () => DOMRect } }).currentTarget;
   const rect = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect() : undefined;
   return rect !== undefined ? { x: rect.right, y: rect.bottom + 4 } : { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 12 };
@@ -410,7 +459,7 @@ function Readings({ reading, onReading }: { reading: Reading; onReading: (readin
   );
 }
 
-function StopButton({ onPress }: { onPress: () => void }): JSX.Element {
+export function StopButton({ onPress }: { onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
     <Press
@@ -434,7 +483,7 @@ function StopButton({ onPress }: { onPress: () => void }): JSX.Element {
   );
 }
 
-function MoreButton({ open, onPress }: { open: boolean; onPress: (e: GestureResponderEvent) => void }): JSX.Element {
+export function MoreButton({ open, onPress }: { open: boolean; onPress: (e: GestureResponderEvent) => void }): JSX.Element {
   const t = useTokens();
   return (
     <Press
