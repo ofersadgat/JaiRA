@@ -102,7 +102,7 @@ function Block({ block, dialect }: { block: TermLogBlock; dialect: CommandDialec
         </View>
       ) : null}
       {lines.map((line, i) => (
-        <ScreenLine key={i} line={line} t={t} wrap />
+        <ScreenLine key={i} line={line} t={t} />
       ))}
     </View>
   );

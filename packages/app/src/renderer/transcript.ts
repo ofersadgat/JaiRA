@@ -368,6 +368,35 @@ const takenLines = new Map<string, TakenApart>();
  * everywhere; a line POSIX cannot read at all is tried as PowerShell, which is what JaiRA's `shell`
  * runs on Windows.
  */
+/**
+ * A command line with each of its commands on a line of its own — what a hover over a shell call
+ * shows. Broken before each command the line runs (not those inside another, as a runner's), so what
+ * joins them (`&&`, `|`, `;`) ends the line before; lines the command already had are kept. A line that
+ * cannot be taken apart is given back as it is.
+ */
+export function commandLinesOf(line: string, dialect?: CommandDialect): string {
+  let requests: TakenApart["requests"];
+  try {
+    requests = takenApartOf(line, dialect).requests;
+  } catch {
+    return line;
+  }
+  const commands = requests.filter((request) => request.kind === "command");
+  const outer = commands.filter((one) => !commands.some((other) => other !== one && other.span.start <= one.span.start && other.span.end >= one.span.end && other.span.end - other.span.start > one.span.end - one.span.start));
+  const starts = [...new Set(outer.map((one) => one.span.start))].filter((at) => at > 0 && at < line.length).sort((a, b) => a - b);
+  const pieces: string[] = [];
+  let from = 0;
+  for (const at of [...starts, line.length]) {
+    pieces.push(line.slice(from, at));
+    from = at;
+  }
+  return pieces
+    .flatMap((piece) => piece.split(/\r?\n/))
+    .map((piece) => piece.trim())
+    .filter((piece) => piece.length > 0)
+    .join("\n");
+}
+
 export function takenApartOf(line: string, dialect?: CommandDialect): TakenApart {
   const key = dialect === undefined ? line : `${dialect}\0${line}`;
   const known = takenLines.get(key);

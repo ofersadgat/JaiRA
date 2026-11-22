@@ -17,6 +17,14 @@ export interface TermStyle {
   dim?: boolean;
   italic?: boolean;
   underline?: boolean;
+  /** Ink and ground swapped (SGR 7). */
+  inverse?: boolean;
+  /** There, but not drawn (SGR 8). */
+  hidden?: boolean;
+  /** Struck through (SGR 9). */
+  strike?: boolean;
+  /** A line over it (SGR 53). */
+  overline?: boolean;
   /** What the person typed (between `YOU_OPEN` and `YOU_CLOSE`). */
   you?: boolean;
 }
@@ -52,45 +60,90 @@ function cube(n: number): string {
 
 /** The 256-colour palette's entry `n`. */
 export function colour256(n: number): string {
-  if (n < 16) return TERM_COLOURS[n]!;
-  if (n < 232) return cube(n - 16);
-  const grey = (8 + (n - 232) * 10).toString(16).padStart(2, "0");
+  const i = Math.max(0, Math.min(255, Math.trunc(n)));
+  if (i < 16) return TERM_COLOURS[i]!;
+  if (i < 232) return cube(i - 16);
+  const grey = (8 + (i - 232) * 10).toString(16).padStart(2, "0");
   return `#${grey}${grey}${grey}`;
 }
 
-/** One SGR sequence's parameters applied to a style: a new object when anything changed. */
-export function applySgr(style: TermStyle, params: number[]): TermStyle {
+function rgb(r: number, g: number, b: number): string {
+  return `#${[r, g, b].map((v) => Math.max(0, Math.min(255, Math.trunc(Number.isNaN(v) ? 0 : v))).toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * One SGR parameter: a number (`31`), or one with its sub-parameters as the colon form writes them
+ * (`38:2::255:0:0` is `[38, 2, NaN, 255, 0, 0]`, `4:3` is `[4, 3]`).
+ */
+export type SgrParam = number | readonly number[];
+
+/** An extended colour from its colon-form sub-parameters (`5:n`, `2:r:g:b`, `2:space:r:g:b`). */
+function colourOfSubs(subs: readonly number[]): string | undefined {
+  if (subs[0] === 5 && subs.length >= 2) return colour256(Number.isNaN(subs[1]!) ? 0 : subs[1]!);
+  if (subs[0] === 2 && subs.length >= 5) return rgb(subs[2]!, subs[3]!, subs[4]!);
+  if (subs[0] === 2 && subs.length === 4) return rgb(subs[1]!, subs[2]!, subs[3]!);
+  return undefined;
+}
+
+/**
+ * One SGR sequence's parameters applied to a style: a new object. What it does not draw (blink, fonts,
+ * an underline's own colour) is passed over, its arguments with it.
+ */
+export function applySgr(style: TermStyle, params: readonly SgrParam[]): TermStyle {
   let next: TermStyle = { ...style };
   const list = params.length === 0 ? [0] : params;
   for (let i = 0; i < list.length; i++) {
-    const p = list[i]!;
+    const param = list[i]!;
+    const head = typeof param === "number" ? param : (param[0] ?? 0);
+    const p = Number.isNaN(head) ? 0 : head;
+    const subs = typeof param === "number" ? undefined : param.slice(1);
+    if (p === 38 || p === 48 || p === 58) {
+      let colour: string | undefined;
+      if (subs !== undefined && subs.length > 0) colour = colourOfSubs(subs);
+      else {
+        const mode = list[i + 1];
+        if (mode === 5) {
+          const n = list[i + 2];
+          if (typeof n === "number" && !Number.isNaN(n)) colour = colour256(n);
+          i += 2;
+        } else if (mode === 2) {
+          const [r, g, b] = [list[i + 2], list[i + 3], list[i + 4]];
+          if (typeof r === "number" && typeof g === "number" && typeof b === "number") colour = rgb(r, g, b);
+          i += 4;
+        } else i = list.length;
+      }
+      // 58 colours an underline, drawn here in the text's own ink: read past, not drawn.
+      if (colour !== undefined && p === 38) next.fg = colour;
+      else if (colour !== undefined && p === 48) next.bg = colour;
+      continue;
+    }
     if (p === 0) next = style.you === true ? { you: true } : {};
     else if (p === 1) next.bold = true;
     else if (p === 2) next.dim = true;
     else if (p === 3) next.italic = true;
-    else if (p === 4) next.underline = true;
+    else if (p === 4) {
+      if (subs !== undefined && subs[0] === 0) delete next.underline;
+      else next.underline = true;
+    } else if (p === 7) next.inverse = true;
+    else if (p === 8) next.hidden = true;
+    else if (p === 9) next.strike = true;
+    else if (p === 21) next.underline = true;
     else if (p === 22) {
       delete next.bold;
       delete next.dim;
     } else if (p === 23) delete next.italic;
     else if (p === 24) delete next.underline;
+    else if (p === 27) delete next.inverse;
+    else if (p === 28) delete next.hidden;
+    else if (p === 29) delete next.strike;
+    else if (p === 53) next.overline = true;
+    else if (p === 55) delete next.overline;
     else if (p >= 30 && p <= 37) next.fg = TERM_COLOURS[p - 30]!;
     else if (p >= 90 && p <= 97) next.fg = TERM_COLOURS[p - 90 + 8]!;
     else if (p >= 40 && p <= 47) next.bg = TERM_COLOURS[p - 40]!;
     else if (p >= 100 && p <= 107) next.bg = TERM_COLOURS[p - 100 + 8]!;
     else if (p === 39) delete next.fg;
     else if (p === 49) delete next.bg;
-    else if ((p === 38 || p === 48) && list[i + 1] === 5 && list[i + 2] !== undefined) {
-      const colour = colour256(list[i + 2]!);
-      if (p === 38) next.fg = colour;
-      else next.bg = colour;
-      i += 2;
-    } else if ((p === 38 || p === 48) && list[i + 1] === 2 && list[i + 4] !== undefined) {
-      const colour = `#${[list[i + 2]!, list[i + 3]!, list[i + 4]!].map((v) => Math.max(0, Math.min(255, v)).toString(16).padStart(2, "0")).join("")}`;
-      if (p === 38) next.fg = colour;
-      else next.bg = colour;
-      i += 4;
-    }
   }
   return next;
 }
@@ -98,6 +151,12 @@ export function applySgr(style: TermStyle, params: number[]): TermStyle {
 interface Cells {
   chars: string[];
   styles: TermStyle[];
+}
+
+/** A row of the screen: its cells while the cursor can still reach it, its spans once drawn (kept until it changes). */
+interface Row {
+  cells?: Cells;
+  spans?: TermLine;
 }
 
 function spansOf(cells: Cells): TermLine {
@@ -117,102 +176,127 @@ function spansOf(cells: Cells): TermLine {
   return line;
 }
 
+const textOf = (line: TermLine): string => line.map((span) => span.text).join("");
+
+const emptyRow = (): Row => ({ cells: { chars: [], styles: [] } });
+
+/** Rows the cursor can still move back into; older ones are kept only as drawn. */
+const LIVE_ROWS = 1_000;
+/** How many rows past {@link LIVE_ROWS} pile up before they are let go of together. */
+const FREEZE_STEP = 500;
+/** The height a program that positions its cursor is taken to assume (none can ask a pipe). */
+const SCREEN_ROWS = 24;
+/** How far below the screen's top an absolute position can reach. */
+const SCREEN_MAX_ROWS = 200;
+/** How far right the cursor can be moved (`ESC[999C` goes to "the end"). */
+const MAX_COL = 512;
+/** A control sequence longer than this is not one. */
+const MAX_CSI = 256;
+/** A string (OSC, DCS, …) still unfinished past this many characters is not one: its introducer is dropped and the rest read as text. */
+const MAX_STRING = 65_536;
+/** The person's typing, as the OSC bodies the engine wraps it in. */
+const YOU_OPEN_BODY = YOU_OPEN.slice(2, -1);
+const YOU_CLOSE_BODY = YOU_CLOSE.slice(2, -1);
+
 /**
  * A terminal's screen, fed its raw output a piece at a time: lines of styled spans, as a terminal
- * would be left showing them. Carriage returns overwrite (a progress bar is its last state), a
- * backspace steps back, `ESC[K` clears to the end of the line, SGR sets colours, and every other
- * escape — cursor movement, titles, the alternate screen — is dropped. The person's typing, set
- * between `YOU_OPEN` and `YOU_CLOSE` by the engine, is marked `you`.
+ * would be left showing them. A terminal with no width (a line too long wraps where it is drawn) and a
+ * screen as tall as the output, the last {@link LIVE_ROWS} rows of which the cursor can reach:
+ *
+ *  - text, `\r`, `\n` (a new line, as a terminal set to translate it does), backspace and tabs;
+ *  - CSI: SGR colours and attributes (16, 256 and true colour, either form), cursor moves (`A`–`G`,
+ *    `H`, `f`, `d`, `` ` ``, `a`, `e`, saving and restoring), erasing (`J`, `K`, `X`), inserting and
+ *    deleting characters and lines (`@`, `P`, `L`, `M`), and the alternate screen (`?1049`, `?1047`,
+ *    `?47`) — left, what was drawn on it is gone, as it is from a terminal;
+ *  - ESC `7`/`8`/`D`/`E`/`M`/`c`; C1 controls as their ESC forms;
+ *  - everything else — titles and links (OSC), DCS, APC, PM and SOS strings, charsets, modes, reports —
+ *    read to its end and dropped, so none of it shows as text.
+ *
+ * Clearing the screen (`ESC[2J`, `ESC c`) keeps what was on it above, as a terminal's scrollback does.
+ * The person's typing, set between `YOU_OPEN` and `YOU_CLOSE` by the engine, is marked `you`.
  */
 export class TermScreen {
-  private readonly done: TermLine[] = [];
-  private cells: Cells = { chars: [], styles: [] };
-  private cursor = 0;
+  private readonly rows: Row[] = [emptyRow()];
+  /** Rows above this are drawn only (`Row.spans`); the cursor cannot reach them. */
+  private frozen = 0;
+  /** The screen's top row, where `ESC[H` puts the cursor. */
+  private top = 0;
+  private row = 0;
+  private col = 0;
   private style: TermStyle = PLAIN;
+  private saved: { row: number; col: number; style: TermStyle } | undefined;
+  /** While on the alternate screen: what to go back to. */
+  private main: { length: number; row: number; col: number; top: number; style: TermStyle } | undefined;
   /** An escape cut off at the end of a piece, finished by the next one. */
   private carry = "";
-  /** A carriage return at the end of a piece: a newline if the next starts with `\n`. */
-  private pendingReturn = false;
 
   write(text: string): void {
     const input = this.carry + text;
     this.carry = "";
+    const length = input.length;
     let i = 0;
-    if (this.pendingReturn) {
-      this.pendingReturn = false;
-      if (input.startsWith("\n")) {
-        this.newline();
-        i = 1;
-      } else this.cursor = 0;
-    }
-    for (; i < input.length; i++) {
-      const ch = input[i]!;
-      if (ch === "\u001b") {
+    while (i < length) {
+      const code = input.charCodeAt(i);
+      if (code === 0x1b || (code >= 0x80 && code <= 0x9f)) {
         const end = this.escape(input, i);
         if (end === undefined) {
+          if (length - i > MAX_STRING) {
+            i++;
+            continue;
+          }
           this.carry = input.slice(i);
           return;
         }
-        i = end;
+        i = end + 1;
         continue;
       }
-      if (ch === "\n") {
-        this.newline();
+      if (code < 0x20 || code === 0x7f) {
+        this.control(code);
+        i++;
         continue;
       }
-      if (ch === "\r") {
-        if (i + 1 >= input.length) {
-          this.pendingReturn = true;
-          continue;
-        }
-        if (input[i + 1] === "\n") {
-          this.newline();
-          i++;
-        } else this.cursor = 0;
-        continue;
+      let j = i + 1;
+      while (j < length) {
+        const c = input.charCodeAt(j);
+        if (c < 0x20 || c === 0x7f || c === 0x1b || (c >= 0x80 && c <= 0x9f)) break;
+        j++;
       }
-      if (ch === "\b") {
-        this.cursor = Math.max(0, this.cursor - 1);
-        continue;
-      }
-      if (ch === "\t") {
-        const to = (Math.floor(this.cursor / TAB) + 1) * TAB;
-        while (this.cursor < to) this.put(" ");
-        continue;
-      }
-      if (ch < " " || ch === "\u007f") continue;
-      this.put(ch);
+      this.print(input.slice(i, j));
+      i = j;
     }
   }
 
   /** Every line, the one still being written last (empty when the output ended with a newline). */
   lines(): TermLine[] {
-    return [...this.done, spansOf(this.cells)];
+    const end = this.end();
+    const out: TermLine[] = [];
+    for (let r = 0; r < end; r++) out.push(this.spansAt(r));
+    return out;
   }
 
   /** How many lines there are, the one being written included. */
   get count(): number {
-    return this.done.length + 1;
+    return this.end();
   }
 
   /** The last `n` lines, the one being written included unless it is empty. */
   tail(n: number): TermLine[] {
-    const current = spansOf(this.cells);
-    const all = current.length > 0 ? [...this.done.slice(-(n - 1)), current] : this.done.slice(-n);
-    return all;
+    let end = this.end();
+    if (end > 0 && this.blank(end - 1)) end--;
+    const out: TermLine[] = [];
+    for (let r = Math.max(0, end - n); r < end; r++) out.push(this.spansAt(r));
+    return out;
   }
 
   /** The line still being written, as text: a prompt that waits for an answer ends without a newline. */
   partial(): string {
-    return this.cells.chars.join("");
+    return textOf(this.spansAt(this.end() - 1));
   }
 
   /** The last line that has text, as text — a finished command's last word. */
   lastText(): string {
-    const partial = this.partial();
-    if (partial.trim().length > 0) return partial;
-    for (let i = this.done.length - 1; i >= 0; i--) {
-      const text = this.done[i]!.map((span) => span.text).join("");
+    for (let r = this.end() - 1; r >= 0; r--) {
+      const text = textOf(this.spansAt(r));
       if (text.trim().length > 0) return text;
     }
     return "";
@@ -221,70 +305,380 @@ export class TermScreen {
   /** The whole screen as plain text: the `Text` reading, and what Copy takes. */
   plain(): string {
     return this.lines()
-      .map((line) => line.map((span) => span.text).join(""))
+      .map(textOf)
       .join("\n")
       .replace(/\n+$/, "\n");
   }
 
-  private put(ch: string): void {
-    // A cursor moved past the end (`ESC[G`) leaves no holes.
-    while (this.cells.chars.length < this.cursor) {
-      this.cells.chars.push(" ");
-      this.cells.styles.push(PLAIN);
+  // --- the rows ------------------------------------------------------------------------------------
+
+  /** One past the last row shown: the cursor's, or below it the last that has something on it. */
+  private end(): number {
+    let end = this.rows.length;
+    while (end - 1 > this.row && this.blank(end - 1)) end--;
+    return end;
+  }
+
+  private blank(r: number): boolean {
+    const row = this.rows[r];
+    if (row === undefined) return true;
+    return row.cells !== undefined ? row.cells.chars.length === 0 : (row.spans?.length ?? 0) === 0;
+  }
+
+  private spansAt(r: number): TermLine {
+    const row = this.rows[r];
+    if (row === undefined) return [];
+    row.spans ??= spansOf(row.cells!);
+    return row.spans;
+  }
+
+  /** The cells of the row the cursor is on, its drawing let go of: it is about to change. */
+  private cells(): Cells {
+    while (this.rows.length <= this.row) this.rows.push(emptyRow());
+    const row = this.rows[this.row]!;
+    delete row.spans;
+    row.cells ??= { chars: [], styles: [] };
+    return row.cells;
+  }
+
+  /** Where the cursor may go up to: the oldest row it can reach — the alternate screen's top while on it. */
+  private get ceiling(): number {
+    return this.main !== undefined ? Math.max(this.frozen, this.top) : this.frozen;
+  }
+
+  private moveTo(row: number, col: number): void {
+    this.row = Math.max(this.ceiling, row);
+    this.col = Math.max(0, Math.min(MAX_COL, col));
+    while (this.rows.length <= this.row) this.rows.push(emptyRow());
+  }
+
+  // --- text and controls ---------------------------------------------------------------------------
+
+  private print(text: string): void {
+    const cells = this.cells();
+    // A cursor moved past the end (`ESC[G`, `ESC[C`) leaves no holes.
+    while (cells.chars.length < this.col) {
+      cells.chars.push(" ");
+      cells.styles.push(PLAIN);
     }
-    this.cells.chars[this.cursor] = ch;
-    this.cells.styles[this.cursor] = this.style;
-    this.cursor++;
+    for (const ch of text) {
+      cells.chars[this.col] = ch;
+      cells.styles[this.col] = this.style;
+      this.col++;
+    }
   }
 
-  private newline(): void {
-    this.done.push(spansOf(this.cells));
-    this.cells = { chars: [], styles: [] };
-    this.cursor = 0;
-  }
-
-  /** An escape at `at`: handled, and the index of its last character — or undefined when it is cut off. */
-  private escape(input: string, at: number): number | undefined {
-    const next = input[at + 1];
-    if (next === undefined) return undefined;
-    if (next === "[") {
-      let j = at + 2;
-      while (j < input.length && !/[@-~]/.test(input[j]!)) j++;
-      if (j >= input.length) return undefined;
-      const final = input[j]!;
-      const body = input.slice(at + 2, j);
-      if (final === "m") {
-        const params = body.length === 0 ? [] : body.split(/[;:]/).map((p) => (p === "" ? 0 : Number.parseInt(p, 10))).filter((p) => !Number.isNaN(p));
-        this.style = applySgr(this.style, params);
-      } else if (final === "K") {
-        const mode = body === "" ? 0 : Number.parseInt(body, 10);
-        if (mode === 0) {
-          this.cells.chars.length = Math.min(this.cells.chars.length, this.cursor);
-          this.cells.styles.length = this.cells.chars.length;
-        } else if (mode === 2) this.cells = { chars: [], styles: [] };
-      } else if (final === "G") {
-        this.cursor = Math.max(0, (Number.parseInt(body, 10) || 1) - 1);
+  private control(code: number): void {
+    if (code === 0x0a || code === 0x0b || code === 0x0c) this.newline();
+    else if (code === 0x0d) this.col = 0;
+    else if (code === 0x08) this.col = Math.max(0, this.col - 1);
+    else if (code === 0x09) {
+      const to = Math.min(MAX_COL, (Math.floor(this.col / TAB) + 1) * TAB);
+      const cells = this.cells();
+      // Past the end a tab writes its blanks, so the text copied keeps its columns; over text it only moves.
+      while (cells.chars.length < to) {
+        cells.chars.push(" ");
+        cells.styles.push(this.style);
       }
-      return j;
+      this.col = to;
     }
-    if (next === "]") {
-      // OSC: to BEL, or to ESC \.
-      let j = at + 2;
-      while (j < input.length && input[j] !== "\u0007" && !(input[j] === "\u001b" && input[j + 1] === "\\")) j++;
-      if (j >= input.length) return undefined;
-      const body = input.slice(at + 2, j);
-      const end = input[j] === "\u0007" ? j : j + 1;
-      if (`\u001b]${body}\u0007` === YOU_OPEN) this.style = { ...this.style, you: true };
-      else if (`\u001b]${body}\u0007` === YOU_CLOSE) {
+    // BEL, NUL, SO, SI and the rest: nothing to draw.
+  }
+
+  /** Down a row to its start — a row added at the bottom, the screen scrolled, when it was the last. */
+  private newline(): void {
+    this.down();
+    this.col = 0;
+  }
+
+  private down(): void {
+    this.row++;
+    while (this.rows.length <= this.row) this.rows.push(emptyRow());
+    if (this.row - this.top >= SCREEN_ROWS) this.top = this.row - SCREEN_ROWS + 1;
+    this.freeze();
+  }
+
+  /** Let go of the cells of rows the cursor can no longer reach. */
+  private freeze(): void {
+    if (this.rows.length - this.frozen <= LIVE_ROWS + FREEZE_STEP) return;
+    const to = Math.min(this.rows.length - LIVE_ROWS, this.row, this.top, this.main?.length ?? Number.POSITIVE_INFINITY);
+    for (let r = this.frozen; r < to; r++) {
+      const row = this.rows[r]!;
+      row.spans ??= spansOf(row.cells!);
+      delete row.cells;
+    }
+    this.frozen = Math.max(this.frozen, to);
+  }
+
+  /** A clean screen below what was shown, which stays above as scrollback; the cursor where it was on it. */
+  private newScreen(): void {
+    let content = false;
+    for (let r = this.top; r < this.rows.length && !content; r++) content = !this.blank(r);
+    const offset = this.row - this.top;
+    if (content) this.top = this.rows.length - (this.blank(this.rows.length - 1) ? 1 : 0);
+    else {
+      this.rows.length = Math.max(this.top, this.frozen) + 1;
+      this.rows[this.rows.length - 1] = emptyRow();
+    }
+    this.moveTo(this.top + offset, this.col);
+  }
+
+  // --- escapes -------------------------------------------------------------------------------------
+
+  /** An escape at `at` (ESC, or a C1 control): handled, and the index of its last character — or undefined when it is cut off. */
+  private escape(input: string, at: number): number | undefined {
+    const first = input.charCodeAt(at);
+    let kind: number;
+    let body: number;
+    if (first === 0x1b) {
+      if (at + 1 >= input.length) return undefined;
+      kind = input.charCodeAt(at + 1);
+      body = at + 2;
+    } else {
+      kind = first - 0x40;
+      body = at + 1;
+    }
+    if (kind === 0x5b) return this.csi(input, body);
+    if (kind === 0x5d) {
+      const end = stringEnd(input, body);
+      if (end === undefined) return undefined;
+      const text = input.slice(body, end.at);
+      if (text === YOU_OPEN_BODY) this.style = { ...this.style, you: true };
+      else if (text === YOU_CLOSE_BODY) {
         const { you: _you, ...rest } = this.style;
         this.style = rest;
       }
-      return end;
+      return end.last;
     }
-    // A two-character escape (`ESC (B`, `ESC =`): dropped.
-    if (next === "(" || next === ")") return input[at + 2] === undefined ? undefined : at + 2;
-    return at + 1;
+    // DCS, SOS, PM, APC: a string to its terminator, none of it drawn.
+    if (kind === 0x50 || kind === 0x58 || kind === 0x5e || kind === 0x5f) return stringEnd(input, body)?.last;
+    if (first !== 0x1b) {
+      this.single(kind);
+      return at;
+    }
+    if (kind >= 0x20 && kind <= 0x2f) {
+      // ESC, intermediates, a final (`ESC ( B`, `ESC # 8`, `ESC % G`): a charset or a line's size — dropped.
+      let j = at + 1;
+      while (j < input.length && input.charCodeAt(j) >= 0x20 && input.charCodeAt(j) <= 0x2f) j++;
+      if (j >= input.length) return undefined;
+      const final = input.charCodeAt(j);
+      return final >= 0x30 && final <= 0x7e ? j : j - 1;
+    }
+    if (kind >= 0x30 && kind <= 0x7e) {
+      this.single(kind);
+      return at + 1;
+    }
+    // ESC before a control (or a second ESC): the ESC alone is dropped, what follows read as itself.
+    return at;
   }
+
+  /** A two-character escape: the cursor's saving and moves, and a reset. */
+  private single(kind: number): void {
+    const ch = String.fromCharCode(kind);
+    if (ch === "7") this.saved = { row: this.row, col: this.col, style: this.style };
+    else if (ch === "8") this.restore();
+    else if (ch === "D") this.down();
+    else if (ch === "E") this.newline();
+    else if (ch === "M") this.row = Math.max(this.ceiling, this.row - 1);
+    else if (ch === "c") {
+      this.style = this.style.you === true ? { you: true } : PLAIN;
+      this.newScreen();
+      this.moveTo(this.top, 0);
+    }
+  }
+
+  private restore(): void {
+    if (this.saved === undefined) return this.moveTo(this.top, 0);
+    this.moveTo(this.saved.row, this.saved.col);
+    this.style = this.saved.style;
+  }
+
+  /** A control sequence from `start` (past its introducer): the index of its final character, or undefined when it is cut off. */
+  private csi(input: string, start: number): number | undefined {
+    let j = start;
+    for (; j < input.length; j++) {
+      const c = input.charCodeAt(j);
+      if (c >= 0x40 && c <= 0x7e) break;
+      // Not a control sequence after all: its introducer is dropped, what follows read as itself.
+      if (c < 0x20 || c > 0x7e || j - start > MAX_CSI) return start - 1;
+    }
+    if (j >= input.length) return undefined;
+    let params = input.slice(start, j);
+    const inter = /[ -/]+$/.exec(params);
+    // With intermediates (`ESC[2 q`, the cursor's shape): nothing a log draws.
+    if (inter !== null) return j;
+    let prefix = "";
+    if (/^[<=>?]/.test(params)) {
+      prefix = params[0]!;
+      params = params.slice(1);
+    }
+    this.sequence(prefix, input[j]!, params);
+    return j;
+  }
+
+  private sequence(prefix: string, final: string, text: string): void {
+    const groups = text.length === 0 ? [] : text.split(";").map((group) => group.split(":").map((p) => (p === "" ? Number.NaN : Number.parseInt(p, 10))));
+    /** The `k`th parameter as a count: absent or 0 is `fallback`. */
+    const count = (k: number, fallback = 1): number => {
+      const v = groups[k]?.[0];
+      return v === undefined || Number.isNaN(v) || v === 0 ? fallback : Math.min(v, 10_000);
+    };
+    if (prefix === "?") {
+      if (final === "h" || final === "l") {
+        for (const group of groups) if (group[0] === 1049 || group[0] === 1047 || group[0] === 47) this.alternate(final === "h");
+      }
+      return;
+    }
+    if (prefix !== "") return;
+    switch (final) {
+      case "m":
+        this.style = applySgr(this.style, groups.map((group) => (group.length === 1 ? (Number.isNaN(group[0]!) ? 0 : group[0]!) : group)));
+        return;
+      case "A":
+        this.row = Math.max(this.ceiling, this.row - count(0));
+        return;
+      case "B":
+      case "e":
+        // Down, but no further than what is there: `ESC[999B` means "to the bottom".
+        this.row = Math.min(this.rows.length - 1, this.row + count(0));
+        return;
+      case "C":
+      case "a":
+        this.col = Math.min(MAX_COL, this.col + count(0));
+        return;
+      case "D":
+        this.col = Math.max(0, this.col - count(0));
+        return;
+      case "E":
+        this.row = Math.min(this.rows.length - 1, this.row + count(0));
+        this.col = 0;
+        return;
+      case "F":
+        this.row = Math.max(this.ceiling, this.row - count(0));
+        this.col = 0;
+        return;
+      case "G":
+      case "`":
+        this.col = Math.min(MAX_COL, count(0) - 1);
+        return;
+      case "H":
+      case "f":
+        this.moveTo(this.top + Math.min(SCREEN_MAX_ROWS, count(0)) - 1, count(1) - 1);
+        return;
+      case "d":
+        this.moveTo(this.top + Math.min(SCREEN_MAX_ROWS, count(0)) - 1, this.col);
+        return;
+      case "J":
+        this.eraseDisplay(count(0, 0));
+        return;
+      case "K":
+        this.eraseLine(count(0, 0));
+        return;
+      case "X": {
+        const cells = this.cells();
+        const to = Math.min(cells.chars.length, this.col + count(0));
+        for (let c = this.col; c < to; c++) {
+          cells.chars[c] = " ";
+          cells.styles[c] = PLAIN;
+        }
+        return;
+      }
+      case "P": {
+        const cells = this.cells();
+        cells.chars.splice(this.col, count(0));
+        cells.styles.splice(this.col, count(0));
+        return;
+      }
+      case "@": {
+        const cells = this.cells();
+        if (this.col >= cells.chars.length) return;
+        const n = Math.min(count(0), MAX_COL);
+        cells.chars.splice(this.col, 0, ...new Array<string>(n).fill(" "));
+        cells.styles.splice(this.col, 0, ...new Array<TermStyle>(n).fill(PLAIN));
+        return;
+      }
+      case "L": {
+        const n = Math.min(count(0), SCREEN_MAX_ROWS);
+        this.rows.splice(this.row, 0, ...Array.from({ length: n }, emptyRow));
+        this.col = 0;
+        return;
+      }
+      case "M": {
+        this.rows.splice(this.row, Math.min(count(0), this.rows.length - this.row));
+        while (this.rows.length <= this.row) this.rows.push(emptyRow());
+        this.col = 0;
+        return;
+      }
+      case "s":
+        if (groups.length === 0) this.saved = { row: this.row, col: this.col, style: this.style };
+        return;
+      case "u":
+        this.restore();
+        return;
+      default:
+      // Scrolling regions, reports, modes, tab stops: nothing a log draws.
+    }
+  }
+
+  private eraseLine(mode: number): void {
+    const cells = this.cells();
+    if (mode === 0) {
+      cells.chars.length = Math.min(cells.chars.length, this.col);
+      cells.styles.length = cells.chars.length;
+    } else if (mode === 1) {
+      for (let c = 0; c <= this.col && c < cells.chars.length; c++) {
+        cells.chars[c] = " ";
+        cells.styles[c] = PLAIN;
+      }
+    } else if (mode === 2) {
+      cells.chars.length = 0;
+      cells.styles.length = 0;
+    }
+  }
+
+  private eraseDisplay(mode: number): void {
+    if (mode === 0) {
+      this.eraseLine(0);
+      this.rows.length = this.row + 1;
+    } else if (mode === 1) {
+      for (let r = Math.max(this.top, this.frozen); r < this.row; r++) this.rows[r] = emptyRow();
+      this.eraseLine(1);
+    } else if (mode === 2) this.newScreen();
+    // 3, the scrollback: kept — it is the log.
+  }
+
+  /** Onto the alternate screen (a clean one below), or off it — what was drawn there goes, as it does from a terminal. */
+  private alternate(on: boolean): void {
+    if (on) {
+      if (this.main !== undefined) return;
+      this.main = { length: this.rows.length, row: this.row, col: this.col, top: this.top, style: this.style };
+      this.top = this.blank(this.rows.length - 1) && this.row === this.rows.length - 1 ? this.rows.length - 1 : this.rows.length;
+      this.moveTo(this.top, 0);
+      return;
+    }
+    const main = this.main;
+    if (main === undefined) return;
+    this.main = undefined;
+    this.rows.length = Math.max(this.frozen + 1, main.length);
+    // The row it left from may have been reused as the alternate screen's first: as it was, empty.
+    if (main.row === this.rows.length - 1 && this.rows.length - 1 >= this.top) this.rows[main.row] = emptyRow();
+    this.top = main.top;
+    this.moveTo(main.row, main.col);
+    this.style = main.style;
+  }
+}
+
+/** Where a string (OSC, DCS, …) from `start` ends — BEL, `ESC \` or ST: its text's end and its terminator's last character. */
+function stringEnd(input: string, start: number): { at: number; last: number } | undefined {
+  for (let j = start; j < input.length; j++) {
+    const c = input.charCodeAt(j);
+    if (c === 0x07 || c === 0x9c) return { at: j, last: j };
+    if (c === 0x1b) {
+      if (j + 1 >= input.length) return undefined;
+      if (input.charCodeAt(j + 1) === 0x5c) return { at: j, last: j + 1 };
+    }
+  }
+  return undefined;
 }
 
 // --- what the card says ----------------------------------------------------------------------------

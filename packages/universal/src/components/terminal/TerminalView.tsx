@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type JSX, type ReactNode } from "react";
 import { ScrollView, TextInput, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { processEnded, type CommandDialect, type ProcessSummary } from "@jaira/shared/browser";
@@ -6,6 +6,7 @@ import { processStatusOf, statusBelow } from "@jaira/ui/processCardModel";
 import { processes } from "@jaira/ui/processStore";
 import { hueOf } from "@jaira/ui/approvalModel";
 import { terminalEntryOf } from "@jaira/ui/panelStack";
+import { commandLinesOf } from "@jaira/ui/transcript";
 import { PLACES, type Place } from "@jaira/ui/splitModel";
 import { invoke } from "@jaira/ui/store";
 import { signalTerminal, typeInto } from "@jaira/ui/terminalStore";
@@ -34,7 +35,7 @@ import { colorOf } from "../Sidebar";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
 import { PortChip, StatsLine, StatusText, TellClaude, useSampling } from "../process/ProcessParts";
-import { CommandLine, Following, IconButton, ScreenLine } from "./TermParts";
+import { CommandLine, Following, IconButton, ScreenLine, WRAP_WEB } from "./TermParts";
 import { useTerminal } from "./useTerminal";
 
 /**
@@ -74,8 +75,8 @@ export interface TerminalViewProps {
    */
   onFold?: (() => void) | undefined;
   /**
-   * The engine's process whose output this terminal is (`run_in_background`, a command of this turn): the
-   * card is then the process card (decision 0032, "The view", ruling 1) — named by its short name, its
+   * The engine's process whose output this terminal is (`run_in_background`, a command of this turn, a
+   * process another tool call started); looked up by the terminal when not given. The card is then the process card (decision 0032, "The view", ruling 1) — named by its short name, its
    * status said as a process's, its stats line under the title bar (ports as links, pid, CPU, memory,
    * the load trace), "Tell Claude when it prints…" among the readings, and Stop through the engine.
    */
@@ -92,8 +93,12 @@ const FILL_LINES = 3_000;
 
 const TONE: Record<TerminalTone, string> = { accent: "accent", warn: "warn", ok: "dim", bad: "bad", dim: "dim" };
 
-export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback, onFold, process, bare = false }: TerminalViewProps): JSX.Element {
+export function TerminalView({ taskId, project, callId, command, dialect, fill = false, fallback, onFold, process: given, bare = false }: TerminalViewProps): JSX.Element {
   const t = useTokens();
+  // Wherever a terminal is drawn — under a tool call, in the Terminals tab, placed — a process behind it
+  // brings the process's controls with it: its stats, "Tell Claude when it prints…", Stop through the engine.
+  const found = useProcessOfTerminal(given === undefined ? taskId : undefined, callId, project);
+  const process = given ?? found;
   const copy = useTerminal(taskId, callId, project);
   const summary = copy?.summary;
   const running = summary !== undefined ? summary.endedAt === undefined : process !== undefined && !processEnded(process.state);
@@ -176,7 +181,9 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
             <View width={18} height={18} borderRadius={5} alignItems="center" justifyContent="center" flexShrink={0} backgroundColor={(waiting ? t.mix(t.v("warn"), 14, "transparent") : t.v("panel-3")) as never}>
               <Icon name="terminal" size={12} color={String(t.v(waiting ? "warn" : "accent"))} />
             </View>
-            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0} maxWidth="60%" {...((isWeb ? { title: process !== undefined ? `${process.command} · pid ${process.pid}` : command } : {}) as object)}>
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} numberOfLines={1} flexShrink={0} maxWidth="60%" {...((isWeb ? { title: process !== undefined ? `${commandLinesOf(process.command, dialect)}
+
+pid ${process.pid}` : commandLinesOf(command, dialect) } : {}) as object)}>
               {title}
             </Txt>
             {below ? (
@@ -232,17 +239,17 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
           <CommandRows command={command} dialect={dialect} />
         ) : reading === "text" ? (
           <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0}>
-            <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} {...(isWeb ? { style: { whiteSpace: "pre-wrap", userSelect: "text" } } : { selectable: true })}>
+            <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} {...(isWeb ? { style: { ...WRAP_WEB, userSelect: "text" } } : { selectable: true })}>
               {kept?.plain() ?? ""}
             </Text>
           </Scroller>
         ) : (
           <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0} capped={!fill && more}>
-            <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>
+            <View flexDirection="row" alignItems="flex-start" gap={8} minWidth={0}>
               <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.accent}>
                 ❯
               </Text>
-              <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} flex={1} minWidth={0} numberOfLines={fill ? undefined : 1}>
+              <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} flex={1} minWidth={0} {...((isWeb ? { style: WRAP_WEB } : {}) as object)}>
                 <CommandLine command={command} dialect={dialect} t={t} />
               </Text>
               {summary?.by === "you" ? <YouChip /> : null}
@@ -351,6 +358,16 @@ function FoldHead({ onFold, label, children }: { onFold: (() => void) | undefine
       {children}
     </Press>
   );
+}
+
+/** The engine's process a terminal is the output of, as the window knows it — none while `taskId` is undefined. */
+function useProcessOfTerminal(taskId: string | undefined, callId: string, project: string | undefined): ProcessSummary | undefined {
+  const snapshot = useCallback(() => (taskId === undefined ? undefined : processes.ofTerminal(taskId, callId)), [taskId, callId]);
+  const found = useSyncExternalStore(processes.subscribe, snapshot, snapshot);
+  useEffect(() => {
+    if (taskId !== undefined) processes.ensureSession(taskId, project);
+  }, [taskId, project]);
+  return found;
 }
 
 /** A second's tick while a command runs, for its elapsed time. */

@@ -3,7 +3,7 @@ import { Platform } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { CommandDialect } from "@jaira/shared/browser";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
-import { TERM_INK, type TermLine } from "@jaira/ui/terminalModel";
+import { TERM_INK, type TermLine, type TermSpan } from "@jaira/ui/terminalModel";
 import { takenApartOf } from "@jaira/ui/transcript";
 import { Press, Txt, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -41,27 +41,37 @@ export function CommandLine({ command, dialect, t }: { command: string; dialect:
   );
 }
 
-/** One line of the screen, its spans in their colours: clipped at the edge as a terminal's, or (`wrap`) wrapped. */
-export function ScreenLine({ line, t, wrap = false }: { line: TermLine; t: Tokens; wrap?: boolean }): JSX.Element {
+/** How a screen's text wraps: at spaces where it can, anywhere where it must — a long path or URL breaks rather than running past the edge. */
+export const WRAP_WEB = { whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" } as const;
+
+/** One line of the screen, its spans in their colours, wrapped as a terminal wraps a line longer than it is wide — or (`clip`) cut at the edge. */
+export function ScreenLine({ line, t, clip = false }: { line: TermLine; t: Tokens; clip?: boolean }): JSX.Element {
   const base = font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object;
-  const shape = wrap ? (isWeb ? { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } : {}) : isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 };
+  const shape = !clip ? (isWeb ? { style: WRAP_WEB } : {}) : isWeb ? { style: { whiteSpace: "pre", overflow: "hidden" } } : { numberOfLines: 1 };
   return (
     <Text {...base} color={TERM_INK.text} minWidth={0} {...(shape as object)}>
-      {line.length === 0
-        ? " "
-        : line.map((span, i) => (
-            <Text
-              key={i}
-              color={span.you === true ? TERM_INK.accent : (span.fg ?? TERM_INK.text)}
-              {...(span.you === true ? { backgroundColor: "rgba(179,182,255,0.16)" } : span.bg !== undefined ? { backgroundColor: span.bg } : {})}
-              {...(span.bold === true || span.you === true ? { fontWeight: "600" } : {})}
-              {...(span.dim === true ? { opacity: 0.6 } : {})}
-              {...(span.italic === true ? { fontStyle: "italic" } : {})}
-              {...(span.underline === true ? { textDecorationLine: "underline" } : {})}
-            >
-              {span.text}
-            </Text>
-          ))}
+      {line.length === 0 ? " " : line.map((span, i) => <ScreenSpan key={i} span={span} />)}
+    </Text>
+  );
+}
+
+/** One span in its colours and attributes: inverse swaps ink and ground, hidden keeps its room but not its ink. */
+function ScreenSpan({ span }: { span: TermSpan }): JSX.Element {
+  const ink = span.you === true ? TERM_INK.accent : (span.fg ?? TERM_INK.text);
+  const ground = span.you === true ? "rgba(179,182,255,0.16)" : span.bg;
+  const [color, backgroundColor] = span.inverse === true ? [ground ?? TERM_INK.ground, ink] : [ink, ground];
+  const lines = (span.underline === true ? (span.strike === true ? "underline line-through" : "underline") : span.strike === true ? "line-through" : "") as "" | "underline" | "line-through" | "underline line-through";
+  return (
+    <Text
+      color={span.hidden === true ? "transparent" : color}
+      {...(backgroundColor !== undefined ? { backgroundColor } : {})}
+      {...(span.bold === true || span.you === true ? { fontWeight: "600" } : {})}
+      {...(span.dim === true ? { opacity: 0.6 } : {})}
+      {...(span.italic === true ? { fontStyle: "italic" } : {})}
+      {...(lines !== "" ? { textDecorationLine: lines } : {})}
+      {...((span.overline === true && isWeb ? { style: { textDecorationLine: `${lines} overline`.trim() } } : {}) as object)}
+    >
+      {span.text}
     </Text>
   );
 }

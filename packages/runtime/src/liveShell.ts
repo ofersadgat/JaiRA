@@ -14,6 +14,7 @@
  */
 import { spawn, type ChildProcess } from "node:child_process";
 import { basename } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { MarkFilter, shellQuote } from "./shellMarks";
 import { descendantsOf, signalEach } from "./processTree";
 
@@ -119,8 +120,11 @@ export class LiveShell {
       this.running.end = { exitCode: Number(status), cwd: where ?? "", env };
       this.settle();
     });
-    this.child.stdout?.on("data", (chunk: Buffer) => this.heard("stdout", outFilter.feed(chunk.toString("utf8"))));
-    this.child.stderr?.on("data", (chunk: Buffer) => this.heard("stderr", errFilter.feed(chunk.toString("utf8"))));
+    // A character cut between two chunks is decoded whole, with the second.
+    const outText = new StringDecoder("utf8");
+    const errText = new StringDecoder("utf8");
+    this.child.stdout?.on("data", (chunk: Buffer) => this.heard("stdout", outFilter.feed(outText.write(chunk))));
+    this.child.stderr?.on("data", (chunk: Buffer) => this.heard("stderr", errFilter.feed(errText.write(chunk))));
     this.child.on("exit", (code, signal) => {
       const why = this.ending ?? (signal !== null ? `was ended by ${signal}` : `exited with code ${String(code)}`);
       this.gone = why;

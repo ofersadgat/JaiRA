@@ -8,7 +8,7 @@ import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
 import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { thoughtLiveOf } from "@jaira/ui/stillRunning";
-import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
+import { commandLinesOf, iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isHostCall, secondsOf } from "@jaira/ui/workSummary";
 import { subagentLineOf } from "@jaira/ui/subagentModel";
 import { ApprovalAskContext, useNow } from "@jaira/ui/workSummaryContext";
@@ -157,7 +157,14 @@ export function Row({
           </Txt>
         </View>
       ) : null}
-      <Txt spec={prose ? { voice: "app", scale: 12 / 12.5, color: ink.preview } : { voice: "data", scale: 11.5 / 12, color: ink.preview }} ellip flex={1} minWidth={0}>
+      <Txt
+        spec={prose ? { voice: "app", scale: 12 / 12.5, color: ink.preview } : { voice: "data", scale: 11.5 / 12, color: ink.preview }}
+        ellip
+        flex={1}
+        minWidth={0}
+        // The whole line on a hover, each of its commands on a line of its own.
+        {...(command !== undefined ? { title: commandLinesOf(command, called !== undefined ? nativeShellDialect(called) : undefined) } : {})}
+      >
         {command !== undefined ? <ShellLine line={command} tool={called} /> : preview}
       </Txt>
       {note !== undefined ? note : null}
@@ -230,6 +237,24 @@ function Payload({ label, value: held, hint, artifacts }: { label: string; value
   return (
     <View paddingTop={4} paddingBottom={6} minWidth={0}>
       <ValueView value={value} label={label} {...(hint !== undefined ? { hint: { mime: hint } } : {})} {...served(artifacts)} />
+    </View>
+  );
+}
+
+/**
+ * A shell call's whole line, opened: in its parts' colours as on the row, wrapping rather than cut, its
+ * own line breaks kept, selectable — the row above can only show its start.
+ */
+function FullCommand({ line, tool }: { line: string; tool?: string | undefined }): JSX.Element {
+  return (
+    <View paddingTop={4} paddingBottom={6} minWidth={0}>
+      <Txt
+        spec={{ voice: "data", scale: 11.5 / 12, color: "text", lineHeight: { px: 19 } }}
+        minWidth={0}
+        {...(Platform.OS === "web" ? { style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word", userSelect: "text" } } : { selectable: true })}
+      >
+        <ShellLine line={line} tool={tool} />
+      </Txt>
     </View>
   );
 }
@@ -324,12 +349,9 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   if (isHostCall(entry)) return <Row {...head} />;
   if (term !== undefined && termEntry !== undefined) {
     const { summary } = term;
-    const card =
-      termProcess !== undefined ? (
-        <ProcessCard process={termProcess} project={artifacts?.project ?? undefined} fill={false} />
-      ) : (
-        <TerminalView taskId={summary.taskId} project={artifacts?.project ?? undefined} callId={summary.callId} command={summary.command} dialect={summary.dialect} />
-      );
+    // The same card before and after its command becomes a process (a second in): it finds the process
+    // itself, and is not drawn afresh — its reading, its earlier lines — when it does.
+    const card = <TerminalView taskId={summary.taskId} project={artifacts?.project ?? undefined} callId={summary.callId} command={summary.command} dialect={summary.dialect} process={termProcess} />;
     const live = termProcess !== undefined ? !processEnded(termProcess.state) : summary.endedAt === undefined;
     const briefs =
       callProcesses.length > 0 ? (
@@ -440,6 +462,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
       {...(live !== undefined ? { shown: live } : kept !== undefined ? { shown: kept } : shown !== undefined ? { shown } : {})}
       body={
         <>
+          {line.command !== undefined ? <FullCommand line={line.command} tool={line.called} /> : null}
           {procs.length > 0 ? (
             <View flexDirection="column" gap={6} paddingTop={4} paddingBottom={6} minWidth={0}>
               {procs.filter((one) => one !== runningProc || live === undefined).map(procCard)}

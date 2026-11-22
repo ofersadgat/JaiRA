@@ -17,7 +17,7 @@ import { usePhone } from "../../app/phone";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
-import { Following, IconButton, ScreenLine } from "../terminal/TermParts";
+import { Following, IconButton, ScreenLine, WRAP_WEB } from "../terminal/TermParts";
 import { MoreButton, StopButton, TerminalView, pressedAt } from "../terminal/TerminalView";
 import { PortChip, StatsLine, StatusText, TellClaude, useSampling } from "./ProcessParts";
 
@@ -295,7 +295,7 @@ function ProcessFollowCard({ process, project, fill, bare, onFold }: { process: 
       </Txt>
       {earlier > 0 && !fill ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: TERM_INK.dim }}>{`↑ ${earlier} earlier line${earlier === 1 ? "" : "s"}`}</Txt> : null}
       {reading === "text" ? (
-        <Txt spec={{ voice: "data", scale: 11.5 / 12, color: TERM_INK.text, lineHeight: { px: 19 } }} whiteSpace="pre-wrap">
+        <Txt spec={{ voice: "data", scale: 11.5 / 12, color: TERM_INK.text, lineHeight: { px: 19 } }} {...(isWeb ? { style: { ...WRAP_WEB, userSelect: "text" } } : { selectable: true })}>
           {plain()}
         </Txt>
       ) : (

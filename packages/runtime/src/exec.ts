@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { hostNode, resolveProgram, type ProgramDeps } from "@declarative-ai/agents-cli";
 import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
@@ -438,17 +439,22 @@ export class NodeExec implements Exec {
         merged.abortSignal?.removeEventListener("abort", onAbort);
       };
 
+      // A character cut between two chunks is decoded whole, with the second, not as two halves of nothing.
+      const outText = new StringDecoder("utf8");
+      const errText = new StringDecoder("utf8");
       child.stdout?.on("data", (chunk: Buffer) => {
         // Output after the result — from what the command left running — belongs to nobody.
         if (settled) return;
         stdoutChunks?.push(chunk);
-        const text = chunk.toString("utf8");
+        const text = outText.write(chunk);
+        if (text.length === 0) return;
         stdout += text;
         observeOutput("stdout", text);
       });
       child.stderr?.on("data", (chunk: Buffer) => {
         if (settled) return;
-        const text = chunk.toString("utf8");
+        const text = errText.write(chunk);
+        if (text.length === 0) return;
         stderr += text;
         observeOutput("stderr", text);
       });

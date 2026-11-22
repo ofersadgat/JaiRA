@@ -47,6 +47,88 @@ describe("TermScreen", () => {
     screen.write("\u001b[1mbold\u001b[0m\n\tx\n");
     expect(screen.plain()).toBe("bold\n        x\n");
   });
+
+  it("redraws lines the cursor goes back up to, as a progress renderer does", () => {
+    const screen = new TermScreen();
+    screen.write("⠋ build\n⠋ test\n");
+    // log-update's redraw: up, erase, write the new frame.
+    screen.write("\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G✓ build\n✓ test\n");
+    expect(text(screen)).toEqual(["✓ build", "✓ test", ""]);
+    screen.write("one\ntwo\n\u001b[2A\u001b[J");
+    expect(text(screen)).toEqual(["✓ build", "✓ test", ""]);
+  });
+
+  it("moves along a line, erases and inserts within it", () => {
+    const screen = new TermScreen();
+    screen.write("a\u001b[3Cb\n");
+    screen.write("hello\u001b[3D\u001b[1X\n");
+    screen.write("abcdef\u001b[4D\u001b[2P\n");
+    screen.write("abc\u001b[2D\u001b[2@\n");
+    screen.write("keep\u001b[2G\u001b[1K\n");
+    expect(text(screen)).toEqual(["a   b", "he lo", "abef", "a  bc", "  ep", ""]);
+  });
+
+  it("starts a clean screen on a clear, keeping what was above", () => {
+    const screen = new TermScreen();
+    screen.write("before\n\u001b[2J\u001b[Hafter\u001b[3;1Hthird");
+    expect(text(screen)).toEqual(["before", "after", "", "third"]);
+    screen.write("\u001b[1;3Hx");
+    expect(text(screen)).toEqual(["before", "afxer", "", "third"]);
+  });
+
+  it("drops what was drawn on the alternate screen when it is left", () => {
+    const screen = new TermScreen();
+    screen.write("$ less file\n\u001b[?1049h\u001b[Hpage one\npage two\u001b[?1049l");
+    screen.write("done\n");
+    expect(text(screen)).toEqual(["$ less file", "done", ""]);
+  });
+
+  it("reads every kind of escape to its end, showing none of it", () => {
+    const screen = new TermScreen();
+    screen.write(
+      [
+        "\u001bP1$r0m\u001b\\", // DCS
+        "\u001b_Gpayload\u001b\\", // APC
+        "\u001b^private\u001b\\", // PM
+        "\u001bXsos\u001b\\", // SOS
+        "\u001b]8;;https://example.com\u001b\\link\u001b]8;;\u001b\\", // OSC 8, ended by ST
+        "\u001b]0;title\u0007", // OSC, ended by BEL
+        "\u001b#8\u001b%G\u001b(B\u001b)0", // nF
+        "\u001b=\u001b>\u001b[?2004h\u001b[>4;2m\u001b[2 q\u001b[6n\u001b[1;24r", // modes, reports, scroll region
+        "\u009b1mC1\u009b0m", // C1 CSI
+        "\u0007\u000e\u000f\u0000", // BEL, SO, SI, NUL
+        "\n",
+      ].join(""),
+    );
+    expect(text(screen)).toEqual(["linkC1", ""]);
+    expect(screen.lines()[0]).toEqual([{ text: "link" }, { bold: true, text: "C1" }]);
+  });
+
+  it("finishes a string escape cut between two pushes", () => {
+    const screen = new TermScreen();
+    screen.write("a\u001b]0;ti");
+    screen.write("tle\u001b");
+    screen.write("\\b");
+    expect(text(screen)).toEqual(["ab"]);
+  });
+
+  it("reads every attribute and colour form", () => {
+    const at = (sgr: string): object => {
+      const screen = new TermScreen();
+      screen.write(`\u001b[${sgr}mx`);
+      const { text: _text, ...style } = screen.lines()[0]![0]!;
+      return style;
+    };
+    expect(at("7;9;53;8")).toEqual({ inverse: true, strike: true, overline: true, hidden: true });
+    expect(at("38;2;255;0;16")).toEqual({ fg: "#ff0010" });
+    expect(at("38:2::255:0:16")).toEqual({ fg: "#ff0010" });
+    expect(at("38:2:255:0:16")).toEqual({ fg: "#ff0010" });
+    expect(at("48:5:196")).toEqual({ bg: "#ff0000" });
+    // An underline's colour is read past, its arguments with it — `2` is not dim, `0` not a reset.
+    expect(at("1;58;2;255;0;0;4")).toEqual({ bold: true, underline: true });
+    expect(at("4:3")).toEqual({ underline: true });
+    expect(at("4;4:0")).toEqual({});
+  });
 });
 
 describe("what the card says", () => {

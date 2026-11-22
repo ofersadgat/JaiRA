@@ -80,6 +80,17 @@ describe("NodeExec (native)", () => {
     expect(result.stderr).toBe("nope");
   });
 
+  it("decodes a character cut between two chunks whole, in what it streams and what it returns", async () => {
+    const chunks: string[] = [];
+    // ✓ is e2 9c 93: two bytes, a pause, the last — two chunks on the pipe.
+    const result = await exec.run(process.execPath, ["-e", "process.stdout.write(Buffer.from([0xe2,0x9c]));setTimeout(()=>process.stdout.write(Buffer.from([0x93,0x0a])),150)"], {
+      onOutput: (_stream, chunk) => chunks.push(chunk),
+    });
+    expect(result.stdout).toBe("✓\n");
+    expect(chunks.join("")).toBe("✓\n");
+    expect(chunks.join("")).not.toContain("�");
+  });
+
   it("runs in the given cwd", async () => {
     const result = await exec.run(process.execPath, ["-e", "process.stdout.write(process.cwd())"], {
       cwd: process.cwd(),

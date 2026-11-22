@@ -459,7 +459,7 @@ function Waiting({ taskId, callId, indent, onAnswer }: { taskId: string; callId:
   return (
     <View flexDirection="row" alignItems="flex-end" gap={8} marginLeft={indent} marginRight={8} marginBottom={6} minWidth={0}>
       <View flex={1} minWidth={0} paddingVertical={4} paddingHorizontal={8} borderRadius={6} backgroundColor={TERM_INK.ground}>
-        {lines.length > 0 ? lines.map((line, i) => <ScreenLine key={i} line={line} t={t} />) : <Txt spec={{ voice: "data", scale: 11 / 12, color: TERM_INK.dim }}>waiting for input</Txt>}
+        {lines.length > 0 ? lines.map((line, i) => <ScreenLine key={i} line={line} t={t} clip />) : <Txt spec={{ voice: "data", scale: 11 / 12, color: TERM_INK.dim }}>waiting for input</Txt>}
       </View>
       <Press onPress={onAnswer} label="Answer it: open its card here" height={24} paddingHorizontal={8} borderRadius={6} justifyContent="center" flexShrink={0} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, String(t.mix(t.v("warn"), 45, "transparent"))) as object)} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("tint-warn") : "transparent" })}>
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 600, color: "warn" }}>Answer it</Txt>
