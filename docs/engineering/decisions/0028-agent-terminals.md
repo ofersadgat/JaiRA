@@ -2,7 +2,7 @@
 id: engineering/decisions/0028-agent-terminals
 type: decision
 status: built
-updated: 2026-11-18
+updated: 2026-11-21
 decides_for: [engineering/units/host-tools, engineering/units/process-exec, engineering/decisions/0025-split-view-and-place-buttons, engineering/decisions/0007-permissionSets]
 ---
 
@@ -176,6 +176,29 @@ All four steps of the build order.
 **Not seen in the app:** an agent's own call drawn as the card under its row. The rig's world has no
 signed-in agent, and its conversation's one answer is scripted. That path is the same terminal reached
 through `ctx.toolCallId`; the row's drawing is type-checked but has not been photographed.
+
+## Amended (2026-11-21): every process a tool call starts is a terminal
+
+The person, 2026-11-21: "I want you to make it so that tool calls which end up as process calls show a
+terminal view in the ui as the command is executing. e.g. git log, git push, etc". `git log` through
+`shell` already was one; `git_push`, the merge request and CI tools, and anything else that reaches git,
+`gh` or `glab` through `NodeExec` was only its call and its result.
+
+- **Ambient, not passed.** Those tools reach their processes through hosts built once per run
+  (`GitToolHost.git(dir)`, the forge CLI's own `NodeExec`), before any call exists. So `startRun` wraps
+  every registered tool but `shell` in `withProcessTerminals` (`packages/runtime/src/toolProcesses.ts`),
+  which runs the call inside an `AsyncLocalStorage`. `NodeExec.run` asks `toolProcessFor` whether it is
+  inside one, and if so opens a terminal in the task's `TerminalHub`.
+- **One terminal per process**, `<callId>~<n>`, carrying `tool` and `call` (`TerminalSummary`). The title
+  is the process's own (`git push`), not the tool's, and the window finds a call's processes by `call`
+  (`useCallTerminals`).
+- **Watched and stopped, never typed into.** The tool decides the process's stdin, and an interactive
+  exec (its own process group, stdin held open) would change what these commands do. So there is no
+  line you type on, no answers, and never `waiting`. `Stop` and Ctrl-C abort the exec, which ends its tree.
+- **Not a run's.** A run is never a tool call's, even when `start`, `move` or a child started it:
+  `startRun` runs `outsideToolCall`. Nothing is opened under a call once it has answered.
+- **Not covered.** The System tools spawn PowerShell or osascript directly with encoded scripts, so they
+  are not watched. That is the OS answering a question, not a command anyone would read.
 
 ## Revisit when
 

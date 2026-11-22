@@ -53,6 +53,14 @@ export interface TerminalSummary {
   endsAt?: number;
   /** Every line the person typed into it, in order (each without its newline). */
   input: string[];
+  /**
+   * Set when this is not a `shell` call but a process another tool call started (`git_push` running
+   * `git push`, a merge request tool running `gh`): the tool's name. Such a process has no stdin to
+   * type into — it can be watched and stopped, never answered — and is never `waiting`.
+   */
+  tool?: string;
+  /** With {@link tool}: the id of the call that started it — the transcript's `tool_use` id. One call can start several. */
+  call?: string;
 }
 
 /** One terminal whole: its facts and what it has printed (from `summary.dropped` on). */

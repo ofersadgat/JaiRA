@@ -80,6 +80,8 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
   const summary = copy?.summary;
   const running = summary !== undefined && summary.endedAt === undefined;
   const waiting = summary !== undefined && isWaiting(summary);
+  // A process another tool call started has no stdin a person can reach: it is watched and stopped.
+  const typable = summary?.tool === undefined;
   const now = useTicking(running);
   const [reading, setReading] = useState<Reading>("terminal");
   const [following, setFollowing] = useState(true);
@@ -122,7 +124,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
         { label: "Download the log…", note: `${title.split(" ")[0]}.log`, onSelect: () => void invoke("shell:saveFile", { name: `${title.split(" ")[0]}.log`, data: base64Of(plain()) }).catch(() => undefined) },
         ...(running
           ? [
-              { label: "Send Ctrl-C", separator: true, note: "interrupt", onSelect: interrupt },
+              ...(typable ? [{ label: "Send Ctrl-C", separator: true, note: "interrupt", onSelect: interrupt }] : []),
               { label: `Stop ${title.split(" ")[0]}`, separator: true, danger: true, note: "ends the process", onSelect: stop },
             ]
           : []),
@@ -160,7 +162,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
           </Txt>
           <Txt spec={{ voice: "app", scale: 12 / 12.5, color: TONE[status.tone], weight: status.tone === "warn" ? 600 : 400 }} ellip flex={1} minWidth={0}>
             {status.text}
-            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}
+            {summary?.shell !== undefined && summary.shell !== "emulated" ? ` · live ${summary.shell}` : ""}{summary?.by === "you" ? " · yours" : ""}{summary?.tool !== undefined ? ` · ${summary.tool}` : ""}
           </Txt>
           {verbs}
         </View>
@@ -247,7 +249,7 @@ export function TerminalView({ taskId, project, callId, command, dialect, fill =
         </View>
       ) : null}
 
-      {running ? (
+      {running && typable ? (
         <InputLine
           title={title}
           waiting={waiting}

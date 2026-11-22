@@ -94,7 +94,7 @@ function Running({ summary, project, onOpen }: { summary: TerminalSummary; proje
         </Press>
       </View>
       <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} paddingLeft={32} paddingRight={10} paddingBottom={6} numberOfLines={1}>
-        {summary.by === "you" ? "You" : "Claude"} · {status.text}
+        {summary.by === "you" ? "You" : "Claude"}{summary.tool !== undefined ? ` · ${summary.tool}` : ""} · {status.text}
       </Txt>
       {tail.length > 0 ? (
         <View marginHorizontal={8} marginBottom={8} paddingVertical={6} paddingHorizontal={10} borderRadius={6} backgroundColor={TERM_INK.ground}>

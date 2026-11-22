@@ -23,6 +23,7 @@ import { createLogger } from "@declarative-ai/log";
 import { refusal } from "@jaira/shared";
 import { containerRefusal, isContainerEnv, isWslEnv, toWslPath, type ContainerExecEnv, type ExecEnv } from "./paths";
 import { detachedForTree, killTree, type KillTreeOptions } from "./killTree";
+import { toolProcessFor } from "./toolProcesses";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.runtime.exec");
@@ -300,7 +301,37 @@ export class NodeExec implements Exec {
   }
 
   run(command: string, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
-    const report = (error: unknown, phase: "spawn" | "exit" | "output"): void => this.reportObserverError(error, phase);
+    // A process a tool call starts is a terminal of its own (`./toolProcesses`); `shell`'s own,
+    // interactive ones are already one.
+    const watched = options.interactive === undefined ? toolProcessFor(command, args, options.cwd) : undefined;
+    if (watched === undefined) return this.spawnRun(command, args, options);
+    const { terminal, stop } = watched;
+    const abortSignal = options.abortSignal !== undefined ? AbortSignal.any([options.abortSignal, stop]) : stop;
+    return this.spawnRun(command, args, {
+      ...options,
+      abortSignal,
+      onOutput: (stream, chunk) => {
+        try {
+          terminal.output(chunk);
+        } catch {
+          // Watching is not the work.
+        }
+        options.onOutput?.(stream, chunk);
+      },
+    }).then(
+      (result) => {
+        terminal.ended({ exitCode: result.code, signal: result.signal, timedOut: result.timedOut, stopped: stop.aborted });
+        return result;
+      },
+      (error: unknown) => {
+        terminal.ended({ exitCode: null, signal: null, timedOut: false, stopped: stop.aborted });
+        throw error;
+      },
+    );
+  }
+
+  private spawnRun(command: string, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
+    const report =(error: unknown, phase: "spawn" | "exit" | "output"): void => this.reportObserverError(error, phase);
     const merged: ExecOptions = {
       ...options,
       execEnv: options.execEnv ?? this.defaults.execEnv ?? "windows",

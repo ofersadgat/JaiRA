@@ -135,8 +135,11 @@ export interface TaskShells {
 
 /** The terminals a shell tool streams its calls to — the service's per-task hub. */
 export interface ShellTerminals {
-  /** A call is starting; undefined when nobody is keeping its terminal. */
-  open(call: { callId: string | undefined; command: string; cwd: string | undefined; dialect: CommandDialect; shell?: string }): ShellCallTerminal | undefined;
+  /**
+   * A call is starting; undefined when nobody is keeping its terminal. `tool` and `call` say it is a
+   * process another tool's call started (`./toolProcesses`): that tool's name and that call's id.
+   */
+  open(call: { callId: string | undefined; command: string; cwd: string | undefined; dialect: CommandDialect; shell?: string; tool?: string; call?: string }): ShellCallTerminal | undefined;
 }
 
 /** One call's terminal, as the shell tool feeds it. */
