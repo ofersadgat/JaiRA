@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { InstanceNode, OperationRecordView } from "@jaira/shared/browser";
 import { ANY, CALL_RENDERERS, functionNameOf, lookup, registryOf, roleOf, visibilityOf, withOverrides } from "../src/renderer/callRenderers";
-import { programCallInstance, programCallsOf, weaveProgramCalls } from "../src/renderer/programCalls";
+import { STEP_SLACK_MS, programCallInstance, programCallsOf, stepBlockOf, stepOf, stepsAt, weaveProgramCalls } from "../src/renderer/programCalls";
 import type { ToolEntry, TranscriptEntry } from "../src/renderer/transcript";
 
 describe("the registry", () => {
@@ -247,5 +247,75 @@ describe("woven into the thread", () => {
   it("keeps a live answer after everything recorded", () => {
     const live: TranscriptEntry[] = [...thread, { kind: "live", text: "thr" }];
     expect(weaveProgramCalls(live, calls, "chat").at(-1)!.kind).toBe("live");
+  });
+});
+
+describe("a step picked in the Steps index, found in the thread by time", () => {
+  // The blocks the thread draws: the first message, its reply, the second message, the work after it.
+  const spans = [
+    { from: T + 20, to: T + 20 },
+    { from: T + 400, to: T + 400 },
+    { from: T + 2010, to: T + 2010 },
+    { from: T + 3000, to: T + 3300 },
+  ];
+
+  it("lands on the work a call is a row of", () => {
+    expect(stepBlockOf(spans, T + 3100)).toBe(3);
+    expect(stepBlockOf(spans, T + 3300)).toBe(3);
+  });
+
+  it("lands on the work a call falls in, though the message before it ended a moment earlier", () => {
+    const quick = [{ from: T + 2010, to: T + 2010 }, { from: T + 2012, to: T + 2020 }];
+    expect(stepBlockOf(quick, T + 2015)).toBe(1);
+  });
+
+  it("lands a reply on the message it answers, entered a moment after it", () => {
+    expect(stepBlockOf(spans, T + 2000 + STEP_SLACK_MS - 10)).toBe(2);
+  });
+
+  it("lands a wait on the message that answered it", () => {
+    expect(stepBlockOf(spans, T + 1000)).toBe(2);
+  });
+
+  it("lands past every block on the last, and nowhere with none", () => {
+    expect(stepBlockOf(spans, T + 9000)).toBe(3);
+    expect(stepBlockOf([], T)).toBe(-1);
+  });
+
+  it("finds a step by its id, the root included", () => {
+    expect(stepOf(root, "i-root")).toBe(root);
+    expect(stepOf(root, root.children[3]!.instanceId)).toBe(root.children[3]);
+    expect(stepOf(root, "nope")).toBeUndefined();
+  });
+
+  it("tells which step the reader is at, and the steps on screen", () => {
+    const at = stepsAt(root, T + 2700, { from: T + 2010, to: T + 3300 });
+    expect(at.current).toBe(root.children[2]!.instanceId);
+    expect(stepsAt(root, T + 3300).current).toBe(root.children[6]!.instanceId);
+    expect([...at.onScreen].sort()).toEqual([root.children[2], root.children[3], root.children[4], root.children[5], root.children[6]].map((n) => n!.instanceId).sort());
+    expect(stepsAt(root, T - STEP_SLACK_MS - 100).current).toBe("i-root");
+  });
+});
+
+describe("a thread whose record keeps no times", () => {
+  const calls = programCallsOf(root, records);
+  const untimed: TranscriptEntry[] = [
+    { kind: "message", role: "user", text: "one" },
+    { kind: "message", role: "assistant", text: "one" },
+    { kind: "message", role: "user", text: "two" },
+    { kind: "message", role: "assistant", text: "two" },
+    { kind: "message", role: "user", text: "three" },
+  ];
+
+  it("dates each message by the program's own calls, so its calls are woven where they happened", () => {
+    const woven = weaveProgramCalls(untimed, calls, "task");
+    const times = woven.map((e) => (e.kind === "message" ? `${e.role}:${e.text}@${(e.at ?? NaN) - T}` : e.kind === "tool" ? `tool:${e.name}@${(e.at ?? NaN) - T}` : e.kind));
+    // The first message as its reply starts, each reply as it ends, a later message as the wait for it ends.
+    expect(times).toEqual(["user:one@10", "assistant:one@510", "user:two@1500", "assistant:two@2500", "tool:conversation_digest@3000", "tool:notice@3100", "tool:start_task@3200", "tool:now@3300", "user:three@4500"]);
+  });
+
+  it("keeps a time a message already has", () => {
+    const woven = weaveProgramCalls([{ kind: "message", role: "user", text: "one", at: T + 7 }], calls, "task");
+    expect(woven.find((e) => e.kind === "message")!.at).toBe(T + 7);
   });
 });

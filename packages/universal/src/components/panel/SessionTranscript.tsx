@@ -198,6 +198,8 @@ export const Transcript = memo(function Transcript({
         const fade = doomed ? { opacity: 0.38 } : {};
         const gap = gapBetween(endOfBlock(list[j - 1]), startOfBlock(block));
         const marker = marks ? <View ref={frame.ctx.register(`block:${i}`, { at: startOfBlock(block) ?? 0 }) as never} height={0} /> : null;
+        // When the block happened (web): what a step picked in the Steps index is found by (`stepBlockOf`).
+        const span = isWeb ? spanOf(block) : {};
         const before = (
           <>
             {marker}
@@ -210,7 +212,7 @@ export const Transcript = memo(function Transcript({
               {before}
               {cutLine}
               <Virtual>
-                <View minWidth={0} {...fade}>
+                <View minWidth={0} {...fade} {...span}>
                   <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, total)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={callsHere} />
                 </View>
               </Virtual>
@@ -245,7 +247,7 @@ export const Transcript = memo(function Transcript({
               {cutLine}
               {dropped}
               <Virtual>
-                <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})}>
+                <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})} {...span}>
                   <Message
                     entry={block}
                     {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
@@ -316,6 +318,13 @@ export const Transcript = memo(function Transcript({
 });
 
 const NO_ENTRIES: TranscriptEntry[] = [];
+
+/** A block's first and last moments, stamped on its element (`data-from`, `data-to`); none for a block with no time. */
+function spanOf(block: Parameters<typeof startOfBlock>[0]): Record<string, number> {
+  const from = startOfBlock(block);
+  if (from === undefined) return {};
+  return { "data-from": from, "data-to": endOfBlock(block) ?? from };
+}
 
 /** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on. */
 const Inner: TranscriptOf = ({ entries, working, onOpenSidechain, artifacts }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} artifacts={artifacts} />;

@@ -51,8 +51,7 @@ A white sheet with rounded corners on the grey page, carrying one conversation f
 Where the transcript is a program's conversation ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)), the calls the program made
 besides its replies are woven into its entries where they happened (`weaveProgramCalls`): a call is a
 work row, folded with the work around it, a told line, or nothing — by the renderer its (function, role)
-finds. `WorkOpenContext` starts every summary of work open (the task view's detail); a summary folded by
-hand stays folded.
+finds. A summary of work starts folded at either detail, and is opened by hand.
 
 ## Only the fold and the scroll belong to the transcript itself
 

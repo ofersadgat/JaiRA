@@ -43,10 +43,14 @@ A gate's prompt is set in the small uppercase `--dim` heading style, its glyph a
 
 A run whose workflow is a program (decision 0029) is not drawn as a sheet per state: the column is the
 Chat view's own thread and box ([chat-view](chat-view.md)) at `task` detail ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)).
-What chat folds is open — every summary of work starts with its steps showing, and can be folded by hand
-— what chat hides is folded, and **Every step** (a switch over the box, off at first) draws every call
+Every summary of work starts folded, as in chat, and is opened by hand; what chat hides is folded, and **Every step** (a switch over the box, off at first) draws every call
 the program made as a row of its own, the waits and the replies among them. The queue, Stop, Interrupt and
 the edits are the Chat view's.
+
+A step picked in the Steps index beside it opens the step's card **and** takes the thread to it: the block
+the step happened in (the work it is a row of, else the message it is or answered) scrolled to the top and
+lit for 1.2s; as the reader scrolls, the index marks the step they are at (`stepBookmarks.ts`). The thread
+draws messages and calls, not states, so a step is found by when it started (web).
 
 ## Every link on the page leads to the thing it names
 

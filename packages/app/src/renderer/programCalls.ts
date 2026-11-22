@@ -244,6 +244,43 @@ function entriesOfCall(call: ProgramCall, entry: RendererEntry, held: ReadonlySe
   }
 }
 
+/**
+ * The thread's messages, each with a time: a conversation whose record keeps none (an agent that writes
+ * no timestamps) would have every call woven after its last message. A message the program answered is
+ * dated by the program's own calls — the person's by the `input()` it answered, a reply by the `llm()`
+ * whose prompt was the message before it — each call used once, in order. A message with a time keeps it.
+ */
+function datedByCalls(entries: readonly TranscriptEntry[], calls: readonly ProgramCall[]): readonly TranscriptEntry[] {
+  if (!entries.some((entry) => entry.kind === "message" && entry.at === undefined)) return entries;
+  const used = new Set<ProgramCall>();
+  const find = (test: (call: ProgramCall) => boolean, after: number): ProgramCall | undefined => calls.find((call) => !used.has(call) && call.at >= after && test(call));
+  let after = Number.NEGATIVE_INFINITY;
+  let said: string | undefined;
+  return entries.map((entry) => {
+    if (entry.kind !== "message") return entry;
+    const text = entry.text?.trim();
+    let at = entry.at;
+    if (at === undefined && text !== undefined) {
+      const call =
+        entry.role === "user"
+          ? find((one) => (one.fn === "input" && objectOf(one.result)?.["text"] === text) || (one.fn === "llm" && typeof one.args["prompt"] === "string" && one.args["prompt"].trim() === text), after)
+          : entry.role === "assistant" && said !== undefined
+            ? find((one) => one.fn === "llm" && typeof one.args["prompt"] === "string" && one.args["prompt"].trim() === said, after)
+            : undefined;
+      if (call !== undefined) {
+        // The reply that answers a first message dates the reply too: only a wait is the person's alone.
+        if (entry.role === "assistant" || call.fn === "input") used.add(call);
+        // A person's message lands when the wait for it ends; the first, which no wait asked for, as its reply starts.
+        at = entry.role === "user" ? (call.fn === "input" ? (call.endedAt ?? call.at) : call.at) : (call.endedAt ?? call.at);
+      }
+    }
+    if (entry.role === "user" && text !== undefined) said = text;
+    if (at === undefined) return entry;
+    after = Math.max(after, entry.role === "user" ? at - 1 : at);
+    return entry.at === at ? entry : { ...entry, at };
+  });
+}
+
 /** When an entry happened, for weaving; a live tail is after everything recorded. */
 function timeOf(entry: TranscriptEntry): number | undefined {
   if (entry.kind === "live" || entry.kind === "writing") return Number.POSITIVE_INFINITY;
@@ -270,6 +307,7 @@ export function weaveProgramCalls(
   everyStep = false,
 ): TranscriptEntry[] {
   if (calls.length === 0) return [...entries];
+  entries = datedByCalls(entries, calls);
   const held = heldMessages(entries);
   const added: TranscriptEntry[] = [];
   for (const call of calls) {
@@ -293,6 +331,77 @@ export function weaveProgramCalls(
   }
   while (next < added.length) out.push(added[next++]!);
   return out;
+}
+
+/**
+ * How far a step may start after the block it belongs to: a reply's state is entered a moment after the
+ * message it answers was sent, a check's call a moment after its state.
+ */
+export const STEP_SLACK_MS = 250;
+
+/** A drawn block's first and last moments (`data-from`, `data-to` on its element). */
+export interface BlockSpan {
+  from: number;
+  to: number;
+}
+
+/**
+ * The block a step that started at `at` is found in (a Steps pick, decision 0033 §1): the block it
+ * falls in, or the nearest within a moment of it — the work it is a row of, else the message it is or
+ * answered; failing that, the first block that had not ended before it, and past them all the last.
+ * `-1` with no blocks.
+ */
+export function stepBlockOf(spans: readonly BlockSpan[], at: number): number {
+  if (spans.length === 0) return -1;
+  let nearest = 0;
+  let distance = Number.POSITIVE_INFINITY;
+  spans.forEach((span, i) => {
+    const off = at < span.from ? span.from - at : at > span.to ? at - span.to : 0;
+    if (off < distance) {
+      nearest = i;
+      distance = off;
+    }
+  });
+  if (distance <= STEP_SLACK_MS) return nearest;
+  const found = spans.findIndex((span) => span.to >= at - STEP_SLACK_MS);
+  return found === -1 ? spans.length - 1 : found;
+}
+
+/** Every state under `root`, depth first. */
+function descendantsOf(root: InstanceNode): InstanceNode[] {
+  const out: InstanceNode[] = [];
+  const visit = (node: InstanceNode): void => {
+    for (const child of node.children) {
+      out.push(child);
+      visit(child);
+    }
+  };
+  visit(root);
+  return out;
+}
+
+/**
+ * The step the thread is at when it shows what happened at `at` — the last state of the program that
+ * started by then — and, given the moments the screen spans, every state that started within them; the
+ * root where nothing under it had started yet. What the Steps index beside the thread marks.
+ */
+export function stepsAt(root: InstanceNode | undefined, at: number, shown?: { from: number; to: number }): { current: string | undefined; onScreen: Set<string> } {
+  const onScreen = new Set<string>();
+  if (root === undefined) return { current: undefined, onScreen };
+  let current: InstanceNode = root;
+  for (const node of descendantsOf(root)) {
+    if (node.startedAt <= at + STEP_SLACK_MS && node.startedAt >= current.startedAt) current = node;
+    if (shown !== undefined && node.startedAt >= shown.from - STEP_SLACK_MS && node.startedAt <= shown.to + STEP_SLACK_MS) onScreen.add(node.instanceId);
+  }
+  onScreen.add(current.instanceId);
+  return { current: current.instanceId, onScreen };
+}
+
+/** The state `instanceId` names under `root` (the root itself included). */
+export function stepOf(root: InstanceNode | undefined, instanceId: string): InstanceNode | undefined {
+  if (root === undefined) return undefined;
+  if (root.instanceId === instanceId) return root;
+  return descendantsOf(root).find((node) => node.instanceId === instanceId);
 }
 
 /** The row id a program's call is drawn under, and the state it names — what an interrupt reaches. */

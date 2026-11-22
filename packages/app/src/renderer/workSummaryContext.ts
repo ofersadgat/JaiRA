@@ -22,12 +22,6 @@ export const DEFAULT_WORK_LOOK: WorkLook = { phases: true, rows: 3, thinking: tr
 export const WorkLookContext = createContext<WorkLook>(DEFAULT_WORK_LOOK);
 
 /**
- * Whether a summary of work starts with every step open — the task view's level of detail (decision
- * 0033 §1), where what chat folds is read open. It can still be folded by hand.
- */
-export const WorkOpenContext = createContext<boolean>(false);
-
-/**
  * Where a phase's name learns which calls CHANGED something: the project's read-only permission set,
  * asked once per distinct call and remembered (`permissionSets:judgeReadOnly`, {@link isChange}).
  * Provided by the shell for the project it stands on, the Appearance preview's sample calls included;

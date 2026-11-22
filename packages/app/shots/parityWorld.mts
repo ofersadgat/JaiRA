@@ -702,7 +702,7 @@ export const SCENES: readonly Scene[] = [
   },
   {
     // The same conversation read as its TASK (decision 0033 §1): the Chat view's thread and composer in the
-    // panel, the program's steps open under the reply, and the Every step switch over the thread.
+    // panel, the program's steps folded under the reply, and the Every step switch over the box.
     name: "task-program",
     reach: async (app) => {
       await programConversation(app);
@@ -710,7 +710,7 @@ export const SCENES: readonly Scene[] = [
       await app.clickText("Tasks");
       await app.until(says(PROGRAM_CONVERSATION), "the conversation's card");
       await app.clickText(PROGRAM_CONVERSATION);
-      await app.until(says("Reading the conversation") + ` && document.querySelector('[role="switch"][aria-label="Every step"], [role="switch"][title="Every step"]') !== null`, "the program's steps, open, in the panel, and Every step over the box");
+      await app.until(says("Checking for a correction") + ` && document.querySelector('[role="switch"][aria-label="Every step"], [role="switch"][title="Every step"]') !== null`, "the program's steps, folded, in the panel, and Every step over the box");
       await settle(800);
     },
   },

@@ -118,7 +118,7 @@ affordances (the composer, the live edge) come from the host, and the task view 
 | | Chat | Task view |
 | --- | --- | --- |
 | A state's letterhead | hidden; consecutive replies in one session read as one thread | shown |
-| Calls between two messages | folded into a summary row, as an agent's tool calls are | open rows |
+| Calls between two messages | folded into a summary row, as an agent's tool calls are | the same: folded, opened by hand |
 | A call whose role is hidden in this view | not drawn | drawn, folded |
 | A waiting `input()` | the composer | the composer |
 | Parallel branches | the task view's bands | the task view's bands |
@@ -301,8 +301,13 @@ The person: "implement it".
   program read from its root is the Chat view's own thread and composer at `task` detail
   (`RunConversation.tsx`'s `ProgramChat`, through `usePaneChatSurface(…, "task")`) — its queue, its
   stop and its edits with it. The per-state sheets are no longer drawn for a program.
-  At `task` detail every summary of work starts open, each phase under its head (`WorkOpenContext`),
-  and can still be folded by hand; chat keeps them folded.
+  A summary of work starts folded at both details, as an agent's tool calls do, and is opened by hand
+  (the person, 2026-11-22: "in task view the tools blocks should still be collapsed by default").
+  A step picked in the Steps index opens its card and takes the thread to the block it happened in, and
+  the thread tells the index where the reader is (`stepBookmarks.ts`, `stepBlockOf`, `stepsAt`) — what
+  the per-state sheets did (the person, 2026-11-22: "clicking on a step should both scroll to the step and
+  bring up the step information"). A message whose record keeps no time is dated by the program's own
+  calls (`datedByCalls`): without it every call was woven after the last message.
 - **hw** (declarative-ai, SCRIPTS.md §18): `renderUI` (both forms, tied to its call site by the compiler,
   written on the call's state as `present`, literal configs, a warning where no call can be found),
   `interruptSignal()` (a recorded id), `Interrupted`. JaiRA carries `present` through the board's

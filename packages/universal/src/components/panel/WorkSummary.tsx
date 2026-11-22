@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactN
 import { ScrollView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
-import { ApprovalAskContext, WorkLookContext, useNow, useReadOnlyVerdicts, WorkOpenContext } from "@jaira/ui/workSummaryContext";
+import { ApprovalAskContext, WorkLookContext, useNow, useReadOnlyVerdicts } from "@jaira/ui/workSummaryContext";
 import {
   ACTIVE_NAME,
   allOf,
@@ -669,13 +669,9 @@ function Ask({ children, afterRow }: { children: ReactNode; afterRow: boolean })
 export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { entries: readonly WorkEntry[]; working: boolean; kept: readonly number[]; clock: (at?: number) => string }): JSX.Element {
   const t = useTokens();
   const look = useContext(WorkLookContext);
-  // At the task view's level of detail every step starts open (decision 0033 §1): every row, and every
-  // phase under its head — `flipped` then holds the phases folded by hand rather than those opened.
-  const startOpen = useContext(WorkOpenContext);
-  const [open, setOpen] = useState(startOpen);
-  // The phases opened under their heads (folded, where they start open), each by its first line.
-  const [flipped, setOpened] = useState<ReadonlySet<number>>(() => new Set());
-  const opened = useMemo(() => ({ has: (at: number) => flipped.has(at) !== startOpen }), [flipped, startOpen]);
+  const [open, setOpen] = useState(false);
+  // The phases opened under their heads, each by its first line.
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
   const toggle = (at: number): void =>
     setOpened((was) => {
       const next = new Set(was);

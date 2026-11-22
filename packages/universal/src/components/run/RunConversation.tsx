@@ -71,15 +71,30 @@ export function RunConversation({
   // A PROGRAM read from its root is one conversation (decision 0033 §1): the Chat view's own thread and
   // composer — its queue, its stop, its edits — drawn at the task view's level of detail.
   if (parent !== undefined && parent === detail.instances[0] && (detail.program === true || isProgramConversation(detail.instances))) {
-    return <ProgramChat detail={detail} source={source} project={project} />;
+    return <ProgramChat detail={detail} source={source} project={project} focus={focus} onHere={onHere} />;
   }
   return <RunConversationOf detail={detail} parent={parent} source={source} project={project} gate={gate} onGate={onGate} asking={asking} onRerun={onRerun} onResume={onResume} onOpenSidechain={onOpenSidechain} foot={foot} onLayout={onLayout} focus={focus} onHere={onHere} />;
 }
 
-/** A program conversation, read as its task: the Chat view's thread at `task` detail. */
-function ProgramChat({ detail, source, project }: { detail: TaskDetail; source: TranscriptSource; project: string | undefined }): JSX.Element {
+/**
+ * A program conversation, read as its task: the Chat view's thread at `task` detail — a step picked in
+ * the Steps index beside it goes there (`focus`), and where the reader is is told back (`onHere`).
+ */
+function ProgramChat({
+  detail,
+  source,
+  project,
+  focus,
+  onHere,
+}: {
+  detail: TaskDetail;
+  source: TranscriptSource;
+  project: string | undefined;
+  focus: { instance: string; at: number } | undefined;
+  onHere: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
+}): JSX.Element {
   const surface = usePaneChatSurface(detail.taskId, project, { detail, conversation: source.conversation, liveTurn: source.liveTurn }, (taskId) => source.onSelectTask?.(taskId), "task");
-  return <ChatThread surface={surface} key={detail.taskId} />;
+  return <ChatThread surface={surface} key={detail.taskId} focus={focus} onHere={onHere} />;
 }
 
 function RunConversationOf({

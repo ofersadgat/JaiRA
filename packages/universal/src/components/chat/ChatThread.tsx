@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
-import { ApprovalAskContext, WorkOpenContext } from "@jaira/ui/workSummaryContext";
+import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { routeDownOf, routeOf } from "@jaira/ui/composerModel";
 import { keepLayersOf } from "@jaira/ui/composerCards";
 import { facesOf } from "@jaira/ui/environmentModel";
@@ -37,6 +37,7 @@ import { AgentHostContext } from "../panel/AgentRail";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 import { PictureSizesContext } from "../pictureSize";
 import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrolled, settled, type EdgeState } from "./liveEdge";
+import { useStepBookmarks } from "./stepBookmarks";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -64,7 +65,17 @@ import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrol
  * progress and the message it will open with, not sent yet (`QueuedMessage`); the box takes no reply
  * then, and its chips change the start it waits for.
  */
-export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
+export function ChatThread({
+  surface,
+  focus,
+  onHere,
+}: {
+  surface: ChatSurface;
+  /** A step to go to, picked in the Steps index beside the thread (a program read as its task); `at` changes on every pick. */
+  focus?: { instance: string; at: number } | undefined;
+  /** Where the reader is, as they scroll — the step being viewed, and every step on screen — for that index to mark. */
+  onHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
+}): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const scroller = useRef<ScrollView | null>(null);
@@ -153,10 +164,12 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   useEffect(() => () => {
     if (idle.current !== null) clearTimeout(idle.current);
   }, []);
+  const steps = useStepBookmarks(scroller, surface.detail?.instances[0], m.entries, focus, onHere, () => settle(readerUp(edge.current)), () => edge.current.pinned, String(t.v("accent")));
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
     if (isWeb) {
       setMoving(true);
       readDay();
+      steps.track();
       if (idle.current !== null) clearTimeout(idle.current);
       idle.current = setTimeout(() => setMoving(false), 900);
     }
@@ -275,7 +288,10 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           const { state, follow } = resized(edge.current, height, Date.now());
           settle(state);
           if (follow) toEnd();
-          if (isWeb) readDay();
+          if (isWeb) {
+            readDay();
+            steps.track();
+          }
         }}
       >
         <ScrollWindowProvider window={scrollWindow.window}>
@@ -286,7 +302,6 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         <AgentHostContext.Provider value={runs.agentHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
         <CallInterruptContext.Provider value={m.interruptCall}>
-        <WorkOpenContext.Provider value={surface.density === "task"}>
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
             // Not started: the message it will open with, not sent until it has somewhere to run — in
@@ -369,7 +384,6 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             </Paper>
           </>
         ) : null}
-        </WorkOpenContext.Provider>
         </CallInterruptContext.Provider>
         </ApprovalAskContext.Provider>
         </AgentHostContext.Provider>
