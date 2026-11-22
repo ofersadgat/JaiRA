@@ -49,7 +49,10 @@ export default async function improve(
     let tried: Tried | null = null;
     let verdict: Judgement | null = null;
     if (trying) {
-      tried = await simulate_change({ files: plan.files, lesson: plan.rule, scope: scope, context: { task: digest.task, session: context.session } });
+      // Through a typed `const`: a registry call answers `any`, and `any` assigned to `tried` would leave
+      // it `Tried | null` below, where it is never null.
+      const trial: Tried = await simulate_change({ files: plan.files, lesson: plan.rule, scope: scope, context: { task: digest.task, session: context.session } });
+      tried = trial;
       if (tried.simulated && tried.version !== undefined && tried.version.kind === "declined") {
         // The conversation running when the change lands could not switch to it: it would reach only
         // the next one. That is the change's to fix.

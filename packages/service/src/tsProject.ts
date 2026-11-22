@@ -476,15 +476,21 @@ export class TsProjects {
     roots: Map<string, string>,
   ): TS.LanguageServiceHost {
     const base = dirname(config);
+    const registry = pathOf(resolvePath(base, REGISTRY_DECLARATION_FILE));
+    const registryKey = keyOf(ts, registry);
+    const isRegistry = (file: string): boolean => keyOf(ts, file) === registryKey;
     return {
       // Minus whatever the overlay says is not there: a root the program cannot read is a root it
-      // reports as missing, which is a diagnostic about the fixture rather than about the code.
-      getScriptFileNames: () => [...roots].flatMap(([key, path]) => (this.open.get(key)?.text === null ? [] : [path])),
+      // reports as missing, which is a diagnostic about the fixture rather than about the code. Plus
+      // the declaration of `$REGISTRY` — see {@link REGISTRY_DECLARATION}.
+      getScriptFileNames: () => [...[...roots].flatMap(([key, path]) => (this.open.get(key)?.text === null ? [] : [path])), registry],
       getScriptVersion: (file) => {
+        if (isRegistry(file)) return "r";
         const held = this.open.get(keyOf(ts, file));
         return held === undefined ? `d${stamp(file)}` : `b${held.version}`;
       },
       getScriptSnapshot: (file) => {
+        if (isRegistry(file)) return ts.ScriptSnapshot.fromString(REGISTRY_DECLARATION);
         const held = this.open.get(keyOf(ts, file));
         if (held !== undefined) return held.text === null ? undefined : ts.ScriptSnapshot.fromString(held.text);
         const text = ts.sys.readFile(file);
@@ -499,10 +505,12 @@ export class TsProjects {
       // `ts.sys` in the second case is what would let a created file resolve at a revision that
       // never had it.
       fileExists: (f) => {
+        if (isRegistry(f)) return true;
         const held = this.open.get(keyOf(ts, f));
         return held === undefined ? ts.sys.fileExists(f) : held.text !== null;
       },
       readFile: (f, encoding) => {
+        if (isRegistry(f)) return REGISTRY_DECLARATION;
         const held = this.open.get(keyOf(ts, f));
         if (held !== undefined) return held.text ?? undefined;
         return ts.sys.readFile(f, encoding);
@@ -516,6 +524,27 @@ export class TsProjects {
     };
   }
 }
+
+/**
+ * What a workflow script's `import { … } from "$REGISTRY"` is, to the editor.
+ *
+ * `$REGISTRY` is not a file: it is the engine's name for the functions the HOST registers on a run
+ * (SCRIPTS.md §10) — JaiRA's `start_task`, `conversation_digest`, `choose_option` and the rest — and
+ * which of them a run has is decided when it starts. No `tsconfig.json` can resolve it, so without
+ * this every script that calls one opened with "Cannot find module '$REGISTRY'" in red, over a file
+ * the engine compiles and runs.
+ *
+ * The engine's own checker leaves the specifier unresolved, which types every import from it as
+ * `any`. A shorthand ambient module says exactly that and nothing more, so the editor and the engine
+ * agree: a registry call is checked at run time, by the function, and nowhere sooner.
+ *
+ * Injected into every program rather than only a script's, because it can only ever matter to a file
+ * that imports `$REGISTRY`, and deciding which files are scripts would be a second answer to a
+ * question the loader already owns. Its path is beside the config so it is inside the program's own
+ * tree; nothing is ever written there.
+ */
+const REGISTRY_DECLARATION_FILE = "__jaira_registry__.d.ts";
+const REGISTRY_DECLARATION = 'declare module "$REGISTRY";\n';
 
 /**
  * A file's version stamp.

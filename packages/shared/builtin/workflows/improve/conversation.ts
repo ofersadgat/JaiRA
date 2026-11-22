@@ -62,7 +62,10 @@ export default async function review(
     let attempt = 0;
     while (simulate && plan.lesson && plan.files.length > 0 && attempt < 2) {
       attempt = attempt + 1;
-      tried = await simulate_change({ files: plan.files, lesson: plan.rule, scope: layer, context: { task: digest.task, quote: one.quote } });
+      // Through a typed `const`: a registry call answers `any`, and `any` assigned to `tried` would leave
+      // it `Tried | null` below, where it is never null.
+      const trial: Tried = await simulate_change({ files: plan.files, lesson: plan.rule, scope: layer, context: { task: digest.task, quote: one.quote } });
+      tried = trial;
       verdict = null;
       if (tried.simulated && tried.version !== undefined && tried.version.kind === "declined") {
         feedback = "Your change was tried on the conversation, and a running conversation could not switch to it: " + String(tried.version.reason ?? "") + ". Keep what is alive across the wait for the next message the same in both versions.";

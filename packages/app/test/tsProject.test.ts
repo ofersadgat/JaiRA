@@ -92,6 +92,26 @@ describe("checking a file in its project", () => {
     expect(only?.endColumn).toBe(15);
   });
 
+  it("knows `$REGISTRY`, a workflow script's host functions, as the engine does — untyped, not missing", async () => {
+    // What the built-in `session.ts` opened with: "Cannot find module '$REGISTRY'" over a script the
+    // engine runs. The import is `any`, as under the engine's checker, so a call through it is clean.
+    const entry = put(
+      "src/workflow.ts",
+      'import { start_task, conversation_digest } from "$REGISTRY";\n' +
+        "export async function run(): Promise<string> {\n" +
+        "  const recent = await conversation_digest({ last: 4 });\n" +
+        "  await start_task({ workflow: 'improve/lesson', inputs: { task: recent.task } });\n" +
+        "  return 'ok';\n" +
+        "}\n",
+    );
+    const check = await projects.check(entry);
+    expect(check.checked).toBe(true);
+    expect(check.diagnostics).toEqual([]);
+    // And it is not a module anything else can find by accident.
+    const other = put("src/other.ts", 'import { x } from "$NOT_A_REGISTRY";\nexport const y = x;\n');
+    expect((await projects.check(other)).diagnostics.map((d) => d.code)).toContain(2307);
+  });
+
   it("checks the BUFFER, so an error appears before anything is saved", async () => {
     const entry = put("src/index.ts", "export const n: number = 1;\n");
     expect((await projects.check(entry)).diagnostics).toEqual([]);

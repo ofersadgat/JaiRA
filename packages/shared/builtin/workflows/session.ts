@@ -57,7 +57,9 @@ export default async function session(
     const picked = (chosen ?? {}) as { model?: string; reasoning?: object };
     let replied = false;
     try {
-      const reply = await llm({
+      // Typed here, not inferred: `conv` feeds this call and is assigned from it, which in a loop is a
+      // circle TypeScript will not infer through.
+      const reply: { session: { id: string } | null } = await llm({
         prompt: text,
         system: SYSTEM,
         session: conv,
