@@ -56,6 +56,8 @@ export interface SessionProcessSummary {
   output: "spawned" | "file" | "unreadable";
   outputPath?: string;
   unreadableWhy?: string;
+  /** Its end was said to the agent (a note on a tool result, or with the person's message). */
+  told?: boolean;
 }
 
 export interface ReadAnswer {
@@ -104,8 +106,10 @@ export interface BackgroundStart {
 export interface SessionProcessesOptions {
   /** How many may run at once; 0 or absent is no limit (`processes.backgroundLimit`). */
   limit?: () => number;
-  /** Told each time a record starts or ends — the engine's push to the window. */
+  /** Told each time a record starts, ends, or its end is said — the engine's push to the window. */
   onChange?: (summary: SessionProcessSummary) => void;
+  /** Each chunk a spawned process prints, as it arrives — what "Tell Claude when it prints…" matches. */
+  onOutput?: (summary: SessionProcessSummary, text: string) => void;
   /** The time, injectable for tests. */
   now?: () => number;
 }
@@ -114,7 +118,7 @@ export class SessionProcessError extends Error {}
 
 export class SessionProcesses {
   private readonly kept = new Map<string, Kept>();
-  private readonly notes: string[] = [];
+  private readonly notes: Array<{ kept: Kept; text: string }> = [];
   private readonly now: () => number;
 
   constructor(
@@ -341,9 +345,49 @@ export class SessionProcesses {
     return n;
   }
 
-  /** What ended since the last time this was asked, said once each. */
+  /** What ended since the last time this was asked, said once each; each is marked told. */
   takeNotes(): string[] {
-    return this.notes.splice(0);
+    const taken = this.notes.splice(0);
+    for (const note of taken) {
+      if (note.kept.summary.told === true) continue;
+      note.kept.summary.told = true;
+      this.options.onChange?.({ ...note.kept.summary });
+    }
+    return taken.map((note) => note.text);
+  }
+
+  /**
+   * What the record keyed by `pid` and `startedAt` printed from `since` (a count of every character it
+   * ever printed), without moving the agent's place: what a window reads.
+   */
+  peek(pid: number, startedAt: number, since = 0): { summary: SessionProcessSummary; output: string; offset: number; dropped?: number } | undefined {
+    const kept = this.kept.get(`${pid}@${startedAt}`);
+    if (kept === undefined) return undefined;
+    const head = kept.length - kept.text.length;
+    return {
+      summary: { ...kept.summary },
+      output: kept.text.slice(Math.max(0, since - head)),
+      offset: kept.length,
+      ...(since < head ? { dropped: head - since } : {}),
+    };
+  }
+
+  /** The record keyed by `pid` and `startedAt`. */
+  byKey(pid: number, startedAt: number): SessionProcessSummary | undefined {
+    const kept = this.kept.get(`${pid}@${startedAt}`);
+    return kept === undefined ? undefined : { ...kept.summary };
+  }
+
+  /** Stop the record keyed by `pid` and `startedAt` (never a later one under a reused pid). */
+  stopKey(pid: number, startedAt: number, how: "interrupt" | "stop" = "stop"): SessionProcessSummary | undefined {
+    const kept = this.kept.get(`${pid}@${startedAt}`);
+    if (kept === undefined) return undefined;
+    if (!kept.summary.running) return { ...kept.summary };
+    if (how === "stop") kept.summary.stopped = true;
+    const signal: NodeJS.Signals = how === "interrupt" ? "SIGINT" : "SIGTERM";
+    if (kept.io !== undefined) kept.io.signal(signal);
+    else kept.stopOther?.(signal);
+    return { ...kept.summary };
   }
 
   // --- inside -------------------------------------------------------------------------------
@@ -375,6 +419,7 @@ export class SessionProcesses {
     kept.text += text;
     if (kept.text.length > OUTPUT_KEEP) kept.text = kept.text.slice(kept.text.length - OUTPUT_KEEP);
     for (const listener of [...kept.listeners]) listener();
+    this.options.onOutput?.(kept.summary, text);
   }
 
   private ended(kept: Kept, exitCode: number | null, signal: string | null): void {
@@ -386,7 +431,7 @@ export class SessionProcesses {
     const minutes = Math.max(0, Math.round((kept.summary.endedAt - kept.summary.startedAt) / 60_000));
     const how = kept.summary.stopped ? "was stopped" : exitCode !== null ? `exited ${exitCode}` : signal !== null ? `ended on ${signal}` : "ended";
     const last = kept.summary.output === "spawned" ? lastLines(kept.text, 5) : "";
-    this.notes.push(`\`${kept.summary.command}\` (pid ${kept.summary.pid}) ${how} after ${minutes < 1 ? "less than a minute" : `${minutes}m`}${last.length > 0 ? `; its last lines:\n${last}` : "."}`);
+    this.notes.push({ kept, text: `\`${kept.summary.command}\` (pid ${kept.summary.pid}) ${how} after ${minutes < 1 ? "less than a minute" : `${minutes}m`}${last.length > 0 ? `; its last lines:\n${last}` : "."}` });
     kept.finish();
     for (const listener of [...kept.listeners]) listener();
     this.options.onChange?.({ ...kept.summary });

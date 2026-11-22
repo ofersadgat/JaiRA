@@ -237,6 +237,17 @@
     "task:moveOut",
     "task:moveIn",
     "task:moveDone",
-    "task:moveBack"
+    "task:moveBack",
+    "process:list",
+    "process:tree",
+    "process:get",
+    "process:read",
+    "process:stop",
+    "process:watch",
+    "process:unwatch",
+    "process:tellWhen",
+    "process:tellCancel",
+    "process:sampling",
+    "project:join"
   ]
 }

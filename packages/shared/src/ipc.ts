@@ -49,6 +49,7 @@ import type { HealthItem } from "./health";
 import type { SyncPage } from "./sync";
 import type { CommandApproval, PartAnswer } from "./commandParts";
 import type { TerminalRead, TerminalSignal, TerminalSummary } from "./terminals";
+import type { ProcessListAnswer, ProcessListRequest, ProcessReadAnswer, ProcessStats, ProcessSummary, ProcessTreeNode } from "./processes";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
 import type { McpDetectedSource, McpToolsReport } from "./mcp";
@@ -2153,6 +2154,46 @@ export interface IpcContract {
    */
   "terminal:run": { request: { taskId: string; command: string; project?: string }; response: TerminalSummary };
   /**
+   * The processes of a scope (decision 0032, "The view"): one task's, a project's, every project's, or
+   * the machine's placed as the process tools place them (`jaira`, `user`, `group` with `group`,
+   * `system`, `all`). Live ones first, then the newest. This engine's memory: `process:state`,
+   * `process:stats` and `process:gone` keep it current. A machine scope this machine cannot place is
+   * refused, saying why.
+   */
+  "process:list": { request: ProcessListRequest; response: ProcessListAnswer };
+  /** The same scope as a tree: each process and what it started, an escaped one under the program that started it. */
+  "process:tree": { request: ProcessListRequest; response: ProcessTreeNode[] };
+  /** One process, by its key or its process task's id; null when the engine no longer keeps it. */
+  "process:get": { request: { key?: string; taskId?: string; project?: string }; response: ProcessSummary | null };
+  /**
+   * What a process printed from `since` (default: what is kept): its terminal's output for one JaiRA
+   * spawned, else followed from the first read where it writes to a file or a Windows console. Reading
+   * here never moves the agent's place (`read_process`).
+   */
+  "process:read": { request: { key: string; since?: number; project?: string }; response: ProcessReadAnswer };
+  /**
+   * Stop a process and what it started (`stop`), or send it Ctrl-C (`interrupt`). The person's: no
+   * permission set is asked. Refused for JaiRA's own and the operating system's, saying why
+   * (`stopped: false`, `why`).
+   */
+  "process:stop": { request: { key: string; signal?: TerminalSignal; project?: string }; response: { stopped: boolean; why?: string } };
+  /** Watch a machine process (from a machine scope): a process task of origin `watched`, with no parent, until unwatched or it is gone. */
+  "process:watch": { request: { pid: number; project?: string }; response: ProcessSummary };
+  "process:unwatch": { request: { key: string; project?: string }; response: { unwatched: boolean } };
+  /**
+   * "Tell Claude when it prints…": arm a one-shot regular expression (its source, and `flags` such as
+   * `i`) on a task's process. When a line it prints matches, the task is sent a message on the person's
+   * behalf naming the process, the line and a few around it; then it is disarmed. Refused for a
+   * process with no task, one that has ended, and one whose output cannot be read.
+   */
+  "process:tellWhen": { request: { key: string; pattern: string; flags?: string; project?: string }; response: ProcessSummary };
+  "process:tellCancel": { request: { key: string; project?: string }; response: ProcessSummary | null };
+  /**
+   * A window started (`true`) or stopped (`false`) showing processes' CPU, memory and ports. While at
+   * least one does, the engine samples the running ones every couple of seconds; with none, slowly.
+   */
+  "process:sampling": { request: { watching: boolean }; response: void };
+  /**
    * The composer's settings changed: they are the conversation's now (`TaskMeta.chatSettings`), what
    * its composer opens with next time, and what its next message is sent with.
    *
@@ -2895,6 +2936,16 @@ export const IPC_CHANNELS = [
   "terminal:input",
   "terminal:signal",
   "terminal:run",
+  "process:list",
+  "process:tree",
+  "process:get",
+  "process:read",
+  "process:stop",
+  "process:watch",
+  "process:unwatch",
+  "process:tellWhen",
+  "process:tellCancel",
+  "process:sampling",
   "chat:settings",
   "chat:thread",
   "log:list",
@@ -3444,6 +3495,15 @@ export type PushMessage =
    * `terminal.project` is not, so a window addresses the terminal by the conversation it is in.
    */
   | { type: "terminal:state"; project?: string; terminal: TerminalSummary }
+  /**
+   * A process started, changed state, or changed what it shows besides its load (decision 0032): its
+   * facts as they now stand. Gathered for a moment, one per process.
+   */
+  | { type: "process:state"; project?: string; process: ProcessSummary }
+  /** A sample's readings: CPU, memory, ports and the load trace of each running process that moved. */
+  | { type: "process:stats"; stats: ProcessStats[] }
+  /** The engine let a process go (its task was deleted, archived or moved; it was unwatched; a command ended). */
+  | { type: "process:gone"; project?: string; key: string; processTaskId?: string }
 
 /** Whose install an `install:output` is: an agent, by its executor's name, or a git program. */
 export interface InstallTarget {

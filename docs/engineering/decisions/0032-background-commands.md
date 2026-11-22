@@ -480,9 +480,45 @@ one is chosen.
   - Each task's agent processes are recorded as they spawn (`AgentProcesses`), and its claude routes
     and functions are handed the notice, so what Claude's own `Bash` starts in the background is
     found under them and kept as the task's.
+- **The view's engine** (the person, "Yes, build it").
+  - The contract is `processes.ts` in shared: `ProcessSummary` (what the card and the rows draw),
+    `ProcessState`, `ProcessOrigin`, and `ProcessTaskFacts`, which a task row, a board card and a
+    task's detail carry as `type: "process"` and `process`.
+  - `ProcessHub` (`processes.ts` in the service) keeps every task's session processes, each command
+    of this turn that runs past a second, and the machine processes a person watches. It derives the
+    state, samples CPU, memory and ports, and pushes `process:state`, `process:stats` and
+    `process:gone`.
+    - A sample is one `ps` and one `lsof` (or `ss`) on POSIX. On Windows it is the containment
+      helper's snapshot for parents, one `Get-Process` for the trees asked about, and one `netstat`
+      (`processSample.ts`).
+    - It samples every 2 s (4 s on Windows) while a window says it shows them (`process:sampling`),
+      and every 30 s otherwise.
+  - The channels: `process:list` and `process:tree` by scope, `process:get`, `process:read`,
+    `process:stop`, `process:watch` and `process:unwatch`, and `process:tellWhen` and
+    `process:tellCancel`. The machine scopes use the process tools' placement (`placedProcesses`).
+  - "Tell Claude when it prints…" matches whole lines. It sends the matching line, three before it
+    and up to three after it, as a message the app sends for the person (`by: "host"`), then disarms.
+    Output JaiRA did not keep is followed from the moment it is armed.
+  - Process tasks are in `task:list`, `task:all` (unless narrowed to other workflows), `sync:since`
+    and the board. `Process` is a root column while the project has one, and `board:view` with level
+    `Process` has a lane per state.
+    - Nothing is written for them but the change log's stamp, under the `task` collection, so a
+      window's index reads them as it reads any task, and a deleted one is in `gone`.
+    - The replicas never see them, and nothing that walks the database does.
+  - Every other channel about a task refuses a process task's id, saying why. `task:detail` answers
+    the process, and `task:cancel` stops it.
+- **Chosen while building the view's engine:**
+  - Deleting or archiving a process task stops it, if it runs, and lets it go. Unarchiving one does
+    nothing. A watched one is let go, not stopped.
+  - The parent's count ("6 processes · 4 running · 1 escaped") is the window's, from the rows it
+    holds (`processCount`, `processCountLabel`). The parent's summary is unchanged.
+  - A command of this turn is a process task only while it runs, and only once it has run a second.
+    A command inside a live shell is the shell's, and is not one.
+  - An ended process stays until its task lets it go. A process task's id is `t-p<pid>-<start>`,
+    which no stored task's id can be.
 
 **Not built yet:**
-- the window (the chosen proposal);
+- the window (the chosen proposal), against the contract above;
 - the Tools card listing flag lines under their tool;
 - `read_process` and `wait_process` on the System card (`SYSTEM_AREAS`).
 

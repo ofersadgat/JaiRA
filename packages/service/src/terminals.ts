@@ -111,6 +111,7 @@ export class TerminalHub {
       output: (text) => this.append(kept, text),
       attach: (io) => {
         kept.io = io;
+        if (io.pid !== undefined) kept.summary.pid = io.pid;
         const endsAt = io.endsAt();
         if (endsAt !== undefined) kept.summary.endsAt = endsAt;
         this.state(kept);
@@ -226,7 +227,23 @@ export class TerminalHub {
 
   private state(kept: Kept): void {
     const project = kept.summary.project;
-    this.publish({ type: "terminal:state", ...(project !== undefined ? { project } : {}), terminal: { ...kept.summary, input: [...kept.summary.input] } });
+    const terminal = { ...kept.summary, input: [...kept.summary.input] };
+    this.publish({ type: "terminal:state", ...(project !== undefined ? { project } : {}), terminal });
+    for (const listener of this.listeners) listener(terminal);
+  }
+
+  private readonly listeners = new Set<(terminal: TerminalSummary) => void>();
+
+  /** Hears every terminal's facts as they change (the process hub: what runs this turn, and what waits for input). */
+  onState(listener: (terminal: TerminalSummary) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** A terminal's facts, without its output. */
+  summary(taskId: string, callId: string): TerminalSummary | undefined {
+    const kept = this.byTask.get(taskId)?.get(callId);
+    return kept === undefined ? undefined : { ...kept.summary, input: [...kept.summary.input] };
   }
 
   /** Past the limit, the oldest ended ones go first; a running one only when every kept one runs. */

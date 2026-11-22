@@ -9,6 +9,7 @@
  * every channel (checked where they meet, in the desktop's `index.ts`).
  */
 import { resolve } from "node:path";
+import { isProcessTaskId } from "@jaira/shared";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { AgentInstallRequest, GitCliName, HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
@@ -66,17 +67,23 @@ export function serviceHandlers(service: AppService, options: { local?: boolean;
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
     // Homed BEFORE routing too: a task another machine owns is forwarded there whatever the window named.
     routed[channel] = ((asked: unknown) => {
+      refuseProcessTask(channel, asked);
       const request = withHome(service, asked);
       return service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request);
     }) as Handler;
   }
   // Starting a task PLACES it, where its project has several workspaces (decision 0013 §5). Only a
   // request made here: one forwarded from another machine was placed there already.
-  routed["task:start"] = ((request: Parameters<typeof service.startTask>[0]) =>
-    service.federation.route("task:start", request) ?? service.placeAndStart(request)) as Handler;
+  routed["task:start"] = ((request: Parameters<typeof service.startTask>[0]) => {
+    refuseProcessTask("task:start", request);
+    return service.federation.route("task:start", request) ?? service.placeAndStart(request);
+  }) as Handler;
   // A conversation moved is moved from HERE, the machine whose window asked: it reaches both ends,
   // where the machine the conversation is on may not reach the one it goes to.
-  routed["task:relocate"] = ((request: Parameters<typeof service.relocateConversation>[0]) => service.relocateConversation(withHome(service, request) as Parameters<typeof service.relocateConversation>[0])) as Handler;
+  routed["task:relocate"] = ((request: Parameters<typeof service.relocateConversation>[0]) => {
+    refuseProcessTask("task:relocate", request);
+    return service.relocateConversation(withHome(service, request) as Parameters<typeof service.relocateConversation>[0]);
+  }) as Handler;
   // The root's lists span every machine: each online one's, keyed for forwarding, and each offline
   // one's from this machine's copy of it.
   routed["task:all"] = (async (request: unknown) => {
@@ -98,9 +105,27 @@ export function serviceHandlers(service: AppService, options: { local?: boolean;
 function homed(service: AppService, table: Record<ServiceChannel, Handler>): Record<ServiceChannel, Handler> {
   const out = {} as Record<ServiceChannel, Handler>;
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
-    out[channel] = ((request: unknown) => (handler as (request: unknown) => unknown)(withHome(service, request))) as Handler;
+    out[channel] = ((request: unknown) => {
+      refuseProcessTask(channel, request);
+      return (handler as (request: unknown) => unknown)(withHome(service, request));
+    }) as Handler;
   }
   return out;
+}
+
+/**
+ * The channels that take a process task's id (decision 0032, "The view"): its detail is the process,
+ * and cancelling, deleting or archiving it stops it. Every other channel about a task refuses one: a
+ * process task has no workflow, run, journal or conversation to act on.
+ */
+const PROCESS_TASK_CHANNELS = new Set<string>(["task:detail", "task:cancel", "task:delete", "task:archive", "task:unarchive", "process:get"]);
+
+function refuseProcessTask(channel: string, request: unknown): void {
+  if (PROCESS_TASK_CHANNELS.has(channel) || request === null || typeof request !== "object") return;
+  const { taskId, taskIds } = request as { taskId?: unknown; taskIds?: unknown };
+  const ids = [taskId, ...(Array.isArray(taskIds) ? taskIds : [])].filter((id): id is string => typeof id === "string");
+  const id = ids.find(isProcessTaskId);
+  if (id !== undefined) throw new Error(`${id} is a process task: it has no workflow, run or conversation to act on. Open it with process:get (or task:detail), and stop it with process:stop; task:cancel, task:delete and task:archive stop it too`);
 }
 
 function withHome(service: AppService, request: unknown): unknown {
@@ -190,6 +215,16 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "terminal:input": ((request: Parameters<typeof service.terminalInput>[0]) => service.terminalInput(request)) as Handler,
     "terminal:signal": ((request: Parameters<typeof service.terminalSignal>[0]) => service.terminalSignal(request)) as Handler,
     "terminal:run": ((request: Parameters<typeof service.terminalRun>[0]) => service.terminalRun(request)) as Handler,
+    "process:list": ((request: Parameters<typeof service.processList>[0]) => service.processList(request)) as Handler,
+    "process:tree": ((request: Parameters<typeof service.processTree>[0]) => service.processTree(request)) as Handler,
+    "process:get": ((request: Parameters<typeof service.processGet>[0]) => service.processGet(request)) as Handler,
+    "process:read": ((request: Parameters<typeof service.processRead>[0]) => service.processRead(request)) as Handler,
+    "process:stop": ((request: Parameters<typeof service.processStop>[0]) => service.processStop(request)) as Handler,
+    "process:watch": ((request: Parameters<typeof service.processWatch>[0]) => service.processWatch(request)) as Handler,
+    "process:unwatch": ((request: Parameters<typeof service.processUnwatch>[0]) => service.processUnwatch(request)) as Handler,
+    "process:tellWhen": ((request: Parameters<typeof service.processTellWhen>[0]) => service.processTellWhen(request)) as Handler,
+    "process:tellCancel": ((request: Parameters<typeof service.processTellCancel>[0]) => service.processTellCancel(request)) as Handler,
+    "process:sampling": ((request: Parameters<typeof service.processSampling>[0]) => service.processSampling(request)) as Handler,
     "chat:settings": ((request: Parameters<typeof service.changeChatSettings>[0]) => service.changeChatSettings(request)) as Handler,
     "chat:thread": ((request: Parameters<typeof service.chatThread>[0]) => service.chatThread(request)) as Handler,
     "log:list": ((request: Parameters<typeof service.readLogs>[0]) => service.readLogs(request)) as Handler,

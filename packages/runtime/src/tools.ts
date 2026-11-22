@@ -187,6 +187,8 @@ export interface ShellCallIo {
   stop(): void;
   /** When the time limit ends, epoch ms. */
   endsAt(): number | undefined;
+  /** The process the call runs as, where JaiRA spawned one (not a live shell's command). */
+  pid?: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -356,6 +358,7 @@ async function runInTerminal(
             io.signal("SIGTERM");
           },
           endsAt: () => watch.endsAt,
+          ...(io.pid !== undefined ? { pid: io.pid } : {}),
         });
       },
     });
@@ -757,6 +760,7 @@ async function runInBackground(
             else io.signal("SIGTERM");
           },
           endsAt: () => undefined,
+          ...(io.pid !== undefined ? { pid: io.pid } : {}),
         }),
       onEnd: (end) => terminal?.ended({ exitCode: end.exitCode, signal: end.signal, timedOut: false, stopped: end.stopped }),
     });

@@ -14,6 +14,7 @@ import type { NextMove } from "./move";
 import type { ConnectMissingInput } from "./connect";
 import type { MachineForm, MachineOsTag, PlacementNote } from "./machines";
 import type { ChatSettings } from "./operationVocabulary";
+import type { ProcessSummary, ProcessTaskFacts } from "./processes";
 
 /**
  * Per-instance status, derived from the event journal (SPEC §10.1). `blocked` is
@@ -324,6 +325,13 @@ export interface BoardCard {
    * task, a task that has never run, and one that stands where nothing further is defined.
    */
   next?: NextMove[];
+  /**
+   * `process`: a task of the built-in `Process` workflow (decision 0032, "The view"), one of the engine's
+   * processes, kept in memory and never a file. {@link process} says which and where it stands.
+   */
+  type?: "process";
+  /** With {@link type} `process`: its key, state, origin, ports and the task that started it. */
+  process?: ProcessTaskFacts;
   updatedAt: number;
   /** When the task was made (`TaskSummary.createdAt`, as a time): what the Tasks list's When can say instead. */
   createdAt?: number;
@@ -502,6 +510,9 @@ export interface TaskDetail {
    * row. Absent for a task that was never placed: one in a project with a single workspace.
    */
   placed?: PlacementNote;
+  /** A process task (decision 0032): the process whole, as `process:get` answers it, which its task view draws as the card. */
+  type?: "process";
+  process?: ProcessSummary;
 }
 
 /**
@@ -1395,6 +1406,14 @@ export interface TaskSummary {
   inReview?: InReview;
   /** The task keeps a connect's Undo (`TaskMeta.connectUndo`) — see {@link BoardCard.undoable}. */
   undoable?: true;
+  /**
+   * `process`: a task of the built-in `Process` workflow (decision 0032, "The view"), one of the engine's
+   * processes, kept in memory and never a file: no run, no journal, no conversation. Its parent is
+   * {@link parentTaskId}, the task whose agent started it; {@link process} says where it stands.
+   */
+  type?: "process";
+  /** With {@link type} `process`: its key, state, origin, ports and the task that started it. */
+  process?: ProcessTaskFacts;
   createdAt: string;
   updatedAt: number;
   /**

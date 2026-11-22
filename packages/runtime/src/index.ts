@@ -47,11 +47,12 @@ export * from "./shellSessions";
 export * from "./sessionProcesses";
 export * from "./leftRunning";
 export * from "./nativeBackground";
-export { outputSourceFor, type OutputSource } from "./processOutput";
+export { outputSourceFor, procOwner, ProcessOutputs, type OutputSource, type OutputRead } from "./processOutput";
 export * from "./containment";
 export * from "./liveShell";
 export * from "./shellMarks";
 export * from "./processTree";
+export * from "./processSample";
 export * from "./linePlaces";
 export * from "./sessionServices";
 // The agent's own on-disk session file, captured into the record at operation close — the lines

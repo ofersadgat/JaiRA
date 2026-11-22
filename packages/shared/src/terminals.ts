@@ -27,6 +27,8 @@ export interface TerminalSummary {
   /** The shell it ran in (decision 0030): `emulated`, or a live shell's kind (`zsh`, `bash`, `sh`). */
   shell?: string;
   by: TerminalBy;
+  /** The process it runs as, once started, where JaiRA spawned one for it (not inside a live shell). */
+  pid?: number;
   /** Epoch ms. */
   startedAt: number;
   /** Epoch ms; absent while it runs. */

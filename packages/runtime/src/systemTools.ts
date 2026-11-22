@@ -395,6 +395,20 @@ async function inScope(backend: SystemBackend, rows: readonly ScopedRow[], scope
   }
 }
 
+/** One of the machine's processes, placed: whose it is (decision 0032, ruling 4), and its account where read. */
+export type PlacedProcessRow = ScopedRow;
+
+/**
+ * The machine's processes in `scope` (not `session`), placed as `list_processes` places them, with
+ * `session` the pids a JaiRA session keeps: what the window's process lists read for a machine scope.
+ * Refused, saying why, for `group` without a group or on a machine that cannot say who is in one.
+ */
+export async function placedProcesses(backend: SystemBackend, scope: Exclude<ProcessScope, "session">, options: { enginePid?: number; session?: readonly SessionProcessSummary[]; group?: string } = {}): Promise<{ rows: PlacedProcessRow[]; unplaced: number; protectedWhy: Map<number, string> }> {
+  const enginePid = options.enginePid ?? process.pid;
+  const { rows, unplaced } = await scopedRows(backend, enginePid, options.session ?? []);
+  return { rows: await inScope(backend, rows, scope, options.group), unplaced, protectedWhy: protectedProcesses(rows, enginePid) };
+}
+
 /** A session process as the process tools say it. */
 function sessionRow(p: SessionProcessSummary): Record<string, JsonValue> {
   return {

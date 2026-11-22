@@ -685,6 +685,7 @@ let installed: LogSink | undefined;
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
 import { TerminalHub } from "./terminals";
+import { ProcessHub, type MachineRow } from "./processes";
 import { agentShellSetting, idleShellVerdict, SHELL_REAP_EVERY_MS } from "./shells";
 import {
   createShellTool,
@@ -704,6 +705,12 @@ import {
   attributeNativeBackground,
   outputSourceFor,
   procRows,
+  placedProcesses,
+  processSampler,
+  protectedProcesses,
+  ProcessOutputs,
+  procOwner,
+  type ProcessSampler,
   type ContainmentGroup,
   type LeftRunningOptions,
   type NativeBackgroundCall,
@@ -711,7 +718,7 @@ import {
   type LiveShell,
   type TaskShells,
 } from "@jaira/runtime";
-import type { TerminalRead, TerminalSignal, TerminalSummary } from "@jaira/shared";
+import { isProcessTaskId, PROCESS_WORKFLOW, type ProcessListAnswer, type ProcessListRequest, type ProcessReadAnswer, type ProcessSummary, type ProcessTreeNode, type TerminalRead, type TerminalSignal, type TerminalSummary } from "@jaira/shared";
 import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
@@ -4659,6 +4666,7 @@ export class AppService {
     // A session's background processes are stopped with the app (decision 0032, ruling 9).
     clearInterval(this.processReaper);
     for (const taskId of new Set([...this.sessionProcesses.keys(), ...this.processGroups.keys()])) this.letProcessesGo(taskId, "the app quit");
+    this.processes.close();
     this.containment.close();
     clearInterval(this.placementTimer);
     clearInterval(this.headTimer);
@@ -4905,6 +4913,8 @@ export class AppService {
         for (const task of taskSummaries(session.project, only)) out.push({ ...task, project: key });
       }
     }
+    // This engine's process tasks (decision 0032, "The view"): in memory, stamped in the change log as they move.
+    out.push(...this.processes.tasks(only !== undefined ? { ids: only } : {}));
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -5536,7 +5546,9 @@ export class AppService {
    * instead of asking and ignoring the refusal.
    */
   listTasks(project?: string): TaskSummary[] {
-    return taskSummaries(this.session(project).project);
+    const open = this.session(project);
+    // And its process tasks (decision 0032, "The view"): kept in memory, never in the database.
+    return [...taskSummaries(open.project), ...(open.kind === "user" ? this.processes.tasks({ projectKey: open.key }).map(({ project: _p, ...task }) => task) : [])];
   }
 
   /**
@@ -5591,6 +5603,8 @@ export class AppService {
     // The Tasks view draws one board PER project, and a level means nothing without saying whose.
     const { level, project } = request;
     const open = this.session(project);
+    // The built-in `Process` workflow opened (decision 0032, "The view"): a lane per state.
+    if (level === PROCESS_WORKFLOW) return this.processes.board(open.key);
     if (level !== undefined && level.length > 0) {
       const board = boardForState(open.project, level, this.browseWorkflowsIn(open), this.stateViewOptions());
       if (board) return this.withNextMoves(open, board);
@@ -5609,7 +5623,10 @@ export class AppService {
   boardRoots(request?: { project?: string }): BoardView {
     const open = this.sessionOf(request?.project);
     if (open === undefined) return { level: "", label: "All workflows", breadcrumb: [], columns: [], atLevel: [], finished: [] };
-    return this.withNextMoves(open, rootsBoard(open.project, this.browseWorkflowsIn(open), this.stateViewOptions()));
+    const roots = this.withNextMoves(open, rootsBoard(open.project, this.browseWorkflowsIn(open), this.stateViewOptions()));
+    // `Process` is a column like any workflow (decision 0032, "The view"), a project's own, while it holds a process task.
+    const processes = open.kind === "user" ? this.processes.rootColumn(open.key) : undefined;
+    return processes !== undefined && processes.cards.length > 0 ? { ...roots, columns: [...roots.columns, processes] } : roots;
   }
 
   /**
@@ -6118,6 +6135,12 @@ export class AppService {
   }
 
   taskDetail(taskId: string, project?: string): TaskDetail {
+    // A process task (decision 0032, "The view"): its detail is the process, from memory.
+    if (isProcessTaskId(taskId)) {
+      const detail = this.processes.detail(taskId);
+      if (detail === undefined) throw this.refusal("process", `no process task ${taskId} is kept here: its process ended and was let go`);
+      return detail;
+    }
     // Scoped, because the Tasks view now shows the root's runs beside the project's and selecting one
     // must read the database it actually lives in.
     const open = this.session(project);
@@ -6171,6 +6194,8 @@ export class AppService {
         out.push({ ...task, project: session.dir });
       }
     }
+    // The process tasks (decision 0032, "The view"), as the tasks of the built-in `Process` workflow.
+    if (wanted === undefined || wanted.has(PROCESS_WORKFLOW)) out.push(...this.processes.tasks());
     return out.sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
@@ -8308,6 +8333,177 @@ export class AppService {
     return read.summary;
   }
 
+  // --- processes as the window draws them (decision 0032, "The view") ------------------------
+
+  /** Every process this engine keeps, each a task of the built-in `Process` workflow — see `ProcessHub`. */
+  readonly processes: ProcessHub = this.makeProcessHub();
+  /** The machine's sampler, made on first use (Windows reads parents through the containment helper). */
+  private processSamplerMade: ProcessSampler | undefined;
+
+  private makeProcessHub(): ProcessHub {
+    const source = outputSourceFor(systemBackendFor());
+    const outputs = source !== undefined ? new ProcessOutputs(source) : undefined;
+    const hub = new ProcessHub({
+      publish: (message) => this.publish(message),
+      // A process task is no row: only the change log is stamped, so a window's index reads it again.
+      touch: (id, deleted) => {
+        const db = this.syncDb();
+        if (db !== undefined) touch(db, "task", id, id, deleted);
+      },
+      machine: () => {
+        try {
+          return this.fleet.identity().label;
+        } catch {
+          return "this machine";
+        }
+      },
+      project: (key) => {
+        const session = this.sessions.get(key);
+        return session !== undefined ? { dir: session.dir, key: session.key } : undefined;
+      },
+      sampler: (pids) => (this.processSamplerMade ??= this.makeProcessSampler())(pids),
+      // A Windows sample starts a PowerShell (Get-Process) and a netstat: half as often.
+      everyMs: process.platform === "win32" ? 4_000 : 2_000,
+      terminal: (taskId, callId) => this.terminals.summary(taskId, callId),
+      terminalRead: (taskId, callId) => this.terminals.read(taskId, callId),
+      terminalSignal: (taskId, callId, signal) => this.terminals.signal(taskId, callId, signal),
+      ...(outputs !== undefined ? { outputs } : {}),
+      // "Tell Claude when it prints…": a message the app sends on the person's behalf.
+      tell: (taskId, project, text) => this.sendChatMessage({ taskId, instanceId: "", message: text, ...(project !== undefined ? { project } : {}) }, { by: "host" }),
+      stopMachine: (pid, startedAt, signal) => this.stopMachineProcess(pid, startedAt, signal),
+      log: (level, message, taskId) => this.log({ level, source: "process", message, ...(taskId !== undefined ? { taskId } : {}) }),
+    });
+    this.terminals.onState((terminal) => hub.fromTerminal(terminal));
+    return hub;
+  }
+
+  private makeProcessSampler(): ProcessSampler {
+    const backend = systemBackendFor();
+    const fallback = backend !== undefined ? () => backend.processes() : undefined;
+    const lister = this.containment.lister(fallback) ?? fallback;
+    return processSampler(lister !== undefined ? { lister } : {});
+  }
+
+  /** The machine's processes in a machine scope, placed as the process tools place them. */
+  private async machineProcessRows(scope: Exclude<ProcessListRequest["scope"], "session" | "project" | "projects">, group: string | undefined): Promise<{ rows: MachineRow[]; unplaced: number; protectedWhy: Map<number, string> }> {
+    const backend = systemBackendFor();
+    const session = [...this.sessionProcesses.values()].flatMap((kept) => kept.list());
+    if (backend !== undefined) return placedProcesses(backend, scope, { session, ...(group !== undefined ? { group } : {}) });
+    if (process.platform !== "linux" || scope === "jaira" || scope === "group") throw this.refusal("process", `the scope '${scope}' is built for Windows and macOS (and 'all', 'user' and 'system' on Linux); this machine runs ${process.platform}`);
+    const uid = process.getuid?.();
+    const all = procRows();
+    const rows: MachineRow[] = all.map((row) => ({ ...row, started_by: procOwner(row.pid) === uid ? ("user" as const) : ("system" as const) }));
+    return { rows: scope === "all" ? rows : rows.filter((row) => row.started_by === scope), unplaced: 0, protectedWhy: protectedProcesses(all, process.pid) };
+  }
+
+  /** Stop a machine process the person watches: refused for JaiRA's own and the operating system's. */
+  private async stopMachineProcess(pid: number, _startedAt: number, signal: TerminalSignal): Promise<{ stopped: boolean; why?: string }> {
+    if (pid === process.pid) return { stopped: false, why: "it is JaiRA's engine" };
+    const backend = systemBackendFor();
+    try {
+      if (backend !== undefined) {
+        const rows = await backend.processes();
+        const row = rows.find((r) => r.pid === pid);
+        if (row === undefined) return { stopped: false, why: "it is no longer running" };
+        const why = protectedProcesses(rows, process.pid).get(pid);
+        if (why !== undefined) return { stopped: false, why };
+        if (signal === "interrupt") {
+          process.kill(pid, "SIGINT");
+          return { stopped: true };
+        }
+        const done = await backend.stopProcess(pid, { ...(row.started !== undefined ? { started: row.started } : {}), tree: true, force: false });
+        return done.stopped ? { stopped: true } : { stopped: false, why: done.how };
+      }
+      const why = protectedProcesses(procRows(), process.pid).get(pid);
+      if (why !== undefined) return { stopped: false, why };
+      process.kill(pid, signal === "interrupt" ? "SIGINT" : "SIGTERM");
+      return { stopped: true };
+    } catch (error) {
+      return { stopped: false, why: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** `process:list` — see the channel. */
+  async processList(request: ProcessListRequest): Promise<ProcessListAnswer> {
+    switch (request.scope) {
+      case "session":
+        if (request.taskId === undefined) throw this.refusal("process", "the scope 'session' names its task (taskId)");
+        return { processes: this.processes.list({ taskId: request.taskId }) };
+      case "project":
+        return { processes: this.processes.list({ projectKey: this.session(request.project).key }) };
+      case "projects":
+        return { processes: this.processes.list() };
+      default: {
+        const placed = await this.machineProcessRows(request.scope, request.group);
+        return {
+          processes: this.processes.machineList(placed.rows, placed.protectedWhy),
+          ...(placed.unplaced > 0 && request.scope !== "all" ? { unplaced: `${placed.unplaced} processes' accounts could not be read (another account's, without an administrator); they are listed under system and all only` } : {}),
+        };
+      }
+    }
+  }
+
+  /** `process:tree` — see the channel. */
+  async processTree(request: ProcessListRequest): Promise<ProcessTreeNode[]> {
+    switch (request.scope) {
+      case "session":
+        if (request.taskId === undefined) throw this.refusal("process", "the scope 'session' names its task (taskId)");
+        return this.processes.tree({ taskId: request.taskId });
+      case "project":
+        return this.processes.tree({ projectKey: this.session(request.project).key });
+      case "projects":
+        return this.processes.tree();
+      default: {
+        const placed = await this.machineProcessRows(request.scope, request.group);
+        return this.processes.machineTree(placed.rows, placed.protectedWhy);
+      }
+    }
+  }
+
+  processGet(request: { key?: string; taskId?: string }): ProcessSummary | null {
+    return this.processes.get(request);
+  }
+
+  processRead(request: { key: string; since?: number }): Promise<ProcessReadAnswer> {
+    return this.processes.read(request.key, request.since ?? 0);
+  }
+
+  processStop(request: { key: string; signal?: TerminalSignal }): Promise<{ stopped: boolean; why?: string }> {
+    return this.processes.stop(request.key, request.signal === "interrupt" ? "interrupt" : "stop");
+  }
+
+  /** `process:watch`: a machine process becomes a process task, listed under the project named (or the only one open). */
+  async processWatch(request: { pid: number; project?: string }): Promise<ProcessSummary> {
+    const open = this.sessionOf(request.project);
+    if (open === undefined) throw this.refusal("process", request.project !== undefined ? `project '${request.project}' is not open` : "several projects are open (or none): name the project to list the watched process under");
+    const kept = this.processes.list().find((p) => p.pid === request.pid && p.processTaskId !== undefined && p.endedAt === undefined);
+    if (kept !== undefined) return kept;
+    const { rows } = await this.machineProcessRows("all", undefined);
+    const row = rows.find((r) => r.pid === request.pid);
+    if (row === undefined) throw this.refusal("process", `no process ${request.pid} is running`);
+    return this.processes.watch(row, { dir: open.dir, key: open.key });
+  }
+
+  processUnwatch(request: { key: string }): { unwatched: boolean } {
+    return { unwatched: this.processes.unwatch(request.key) };
+  }
+
+  async processTellWhen(request: { key: string; pattern: string; flags?: string }): Promise<ProcessSummary> {
+    try {
+      return await this.processes.tellWhen(request.key, request.pattern, request.flags);
+    } catch (error) {
+      throw this.refusal("process", error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  processTellCancel(request: { key: string }): ProcessSummary | null {
+    return this.processes.tellCancel(request.key);
+  }
+
+  processSampling(request: { watching: boolean }): void {
+    this.processes.setSampling(request.watching !== false);
+  }
+
   // --- the agent's shell (decision 0030) --------------------------------------
 
   /** Each task's shell: where it stands, its live shell, what its agent is to be told. */
@@ -8348,7 +8544,14 @@ export class AppService {
     this.processSettings.set(taskId, { stopIdleAfterMinutes: config.processes?.stopIdleAfterMinutes ?? 0, backgroundLimit: config.processes?.backgroundLimit ?? 0 });
     let kept = this.sessionProcesses.get(taskId);
     if (kept === undefined) {
-      kept = new SessionProcesses(new NodeExec(), { limit: () => this.processSettings.get(taskId)?.backgroundLimit ?? 0 });
+      const project = { dir: open.dir, key: open.key };
+      const made: SessionProcesses = new SessionProcesses(new NodeExec(), {
+        limit: () => this.processSettings.get(taskId)?.backgroundLimit ?? 0,
+        // Each record as it starts, ends or is told — the window's process tasks (decision 0032, "The view").
+        onChange: (summary) => this.processes.fromSession(taskId, project, summary, made),
+        onOutput: (summary, text) => this.processes.output(summary, text),
+      });
+      kept = made;
       this.sessionProcesses.set(taskId, kept);
     }
     return kept;
@@ -8438,6 +8641,8 @@ export class AppService {
       void group.stopAll().finally(() => group.close());
     }
     const kept = this.sessionProcesses.get(taskId);
+    // Its process tasks leave with it (decision 0032, "The view", ruling 7), and what its records say from now on is not taken in.
+    this.processes.letGoOf(taskId, kept);
     if (kept === undefined) return;
     const stopped = kept.stopAll();
     this.sessionProcesses.delete(taskId);
@@ -9682,6 +9887,13 @@ export class AppService {
 
   /** Cancel a task: abort a live run here, or record a terminal status. */
   cancelTask(taskId: string, project?: string): { taskId: string } {
+    // A process task (decision 0032, "The view"): cancelling it is Stop.
+    if (isProcessTaskId(taskId)) {
+      const key = this.processes.get({ taskId })?.key;
+      if (key === undefined) throw this.refusal("process", `no process task ${taskId} is kept here`);
+      void this.processes.stop(key).catch(() => undefined);
+      return { taskId };
+    }
     return this.cancelTaskIn(this.session(project), taskId);
   }
 
@@ -10983,6 +11195,14 @@ export class AppService {
    * be — a task not finished, or not archived — is left as it is and not named in the answer.
    */
   archiveTasks(request: { taskIds: string[]; project?: string; undo?: boolean }): { changed: string[] } {
+    // Process tasks (decision 0032, "The view") are not archived: they are stopped and let go — what
+    // `task:delete` does to one. Unarchiving one is nothing.
+    const processTasks = request.taskIds.filter(isProcessTaskId);
+    if (processTasks.length > 0) {
+      const gone = request.undo === true ? [] : processTasks.filter((taskId) => this.processes.discard(taskId));
+      const rest = request.taskIds.filter((taskId) => !isProcessTaskId(taskId));
+      return { changed: [...gone, ...(rest.length > 0 ? this.archiveTasks({ ...request, taskIds: rest }).changed : [])] };
+    }
     const session = this.session(request.project);
     const now = Date.now();
     const changed = request.taskIds.filter((taskId) => (request.undo === true ? session.project.runtime.unarchive(taskId, now) : session.project.runtime.archive(taskId, now)));
@@ -11041,6 +11261,11 @@ export class AppService {
    * remove it leaves the task intact and reportable rather than rows gone and a worktree orphaned.
    */
   async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
+    // A process task (decision 0032, "The view"): stopped if it runs, and let go.
+    if (isProcessTaskId(taskId)) {
+      if (!this.processes.discard(taskId)) throw this.refusal("process", `no process task ${taskId} is kept here`);
+      return { taskId };
+    }
     const session = this.session(project);
     this.letProcessesGo(taskId, "the task was deleted");
     const live = session.live.get(taskId);
