@@ -403,7 +403,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     if (line.shown === "output") return <ValueView value={entry.output!.value} label={entry.output!.name ?? "output"} {...(entry.output!.schema !== undefined ? { hint: { schema: entry.output!.schema } } : {})} />;
     return undefined;
   })();
-  const procCard = (one: TerminalSummary): JSX.Element => <TerminalView key={one.callId} taskId={one.taskId} project={artifacts?.project ?? undefined} callId={one.callId} command={one.command} dialect={one.dialect} />;
+  const procCard = (one: TerminalSummary): JSX.Element => <ProcCard key={one.callId} summary={one} project={artifacts?.project ?? undefined} />;
   const live = runningProc !== undefined && procShown ? procCard(runningProc) : undefined;
   return (
     <Row
@@ -426,6 +426,31 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
         </>
       }
     />
+  );
+}
+
+/**
+ * A process another tool call started, under its row: the card — or, while the card is placed elsewhere
+ * (a split, the main view, the side panel), one line naming it with the three place buttons, that place
+ * lit, and no second copy (decision 0028, ruling 2; decision 0032's view, board 4).
+ */
+function ProcCard({ summary, project }: { summary: TerminalSummary; project: string | undefined }): JSX.Element {
+  const t = useTokens();
+  const entry = useMemo(() => terminalEntryOf({ taskId: summary.taskId, project, callId: summary.callId, command: summary.command, dialect: summary.dialect }), [summary.taskId, project, summary.callId, summary.command, summary.dialect]);
+  const lit = useEntryPlaces(entry.key);
+  const phone = usePhone();
+  const here = usePlacesHere(phone);
+  if (lit.length === 0) return <TerminalView taskId={summary.taskId} project={project} callId={summary.callId} command={summary.command} dialect={summary.dialect} />;
+  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
+  return (
+    <View flexDirection="row" alignItems="center" gap={8} minWidth={0} paddingLeft={2}>
+      <Icon name="terminal" size={13} color={String(t.v(summary.endedAt === undefined ? "accent" : "dim"))} />
+      <Txt spec={{ voice: "data", scale: 11.5 / 12, weight: 600 }} ellip flexShrink={1} minWidth={0} title={summary.command}>
+        {summary.command}
+      </Txt>
+      <View flex={1} />
+      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => moveEntry(place, entry, lit, phone)} />
+    </View>
   );
 }
 
