@@ -33,6 +33,15 @@ export interface LiveCall {
   /** The task whose run made the call, when the registering stack was built for one. */
   taskId?: string;
   /**
+   * The state making the call — its own interrupt id (decision 0033 §6): every call can be reached by
+   * the state it is, whatever else it registered under.
+   */
+  instanceId?: string;
+  /** The `interruptSignal()` ids the script registered the call under (`llm({ interrupt: s })`). */
+  signals?: readonly string[];
+  /** Set when it is interrupted: why, as the person or the script said it. Read when it settles. */
+  interrupted?: { reason?: string };
+  /**
    * Resolves when this call settles, however it settles.
    *
    * Never rejects. Somebody waiting for the position to stop moving does not care whether the turn
@@ -120,6 +129,25 @@ export class LiveCalls {
     return [...this.calls.values()].filter((call) => call.taskId === taskId);
   }
 
+  /**
+   * The calls a target reaches in one task (decision 0033 §6): the call a state makes, by the state's
+   * id, or every call registered under an `interruptSignal()` id.
+   */
+  reachedBy(taskId: string, target: string): LiveCall[] {
+    return this.ofTask(taskId).filter((call) => call.instanceId === target || call.signals?.includes(target) === true);
+  }
+
+  /**
+   * Interrupt every call a target reaches: each fails, `interrupted` with the reason, which the code
+   * that made it may catch — and a run that does not ends stopped, not failed. How many it reached.
+   */
+  async interrupt(taskId: string, target: string, reason?: string): Promise<number> {
+    const calls = this.reachedBy(taskId, target);
+    for (const call of calls) call.interrupted = reason === undefined ? {} : { reason };
+    await Promise.all(calls.map((call) => call.cancel().catch(() => undefined)));
+    return calls.length;
+  }
+
   /** Every session with a call in flight — for a UI asking "is anything running". */
   sessions(): string[] {
     return [...this.calls.keys()];
@@ -188,6 +216,8 @@ export function register(
   handle: ExecHandle<ResolvedValue, WorkflowMetrics>,
   /** The task whose run makes the call — see {@link LiveCall.taskId}. */
   taskId?: string,
+  /** The `interruptSignal()` ids the call was made under — see {@link LiveCall.signals}. */
+  signals?: readonly string[],
 ): ExecHandle<ResolvedValue, WorkflowMetrics> {
   const sessionId = conversationOf(ctx.session);
   if (sessionId === undefined) return handle;
@@ -201,7 +231,7 @@ export function register(
   const result = handle.result.then(
     (r) => {
       live.remove(sessionId, entry);
-      return r;
+      return interruptedResult(r, entry?.interrupted);
     },
     (e: unknown) => {
       live.remove(sessionId, entry);
@@ -232,6 +262,8 @@ export function register(
     },
     cancel: () => handle.cancel(),
     ...(taskId !== undefined ? { taskId } : {}),
+    ...(ctx.scope?.instanceId !== undefined ? { instanceId: ctx.scope.instanceId } : {}),
+    ...(signals !== undefined && signals.length > 0 ? { signals } : {}),
   };
   live.add(entry);
   return {
@@ -241,4 +273,31 @@ export function register(
       return handle.control;
     },
   };
+}
+
+/**
+ * A call that was interrupted settles as a CANCELED failure that says so (decision 0033 §6): what it was
+ * interrupted with is its reason, and `interrupted` carries it for whatever reads the record. Canceled,
+ * so a run that does not catch it ends stopped rather than failed. A call that settled some other way
+ * before the interrupt reached it is left as it settled.
+ */
+function interruptedResult<R>(result: R, interrupted: { reason?: string } | undefined): R {
+  if (interrupted === undefined) return result;
+  const failure = (result as { error?: Record<string, unknown> }).error;
+  if (failure === undefined) return result;
+  const said = interrupted.reason === undefined ? "interrupted" : `interrupted: ${interrupted.reason}`;
+  return { ...result, error: { ...failure, classification: "canceled", reason: said, interrupted: interrupted.reason === undefined ? {} : { reason: interrupted.reason } } } as R;
+}
+
+/**
+ * The `interruptSignal()` ids a call was made under: `llm({ interrupt: s })` reaches the executor as the
+ * knob `config.interrupt` — an id, or a list of them. Read here and taken OUT of the call, so no model
+ * is ever handed it as a setting.
+ */
+export function signalsOf(op: { config?: unknown }): { signals: string[]; op: typeof op } {
+  const config = op.config;
+  if (config === null || typeof config !== "object" || Array.isArray(config) || !("interrupt" in config)) return { signals: [], op };
+  const { interrupt, ...rest } = config as Record<string, unknown>;
+  const signals = (Array.isArray(interrupt) ? interrupt : [interrupt]).filter((id): id is string => typeof id === "string" && id.length > 0);
+  return { signals, op: { ...op, config: rest } };
 }

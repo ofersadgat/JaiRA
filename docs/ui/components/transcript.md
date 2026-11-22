@@ -2,7 +2,7 @@
 id: ui/components/transcript
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-22
 realizes: [ux/patterns/stream-then-settle, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/arm-the-cut-then-confirm, ux/patterns/absence-is-stated, ux/patterns/say-what-it-is-doing-and-for-how-long]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/chat-with-agents, product/rewind-to-where-it-went-wrong]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
@@ -45,6 +45,14 @@ A white sheet with rounded corners on the grey page, carrying one conversation f
 | time passed | `{m} minutes later` after a pause of five minutes or more with 20px above and 16px below; `1 hour later` or `{h} hours later` from an hour with 34px and 28px; the weekday, or a short date from a week ago, on a new day with 52px and 44px. The day chip reads `Today` or a short date, at 34% while still and full strength while scrolling. | [time-passed.html](../assets/transcript/time-passed.html) |
 | armed | A rewind waiting for confirmation: a `--bad` lowercase line between dashed rules reads how many messages go, and everything from it down fades to 38%, the bubbles losing their tint. | [armed.html](../assets/transcript/armed.html) |
 | error | A call that did not end well closes with one more row: amber `the process ended before this call finished — everything above is what had been recorded`, or red `this call failed`. | [error.html](../assets/transcript/error.html) |
+
+## A program's calls are entries like any other
+
+Where the transcript is a program's conversation ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)), the calls the program made
+besides its replies are woven into its entries where they happened (`weaveProgramCalls`): a call is a
+work row, folded with the work around it, a told line, or nothing — by the renderer its (function, role)
+finds. `WorkOpenContext` starts every summary of work open (the task view's detail); a summary folded by
+hand stays folded.
 
 ## Only the fold and the scroll belong to the transcript itself
 

@@ -17,6 +17,8 @@ import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from
 import { contextTotalOf } from "./runConversationModel";
 import { conversationAnswering, isProgramConversation, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
+import { programCallsOf, weaveProgramCalls, type ProgramCall } from "./programCalls";
+import type { OperationRecordView, QueuedMessageView } from "@jaira/shared/browser";
 import { seenClockOf } from "./pillModel";
 import type { CutSide } from "./transcriptViewTypes";
 import { terminals } from "./terminalStore";
@@ -121,6 +123,8 @@ export function replyPlaceholder(arming: Arming | null): string {
  * Everything one conversation holds and derives — what `ChatThread` draws.
  * `jump` is the host's "scroll to the live edge", called when a message is sent.
  */
+const NO_QUEUE: QueuedMessageView[] = [];
+
 export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() => void>) {
   const taskId = surface.taskId!;
   const project = surface.project ?? undefined;
@@ -315,6 +319,11 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
         // WAITING for the allowance: held until the reset (drawn from the waiting list below, not as
         // a pending turn), or refused for it — then the refusal's own line, with "Try again at …",
         // says so instead of an error.
+        // Queued for the next `input()`: drawn from the queue now, not as a pending turn.
+        if (result.queued !== undefined) {
+          setSent((was) => was.filter((m, k) => k !== was.lastIndexOf(message)));
+          void syncCache().refresh("chat:queue", queueRequest);
+        }
         if (result.waiting !== undefined) {
           if (result.waiting.state === "waiting") setSent((was) => was.filter((m, k) => k !== was.lastIndexOf(message)));
           setError(null);
@@ -423,7 +432,15 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    * live tail is the only thing there is to show. Passing a null session here is exactly what
    * `entriesOf` takes it for.
    */
-  const entries = useMemo(() => {
+  /**
+   * A PROGRAM's calls besides its replies (decision 0033 §1): what it checked, what it started, read
+   * off its states and their records — woven among the thread's messages as chat draws them.
+   */
+  const program = surface.detail?.program === true || isProgramConversation(surface.detail?.instances);
+  const recordsHeld = useView("run:records", program ? { taskId, ...(surface.project !== null ? { project: surface.project } : {}) } : null);
+  const records = useMemo<Record<string, OperationRecordView>>(() => Object.fromEntries((recordsHeld.value ?? []).map((row) => [row.recordId, row])), [recordsHeld.value]);
+  const programCalls = useMemo(() => (program ? programCallsOf(surface.detail?.instances[0], records) : []), [program, surface.detail?.instances, records]);
+  const threadEntries = useMemo(() => {
     /**
      * The messages that have been sent and are not in the record yet, shown as the turns they are
      * about to be.
@@ -452,6 +469,64 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       pending,
     );
   }, [thread, surface.journal, surface.live, afterglow, surface.opening, surface.detail?.status, openingMessage, sent]);
+  /** "Every step" — the task view's offer of the program at the level of its calls (decision 0033 §1). */
+  const [everyStep, setEveryStep] = useState(false);
+  const entries = useMemo(
+    () => weaveProgramCalls(threadEntries, programCalls, surface.density ?? "chat", undefined, surface.density === "task" && everyStep),
+    [threadEntries, programCalls, surface.density, everyStep],
+  );
+
+  /**
+   * The messages QUEUED for the program's next `input()` (decision 0033 §9): sent while a reply was being
+   * written, shown at once under the thread, each with Edit, Delete — and Send now, while the reply in
+   * flight can take a message.
+   */
+  const queueRequest = useMemo(() => ({ taskId, ...(surface.project !== null ? { project: surface.project } : {}) }), [taskId, surface.project]);
+  const queueHeld = useView("chat:queue", program ? queueRequest : null);
+  const queuedMessages: QueuedMessageView[] = queueHeld.value?.items ?? NO_QUEUE;
+  const steerable = queueHeld.value?.steerable === true;
+  const actOnQueued = (id: string, action: "drop" | "sendNow"): void => {
+    void invoke("chat:queueAct", { id, action })
+      .then(() => syncCache().refresh("chat:queue", queueRequest))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  };
+  /** Back into the box to be changed, and out of the queue. */
+  const editQueued = (item: QueuedMessageView): void => {
+    setDraft(item.text);
+    actOnQueued(item.id, "drop");
+  };
+
+  /**
+   * What an interrupt can reach (decision 0033 §6–§7): the program's calls in flight — a wait for the
+   * person is not one. One is interrupted at once; more than one asks which (`choosing`).
+   */
+  const runningCalls = useMemo(() => programCalls.filter((call) => call.fn !== "input" && call.endedAt === undefined && call.status !== "completed" && call.status !== "failed"), [programCalls]);
+  const [choosing, setChoosing] = useState<{ withMessage: boolean } | null>(null);
+  /** Interrupt one call — or, with `null`, every call the conversation has going — with the draft as its reason when asked. */
+  const interrupt = (target: ProgramCall | null, withMessage: boolean): void => {
+    setChoosing(null);
+    const reason = withMessage ? draft.trim() : "";
+    // The message is the reason, and the program's next `input()` takes it: sent, so queued for it.
+    if (reason !== "") {
+      send(reason);
+      setDraft("");
+    }
+    if (target === null) {
+      void invoke("chat:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch(() => undefined);
+      return;
+    }
+    void invoke("task:interrupt", { taskId, target: target.instanceId, ...(reason !== "" ? { reason } : {}), ...(project !== undefined ? { project } : {}) }).catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  };
+  /** Stop: the one call in flight, or the question which, when a program has several going. */
+  const stopOrChoose = (): void => {
+    if (program && runningCalls.length > 1) setChoosing({ withMessage: false });
+    else stop();
+  };
+  /** Interrupt with the message in the box: its reason, and the next message the program takes. */
+  const interruptWithMessage = (): void => {
+    if (runningCalls.length > 1) setChoosing({ withMessage: true });
+    else interrupt(runningCalls[0] ?? null, true);
+  };
 
   /** The last message that never reached the conversation, and why — said under the thread until one does. */
   const unsent = thread?.unsent?.at(-1);
@@ -721,7 +796,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     disarm,
     confirmRewind,
     send,
-    stop,
+    stop: stopOrChoose,
+    runningCalls,
+    choosing,
+    interrupt,
+    interruptWithMessage,
+    cancelChoosing: () => setChoosing(null),
+    /** Interrupt one call by its state, from its own row. */
+    interruptCall: (instanceId: string) => interrupt(runningCalls.find((call) => call.instanceId === instanceId) ?? ({ instanceId } as ProgramCall), false),
     answering,
     waitingHere,
     lastContext,
@@ -729,6 +811,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     onCompact,
     artifacts,
     entries,
+    /** Whether "Every step" can be offered — a program read as its task — and whether it is on. */
+    stepsOffered: program && surface.density === "task",
+    everyStep,
+    setEveryStep,
+    queuedMessages,
+    steerable,
+    actOnQueued,
+    editQueued,
     status,
     askValue,
     approvalInThread,

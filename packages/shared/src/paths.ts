@@ -241,6 +241,8 @@ export interface JairaBasePaths {
   limitsFile: string;
   /** Messages and runs waiting for an account's allowance to reset, so a restart still sends them. */
   waitingFile: string;
+  /** Messages queued for a program conversation's next `input()`, so a restart still delivers them. */
+  queuedFile: string;
 }
 
 
@@ -477,6 +479,7 @@ export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePat
     syncFile: join(system, "sync.json"),
     limitsFile: join(system, "limits.json"),
     waitingFile: join(system, "waiting.json"),
+    queuedFile: join(system, "queued.json"),
   };
 }
 

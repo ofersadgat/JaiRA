@@ -58,7 +58,9 @@ describe("making a workspace from a forge", () => {
   });
 });
 
-describe("copying a checkout as it is", () => {
+// Dozens of git commands each: two seconds alone, past the suite's 30 when every worker spawns at once on
+// Windows, where starting a process is the slow part.
+describe("copying a checkout as it is", { timeout: 90_000 }, () => {
   it("brings the unpushed commit, staged and unstaged changes and new files — and nothing git ignores", async () => {
     const { work } = forgeAndClone();
     git(work, "checkout", "-q", "-b", "feature/maps");

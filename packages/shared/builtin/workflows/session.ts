@@ -11,8 +11,11 @@
  *
  * Everything here is ordinary code: change what is checked, when the improver runs, or turn it off, by
  * copying this file into a layer above and editing it — or let a lesson do that.
+ *
+ * `renderUI` says how a call is drawn, and nothing else (decision 0033): the check on each message is an
+ * aside — folded in chat, open in the task view — and the reply and the wait are the conversation.
  */
-import { llm, input } from "@declarative-ai/hw/script";
+import { llm, input, renderUI } from "@declarative-ai/hw/script";
 import { conversation_digest, start_task } from "$REGISTRY";
 
 export const meta = {
@@ -82,8 +85,8 @@ export default async function session(
       // Strict, per message: only a clear-cut correction is acted on now (decision 0029 §6). The
       // improver runs on its own, so the conversation never waits for it.
       try {
-        const recent = await conversation_digest({ session: conv, last: 4 });
-        const seen = await llm<Verdict>({
+        const recent = await renderUI(conversation_digest({ session: conv, last: 4 }), { role: "aside", title: "Reading the conversation" });
+        const seen = await renderUI(llm<Verdict>({
           prompt:
             "The person's message: " + text +
             "\n\nThe conversation around it:\n" + JSON.stringify(recent.messages, null, 2) +
@@ -91,7 +94,7 @@ export default async function session(
           system: NOTICE,
           config: { configRef: "simple" },
           label: "notice",
-        });
+        }), { role: "aside", title: "Checking for a correction" });
         if (seen.verdict === "clear") {
           await start_task({ workflow: "improve/lesson", title: "Lesson: " + seen.lesson, inputs: { lesson: seen.lesson, workflow: "session", context: { task: recent.task, session: conv }, approval } });
           lessons = lessons + 1;

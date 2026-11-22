@@ -469,7 +469,11 @@ async function shell(
   const sep = (ctx.platform ?? process.platform) === "win32" && typeof ctx.execEnv !== "object" ? ";" : ":";
   const path: Record<string, string> =
     pathFirst.length > 0 && typeof ctx.execEnv !== "object" ? { PATH: [...pathFirst, process.env["PATH"] ?? ""].filter((p) => p !== "").join(sep) } : {};
-  const result = await ctx.exec.run(command, [...prefix, line], {
+  // Windows PowerShell 5.1 writes what `>` redirects as UTF-16: `echo made > made.txt` made a file no
+  // other tool reads as "made". Redirection follows Out-File's default, set to UTF-8 for the step — an
+  // argument of its own before the line, which `-Command` joins to it, so the line is the step's as written.
+  const utf8 = command.toLowerCase().startsWith("powershell") ? ["$PSDefaultParameterValues['Out-File:Encoding']='utf8';"] : [];
+  const result = await ctx.exec.run(command, [...prefix, ...utf8, line], {
     cwd: where,
     env: { ...(ctx.env ?? {}), ...path, ...(env ?? {}) },
     execEnv: ctx.execEnv,

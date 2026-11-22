@@ -59,6 +59,7 @@ import type { EventsStatusView } from "./repoWatch";
 import type {
   BoardView,
   ChatThreadView,
+  QueuedMessageView,
   ConversationView,
   JobOutputChunk,
   JobRow,
@@ -2104,6 +2105,11 @@ export interface IpcContract {
        * it stays, and what came after it goes, as a rewind's does.
        */
       branchAt?: string;
+      /**
+       * Join the reply in flight NOW — "Send now" (decision 0033 §9). Without it, a message sent while a
+       * call runs is queued for the program's next `input()`.
+       */
+      now?: boolean;
     };
     response: {
       instanceId: string;
@@ -2111,6 +2117,8 @@ export interface IpcContract {
       sessionRef?: string;
       failure?: string;
       steered?: boolean;
+      /** Held for the program's next `input()`, shown until it is taken (decision 0033 §9). */
+      queued?: QueuedMessageView;
       /**
        * The message is WAITING rather than answered: the account had no allowance left, so it was held
        * until the reset (`state: "waiting"`), or the provider refused it for that reason
@@ -2126,6 +2134,19 @@ export interface IpcContract {
    * transcript keeps. `canceled: false` when nothing was in flight.
    */
   "chat:cancel": { request: { taskId: string; project?: string }; response: { canceled: boolean } };
+  /**
+   * The messages queued for a program conversation's next `input()` (decision 0033 §9), oldest first,
+   * and whether its running reply can take one now — which is when "Send now" is offered.
+   */
+  "chat:queue": { request: { taskId: string; project?: string }; response: { items: QueuedMessageView[]; steerable: boolean } };
+  /**
+   * Interrupt what a target reaches in one task (decision 0033 §6): the call a state is making, by the
+   * state's instance id, or every call registered under an `interruptSignal()` id. Each fails as
+   * interrupted, with `reason` when one is given — a failure the program may catch. How many it reached.
+   */
+  "task:interrupt": { request: { taskId: string; target: string; reason?: string; project?: string }; response: { interrupted: number } };
+  /** Delete a queued message, or send it now — steered into the running reply, which must be able to take it. */
+  "chat:queueAct": { request: { id: string; action: "drop" | "sendNow" }; response: { items: QueuedMessageView[]; steered?: boolean } };
   /**
    * End a conversation that is a program (decision 0029 §2): its `input()` returns `null`, and the
    * program does what it does at its end — `session` reviews the conversation for lessons (§6). Writing
@@ -2939,6 +2960,9 @@ export const IPC_CHANNELS = [
   "chat:startPlan",
   "chat:send",
   "chat:cancel",
+  "chat:queue",
+  "chat:queueAct",
+  "task:interrupt",
   "chat:end",
   "terminal:list",
   "terminal:read",
@@ -3448,6 +3472,7 @@ export type PushMessage =
   | { type: "limits:changed"; view: LimitsView }
   /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
   | { type: "waiting:changed"; items: WaitingItem[] }
+  | { type: "queued:changed"; items: QueuedMessageView[] }
   /**
    * The tasks being placed or waiting for a workspace changed — one began, asked again, was sent
    * somewhere or started. The whole list, as `placement:queue` answers it. This machine's.

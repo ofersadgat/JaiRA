@@ -12,6 +12,7 @@ import { commandLinesOf, iconOf, takenApartOf, type ThoughtEntry, type ToolEntry
 import { isHostCall, secondsOf } from "@jaira/ui/workSummary";
 import { subagentLineOf } from "@jaira/ui/subagentModel";
 import { ApprovalAskContext, useNow } from "@jaira/ui/workSummaryContext";
+import { CallInterruptContext, programCallInstance } from "@jaira/ui/programCalls";
 import { askedOf, pictureOf, producedArtifact, publishedOf, shownInChain, shownOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useFilled } from "@jaira/ui/useView";
@@ -305,6 +306,10 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   // A host with more to say about a subagent draws it instead of the fold (`subagentHost.ts`).
   const subagentHost = useContext(SubagentHostContext);
   const askedHere = ask?.pending.recovered === true && held.callId === ask.pending.requestId;
+  // A program's call still running carries its own Interrupt (decision 0033 §6), where the thread offers one.
+  const interruptCall = useContext(CallInterruptContext);
+  const programState = programCallInstance(held.callId);
+  const interruptible = interruptCall !== undefined && programState !== undefined && held.ok === undefined && held.result === undefined;
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   // A shell call JaiRA ran is a terminal (decision 0028): live under its row while it runs, a press away
   // once it has ended, and placeable as an artifact is.
@@ -343,7 +348,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     tone: line.tone,
     mark: line.mark,
     // Who stopped a refused call, in grey before the time (2026-10-24, D+E).
-    ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : {}),
+    ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : interruptible ? { note: <InterruptButton onPress={() => interruptCall!(programState!)} /> } : {}),
   };
   // The approval prompt, and a permission check: its line is the whole of it.
   if (isHostCall(entry)) return <Row {...head} />;
@@ -806,3 +811,13 @@ export function OutcomeNote({ outcome }: { outcome: WorkflowOutcome }): JSX.Elem
 }
 
 export type { Tokens };
+
+/** A running program call's own Interrupt, on its row (decision 0033 §6): app 11/12.5 --bad, hovered on --bad 12%. */
+function InterruptButton({ onPress }: { onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press onPress={onPress} title="Interrupt this call — the program may catch it and go on" paddingVertical={1} paddingHorizontal={6} borderRadius={5} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("bad"), 12, "transparent") : "transparent" })}>
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad", lineHeight: 1 }}>Interrupt</Txt>
+    </Press>
+  );
+}

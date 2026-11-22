@@ -2,7 +2,7 @@
 id: ui/surfaces/run-conversation
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-11-22
 kind: panel
 realizes: [ux/patterns/stream-then-settle, ux/patterns/follow-the-live-edge, ux/patterns/park-and-ask, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/arm-the-cut-then-confirm, ux/patterns/button-says-what-will-happen, ux/patterns/nested-under-what-caused-it, ux/patterns/drill-in-and-back-out, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/the-window-remembers-its-arrangement]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/decisions-stay-yours, product/agents-ask-instead-of-guessing, product/risky-actions-wait-for-approval, product/failures-explain-themselves, product/steer-agents-mid-task, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/pick-up-where-it-left-off, product/move-work-on-by-hand]
@@ -38,6 +38,15 @@ A run read as its conversations: sheets stacked down a grey page in the order th
 | subagent | One sheet holding the subagent's transcript, its live turns appended as they stream, with no rail, strip or composer. It reads `Loading…` before the conversation arrives, `This subagent has not said anything yet.` when it is empty, and `This step is not a subagent conversation.` when the address points elsewhere. | [subagent.html](../assets/run-conversation/subagent.html) |
 
 A gate's prompt is set in the small uppercase `--dim` heading style, its glyph and words pushed to opposite ends of the line, while an agent's question and a command approval take the large `--text` heading.
+
+## A program read from its root is its conversation, at the task view's detail
+
+A run whose workflow is a program (decision 0029) is not drawn as a sheet per state: the column is the
+Chat view's own thread and box ([chat-view](chat-view.md)) at `task` detail ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)).
+What chat folds is open — every summary of work starts with its steps showing, and can be folded by hand
+— what chat hides is folded, and **Every step** (a switch over the thread, off at first) draws every call
+the program made as a row of its own, the waits and the replies among them. The queue, Stop, Interrupt and
+the edits are the Chat view's.
 
 ## Every link on the page leads to the thing it names
 

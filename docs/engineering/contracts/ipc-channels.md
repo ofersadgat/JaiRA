@@ -2,7 +2,7 @@
 id: engineering/contracts/ipc-channels
 type: engineering-contract
 status: shipped
-updated: 2026-09-23
+updated: 2026-11-22
 visibility: internal
 kind: api
 owned_by: [engineering/units/ipc-bridge]
@@ -36,7 +36,7 @@ Types are from `ipc.ts` unless a table says otherwise; view types are from `view
 | Family | Channels | Contract |
 | --- | --- | --- |
 | Task actions and module approval | `task:create`, `task:start`, `task:cancel`, `task:rerun`, `task:resume`, `task:resumable`, `task:move`, `task:adopt`, `task:connect`, `task:connectUndo`, `task:inputSources`, `task:rewind`, `task:fork`, `task:delete`, `task:rename`, `functions:pending`, `functions:approve` | [task-channels](task-channels.md) |
-| Typed conversation | `chat:plan`, `chat:startPlan`, `chat:send`, `chat:cancel`, `chat:end`, `chat:thread` | [chat-channels](chat-channels.md) |
+| Typed conversation | `chat:plan`, `chat:startPlan`, `chat:send`, `chat:cancel`, `chat:end`, `chat:thread`, `chat:queue`, `chat:queueAct`, `task:interrupt` | [chat-channels](chat-channels.md) |
 | Inbox | `interaction:pending`, `interaction:submit`, `approval:pending`, `approval:submit`, `question:pending`, `question:submit`, `userEvent:pending`, `userEvent:deliver` | [inbox-channels](inbox-channels.md) |
 | Live turn snapshot | `session:live` | [session-live-protocol](session-live-protocol.md) |
 | Schema checks | `schema:validate`, `schema:check`, `schema:detect` | [schema-check-channels](schema-check-channels.md) |

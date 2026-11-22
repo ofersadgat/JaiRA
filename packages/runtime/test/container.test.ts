@@ -29,10 +29,16 @@ import type { ExecOptions } from "../src/exec";
 import { LINUX_PATH, fakeFs, machineExec } from "./installRig";
 
 const BOX = { container: "jaira-1a2b3c4d" } as const;
+/**
+ * A workspace runs in a container on a Mac or a Linux machine only (Windows is refused, and runs in
+ * WSL instead): what such a host does with its own paths and its own docker is not something a Windows
+ * host can be asked to show, so those cases are left to the hosts they describe.
+ */
+const POSIX_HOST = process.platform !== "win32";
 const NO_SUCH = { code: 1, stderr: "Error: No such object: jaira-1a2b3c4d\n" };
 
 describe("a command run inside a workspace's container", () => {
-  it("goes through docker exec, at the same path, with its variables passed by name only", () => {
+  it.runIf(POSIX_HOST)("goes through docker exec, at the same path, with its variables passed by name only", () => {
     const run = resolveInvocation("pnpm", ["install", "--frozen-lockfile"], { execEnv: BOX, cwd: "/w/app", env: { TOKEN: "s3cret", CI: "1" } });
     expect(run.file).toBe("docker");
     expect(run.argv.slice(0, 9)).toEqual(["exec", "-i", "-w", "/w/app", "-e", "TOKEN", "-e", "CI", "jaira-1a2b3c4d"]);
@@ -134,7 +140,7 @@ describe("making a workspace's container", () => {
     expect(exec.calls.every((call) => call.execEnv === "windows")).toBe(true);
   });
 
-  it("builds a Dockerfile in its own folder, tagged with the container's name", async () => {
+  it.runIf(POSIX_HOST)("builds a Dockerfile in its own folder, tagged with the container's name", async () => {
     const exec = machineExec((_file, args) => (args[0] === "inspect" ? NO_SUCH : {}));
     const up = await dockerUp(spot, { kind: "docker", file: ".devcontainer/Dockerfile" }, io(exec));
     expect(up.ok).toBe(true);
@@ -174,7 +180,7 @@ describe("a Dev Container through its CLI", () => {
   const spot = { dir: "/w/app", mounts: ["/w/.jaira-worktrees/app"] };
   const text = '{ "build": { "dockerfile": "Dockerfile" }, "remoteUser": "node", "postCreateCommand": "pnpm install" }';
 
-  it("hands devcontainer up the project's file laid over at the workspace's own path, and reads the container it made", async () => {
+  it.runIf(POSIX_HOST)("hands devcontainer up the project's file laid over at the workspace's own path, and reads the container it made", async () => {
     let override: unknown;
     const exec = machineExec((file, args) => {
       if (file === "/opt/bin/devcontainer") {

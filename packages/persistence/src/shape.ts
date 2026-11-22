@@ -53,6 +53,9 @@ export function workflowShape(bundle: WorkflowBundle, options?: ShapeOptions): W
     // A title is a computed field (SPEC §5.3), so the loaded state carries it as a FIELD entry and
     // never as a literal `title` — which is only written back once an instance has evaluated it.
     if (def.fields?.some((field) => field.path === "title") === true) entry.titled = true;
+    // How a script asked its call to be drawn (`renderUI`, decision 0033 §4) — for the view alone.
+    const present = (def as { present?: StateShape["present"] }).present;
+    if (present !== undefined) entry.present = present;
     shape[stateId] = entry;
   }
   return shape;

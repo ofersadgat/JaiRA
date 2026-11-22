@@ -36,7 +36,8 @@ function keeper(): { terminals: ShellTerminals; opened: Opened[] } {
 
 const node = process.execPath;
 const exec = new NodeExec();
-const toolOf = (run: Tool["run"]): Tool => ({ description: "t", inputSchema: { type: "object" }, readOnly: true, run }) as Tool;
+// A tool whose run is whatever the case needs — an exec result is no JSON value, and the wrapper passes it through.
+const toolOf = (run: (...args: never[]) => unknown): Tool => ({ description: "t", inputSchema: { type: "object" }, readOnly: true, run }) as unknown as Tool;
 const call = (tool: Tool, ctx: object = { toolCallId: "toolu_1" }) => (tool as unknown as { run: (input: unknown, ctx: unknown) => Promise<unknown> }).run({}, ctx);
 
 describe("a tool call's processes", () => {

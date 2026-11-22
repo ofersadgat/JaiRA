@@ -14,6 +14,9 @@ import { RAIL_WIDTH, StepsRail } from "../panel/StepsRail";
 import { runFocus } from "../panel/panelBridge";
 import { askingInstanceOf, hasAsking } from "@jaira/ui/stateSurfaceModel";
 import { usePhone } from "../../app/phone";
+import { isProgramConversation } from "@jaira/ui/childRunModel";
+import { ChatThread } from "../chat/ChatThread";
+import { usePaneChatSurface } from "../chat/surface";
 
 /**
  * One run's conversation — the transcript's scroller (`RunTranscript`), and under it the composer or
@@ -65,6 +68,36 @@ export function RunConversation({
   /** Where the reader is, reported as they scroll, for that index to mark. */
   onHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
 }): JSX.Element {
+  // A PROGRAM read from its root is one conversation (decision 0033 §1): the Chat view's own thread and
+  // composer — its queue, its stop, its edits — drawn at the task view's level of detail.
+  if (parent !== undefined && parent === detail.instances[0] && (detail.program === true || isProgramConversation(detail.instances))) {
+    return <ProgramChat detail={detail} source={source} project={project} />;
+  }
+  return <RunConversationOf detail={detail} parent={parent} source={source} project={project} gate={gate} onGate={onGate} asking={asking} onRerun={onRerun} onResume={onResume} onOpenSidechain={onOpenSidechain} foot={foot} onLayout={onLayout} focus={focus} onHere={onHere} />;
+}
+
+/** A program conversation, read as its task: the Chat view's thread at `task` detail. */
+function ProgramChat({ detail, source, project }: { detail: TaskDetail; source: TranscriptSource; project: string | undefined }): JSX.Element {
+  const surface = usePaneChatSurface(detail.taskId, project, { detail, conversation: source.conversation, liveTurn: source.liveTurn }, (taskId) => source.onSelectTask?.(taskId), "task");
+  return <ChatThread surface={surface} key={detail.taskId} />;
+}
+
+function RunConversationOf({
+  detail,
+  parent,
+  source,
+  project,
+  gate,
+  onGate,
+  asking,
+  onRerun,
+  onResume,
+  onOpenSidechain,
+  foot,
+  onLayout,
+  focus,
+  onHere,
+}: Parameters<typeof RunConversation>[0]): JSX.Element {
   // A rewind the reader has ARMED from an entered row — cleared with the task, since a cut is a
   // question about one journal. A fork needs no arming: it starts at once.
   const [armed, setArmed] = useState<ArmedRewind | null>(null);

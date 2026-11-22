@@ -2,7 +2,7 @@
 id: ui/components/work-row
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-22
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/stream-then-settle, ux/patterns/nested-under-what-caused-it, ux/patterns/drill-in-and-back-out]
 serves: [product/watch-agents-work-live, product/complete-record-of-every-run, product/failures-explain-themselves, product/agents-ask-instead-of-guessing, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
@@ -32,6 +32,15 @@ An agent's `AskUserQuestion` the conversation that asked for a fast-forward answ
 **Use when.** A transcript draws a tool call with its result, a block of reasoning, or a recorded fact such as a policy decision, a move to the next state, a provider event or how a call ended. The three are one row with three tones.
 
 **Do not use when.** Someone said something: use [message](message.md). The machine moved between states in a run, on the grey between sheets: use [run-step-note](run-step-note.md). A state that never spoke and only called functions: use [computed-state-body](computed-state-body.md). An agent's question still waiting for an answer: use [agent-question](agent-question.md); the row only shows the question once it is asked and answered.
+
+## A program's call is a work row too
+
+A call a program made that has no renderer of its own — `conversation_digest`, a check it asked a model —
+is a work row ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)): named by its `renderUI` title or its label, its arguments and
+what it returned opening under it, as an agent's tool call's do. While it runs and the thread drawing it
+can interrupt it (`CallInterruptContext`), the row carries **Interrupt** in --bad where its note would be.
+A model's tool call and a program's call of the same function find the same renderer: the model's
+`start_task` and the program's are both the child-run row.
 
 ## The glyph and name say what kind of work it was, and the mark says whether it worked
 

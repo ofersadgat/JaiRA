@@ -407,7 +407,8 @@ describe("what the digest says the person did, beyond what they typed (decision 
     await service.sendChatMessage({ taskId, instanceId: "", message: "a long one" });
     const inFlight = () => (service as unknown as { session(): { liveCalls: { ofTask(id: string): unknown[] } } }).session().liveCalls.ofTask(taskId).length > 0;
     await eventually(inFlight, "the reply to be in flight", 20_000);
-    expect(await service.sendChatMessage({ taskId, instanceId: "", message: "shorter, please" })).toMatchObject({ steered: true });
+    // "Send now": joined to the reply in flight — without it, a message sent now is queued (decision 0033 §9).
+    expect(await service.sendChatMessage({ taskId, instanceId: "", message: "shorter, please", now: true })).toMatchObject({ steered: true });
     expect((await digest(taskId)).signals).toContainEqual({ kind: "steered", message: "shorter, please" });
     service.cancelTask(taskId);
   });

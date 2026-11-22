@@ -270,6 +270,29 @@ export function containerInvocation(
   return { file: "docker", argv, stop: { file: "docker", argv: ["exec", ...user, execEnv.container, "sh", "-c", CONTAINER_STOP, "jaira", pidFile] } };
 }
 
+/**
+ * Every command a {@link NodeExec} is running, until it ends — see {@link processesSettled}.
+ */
+const RUNNING = new Set<Promise<unknown>>();
+
+/**
+ * Wait for the commands still running to end — at most `timeoutMs`. What an engine closing waits on: a
+ * command started for a run, a look at a workspace, holds its folder as its working directory for as
+ * long as it runs, and one that outlived the engine kept that folder from being removed (Windows).
+ */
+export async function processesSettled(timeoutMs = 3_000): Promise<void> {
+  if (RUNNING.size === 0) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, timeoutMs);
+  });
+  try {
+    await Promise.race([Promise.allSettled([...RUNNING]), bound]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
 export class NodeExec implements Exec {
   constructor(
     private readonly defaults: {
@@ -308,6 +331,14 @@ export class NodeExec implements Exec {
   }
 
   run(command: string, args: readonly string[], options: ExecOptions = {}): Promise<ExecResult> {
+    const running = this.runWatched(command, args, options);
+    RUNNING.add(running);
+    const done = (): void => void RUNNING.delete(running);
+    running.then(done, done);
+    return running;
+  }
+
+  private runWatched(command: string, args: readonly string[], options: ExecOptions): Promise<ExecResult> {
     // A process a tool call starts is a terminal of its own (`./toolProcesses`); `shell`'s own,
     // interactive ones are already one.
     const watched = options.interactive === undefined ? toolProcessFor(command, args, options.cwd) : undefined;

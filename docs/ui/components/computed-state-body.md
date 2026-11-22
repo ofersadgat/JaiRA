@@ -2,7 +2,7 @@
 id: ui/components/computed-state-body
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-22
 realizes: [ux/patterns/absence-is-stated]
 serves: [product/complete-record-of-every-run, product/failures-explain-themselves]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context]
@@ -20,6 +20,8 @@ The body under the letterhead of a state that did not speak: a red mono sentence
 ## A computed state body is the account of a state that has no conversation to show
 
 **Use when.** A state on a session sheet computed its outputs, called functions to produce them, or failed. A failed state shows this body in place of any transcript, so its reason is the first line under its red [letterhead](letterhead.md). A settled gate's `Show the record` opens one call block drawn the same way.
+
+**Not for a program's calls.** A conversation written as a script (decision 0029) is read as one thread at the task view's level of detail ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)): each call is drawn by the renderer its function and role find, and a function with none is a tool-call [work-row](work-row.md), its arguments and result in its open body.
 
 **Do not use when.** The state spoke and did not fail: its [transcript](transcript.md) is the body. A gate is asking or was answered: [gate-surface](gate-surface.md) draws the control. A conversation's tool call is a [work-row](work-row.md). The value a state's slot produced, read beside its declaration, is a [run-value-field](run-value-field.md).
 

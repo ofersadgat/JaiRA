@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0033-one-view-of-a-run
 type: decision
-status: proposed
+status: built in part
 updated: 2026-11-22
 decides_for: [engineering/decisions/0029-workflows-that-learn-from-corrections, engineering/units/chat-turns, engineering/units/live-turns, engineering/units/interaction-hub, engineering/units/workflow-authoring, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/components/computed-state-body, ui/components/transcript, ui/components/work-row]
 ---
@@ -281,6 +281,59 @@ specific hands its renderer a signal (§6).
    now; the composer in the task view.
 5. **Chat on the shared component**, keeping its composer and live edge; its thread model retired.
 6. **The record.** The component and surface specs above, mockups, and parity shots for both levels.
+
+## Built (2026-11-22)
+
+The person: "implement it".
+
+- **The registry** (`packages/app/src/renderer/callRenderers.ts`): entries keyed (function, role), `"*"`
+  stored explicitly, looked up (function, role) → ("*", role) → (function, "*") → ("*", "*"), the last
+  the tool-call row; roles say per view whether a call is shown, folded or hidden; `now`, `random` and
+  `log` default to `hidden`; `withOverrides` lays a scope's entries over it; a model's tool name is
+  read as the function it calls (`functionNameOf`).
+- **A program's calls among its messages** (`programCalls.ts`): `programCallsOf` reads every call a
+  program made off its states and their records, its `renderUI` config resolved down the call path
+  (`presentationOf`, nearest winning, `renderers` adding up, a renderer the app does not have left out);
+  `weaveProgramCalls` places each where it happened, drawn by its renderer: `input()` and the reply add
+  nothing the thread already holds, a check is a row with its answer, `start_task` the child-run row,
+  `notify` the told line, anything else a tool-call row.
+- **One component.** Chat weaves them at `chat` detail (`chatThreadModel.ts`). The task view of a
+  program read from its root is the Chat view's own thread and composer at `task` detail
+  (`RunConversation.tsx`'s `ProgramChat`, through `usePaneChatSurface(…, "task")`) — its queue, its
+  stop and its edits with it. The per-state sheets are no longer drawn for a program.
+  At `task` detail every summary of work starts open, each phase under its head (`WorkOpenContext`),
+  and can still be folded by hand; chat keeps them folded.
+- **hw** (declarative-ai, SCRIPTS.md §18): `renderUI` (both forms, tied to its call site by the compiler,
+  written on the call's state as `present`, literal configs, a warning where no call can be found),
+  `interruptSignal()` (a recorded id), `Interrupted`. JaiRA carries `present` through the board's
+  shape and the projection onto every instance (`shape.ts`, `projection.ts`, `InstanceNode.present`).
+  `session.ts` draws its correction check and its digest as asides.
+- **Interrupts** (`liveHandles.ts`): a call in flight is registered under its state and the signals it
+  was made under (read off `config.interrupt` and taken out before a model sees it); `task:interrupt`
+  fails every call a target reaches, canceled with `interrupted: <reason>`. In the thread, Stop asks which
+  when a program has several calls going (`InterruptChoices`), "Interrupt with this message" is offered
+  while a reply is written and the box holds one, and a running program call's row carries its own
+  Interrupt (`CallInterruptContext`).
+- **The queue** (`queuedMessages.ts`, `~/.jaira/system/queued.json`): a message sent while a call runs is
+  queued, not steered; a program parking at `input()` takes the oldest; `chat:queue` / `chat:queueAct`;
+  the thread draws each with Send now (only while the reply can take it), Edit and Delete.
+
+- **The coarser modes** (`"phases"`, `"state"`): `renderUI(promise, config)` tells the host which call
+  the promise is, and the config is recorded on its `script.call.settled` (`present`); a script's
+  `operation.dispatched` names its `site`. JaiRA projects both (`OperationCall.site`,
+  `InstanceNode.scriptCalls`), and `programCallsOf` reads every recorded call a state made — each named and
+  drawn by what was said at its site — rather than the first.
+- **A scope's `interrupt`**: the one field of a config that may be computed; every `llm()` and `agent()`
+  inside is registered under it unless it names its own (SCRIPTS.md §18.1).
+- **Every step**: a switch over the program's thread at `task` detail, off at first, that draws every
+  call as a row of its own — the waits and the replies the thread already says among them. This is the
+  ruling's "a state's letterhead, shown in the task view": the step, named, in place, without its sheet.
+- **The record**: chat-view, run-conversation, transcript, work-row and computed-state-body say all this.
+
+- **A program however compiled**: the task detail says so (`TaskDetail.program`, from its pinned bundle), so a
+  script compiled as one state is read as its conversation too.
+
+**Not yet:** no parity scene photographs a program's thread at either detail.
 
 ## Revisit when
 

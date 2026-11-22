@@ -42,7 +42,7 @@ import {
   type WorkflowBundle,
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
-import { register, type LiveCalls } from "./liveHandles";
+import { register, signalsOf, type LiveCalls } from "./liveHandles";
 import { withContinuation, type ContinuationPorts } from "./continuation";
 import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/promptop";
 import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
@@ -800,8 +800,10 @@ export function withTurnStream(
     ...(executor.capabilitiesFor !== undefined
       ? { capabilitiesFor: (op: Operation<InlineFamily>) => executor.capabilitiesFor!(op) }
       : {}),
-    start: (op: Operation<InlineFamily>, ctx: ExecServices) => {
-      const handle = executor.start(op, ctx);
+    start: (written: Operation<InlineFamily>, ctx: ExecServices) => {
+      // An `interruptSignal()` the call was made under is the app's to register, never a model setting.
+      const { signals, op } = signalsOf(written as { config?: unknown });
+      const handle = executor.start(op as Operation<InlineFamily>, ctx);
       const at = (ctx as { session?: { at?: { id: string; seq: number } } }).session?.at;
       // The seed rides on the RESOLUTION now — hw resolves each operation's position before dispatch,
       // so there is no request left to read it off.
@@ -859,7 +861,7 @@ export function withTurnStream(
           // A stream that ends badly must not fail the call it was narrating.
         }
       })();
-      return live === undefined ? handle : register(live, ctx, handle, taskId);
+      return live === undefined ? handle : register(live, ctx, handle, taskId, signals);
     },
   };
 }

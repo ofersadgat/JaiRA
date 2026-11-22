@@ -55,6 +55,11 @@ export interface StateShape {
    * `value.settled` event arrives, both look like nothing.
    */
   titled?: boolean;
+  /**
+   * How the state's call is drawn — a script's `renderUI` config (decision 0033 §4), copied onto every
+   * instance of it so a view can read it. Nothing in the engine reads it.
+   */
+  present?: Record<string, JsonValue>;
 }
 
 /** The workflow shape a projection reads: state id → shape. */
@@ -202,6 +207,7 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
           // state's own name are identical across all of them.
           ...(inputsOf(event) !== undefined ? { inputs: inputsOf(event)! } : {}),
           ...(runLabelOf(event, shape) !== undefined ? { label: runLabelOf(event, shape)! } : {}),
+          ...(shape?.[event.stateId]?.present !== undefined ? { present: shape[event.stateId]!.present! } : {}),
           children: [],
         };
         byId.set(node.instanceId, node);
@@ -255,8 +261,20 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
         if (!node) break;
         const calls = (node.calls ??= []);
         if (!calls.some((call) => call.operationId === event.operationId)) {
-          calls.push({ operationId: event.operationId, kind: event.op });
+          calls.push({ operationId: event.operationId, kind: event.op, ...(event.site !== undefined ? { site: event.site } : {}) });
         }
+        break;
+      }
+      // What a script said about a call its code made: its label, its phase, how it is drawn (decision 0033 §4).
+      case "script.call.settled": {
+        const node = byId.get(event.instanceId);
+        if (!node) break;
+        const said = {
+          ...(event.label !== undefined ? { label: event.label } : {}),
+          ...(event.phase !== undefined ? { phase: event.phase } : {}),
+          ...(event.present !== undefined ? { present: event.present } : {}),
+        };
+        if (Object.keys(said).length > 0) (node.scriptCalls ??= {})[event.site] = said;
         break;
       }
       case "operation.completed": {

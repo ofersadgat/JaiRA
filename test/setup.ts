@@ -17,7 +17,7 @@
  * that reaches the default path before anything has had a chance to name a root. An empty scratch
  * directory is the right answer there, and it costs one `mkdtemp` per worker.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach } from "vitest";
@@ -49,6 +49,17 @@ process.env["DAI_ENDPOINTS"] = join(BASE_DIR, "dai", "endpoints");
  */
 export const EMPTY_BUILT_IN_DIR = join(BASE_DIR, "no-builtin");
 setBuiltInDir(EMPTY_BUILT_IN_DIR);
+
+/**
+ * Git as the suite expects it, whatever this machine's own configuration says — the same floor as the
+ * base root's. Git for Windows' SYSTEM file turns `core.autocrlf` on, and every file a test cloned came
+ * back with CRLF endings; a machine with no identity of its own refused every commit a test made. So no
+ * system or global file is read, and the one global file is this, with an identity a test commits as.
+ */
+const GIT_CONFIG = join(BASE_DIR, "gitconfig");
+writeFileSync(GIT_CONFIG, "[core]\n\tautocrlf = false\n[user]\n\tname = JaiRA tests\n\temail = tests@jaira.invalid\n", "utf8");
+process.env["GIT_CONFIG_GLOBAL"] = GIT_CONFIG;
+process.env["GIT_CONFIG_NOSYSTEM"] = "1";
 
 // A developer's shell may export real forge tokens, and the environment is the last link of the
 // secret chain. With no token a connection check makes no request at all, so removing the two

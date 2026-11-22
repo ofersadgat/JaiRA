@@ -215,6 +215,18 @@ export interface InstanceNode {
    * rather than the journal — see `headingOf`.
    */
   title?: InstanceTitle;
+  /**
+   * How this state's call is drawn — a script's `renderUI` config (decision 0033 §4): `role`, `title`,
+   * `label`, `renderer`, `renderers`. From the workflow's shape; absent where the script said nothing.
+   * A view resolves it down the call path, the nearest instance winning.
+   */
+  present?: Record<string, JsonValue>;
+  /**
+   * The calls this instance's script code made, by site — their label, their phase and how each is drawn.
+   * Where a script is cut a call per state (`"calls"` mode) a call is its own instance and this says
+   * little; in the coarser modes it is how one state's several calls are told apart. Absent when none.
+   */
+  scriptCalls?: Record<string, ScriptCallView>;
   children: InstanceNode[];
 }
 
@@ -452,6 +464,12 @@ export interface RunView {
 export interface TaskDetail {
   taskId: string;
   title: string;
+  /**
+   * The task runs a PROGRAM — code that waits on `input()` (decision 0029 §2) — however it was compiled:
+   * a script cut a state per call has its calls as children, one compiled as a single state has none,
+   * and both are read as one conversation (decision 0033 §1). Absent for anything else.
+   */
+  program?: true;
   description?: string;
   labels?: string[];
   workflow: string;
@@ -1037,6 +1055,16 @@ export interface OperationCall {
   /** The record id — what `run:records` keys on. */
   operationId: string;
   kind: "prompt" | "function";
+  /** The script site that made it (`<content hash>#<k>`), when a script's code did — see {@link InstanceNode.scriptCalls}. */
+  site?: string;
+}
+
+/** What a script said about one call its code made, by the call's site (`script.call.settled`). */
+export interface ScriptCallView {
+  label?: string;
+  phase?: string;
+  /** How the call is drawn — `renderUI`'s config, where the call is not a state of its own (decision 0033 §4). */
+  present?: Record<string, JsonValue>;
 }
 
 export interface OperationRecordView {
@@ -1700,6 +1728,23 @@ export const CUT_OFF_EVENT = "jaira.cutOff";
  * `points` is what makes editing possible without the renderer knowing anything about positions: it
  * says which turns began a record, and the opaque handle to send in their place.
  */
+/**
+ * A message sent to a program conversation while one of its calls ran (decision 0033 §9): shown at
+ * once, kept on disk, and answering the program's next `input()` — the oldest first. "Send now" steers
+ * it into the running reply instead, where that reply can take it.
+ */
+export interface QueuedMessageView {
+  id: string;
+  /** The project's key, as the engine names it. */
+  project: string;
+  taskId: string;
+  text: string;
+  /** What the composer chose for it, delivered with it. */
+  settings?: ChatSettings;
+  /** When it was sent (ms). */
+  at: number;
+}
+
 export interface ChatThreadView {
   taskId: string;
   /** The instance whose conversation this is — what `chat:send` and `chat:plan` address. */

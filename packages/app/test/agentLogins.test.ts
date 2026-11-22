@@ -95,7 +95,8 @@ describe("an agent's sign-in inside the WSL distro the agents run in", () => {
     claude!.write('{"claudeAiOauth":{"accessToken":"w1"}}');
     codex!.write('{"tokens":{}}');
     expect(readFileSync(join(linux, ".claude", ".credentials.json"), "utf8")).toBe('{"claudeAiOauth":{"accessToken":"w1"}}');
-    expect(statSync(join(linux, ".claude", ".credentials.json")).mode & 0o777).toBe(0o600);
+    // Windows keeps no Unix mode for a file the fake distro wrote: the mode is a Linux host's to check.
+    if (process.platform !== "win32") expect(statSync(join(linux, ".claude", ".credentials.json")).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(linux, ".codex", "auth.json"), "utf8")).toBe('{"tokens":{}}');
     expect(calls.filter((c) => c.input !== undefined).every((c) => !c.args.join(" ").includes("w1"))).toBe(true);
     expect(claude!.read()).toEqual({ value: '{"claudeAiOauth":{"accessToken":"w1"}}', at: expect.any(Number) });

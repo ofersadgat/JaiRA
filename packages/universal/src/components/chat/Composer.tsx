@@ -562,7 +562,7 @@ export function Composer({
             >
               {live !== undefined ? (
                 // Its words go with the chips': drawn while they have words, the pulse alone after.
-                <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} {...({ title: live === "steerable" ? "A message now joins this turn" : "A message now waits for this turn" } as object)}>
+                <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} {...({ title: live === "steerable" ? "A message now is queued for after this turn — its Send now joins it" : "A message now is queued for after this turn" } as object)}>
                   <Pulse color={live === "busy" ? "dim" : "accent"} />
                   {noteShown ? (
                     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: live === "busy" ? "dim" : "accent" }} numberOfLines={1}>
@@ -743,8 +743,11 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
   return [ref, () => ref.current?.measureInWindow((x, y, w, h) => onOpen({ left: x, top: y, right: x + w, bottom: y + h }))];
 }
 
-/** The live note's words: what a message sent now would do. */
-const LIVE_WORDS = { steerable: "joins this turn", busy: "waits for this turn" } as const;
+/**
+ * The live note's words: what a message sent now would do. Queued either way (decision 0033 §9); where
+ * the turn can take one, the queued message's Send now joins it.
+ */
+const LIVE_WORDS = { steerable: "queued · can join this turn", busy: "queued for after this turn" } as const;
 
 /** The chips before the stack, whose words drop in steps; the stack is the Permissions and Tools chips now (decision 0023 §4.1). */
 const FOOT_CHIPS = ["model", "thinking"] as const;

@@ -2,7 +2,7 @@
 id: engineering/contracts/chat-channels
 type: engineering-contract
 status: shipped
-updated: 2026-10-01
+updated: 2026-11-22
 visibility: internal
 kind: api
 owned_by: [engineering/units/chat-turns, engineering/units/conversation-lookup]
@@ -61,11 +61,29 @@ There is no other way a message runs: no turn outside a run, no `chat:<host>` ch
 | `project` | string | no | the project holding the task |
 | `overrides` | `ChatSettings` | no | folded over the conversation's kept settings and handed to the program in the answer; settings that name tools or a permission set are also kept on the task and reach the run's calls |
 | `branchAt` | string | no | an edit point's `at` from `chat:thread`; the task is rewound to that point and the message answers the `input()` that asked there; never steered |
+| `now` | `true` | no | "Send now": join the call in flight where its transport can take a message, rather than queue (decision 0033 §9) |
 | `fake` | fake rules | no | not in the declared type; main hands it to the resume a rewind makes, for an edit or an ended conversation |
 | response `instanceId` | string | yes | as sent |
 | response `index` | number | yes | `0` |
 | response `program` | `true` | no | the message went to the program's `input()`: the run's next call is the reply, streamed and landing as a run's calls do |
-| response `steered` | `true` | no | the message joined a call in flight: the call's record holds it, and the journal a `jaira.steered` row |
+| response `steered` | `true` | no | the message joined a call in flight (`now`): the call's record holds it, and the journal a `jaira.steered` row |
+| response `queued` | `QueuedMessageView` | no | sent while a call ran and not `now`: kept for the program's next `input()`, the oldest first, shown by `chat:queue` |
+
+### `chat:queue` and `chat:queueAct`: the messages waiting for the next `input()`
+
+`chat:queue` (`{ taskId, project? }`) answers the conversation's queued messages oldest first, and
+`steerable`: whether a call in flight can take a message now, which is when Send now is offered.
+`chat:queueAct` (`{ id, action: "drop" | "sendNow" }`) deletes one, or sends it now: removed from the queue
+and steered into the call in flight (`chat:send` with `now`); one that could not be sent goes back at the
+head. The queue is kept in `~/.jaira/system/queued.json`; `queued:changed` publishes it; a program parking
+at `input()` is answered with the head, after the park's own row is written.
+
+### `task:interrupt` interrupts the calls a target reaches
+
+`{ taskId, target, reason?, project? }` → `{ interrupted }`. The target is a state's instance id (the call
+it is making) or an `interruptSignal()` id (every call made under it, read off `config.interrupt` and taken
+out before a model sees it). Each call fails canceled, its reason `interrupted: <reason>` and
+`interrupted: { reason? }` on its error; a program may catch it, and a run that does not ends stopped.
 
 ### `chat:cancel` stops the reply a program conversation is making
 
@@ -156,10 +174,10 @@ answer). The Chat list offers it for a row whose `TaskSummary.waitsForMessage` i
 
 ## Sends wait, steer and refuse in ways the channel names do not show
 
-- `chat:send` resolves once the message is delivered — answered at the wait, steered into the call in flight, or seeded for the next `input()` — never when the reply lands; the reply is the run's next call. To a conversation that ended it first rewinds the task to the last `input()` it asked, cutting what came after.
-- `live` is read at plan time and is stale by send time; `chat:send` decides steering again.
+- `chat:send` resolves once the message is delivered — answered at the wait, queued for the next `input()` while a call runs, or steered into the call in flight when sent `now` — never when the reply lands; the reply is the run's next call. To a conversation that ended it first rewinds the task to the last `input()` it asked, cutting what came after.
+- `live` is read at plan time and is stale by send time; `chat:send` with `now` decides steering again, and queues when the call can no longer take the message.
 - A steered message appears in the thread only once the call it joined writes its record, which folds it in.
-- `chat:cancel` stops every call in flight for the task, the opening message's reply and a call a message was steered into included, and never the program: stopping the program is `task:cancel`. A message already seeded for the next `input()` is not withdrawn, so it answers that `input()` at once.
+- `chat:cancel` stops every call in flight for the task, the opening message's reply and a call a message was steered into included, and never the program: stopping the program is `task:cancel`. A message already queued for the next `input()` is not withdrawn, so it answers that `input()` at once.
 - A message is sent under the conversation's kept settings (`TaskMeta.chatSettings`, which `chat:settings` writes) with its own `overrides` over them, all of it handed to the program inside the answer, `{text, settings}`. Settings that name tools or a permission set are also kept on the task and handed to the run's calls (`changeChatSettings`); the model and the reasoning are the program's to use or not.
 - `branchAt` must name an edit point the thread shows now: an edit is a rewind of the task to that point's journal position, and the message is the answer to the `input()` that asked there.
 - `chat:thread`'s host is the first speaking instance in the task's history, so a task with several conversations exposes only the first through this channel.

@@ -8,6 +8,20 @@ import { afterEach, describe, expect, it } from "vitest";
 import { NodeExec } from "../src/exec";
 import { SessionProcesses } from "../src/sessionProcesses";
 import { descendantsByStart, isAlive, mayLeaveRunning } from "../src/leftRunning";
+
+/**
+ * Whether a process is gone within `ms`. A stop is a kill and then the system's own time to end it — a
+ * second or two on a quiet machine, longer while the whole suite runs beside it — so it is waited for
+ * rather than assumed to have happened by a fixed time.
+ */
+async function diesWithin(pid: number, ms = 15_000): Promise<boolean> {
+  const until = Date.now() + ms;
+  while (Date.now() < until) {
+    if (!isAlive(pid)) return true;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return !isAlive(pid);
+}
 import { createShellTool, type ShellTerminals } from "../src/tools";
 import { createSystemTools, systemBackendFor } from "../src/systemTools";
 import type { ExecServices } from "@declarative-ai/exec";
@@ -143,8 +157,7 @@ describe("what a foreground command leaves running", () => {
     const stopped = answer["stoppedLeft"] as Array<{ pid: number }>;
     expect(stopped).toHaveLength(1);
     expect(String(answer["note"])).toMatch(/shell --run_in_background/);
-    await new Promise((r) => setTimeout(r, 1_500));
-    expect(isAlive(stopped[0]!.pid)).toBe(false);
+    expect(await diesWithin(stopped[0]!.pid)).toBe(true);
     expect(processes.list()).toEqual([]);
   }, 60_000);
 });
@@ -180,8 +193,7 @@ describe.runIf(win)("with the session's containment (Windows)", () => {
       const kept = processes.list().find((p) => p.pid === escaped[0]!.pid);
       expect(kept?.how).toBe("escaped");
       processes.stop(escaped[0]!.pid);
-      await new Promise((r) => setTimeout(r, 1_500));
-      expect(isAlive(escaped[0]!.pid)).toBe(false);
+      expect(await diesWithin(escaped[0]!.pid)).toBe(true);
     } finally {
       engine.close();
     }

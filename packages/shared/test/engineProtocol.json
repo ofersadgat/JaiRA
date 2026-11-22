@@ -249,6 +249,9 @@
     "process:tellWhen",
     "process:tellCancel",
     "process:sampling",
-    "project:join"
+    "project:join",
+    "chat:queue",
+    "chat:queueAct",
+    "task:interrupt"
   ]
 }

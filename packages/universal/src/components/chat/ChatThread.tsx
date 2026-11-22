@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
-import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
+import { ApprovalAskContext, WorkOpenContext } from "@jaira/ui/workSummaryContext";
 import { routeDownOf, routeOf } from "@jaira/ui/composerModel";
 import { keepLayersOf } from "@jaira/ui/composerCards";
 import { facesOf } from "@jaira/ui/environmentModel";
@@ -13,6 +13,7 @@ import { clockOf } from "@jaira/ui/runActivityModel";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
+import { CallInterruptContext, type ProgramCall } from "@jaira/ui/programCalls";
 import { Composer, RouteFixes } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
 import { LiveStatusLine, LiveStatusPill, Paper } from "./Paper";
@@ -27,6 +28,7 @@ import { FootFade } from "./FootFade";
 import { EnvironmentBar } from "./EnvironmentBar";
 import { PlacementSummary } from "./PlacementSummary";
 import { QueuedMessage } from "./QueuedMessage";
+import { Switch } from "../settings/controls";
 import { useChatEnvironment } from "./environment";
 import { useChildRunHost } from "./childRunHost";
 import { OutcomeHostContext } from "../panel/outcomeHost";
@@ -283,6 +285,15 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         <SubagentHostContext.Provider value={runs.subagentHost}>
         <AgentHostContext.Provider value={runs.agentHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
+        <CallInterruptContext.Provider value={m.interruptCall}>
+        <WorkOpenContext.Provider value={surface.density === "task"}>
+        {m.stepsOffered ? (
+          // The program at the level of its calls, among its messages: every step a row of its own.
+          <View flexDirection="row" alignItems="center" justifyContent="flex-end" gap={8} width="100%" maxWidth={900} alignSelf="center" paddingHorizontal={12} paddingTop={6} paddingBottom={4}>
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>Every step</Txt>
+            <Switch on={m.everyStep} label="Every step" onChange={m.setEveryStep} />
+          </View>
+        ) : null}
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
             // Not started: the message it will open with, not sent until it has somewhere to run — in
@@ -312,6 +323,23 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               {...doomed}
             />
           )}
+          {m.queuedMessages.length > 0 ? (
+            // Queued for the program's next `input()` (decision 0033 §9), in the transcript's column.
+            <View paddingHorizontal={16} paddingBottom={12} minWidth={0}>
+              {m.queuedMessages.map((item) => (
+                <QueuedMessage
+                  key={item.id}
+                  about="reply"
+                  message={item.text}
+                  since={item.at}
+                  waiting
+                  onEdit={() => m.editQueued(item)}
+                  onDelete={() => m.actOnQueued(item.id, "drop")}
+                  {...(m.steerable ? { onSendNow: () => m.actOnQueued(item.id, "sendNow") } : {})}
+                />
+              ))}
+            </View>
+          ) : null}
           {plain ? asking : null}
         </Paper>
         {m.split === null && m.seam !== null && m.origin !== undefined ? (
@@ -348,6 +376,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             </Paper>
           </>
         ) : null}
+        </WorkOpenContext.Provider>
+        </CallInterruptContext.Provider>
         </ApprovalAskContext.Provider>
         </AgentHostContext.Provider>
         </SubagentHostContext.Provider>
@@ -425,6 +455,11 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           </View>
         ) : null}
         {m.error !== null ? <ChatError text={m.error} route={m.errorRoute} /> : null}
+        {m.choosing !== null ? (
+          <InterruptChoices calls={m.runningCalls} withMessage={m.choosing.withMessage} onPick={(call) => m.interrupt(call, m.choosing!.withMessage)} onCancel={m.cancelChoosing} />
+        ) : m.answering && m.runningCalls.length > 0 && m.draft.trim() !== "" ? (
+          <InterruptOffer onInterrupt={m.interruptWithMessage} />
+        ) : null}
         <Composer
           plan={m.queued !== undefined ? m.startPlan : (m.plan ?? null)}
           busy={m.sending > 0 || m.answering}
@@ -481,3 +516,44 @@ function ChatFork({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
+
+/**
+ * Which call to interrupt, asked when a program has several going (decision 0033 §7): one button each,
+ * named by its title or its label, and "All of them".
+ *
+ *   the strip     row, wrapping, centred, gap 8 4, at most 900 wide, centred, 8 above, padding 5 12,
+ *                 radius 8, --bad 10% over transparent; the question app 12/12.5 --bad
+ *   a call        padding 3 10, radius 7, 1px --line, app 12/12.5 --text (hovered --fill-ghost-hover)
+ */
+function InterruptChoices({ calls, withMessage, onPick, onCancel }: { calls: readonly ProgramCall[]; withMessage: boolean; onPick: (call: ProgramCall | null) => void; onCancel: () => void }): JSX.Element {
+  const t = useTokens();
+  const choice = (key: string, label: string, onPress: () => void, title?: string): JSX.Element => (
+    <Press key={key} onPress={onPress} {...(title !== undefined ? { title } : {})} paddingVertical={3} paddingHorizontal={10} borderRadius={7} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "text" }} numberOfLines={1}>
+        {label}
+      </Txt>
+    </Press>
+  );
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={8} rowGap={4} width="100%" maxWidth={900} alignSelf="center" marginTop={8} paddingVertical={5} paddingHorizontal={12} borderRadius={8} backgroundColor={t.mix(t.v("bad"), 10, "transparent") as never}>
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "bad" }} flexShrink={1}>
+        {withMessage ? "Interrupt which, with your message?" : "Interrupt which?"}
+      </Txt>
+      {calls.map((call) => choice(call.instanceId, call.label, () => onPick(call), call.fn))}
+      {choice("all", "All of them", () => onPick(null))}
+      <View marginLeft="auto">{choice("cancel", "Cancel", onCancel)}</View>
+    </View>
+  );
+}
+
+/** While a reply is being written and the box holds a message: interrupt it, the message its reason. */
+function InterruptOffer({ onInterrupt }: { onInterrupt: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexDirection="row" alignItems="center" justifyContent="flex-end" width="100%" maxWidth={900} alignSelf="center" marginTop={6} paddingHorizontal={12}>
+      <Press onPress={onInterrupt} title="Stop the reply being written, and send this — the program takes it next" paddingVertical={3} paddingHorizontal={10} borderRadius={7} box={({ hovered }) => ({ backgroundColor: t.mix(t.v("bad"), hovered ? 22 : 12, "transparent") as never })}>
+        <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "bad" }}>Interrupt with this message</Txt>
+      </Press>
+    </View>
+  );
+}

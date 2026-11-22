@@ -3,6 +3,7 @@
  * draw from (`useChatSurface`, `packages/universal/src/components/chat/surface.ts`).
  */
 import type { AppState, useApp } from "./store";
+import type { CallView } from "./callRenderers";
 import { askOfTask } from "./approvalCall";
 import { chatProjectOf, conversationStartOf, type ConversationStart } from "./chatWorkflow";
 import { parkedGateOf } from "./panelHost";
@@ -30,6 +31,12 @@ import type { LiveTail } from "./transcript";
 export type RewindOutcome = "done" | "busy" | "deleted" | { failure: string };
 
 export interface ChatSurface {
+  /**
+   * The level of detail the thread is drawn at (decision 0033 §1): `chat` folds and hides what a
+   * program did besides its replies; `task` — a program conversation read as its task — shows it.
+   * Absent is `chat`.
+   */
+  density?: CallView;
   /**
    * Every conversation this window can show — already filtered to the chat workflows.
    *

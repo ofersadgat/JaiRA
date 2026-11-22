@@ -18,9 +18,13 @@ import { Icon } from "../panel/Icon";
  *   the pill           under it, at the end, 6 above: row, gap 4, padding 1 8, round, --warn 13% into
  *                      --panel; a clock 11 and "queued · 2 min 14 s" app 11/12.5 --warn, tabular
  *   the rail           4 above, at least 22 tall, at the end: "Edit" and "Delete", padding 4, app
- *                      11/12.5 on 1, --dim (hovered --text on --fill-ghost-hover)
+ *                      11/12.5 on 1, --dim (hovered --text on --fill-ghost-hover); "Send now" before them
+ *                      where the reply being written can take the message
+ *
+ * The same bubble is a message QUEUED for a program's next `input()` (decision 0033 §9, `about: "reply"`):
+ * sent while a reply was being written, waiting for it to end — or, with "Send now", joined to it.
  */
-export function QueuedMessage({ message, since, waiting, onEdit, onDelete, at }: { message: string; /** When placing began. */ since: number; /** Nothing had room: it waits. Otherwise it is being placed now. */ waiting: boolean; onEdit?: (() => void) | undefined; onDelete?: (() => void) | undefined; /** The moment it is drawn as of, for a still picture; absent, now. */ at?: number }): JSX.Element {
+export function QueuedMessage({ message, since, waiting, onEdit, onDelete, onSendNow, about = "opening", at }: { message: string; /** When placing began. */ since: number; /** Nothing had room: it waits. Otherwise it is being placed now. */ waiting: boolean; onEdit?: (() => void) | undefined; onDelete?: (() => void) | undefined; /** Join the reply being written — offered only where it can take the message. */ onSendNow?: (() => void) | undefined; /** What it waits for: the conversation to start, or the reply being written to end. */ about?: "opening" | "reply"; /** The moment it is drawn as of, for a still picture; absent, now. */ at?: number }): JSX.Element {
   const t = useTokens();
   const ticking = useNow(waiting && at === undefined);
   const now = at ?? ticking;
@@ -60,10 +64,11 @@ export function QueuedMessage({ message, since, waiting, onEdit, onDelete, at }:
               {`queued · ${secondsOf(Math.max(0, now - since))}`}
             </Txt>
           </View>
-          {onEdit !== undefined || onDelete !== undefined ? (
+          {onEdit !== undefined || onDelete !== undefined || onSendNow !== undefined ? (
             <View flexDirection="row" alignItems="center" gap={2} marginTop={4} minHeight={22} paddingHorizontal={1}>
-              {onEdit !== undefined ? act("Edit", "Take this message back to change it — the conversation has not started", onEdit) : null}
-              {onDelete !== undefined ? act("Delete", "Delete this message — the conversation has not started, and will not", onDelete) : null}
+              {onSendNow !== undefined ? act("Send now", "Send this into the reply being written now, rather than after it", onSendNow) : null}
+              {onEdit !== undefined ? act("Edit", about === "reply" ? "Take this message back to change it — it has not been sent" : "Take this message back to change it — the conversation has not started", onEdit) : null}
+              {onDelete !== undefined ? act("Delete", about === "reply" ? "Delete this message — it will not be sent" : "Delete this message — the conversation has not started, and will not", onDelete) : null}
             </View>
           ) : null}
         </>

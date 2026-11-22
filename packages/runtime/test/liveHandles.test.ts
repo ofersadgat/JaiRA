@@ -217,3 +217,54 @@ describe("two calls sharing one session id", () => {
     expect(live.sessions()).toEqual([]);
   });
 });
+
+describe("interrupting a call (decision 0033 §6)", () => {
+  /** An executor whose call runs until it is canceled, and records the op it was handed. */
+  function cancellable() {
+    const seen: Operation<InlineFamily>[] = [];
+    const executor: Executor<ExecServices, WorkflowMetrics> = {
+      capabilities: {} as never,
+      metrics: { merge: (a: WorkflowMetrics) => a, empty: () => METRICS } as never,
+      start(written: Operation<InlineFamily>): ExecHandle<ResolvedValue, WorkflowMetrics> {
+        seen.push(written);
+        let cancel!: () => void;
+        const result = new Promise<never>((resolve) => {
+          cancel = () => resolve({ error: { classification: "canceled", reason: "canceled" }, metrics: METRICS } as never);
+        });
+        return { events: (async function* () {})(), result, cancel: async () => cancel() } as unknown as ExecHandle<ResolvedValue, WorkflowMetrics>;
+      },
+    };
+    return { executor, seen };
+  }
+  const scoped = (session: string, instanceId: string): ExecServices => ({ session: { id: session }, scope: { instanceId, sequence: 0 } }) as unknown as ExecServices;
+  const signalled = (...ids: string[]) => ({ ...op, config: { temperature: 0, interrupt: ids.length === 1 ? ids[0] : ids } }) as unknown as Operation<InlineFamily>;
+
+  it("reaches a call by the state making it, and fails it as interrupted, with the reason", async () => {
+    const live = new LiveCalls();
+    const inner = cancellable();
+    const handle = withTurnStream(() => {}, inner.executor, live, "t").start(op, scoped("s", "i-reply"));
+    expect(live.reachedBy("t", "i-reply")).toHaveLength(1);
+    expect(await live.interrupt("t", "i-reply", "shorter, please")).toBe(1);
+    expect(await handle.result).toMatchObject({ error: { classification: "canceled", reason: "interrupted: shorter, please", interrupted: { reason: "shorter, please" } } });
+  });
+
+  it("reaches every call registered under a signal, and none other — the signal never reaches the model", async () => {
+    const live = new LiveCalls();
+    const inner = cancellable();
+    const stream = withTurnStream(() => {}, inner.executor, live, "t");
+    const a = stream.start(signalled("sig-1"), scoped("a", "i-a"));
+    const b = stream.start(signalled("sig-1", "sig-2"), scoped("b", "i-b"));
+    stream.start(op, scoped("c", "i-c"));
+    expect(inner.seen.map((o) => (o as unknown as { config: Record<string, unknown> }).config)).toEqual([{ temperature: 0 }, { temperature: 0 }, {}]);
+    expect(live.reachedBy("t", "sig-2").map((c) => c.instanceId)).toEqual(["i-b"]);
+    expect(live.reachedBy("other-task", "sig-1")).toEqual([]);
+    expect(await live.interrupt("t", "sig-1")).toBe(2);
+    expect(await a.result).toMatchObject({ error: { reason: "interrupted", interrupted: {} } });
+    expect(await b.result).toMatchObject({ error: { reason: "interrupted" } });
+    expect(live.reachedBy("t", "i-c")).toHaveLength(1);
+  });
+
+  it("reaches nothing when nothing is running there", async () => {
+    expect(await new LiveCalls().interrupt("t", "i-gone")).toBe(0);
+  });
+});

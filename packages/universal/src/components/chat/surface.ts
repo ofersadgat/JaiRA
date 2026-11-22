@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { ConversationView, TaskDetail } from "@jaira/shared/browser";
+import type { CallView } from "@jaira/ui/callRenderers";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { chatSurfaceOf, conversationsAt } from "@jaira/ui/chatSurface";
 import { askOfTask } from "@jaira/ui/approvalCall";
@@ -44,6 +45,8 @@ export function usePaneChatSurface(
   project: string | undefined,
   run: { detail: TaskDetail | null; conversation: ConversationView | null; liveTurn: ChatSurface["live"] },
   onOpen: (taskId: string, project?: string) => void,
+  /** The level of detail — `task` where a program conversation is read as its task (decision 0033 §1). */
+  density: CallView = "chat",
 ): ChatSurface {
   const room = useChatSurface();
   const { state } = useShell();
@@ -76,9 +79,10 @@ export function usePaneChatSurface(
       walkedChain,
       onWalkIntoSubagent: (chain: ChatSurface["walkedChain"] | null) => setWalkedChain(chain ?? undefined),
       onOpen: (id: string | null, at?: string) => (id === null ? room.onOpen(null, at) : onOpen(id, at)),
+      density,
     }),
     // `onOpen` is the pane's, made again with it; what it does does not change with it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [room, taskId, project, run.detail, run.conversation, run.liveTurn, queued, approval, question, gate, walkedInto, walkedChain],
+    [room, taskId, project, run.detail, run.conversation, run.liveTurn, queued, approval, question, gate, walkedInto, walkedChain, density],
   );
 }

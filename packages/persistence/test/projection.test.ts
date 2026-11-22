@@ -775,3 +775,33 @@ describe("an operation list", () => {
     expect(projectRun(events).instances[0]!.operationCalls).toBeUndefined();
   });
 });
+
+describe("how a script asked a call to be drawn (decision 0033 §4)", () => {
+  it("copies a state's `renderUI` config onto every instance of it, and nothing where none was said", () => {
+    const shape: WorkflowShape = {
+      session: { children: [{ key: "call_1", stateId: "session/call_1" }, { key: "call_2", stateId: "session/call_2" }] },
+      "session/call_1": { children: [], present: { role: "aside", title: "Checking" } },
+      "session/call_2": { children: [] },
+    };
+    const events: EngineEvent[] = [entered("r", "session"), entered("a", "session/call_1", "r", "call_1"), entered("b", "session/call_2", "r", "call_2")];
+    const nodes = flattenInstances(projectRun(events, shape).instances);
+    expect(nodes.find((n) => n.instanceId === "a")!.present).toEqual({ role: "aside", title: "Checking" });
+    expect(nodes.find((n) => n.instanceId === "b")!.present).toBeUndefined();
+    expect(nodes.find((n) => n.instanceId === "r")!.present).toBeUndefined();
+  });
+});
+
+describe("the calls a script's code made (decision 0033, the coarser modes)", () => {
+  it("keeps each call's site, and what the script said of it there — its label, its phase, how it is drawn", () => {
+    const events = [
+      entered("r", "s"),
+      { type: "operation.dispatched", instanceId: "r", stateId: "s", op: "prompt", operationId: "op-1", site: "h1#0" },
+      { type: "operation.dispatched", instanceId: "r", stateId: "s", op: "function", operationId: "op-2" },
+      { type: "script.call.settled", instanceId: "r", stateId: "s", site: "h1#0", label: "look", phase: "Find", present: { role: "aside" }, outcome: "value", value: "x" },
+      { type: "script.call.settled", instanceId: "r", stateId: "s", site: "now#0", outcome: "value", value: 1 },
+    ] as unknown as EngineEvent[];
+    const node = projectRun(events).instances[0]!;
+    expect(node.calls).toEqual([{ operationId: "op-1", kind: "prompt", site: "h1#0" }, { operationId: "op-2", kind: "function" }]);
+    expect(node.scriptCalls).toEqual({ "h1#0": { label: "look", phase: "Find", present: { role: "aside" } } });
+  });
+});

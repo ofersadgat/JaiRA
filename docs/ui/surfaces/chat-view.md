@@ -2,7 +2,7 @@
 id: ui/surfaces/chat-view
 type: ui-surface
 status: shipped
-updated: 2026-10-02
+updated: 2026-11-22
 kind: screen
 realizes: [ux/patterns/unattended-run-never-waits-silently, ux/patterns/stream-then-settle, ux/patterns/follow-the-live-edge, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/show-the-request-not-the-outcome, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/choose-a-side-where-it-divided]
 serves: [product/nothing-stalls-in-silence, product/chat-with-agents, product/steer-agents-mid-task, product/watch-agents-work-live, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/read-what-work-produced]
@@ -49,6 +49,24 @@ The Chat view starts **`session`** ([decision 0005](../../engineering/decisions/
 | error | A send or a start that failed puts its message on a `--bad` wash above the composer. A conversation that can no longer be continued greys the composer with `This conversation cannot be continued.`. | [error.html](../assets/chat-view/error.html) |
 
 The first line quoted in a banner is cut at 60 characters. Rewinding to a reply rather than a sent message drops the word `before` and leaves two spaces in its place.
+
+## A program's other calls are drawn among its messages, and a message sent mid-reply is queued
+
+A conversation is a program ([decision 0033](../../engineering/decisions/0033-one-view-of-a-run.md)): besides its replies it reads the conversation,
+checks for a correction, starts a lesson. Those calls are drawn where they happened, each by the renderer
+its function and role find (`callRenderers.ts`, `programCalls.ts`): a call the script marks an aside
+(`renderUI`) folds into the work summary under the reply, a started run is its child-run row, and a call
+whose role is hidden is not drawn. The person's message is drawn once, by the thread.
+
+- **Queued.** A message sent while a reply is being written is shown at once under the thread as a queued
+  bubble ("queued · 12 s") with Edit and Delete, and **Send now** while the reply can take a message; the
+  program's next wait takes the oldest. Queued messages outlive a restart.
+- **Interrupt.** Stop asks which call when the program has several going ("Interrupt which?", a button
+  each by its title, and "All of them"). While a reply is written and the box holds a message, **Interrupt
+  with this message** stops the reply and sends the message, which the program takes next. A running
+  program call's row carries its own **Interrupt**.
+- **The box's note** says a message now is queued: "queued for after this turn", or "queued · can join
+  this turn" where Send now would join it.
 
 ## The list in the sidebar opens a conversation and the conversation marks itself read
 

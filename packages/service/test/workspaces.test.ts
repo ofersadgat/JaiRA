@@ -229,7 +229,8 @@ describe("a workspace's setup when it opens and when its checkout moves", () => 
 });
 
 describe("a workspace that runs in its container", () => {
-  it("brings the container up with docker on the machine, records it for the workspace, and runs the task's setup inside", async () => {
+  // A workspace runs in a container on a Mac or a Linux machine only; Windows refuses it (and runs in WSL).
+  it.runIf(process.platform !== "win32")("brings the container up with docker on the machine, records it for the workspace, and runs the task's setup inside", async () => {
     // In a folder of its own, so the worktrees' folder made beside it goes when the test does.
     const dir = join(scratch(), "app");
     mkdirSync(join(dir, ".jaira"), { recursive: true });

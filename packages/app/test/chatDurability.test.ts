@@ -540,6 +540,40 @@ describe("4. messages that arrive together", { timeout: 60_000 }, () => {
 
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "user: three", "assistant: third answer"]);
   });
+
+  it("interrupts the reply by the state making it, and the program goes on to wait (decision 0033 §6)", async () => {
+    const taskId = await talking([ONE, { promptIncludes: "two", output: "second answer", hold: "cancel" }, { promptIncludes: "three", output: "third answer" }]);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "two" });
+    await eventually(() => inFlight(taskId), "the reply to be in flight", 20_000);
+    const running = (service as unknown as { session(): { liveCalls: { ofTask(id: string): Array<{ instanceId?: string }> } } }).session().liveCalls.ofTask(taskId);
+    expect(running).toHaveLength(1);
+    expect(await service.interruptCall({ taskId, target: "not-a-call" })).toEqual({ interrupted: 0 });
+    expect(await service.interruptCall({ taskId, target: running[0]!.instanceId!, reason: "wrong question" })).toEqual({ interrupted: 1 });
+    // session.ts catches it: the conversation goes on, waiting, and the message it was answering stays.
+    await eventually(() => !inFlight(taskId) && parked(taskId), "the conversation to wait again", 20_000);
+    expect(said(taskId)).toContain("user: two");
+    expect(said(taskId)).not.toContain("assistant: second answer");
+    await service.sendChatMessage({ taskId, instanceId: "", message: "three" });
+    await eventually(() => said(taskId).includes("assistant: third answer"), "the reply to 'three'", 20_000);
+  });
+
+  it("queues one sent while a reply is being made, shows it, and gives it to the next wait — or drops it (decision 0033 §9)", async () => {
+    const taskId = await talking([ONE, { promptIncludes: "two", output: "second answer", hold: "interrupt" }, { promptIncludes: "three", output: "third answer" }]);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "two" });
+    await eventually(() => inFlight(taskId), "the reply to be in flight", 20_000);
+    const sent = await service.sendChatMessage({ taskId, instanceId: "", message: "three" });
+    expect(sent.steered).toBeUndefined();
+    expect(sent.queued).toMatchObject({ taskId, text: "three" });
+    // Shown while it waits, with "Send now" on offer only because this reply can take a message.
+    expect(service.listQueued({ taskId })).toMatchObject({ items: [{ text: "three" }], steerable: true });
+    const doomed = await service.sendChatMessage({ taskId, instanceId: "", message: "never mind" });
+    await service.actOnQueued({ id: doomed.queued!.id, action: "drop" });
+    expect(service.listQueued({ taskId }).items.map((i) => i.text)).toEqual(["three"]);
+    expect(service.cancelChatTurn({ taskId })).toEqual({ canceled: true });
+    await eventually(() => said(taskId).includes("assistant: third answer") && parked(taskId), "the reply to 'three'", 20_000);
+    expect(service.listQueued({ taskId }).items).toEqual([]);
+    expect(said(taskId).filter((line) => line.startsWith("user:"))).toEqual(["user: one", "user: two", "user: three"]);
+  });
 });
 
 describe("6. the app closing while a reply is going", { timeout: 60_000 }, () => {

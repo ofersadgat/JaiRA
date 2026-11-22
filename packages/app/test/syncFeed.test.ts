@@ -29,10 +29,14 @@ beforeEach(async () => {
   handlers = serviceHandlers(service) as Record<string, (request: unknown) => unknown>;
 });
 
+/** Projects a test opened in the service beyond the two: removed once it has let them go. */
+let opened: string[] = [];
+
 afterEach(async () => {
   await service.close();
   rmSync(a, { recursive: true, force: true });
   rmSync(b, { recursive: true, force: true });
+  for (const dir of opened.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 const made = (project: string, title = "Plan the feature"): string =>
@@ -71,20 +75,19 @@ describe("sync:since", () => {
 
   it("is everything again once a project opens after the cursor — its tasks did not change, but the index did", async () => {
     const third = mkdtempSync(join(tmpdir(), "jaira-sync-c-"));
+    // Removed after the service closes: it is still open there when the test ends, and Windows will not
+    // delete a project whose database is open.
+    opened.push(third);
     writeWorkflowFiles(initProject(third, testHome()).workflowsDir, specPlanningFiles());
     const other = new AppService({ baseDir: testHome(), watchWorkflows: false });
     await other.open(third);
     const theirs = other.createTask({ title: "made before it was open here", workflow: "feature/plan", inputs: { issue: "i" }, project: third }).taskId;
     await other.close();
-    try {
-      const cursor = (await since(0)).at;
-      await service.open(third);
-      const page = await since(cursor);
-      expect(page.whole).toBe(true);
-      expect(page.tasks.map((t) => t.taskId)).toContain(theirs);
-    } finally {
-      rmSync(third, { recursive: true, force: true });
-    }
+    const cursor = (await since(0)).at;
+    await service.open(third);
+    const page = await since(cursor);
+    expect(page.whole).toBe(true);
+    expect(page.tasks.map((t) => t.taskId)).toContain(theirs);
   });
 
   it("names a deleted task among the gone", async () => {

@@ -380,6 +380,7 @@ import {
   Git,
   ExecError,
   NodeExec,
+  processesSettled,
   onMachine,
   type ExecEnv,
   type ForgeCliOptions,
@@ -724,6 +725,7 @@ import { isProcessTaskId, PROCESS_WORKFLOW, type ProcessListAnswer, type Process
 import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
+import { QueuedMessages } from "./queuedMessages";
 import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
@@ -886,6 +888,7 @@ import type {
   ChatFork,
   ChatPlanView,
   ChatThreadView,
+  QueuedMessageView,
   ChatUnsent,
   JairaPromptNode,
   PermissionMode,
@@ -1894,6 +1897,7 @@ export class AppService {
         }
       },
     });
+    this.queued = new QueuedMessages(basePaths.queuedFile, (items) => this.publish({ type: "queued:changed", items }));
     this.waiting = new WaitingQueue(basePaths.waitingFile, {
       sendMessage: (item) => this.sendWaitingMessage(item),
       resumeRun: async (item) => {
@@ -2173,7 +2177,11 @@ export class AppService {
     project: Project,
   ): { hub: InteractionHub; approvals: ApprovalHub; questions: QuestionHub; userEvents: UserEventHub; remoteEvents: RemoteEventHub; events: EventHub } {
     const hub = new InteractionHub({
-      onRequest: (request) => this.publishInteraction(key, request),
+      onRequest: (request) => {
+        this.publishInteraction(key, request);
+        // A program waiting for its next message takes the oldest one queued for it (decision 0033 §9).
+        if (request.component === INPUT_FUNCTION && request.taskId !== undefined) setImmediate(() => this.drainQueued(key, request.requestId, request.taskId!));
+      },
       onResolved: (requestId, fate) => {
         const session = this.sessions.get(key);
         // A DECISION ends the question; the process going away does not (see `RequestFate`). Only
@@ -3077,6 +3085,8 @@ export class AppService {
     if (session.kind !== "user") return;
     const dir = session.project.paths.projectDir;
     const head = await this.headOf(dir);
+    // Closed while git was asked: nothing more is started for a workspace being let go.
+    if (this.closed) return;
     if (head !== undefined) this.heads.set(dir, head);
     await this.keepContainerUp(session);
     await this.runSetupPhase(session, "open");
@@ -3133,14 +3143,33 @@ export class AppService {
   }
 
   private async headOf(dir: string): Promise<string | undefined> {
-    const result = await new NodeExec().run("git", ["rev-parse", "HEAD"], { cwd: dir, stdin: "", timeoutMs: 10_000 }).catch(() => undefined);
+    const result = await this.lookWithGit(dir, ["rev-parse", "HEAD"], 10_000);
     return result !== undefined && result.code === 0 ? result.stdout.trim() : undefined;
   }
 
   private async changedBetween(dir: string, from: string, to: string): Promise<string[]> {
-    const result = await new NodeExec().run("git", ["diff", "--name-only", from, to], { cwd: dir, stdin: "", timeoutMs: 20_000 }).catch(() => undefined);
+    const result = await this.lookWithGit(dir, ["diff", "--name-only", from, to], 20_000);
     return result !== undefined && result.code === 0 ? result.stdout.split(/\r?\n/).filter((line) => line.length > 0) : [];
   }
+
+  /**
+   * One look at a workspace with `git`, kept until it ends: `close` waits for every one still going. A
+   * `git` started in a workspace holds it as its working directory, and one left running past close
+   * outlived the service — a project removed after it could not be, on Windows, for as long as it ran.
+   */
+  private async lookWithGit(dir: string, args: string[], timeoutMs: number): Promise<Awaited<ReturnType<NodeExec["run"]>> | undefined> {
+    if (this.closed) return undefined;
+    const run = new NodeExec().run("git", args, { cwd: dir, stdin: "", timeoutMs }).catch(() => undefined);
+    this.gitLooks.add(run);
+    try {
+      return await run;
+    } finally {
+      this.gitLooks.delete(run);
+    }
+  }
+
+  /** The `git` looks at workspaces still going — see {@link lookWithGit}. */
+  private readonly gitLooks = new Set<Promise<unknown>>();
 
   /** Run a workspace's open or again steps, one run at a time, saying in the log how it went. */
   private async runSetupPhase(session: ProjectSession, phase: "open" | "again", changed?: string[]): Promise<void> {
@@ -3517,7 +3546,8 @@ export class AppService {
    * — unless it was looked at within `maxAgeMs`. Says so (`environment:changed`) when what it found differs.
    */
   private lookAtWorkspace(session: ProjectSession, maxAgeMs = WORKSPACE_LOOK_MS): Promise<void> {
-    if (session.kind !== "user") return Promise.resolve();
+    // Closing: no `git` is started in a workspace being let go (see `close`, which waits for those going).
+    if (session.kind !== "user" || this.closed) return Promise.resolve();
     let known = this.workspaceGit.get(session.key);
     if (known === undefined) this.workspaceGit.set(session.key, (known = { at: 0 }));
     if (known.looking !== undefined) {
@@ -4124,6 +4154,8 @@ export class AppService {
    * none left, or refused and set to try again. Remembered in `~/.jaira/system/waiting.json`.
    */
   readonly waiting: WaitingQueue;
+  /** Messages queued for a program conversation's next `input()` (decision 0033 §9). */
+  readonly queued: QueuedMessages;
 
   /** Hears every agent call — handed to both places agents are registered (functions and routes). */
   private readonly onAgentOutcome: AgentOutcomeObserver = (agent, error) => {
@@ -4672,6 +4704,9 @@ export class AppService {
     this.containment.close();
     clearInterval(this.placementTimer);
     clearInterval(this.headTimer);
+    // A look at a workspace — its commit, its checkout — still going ends before the workspace is let go:
+    // the `git` it runs holds the workspace as its working directory.
+    await Promise.allSettled([...this.gitLooks, ...[...this.workspaceGit.values()].flatMap((entry) => (entry.looking !== undefined ? [entry.looking] : []))]);
     clearInterval(this.archiveTimer);
     clearInterval(this.syncTimer);
     this.resources.close();
@@ -4722,6 +4757,9 @@ export class AppService {
     // same reason: a run that ends after its service has is a run nobody is watching.
     await this.bridgeHost?.close();
     this.bridgeHost = undefined;
+    // Last: a command a run or a look started and the close did not wait on ends before the engine says
+    // it is closed — it holds its folder as its working directory for as long as it runs.
+    await processesSettled();
   }
 
   /** Whether {@link close} has run. A closed service answers; it does not re-open anything. */
@@ -4977,6 +5015,9 @@ export class AppService {
         break;
       case "waiting:changed":
         touch(db, "waiting", "waiting");
+        break;
+      case "queued:changed":
+        touch(db, "queued", "queued");
         break;
       case "machines:changed":
         touch(db, "machine", "machines");
@@ -6155,6 +6196,7 @@ export class AppService {
     const placed = viewed.runs.length > 0 ? placedNoteOf(open.project, taskId) : undefined;
     const detail = {
       ...viewed,
+      ...(this.isProgramConversation(open, taskId) ? { program: true as const } : {}),
       ...(forward !== undefined && forward.end === undefined ? { fastForward: fastForwardView(forward) } : {}),
       ...(listening.length > 0 ? { listening } : {}),
       ...(placed !== undefined ? { placed } : {}),
@@ -7885,6 +7927,8 @@ export class AppService {
     overrides?: ChatSettings;
     project?: string;
     branchAt?: string;
+    /** "Send now": join the reply in flight rather than queue (decision 0033 §9). */
+    now?: boolean;
     fake?: JsonValue | FakeRule[];
   };
 
@@ -7904,7 +7948,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** Who wrote the message, when the person did not: the app, sending it on their behalf. Never an IPC field. */
     origin: ChatOrigin = {},
-  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; queued?: QueuedMessageView; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
     request = { ...request, message: expandArtifactCommand(request.message) };
@@ -7937,7 +7981,7 @@ export class AppService {
     open: ProjectSession,
     request: typeof AppService.chatSend,
     origin: ChatOrigin,
-  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
+  ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; queued?: QueuedMessageView; waiting?: WaitingItem }> {
     // Sent under the conversation's OWN settings — what its composer keeps on the task (`chat:settings`,
     // which every chip change goes through before anything is sent) — with what the message names over
     // them. A composer that has not read them yet says less than they do, and its message must not run
@@ -8033,7 +8077,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** Set on the second pass, after an ended conversation was rewound to its last wait. */
     reopened = false,
-  ): Promise<(ChatTurnResult & { instanceId: string; index: number; steered?: boolean }) | undefined> {
+  ): Promise<(ChatTurnResult & { instanceId: string; index: number; steered?: boolean; queued?: QueuedMessageView }) | undefined> {
     const taskId = request.taskId;
     const answer: JsonValue = {
       text: request.message,
@@ -8102,7 +8146,12 @@ export class AppService {
         return this.answerProgramInput(open, request, true);
       }
     }
-    // A call is in flight: join it if its transport can, else the next `input()` takes this.
+    // A call is in flight: QUEUED for the next `input()`, shown at once and kept (decision 0033 §9) —
+    // unless the person said "Send now", which joins the reply in flight where its transport can.
+    if (request.now !== true) {
+      const queued = this.queued.add(open.key, taskId, request.message, request.overrides);
+      return { ...at, ...PROGRAM_ANSWERED, queued };
+    }
     const steer = (() => {
       try {
         return this.steerOf(open, this.chatContextOf(taskId, request.instanceId, request.project).position);
@@ -8154,13 +8203,21 @@ export class AppService {
     const task = open.project.runtime.get(taskId);
     const pinned = task !== undefined ? currentPin(open.project, task)?.snapshotHash : undefined;
     if (pinned === undefined) return false;
+    // A snapshot never changes, so neither does the answer — asked on every detail a panel draws.
+    const known = this.programSnapshots.get(pinned);
+    if (known !== undefined) return known;
     try {
       const bundle = bundleFor(open.project, pinned, pinned);
-      return bundle !== undefined && isProgramBundle(bundle);
+      const program = bundle !== undefined && isProgramBundle(bundle);
+      this.programSnapshots.set(pinned, program);
+      return program;
     } catch {
       return false;
     }
   }
+
+  /** Whether each pinned snapshot is a program — see {@link isProgramConversation}. */
+  private readonly programSnapshots = new Map<string, boolean>();
 
   /**
    * The route a message on this plan would go out on, when that can be said before sending: the
@@ -8304,6 +8361,61 @@ export class AppService {
       }
       return { canceled: true };
     }
+  }
+
+  /**
+   * Interrupt what a target reaches (decision 0033 §6) — a state's call by its instance id, or the calls
+   * registered under an `interruptSignal()` id. A question the run is asking stays asked; only calls in
+   * flight are reached.
+   */
+  async interruptCall(request: { taskId: string; target: string; reason?: string; project?: string }): Promise<{ interrupted: number }> {
+    const open = this.session(request.project);
+    const interrupted = await open.liveCalls.interrupt(request.taskId, request.target, request.reason);
+    if (interrupted > 0) open.liveFlush.get(request.taskId)?.();
+    return { interrupted };
+  }
+
+  // --- queued messages (decision 0033 §9) ---------------------------------------
+
+  /** What is queued for a conversation, and whether its running reply can take a message now. */
+  listQueued(request: { taskId: string; project?: string }): { items: QueuedMessageView[]; steerable: boolean } {
+    const open = this.session(request.project);
+    const steerable = open.liveCalls.ofTask(request.taskId).some((call) => call.control?.send !== undefined);
+    return { items: this.queued.list({ project: open.key, taskId: request.taskId }), steerable };
+  }
+
+  /** Delete a queued message, or send it now — into the running reply, which must be able to take it. */
+  async actOnQueued(request: { id: string; action: "drop" | "sendNow" }): Promise<{ items: QueuedMessageView[]; steered?: boolean }> {
+    const item = this.queued.get(request.id);
+    if (item === undefined) return { items: this.queued.list() };
+    if (request.action === "drop") {
+      this.queued.remove(item.id);
+      return { items: this.queued.list({ project: item.project, taskId: item.taskId }) };
+    }
+    const open = this.session(item.project);
+    const instanceId = this.chatHostOf(item.taskId, item.project) ?? undefined;
+    this.queued.remove(item.id);
+    try {
+      const sent = await this.answerProgramInput(open, { taskId: item.taskId, instanceId: instanceId ?? "", message: item.text, project: item.project, ...(item.settings !== undefined ? { overrides: item.settings } : {}), now: true } as typeof AppService.chatSend);
+      // Too late to join (the reply ended as it was pressed): it went to the queue again, or answered the wait.
+      return { items: this.queued.list({ project: item.project, taskId: item.taskId }), ...(sent?.steered === true ? { steered: true } : {}) };
+    } catch (e) {
+      // Nothing was sent: it goes back where it was, at the head.
+      this.queued.add(item.project, item.taskId, item.text, item.settings);
+      throw e;
+    }
+  }
+
+  /**
+   * A program parked at its `input()`: answered with the oldest message queued for it, if one is. On a
+   * later turn of the loop, so the park's own bookkeeping (its row, its publish) is done first.
+   */
+  private drainQueued(key: string, requestId: string, taskId: string): void {
+    const session = this.sessions.get(key);
+    const head = session === undefined ? undefined : this.queued.first(session.key, taskId);
+    if (session === undefined || head === undefined) return;
+    const answer: JsonValue = { text: head.text, ...(head.settings !== undefined ? { settings: head.settings as unknown as JsonValue } : {}) };
+    if (session.hub.submit(requestId, answer)) this.queued.remove(head.id);
   }
 
   // --- terminals (decision 0028) ---------------------------------------------
@@ -9841,9 +9953,13 @@ export class AppService {
   /** The project a directory is in: the nearest one up that holds `.jaira/` — never the shared root itself. */
   private projectDirOf(start: string): string | undefined {
     let dir = resolvePath(start);
+    // A JaiRA ROOT is not a project's `.jaira`: this engine's, and the person's own in their home — which
+    // an engine with a home of its own (`--home`, a test's) would otherwise take for one, and make the
+    // whole home a project for every script run beneath it.
+    const roots = new Set([resolvePath(this.baseDir), resolvePath(join(homedir(), ".jaira"))]);
     for (;;) {
       const jaira = join(dir, ".jaira");
-      if (existsSync(jaira) && resolvePath(jaira) !== resolvePath(this.baseDir)) return dir;
+      if (existsSync(jaira) && !roots.has(resolvePath(jaira))) return dir;
       const parent = dirname(dir);
       if (parent === dir) return undefined;
       dir = parent;
