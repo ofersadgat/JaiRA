@@ -18,6 +18,7 @@ import { ChangesetGate, EditArtifactGate, ReviewArtifactGate, serveOfGate } from
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
+import { JsonSource } from "./ValueView";
 
 /** One question, picked from its options alone: what this file's `ChooseOption` draws. */
 const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 1 && choices[0]!.freeText === undefined && choices[0]!.multiple !== true && choices[0]!.requireConfirm !== true;
@@ -276,8 +277,8 @@ const recordOf = (value: unknown): Record<string, unknown> => (value !== null &&
  * The settled bodies other than `choose_option`'s: a form as it was submitted (a field it did not name is
  * "not answered"), a confirmation with the button that was pressed filled, a tool call's approval as it
  * was asked (the same surface: nothing it presses goes anywhere), an artifact reviewed or edited as it
- * was decided (`artifact/ArtifactGates.tsx` with `settled`), and anything else's JSON (--bg, 1px --line,
- * radius 8, padding 8, data 11/12, pre-wrap, at most 220). The changeset reviewer answered
+ * was decided (`artifact/ArtifactGates.tsx` with `settled`), and anything else's JSON (`JsonSource`, folded,
+ * 14 above, no box). The changeset reviewer answered
  * (`review_artifacts`) is the reviewer read-only (`ChangesetGate` with `settled`), given the host's
  * services.
  *
@@ -348,11 +349,10 @@ function SettledBody({ pending, value, lift, plain, services }: { pending: Pendi
       </View>
     );
   }
+  // The JSON view with no box: its folding keeps an answer that carries a whole conversation short.
   return (
-    <View marginTop={14} padding={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never} maxHeight={220} {...({ overflow: "auto" } as object)} {...(viewScrollbarProps(t) as object)}>
-      <Txt spec={{ voice: "data", scale: 11 / 12 }} whiteSpace="pre-wrap">
-        {value === undefined ? "" : JSON.stringify(value, null, 2)}
-      </Txt>
+    <View marginTop={14} minWidth={0}>
+      <JsonSource value={value} t={t} />
     </View>
   );
 }

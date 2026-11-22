@@ -3,7 +3,7 @@
  * kept whole across the cuts, and an empty line at a cut never lost.
  */
 import { describe, expect, it } from "vitest";
-import { runsOf, textRuns } from "../src/renderer/textRuns";
+import { clipText, runsOf, textRuns } from "../src/renderer/textRuns";
 
 describe("textRuns", () => {
   it("leaves a short text whole", () => {
@@ -42,5 +42,24 @@ describe("runsOf", () => {
   it("groups by size and count, an oversized item alone", () => {
     expect(runsOf([1, 2, 3, 10, 1], (n) => n, 5, 10)).toEqual([[1, 2], [3], [10], [1]]);
     expect(runsOf([1, 1, 1, 1], (n) => n, 100, 3)).toEqual([[1, 1, 1], [1]]);
+  });
+});
+
+describe("clipText", () => {
+  it("leaves a text within the limit whole", () => {
+    expect(clipText("a\nb", 10)).toEqual({ shown: "a\nb", rest: 0 });
+  });
+
+  it("cuts at the last line break inside the limit, and counts what it left out", () => {
+    const text = "0123456\n89\nabcdef";
+    const clip = clipText(text, 12);
+    expect(clip).toEqual({ shown: "0123456\n89", rest: text.length - 10 });
+    expect(clip.shown.length + clip.rest).toBe(text.length);
+  });
+
+  it("cuts at the limit when no line break falls past half of it", () => {
+    const text = "x".repeat(30);
+    expect(clipText(text, 10)).toEqual({ shown: "x".repeat(10), rest: 20 });
+    expect(clipText("ab\n" + "y".repeat(30), 10)).toEqual({ shown: ("ab\n" + "y".repeat(30)).slice(0, 10), rest: 23 });
   });
 });

@@ -21,7 +21,8 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import { editorLook } from "@jaira/ui/editorLook";
-import { highlightJson } from "@jaira/ui/jsonHighlight";
+import { highlightJson, type HighlightLine, type Token } from "@jaira/ui/jsonHighlight";
+import { foldRows, foldingOf, initialFold, stepped, type FoldRow, type FoldState, type FoldStates, type FoldUnit, type JsonFolding } from "@jaira/ui/jsonFold";
 import { RUN_CHARS, RUN_LINES, runsOf } from "@jaira/ui/textRuns";
 import { textRendererFor, useRenderChoice } from "@jaira/ui/renderChoice";
 import { useArtifactFrame } from "@jaira/ui/artifactFrame";
@@ -40,6 +41,7 @@ import { FenceLineContext, Markdown, registerFenceRenderer } from "../Markdown";
 import { LongText } from "../LongText";
 import { Virtual } from "../Virtual";
 import { Icon } from "./Icon";
+import { ClipMore, useClip } from "./ClipMore";
 import { ChangesView, EmptyNote, Media, PatchView, Scroll, TableView, type ChangeOutcome } from "./ValueReadings";
 
 /** A change over a markdown document, in the shape the markdown editor takes (`markdownEditorTypes.ts`'s `MarkdownDiff`). */
@@ -105,6 +107,7 @@ export function ValueView({
   lead,
   segment,
   titleBar,
+  folding,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -148,6 +151,11 @@ export function ValueView({
   segment?: ReactNode;
   /** Drawn above the head row, never instead of it: a published artifact's title bar. */
   titleBar?: ReactNode;
+  /**
+   * How the JSON view draws a long value (`jsonFold.ts`): folded to a budget, in chunks, its long strings
+   * cut — each part on by default, and off where a host wants that part whole.
+   */
+  folding?: JsonFolding | undefined;
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
@@ -249,7 +257,7 @@ export function ValueView({
       );
     }
     // The coloured reading whether or not it may be changed: JSON is never the text box below.
-    if (view === "json") return <JsonSource value={showing} schema={hint?.schema} ceiling={ceiling} t={t} />;
+    if (view === "json") return <JsonSource value={showing} schema={hint?.schema} ceiling={ceiling} folding={folding} t={t} />;
     if (writing !== undefined && typeof showing === "string") {
       // The text as written, in the data face, to type into.
       return <EditSource value={showing} onChange={writing} inline={inline} t={t} />;
@@ -578,9 +586,11 @@ function jsonTextOf(value: unknown): string {
 
 /** `Source`: the raw form — text as written, or JSON pretty-printed. */
 function Source({ value, ceiling, t }: { value: unknown; ceiling: number; t: Tokens }): JSX.Element {
+  const clip = useClip(useMemo(() => jsonTextOf(value), [value]));
   return (
     <Scroll maxHeight={ceiling} t={t}>
-      <LongText text={jsonTextOf(value)} spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)} />
+      <LongText text={clip.shown} spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)} />
+      <ClipMore rest={clip.rest} onMore={clip.more} />
     </Scroll>
   );
 }
@@ -588,59 +598,189 @@ function Source({ value, ceiling, t }: { value: unknown; ceiling: number; t: Tok
 // Plain text is --dim, the source's ink, not --text: JSON is the source's box, coloured.
 const TOKEN_INK: Record<string, string> = { key: "accent", string: "tok-string", number: "tok-number", literal: "tok-number", punct: "dim", comment: "dim", plain: "dim" };
 
+/** A line `JsonSource` draws: a value's (`FoldRow`), or one of a JSON text's (`HighlightLine`). */
+type JsonLine = FoldRow | (HighlightLine & { kind?: undefined });
+
+/** Fold states that follow the value: a new value starts from its own first view (`initialFold`). */
+function useFold(value: unknown, folding: Required<JsonFolding>): { states: FoldStates; step: (path: string, change: (was: FoldState) => FoldState) => void } {
+  const key = JSON.stringify(folding);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `folding` by its content, which `key` is
+  const fresh = useMemo(() => initialFold(value, folding), [value, key]);
+  const [held, setHeld] = useState<{ of: unknown; key: string; states: FoldStates } | null>(null);
+  const states = held !== null && held.of === value && held.key === key ? held.states : fresh;
+  return { states, step: (path, change) => setHeld({ of: value, key, states: stepped(states, path, change) }) };
+}
+
+const countOf = (n: number, unit: FoldUnit): string => `${n.toLocaleString()} ${n === 1 ? unit.slice(0, -1) : unit}`;
+
 /**
- * `JsonSource`: the value as JSON, coloured by the one highlighter (`highlightJson`), each key's
- * description from the schema (`schemaDescriber`) ghosted at the end of its line. On web the hint stands
- * in a slot of no width, so it never moves where a line breaks and runs past the box's edge, which
- * scrolls. On a phone a native text cannot hold a box of no width, so the hint follows its line after the
- * gap, and a long one can wrap it.
+ * `JsonSource`: the value as JSON, coloured as the one highlighter colours it (`highlightJson`'s
+ * tokens), each key's description from the schema (`schemaDescriber`) ghosted at the end of its line —
+ * and drawn from the value a piece at a time (`jsonFold.ts`): objects and arrays fold, a long one shows
+ * a chunk and `… N more items`, a long string its start. `folding` turns each of those off; all three
+ * off is `JSON.stringify(value, null, 2)` drawn whole. A value that is already text (a JSON document)
+ * is coloured as written, cut by `ClipMore`.
+ *
+ *   the hint        web: in a slot of no width, so it never moves where a line breaks and runs past the
+ *                   box's edge, which scrolls; a phone cannot hold a box of no width, so it follows its
+ *                   line after the gap, and a long one can wrap it
+ *   the gutter      with folding, 2ch before each line's content; an open or closed container's
+ *                   chevron (▾ ▸) in it, --tok-hint (hover --text)
+ *   closed          its first members, shortened, --tok-hint italic; then its size, app 10.5/12.5,
+ *                   --dim on --panel-2, radius 9, padding 0 6 (hover --text on --line); both open it
+ *   … N more        --tok-hint italic, then "Show 20 more" --accent and "Show all" --dim (hover
+ *                   underlined), 2 spaces apart
+ *   a cut string    its start and …", then "N more characters" --tok-hint italic, "more" --accent
+ *                   (five times as much) and "all" --dim
+ *
+ * `ceiling`: the box's height, past which it scrolls; none, no box — the folding keeps it short.
  */
-function JsonSource({ value, schema, ceiling, t }: { value: unknown; schema: unknown; ceiling: number; t: Tokens }): JSX.Element {
-  const text = useMemo(() => jsonTextOf(value), [value]);
+export function JsonSource({ value, schema, ceiling, folding, t }: { value: unknown; schema?: unknown; ceiling?: number | undefined; folding?: JsonFolding | undefined; t: Tokens }): JSX.Element {
   const describe = useMemo(() => schemaDescriber(schema), [schema]);
-  const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
+  const parts = foldingOf(folding);
+  const { states, step } = useFold(value, parts);
+  // A JSON document as text: coloured as written, cut before it is (every token is an element).
+  const clip = useClip(typeof value === "string" ? value : "");
+  const lines = useMemo<JsonLine[]>(() => (typeof value === "string" ? highlightJson(clip.shown, describe) : foldRows(value, states, parts, describe)), [value, clip.shown, states, parts.fold, parts.chunk, parts.strings, describe]);
+  const more = typeof value === "string" ? <ClipMore rest={clip.rest} onMore={clip.more} /> : null;
+  const gutter = lines.some((line) => line.kind === "line" && line.fold !== undefined);
+
   const base = { voice: "data" as const, scale: 11.5 / 12, lineHeight: 1.55 };
   const ghost = font(t, { ...base, color: "tok-hint", italic: true });
-  const drawn = (run: typeof lines, from: number): ReactNode =>
-    run.map((line, k) => (
-      <Text key={from + k}>
-        {line.tokens.map((token, j) => (
-          // Each token keeps the line's own height (web: the parent's unitless 1.55), not one of its own.
-          <Text key={j} {...(font(t, { ...base, color: TOKEN_INK[token.kind] ?? "text", ...(token.kind === "comment" ? { italic: true } : {}) }) as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
-            {token.text}
-          </Text>
-        ))}
-        {line.hint === undefined ? null : isWeb ? (
-          // The hint's slot: an inline block of no width whose text overflows it, `pre`.
-          <Text style={{ display: "inline-block", width: 0, overflow: "visible", whiteSpace: "pre" } as never}>
-            <Text {...(ghost as object)} lineHeight="inherit" style={{ paddingLeft: "1.6em" } as never}>
-              {hintText(line.hint)}
-            </Text>
-          </Text>
-        ) : (
-          <Text {...(ghost as object)}>
-            {"   "}
-            {hintText(line.hint)}
-          </Text>
-        )}
-        {k < run.length - 1 ? "\n" : null}
+  const ink = (color: string, extra: Record<string, unknown> = {}): object => ({ ...(font(t, { ...base, color, ...extra }) as object), ...(isWeb ? { lineHeight: "inherit" } : {}) });
+  /** A word that does something, inline in the line: a button to a screen reader, a hand to the pointer. */
+  const act = (key: string, label: string, color: string, onPress: () => void, extra: object = {}): ReactNode => (
+    <Text key={key} role="button" onPress={onPress} cursor="pointer" hoverStyle={{ textDecorationLine: "underline" } as never} {...(ink(color, { voice: "app", scale: 11 / 12.5 }) as object)} {...extra}>
+      {label}
+    </Text>
+  );
+  /** The gutter's slot: the chevron of a container that opens here, else as wide and empty. */
+  const slot = (line: JsonLine): ReactNode => {
+    if (!gutter) return null;
+    const fold = line.kind === "line" ? line.fold : undefined;
+    const box = isWeb ? { style: { display: "inline-block", width: "2ch" } as never } : {};
+    if (fold === undefined) return <Text {...box}>{isWeb ? "" : "  "}</Text>;
+    return (
+      <Text
+        role="button"
+        aria-label={fold.open ? "Fold" : `Open ${countOf(fold.size, fold.unit)}`}
+        aria-expanded={fold.open}
+        onPress={() => step(fold.path, (s) => ({ ...s, open: !fold.open }))}
+        cursor="pointer"
+        hoverStyle={{ color: t.v("text") } as never}
+        {...(ink("tok-hint") as object)}
+        {...box}
+      >
+        {fold.open ? "▾" : "▸"}
+        {isWeb ? "" : " "}
+      </Text>
+    );
+  };
+  const tokensOf = (tokens: readonly Token[], from: number): ReactNode =>
+    tokens.map((token, j) => (
+      // Each token keeps the line's own height (web: the parent's unitless 1.55), not one of its own.
+      <Text key={from + j} {...(ink(TOKEN_INK[token.kind] ?? "text", token.kind === "comment" ? { italic: true } : {}) as object)}>
+        {token.text}
       </Text>
     ));
+  const drawn = (run: readonly JsonLine[], from: number): ReactNode =>
+    run.map((line, k) => {
+      // The gutter goes between a line's indent and its content, so a chevron sits beside what it folds.
+      const [first, ...rest] = line.tokens;
+      const indented = first !== undefined && first.kind === "plain" && first.text.trim() === "";
+      const lead = indented ? tokensOf([first], 0) : null;
+      const body = indented ? rest : line.tokens;
+      return (
+        <Text key={from + k}>
+          {lead}
+          {slot(line)}
+          {tokensOf(body, 1)}
+          {line.kind === "more" ? (
+            <>
+              <Text {...(ghost as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
+                … {line.rest.toLocaleString()} more {line.rest === 1 ? line.unit.slice(0, -1) : line.unit}
+              </Text>
+              {"  "}
+              {act("next", `Show ${line.step.toLocaleString()} more`, "accent", () => step(line.path, (s) => ({ ...s, shown: line.shown + line.step })))}
+              {line.rest > line.step ? (
+                <>
+                  {"  "}
+                  {act("all", "Show all", "dim", () => step(line.path, (s) => ({ ...s, shown: Number.MAX_SAFE_INTEGER })))}
+                </>
+              ) : null}
+            </>
+          ) : null}
+          {line.kind === "line" && line.closed !== undefined ? (
+            <>
+              {line.closed.peek.length > 0 ? (
+                <Text {...(ghost as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
+                  {" "}
+                  {line.closed.peek}
+                </Text>
+              ) : null}{" "}
+              {act("size", countOf(line.fold!.size, line.fold!.unit), "dim", () => step(line.fold!.path, (s) => ({ ...s, open: true })), {
+                backgroundColor: t.v("panel-2"),
+                borderRadius: 9,
+                paddingHorizontal: 6,
+                hoverStyle: { color: t.v("text"), backgroundColor: t.v("line") },
+              })}{" "}
+              {tokensOf(line.closed.after, 100)}
+            </>
+          ) : null}
+          {line.kind === "line" && line.cut !== undefined ? (
+            <>
+              <Text {...(ghost as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
+                {" "}
+                {line.cut.rest.toLocaleString()} more characters
+              </Text>
+              {"  "}
+              {act("more", "more", "accent", () => step(line.cut!.path, (s) => ({ ...s, chars: line.cut!.shown * 5 })))}
+              {"  "}
+              {act("all", "all", "dim", () => step(line.cut!.path, (s) => ({ ...s, chars: Number.MAX_SAFE_INTEGER })))}
+            </>
+          ) : null}
+          {line.hint === undefined ? null : isWeb ? (
+            // The hint's slot: an inline block of no width whose text overflows it, `pre`.
+            <Text style={{ display: "inline-block", width: 0, overflow: "visible", whiteSpace: "pre" } as never}>
+              <Text {...(ghost as object)} lineHeight="inherit" style={{ paddingLeft: "1.6em" } as never}>
+                {hintText(line.hint)}
+              </Text>
+            </Text>
+          ) : (
+            <Text {...(ghost as object)}>
+              {"   "}
+              {hintText(line.hint)}
+            </Text>
+          )}
+          {k < run.length - 1 ? "\n" : null}
+        </Text>
+      );
+    });
+  const box = (children: ReactNode, both: boolean): JSX.Element =>
+    ceiling === undefined ? (
+      <View minWidth={0}>{children}</View>
+    ) : (
+      <Scroll maxHeight={ceiling} both={both} t={t}>
+        {children}
+      </Scroll>
+    );
   if (isWeb) {
-    return (
-      <Scroll maxHeight={ceiling} both t={t}>
+    return box(
+      <>
         {/* The line height unitless on web: Blink multiplies it out in float. */}
         <Txt spec={{ ...base, color: "dim" }} whiteSpace="pre-wrap" lineHeight="1.55" style={{ overflowWrap: "anywhere" }}>
           {drawn(lines, 0)}
         </Txt>
-      </Scroll>
+        {more}
+      </>,
+      true,
     );
   }
   // A phone wraps the lines, a run of them to a text (`textRuns.ts`) kept near the screen (`Virtual`):
   // one text of every line, sideways, was one bitmap as wide as the longest and as tall as all of them.
   let from = 0;
-  return (
-    <Scroll maxHeight={ceiling} t={t}>
+  return box(
+    <>
       {runsOf(lines, (line) => line.tokens.reduce((n, token) => n + token.text.length, 0) + 1, RUN_CHARS, RUN_LINES).map((run) => {
         const at = from;
         from += run.length;
@@ -650,7 +790,9 @@ function JsonSource({ value, schema, ceiling, t }: { value: unknown; schema: unk
           </Virtual>
         );
       })}
-    </Scroll>
+      {more}
+    </>,
+    false,
   );
 }
 

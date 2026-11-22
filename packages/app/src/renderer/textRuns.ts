@@ -60,3 +60,22 @@ export function textRuns(text: string, chars = RUN_CHARS, lines = RUN_LINES): st
   }
   return runs.map((run) => run.join("\n"));
 }
+
+/**
+ * How much of a long text a reading draws before it asks: {@link clipText}'s first cut. A browser lays
+ * out ALL of a text to size its box, even one capped at a few lines and scrolled: measured 2026-11-21, a
+ * settled gate's 9.2 MB answer, pretty-printed into a 220-tall box, took 7.4 s of one layout on every
+ * click in the task view. This many characters lay out in about a millisecond.
+ */
+export const CLIP_CHARS = 8_000;
+
+/**
+ * `text` cut to at most `limit` characters, at the last line break inside them when there is one past
+ * half of it (else at `limit`), and how many characters that left out. Not cut: the text and 0.
+ */
+export function clipText(text: string, limit = CLIP_CHARS): { shown: string; rest: number } {
+  if (text.length <= limit) return { shown: text, rest: 0 };
+  const lineEnd = text.lastIndexOf("\n", limit);
+  const cut = lineEnd > limit / 2 ? lineEnd : limit;
+  return { shown: text.slice(0, cut), rest: text.length - cut };
+}
