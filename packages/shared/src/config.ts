@@ -371,6 +371,8 @@ export interface JairaConfig {
   executors: Record<string, JairaOperationNode>;
   /** Where artifacts are stored (DESIGN §7.6). */
   artifacts: JairaArtifactConfig;
+  /** A session's background processes (decision 0032, ruling 9). Absent: both settings off. */
+  processes?: JairaProcessesConfig;
   /** Which kinds of run state live on disk and which in SQLite (DESIGN §4.4). */
   storage: JairaStorageConfig;
   /** Durable memoization of model calls — off unless asked for. */
@@ -1047,6 +1049,26 @@ function parseMemo(raw: unknown): JairaMemoConfig {
   return { enabled: enabled ?? false };
 }
 
+/** Decision 0032, ruling 9: two settings over a session's background processes, both off by default. */
+export interface JairaProcessesConfig {
+  /** Stop a session's background process idle this many minutes (no port, no CPU, nothing running in the task); 0 never. */
+  stopIdleAfterMinutes: number;
+  /** How many background processes a session may have running; 0 no limit. */
+  backgroundLimit: number;
+}
+
+function parseProcesses(raw: unknown): JairaProcessesConfig | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.processes must be an object");
+  const cfg = raw as Record<string, unknown>;
+  const count = (key: string): number => {
+    const value = cfg[key] ?? 0;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < 0) throw new Error(`config.processes.${key} must be a non-negative integer`);
+    return value;
+  };
+  return { stopIdleAfterMinutes: count("stopIdleAfterMinutes"), backgroundLimit: count("backgroundLimit") };
+}
+
 function parseArtifacts(raw: unknown): JairaArtifactConfig {
   const fallback: JairaArtifactConfig = {
     destination: DEFAULT_ARTIFACT_DESTINATION,
@@ -1549,6 +1571,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     models,
     memo: parseMemo(cfg["memo"]),
     artifacts: parseArtifacts(cfg["artifacts"]),
+    ...(cfg["processes"] !== undefined ? { processes: parseProcesses(cfg["processes"])! } : {}),
     storage: parseStorage(cfg["storage"]),
     execEnvironment: parseExecEnvironment(cfg["execEnvironment"]),
     agents: parseAgents(cfg["agents"]),

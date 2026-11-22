@@ -41,10 +41,10 @@ describe.skipIf(process.platform !== "win32")("on this Windows", () => {
   });
 
   it("lists the processes, this one among them and marked as JaiRA's", async () => {
-    const listed = await run("list_processes", { sort: "pid", limit: 500, name: String(process.title).includes("node") ? "node" : "" });
+    const listed = await run("list_processes", { scope: "all", sort: "pid", limit: 500, name: String(process.title).includes("node") ? "node" : "" });
     const rows = listed["processes"] as Array<{ pid: number; protected?: string }>;
     expect(rows.find((row) => row.pid === process.pid)?.protected).toMatch(/engine/);
-    expect((await run("stop_process", { pid: process.pid }))["error"]).toMatch(/refused/);
+    expect((await run("stop_process", { pid: process.pid, scope: "all" }))["error"]).toMatch(/refused/);
   });
 
   it("lists the services", async () => {

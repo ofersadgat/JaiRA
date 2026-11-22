@@ -23,6 +23,7 @@ import {
   type InstallResult,
   type LogQuery,
   type OpenRequest,
+  type OutputTargets,
   type PowerAction,
   type ProcessRow,
   type ReadSettingsRequest,
@@ -326,6 +327,53 @@ $rows = foreach ($p in Get-Process) {
   $row
 }
 Out-Result @($rows)
+`;
+
+/**
+ * Each process's account (decision 0032, ruling 4), read from its token. A process of another account
+ * cannot be opened without an administrator, and is left out: the tools place it under `system`.
+ */
+const OWNERS = `
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Security.Principal;
+public static class JairaOwners {
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("advapi32.dll", SetLastError = true)] static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  public static Dictionary<string, string> All() {
+    var owners = new Dictionary<string, string>();
+    foreach (var p in Process.GetProcesses()) {
+      IntPtr h = OpenProcess(0x1000, false, p.Id);
+      if (h == IntPtr.Zero) continue;
+      try {
+        IntPtr t;
+        if (!OpenProcessToken(h, 0x0008, out t)) continue;
+        try { using (var id = new WindowsIdentity(t)) owners[p.Id.ToString()] = id.Name; } catch { } finally { CloseHandle(t); }
+      } finally { CloseHandle(h); }
+    }
+    return owners;
+  }
+}
+'@
+Out-Result ([JairaOwners]::All())
+`;
+
+/** The accounts in a local group: `Get-LocalGroupMember`, or ADSI where that module is missing. */
+const GROUP_MEMBERS = `
+$g = [string]$A.group
+$members = @()
+try { $members = @(Get-LocalGroupMember -Group $g -ErrorAction Stop | ForEach-Object { [string]$_.Name }) }
+catch {
+  try {
+    $grp = [ADSI]"WinNT://./$g,group"
+    $members = @($grp.psbase.Invoke('Members') | ForEach-Object { [string]$_.GetType().InvokeMember('Name', 'GetProperty', $null, $_, $null) })
+  } catch { Out-Refusal "there is no group '$g' on this machine"; return }
+}
+Out-Result @($members)
 `;
 
 const STOP_PROCESS = `
@@ -800,6 +848,257 @@ function runProgram(program: string, args: readonly string[], timeoutMs: number)
   });
 }
 
+/**
+ * Where a process's stdout and stderr go (decision 0032, ruling 6): its standard handles, read from its
+ * process block (the PEB's process parameters, 64-bit or WOW64), each duplicated into this script to
+ * ask what it is. A disk file is named; a console handle answers `GetConsoleMode` (the null device, a
+ * character device too, does not); a pipe is another program's. Needs no administrator for the user's
+ * own unelevated processes; an elevated one, or another account's, cannot be opened, and says so.
+ */
+const STDIO = `
+Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class JairaStdio {
+  [StructLayout(LayoutKind.Sequential)] struct Pbi { public IntPtr ExitStatus; public IntPtr PebBaseAddress; public IntPtr AffinityMask; public IntPtr BasePriority; public IntPtr UniqueProcessId; public IntPtr InheritedFrom; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr sourceProcess, IntPtr source, IntPtr targetProcess, out IntPtr target, uint access, bool inherit, uint options);
+  [DllImport("kernel32.dll")] static extern uint GetFileType(IntPtr handle);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFinalPathNameByHandleW(IntPtr handle, StringBuilder path, uint length, uint flags);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadProcessMemory(IntPtr process, IntPtr address, byte[] buffer, IntPtr size, out IntPtr read);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool IsWow64Process(IntPtr process, out bool wow);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+  [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref Pbi info, int length, out int returned);
+  [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr process, int infoClass, ref IntPtr info, int length, out int returned);
+
+  static long Read(IntPtr process, long address, int size) {
+    byte[] buffer = new byte[size]; IntPtr got;
+    if (!ReadProcessMemory(process, new IntPtr(address), buffer, new IntPtr(size), out got)) throw new Exception("its memory could not be read (error " + Marshal.GetLastWin32Error() + ")");
+    return size == 8 ? BitConverter.ToInt64(buffer, 0) : (long)BitConverter.ToUInt32(buffer, 0);
+  }
+
+  static Dictionary<string, object> Kind(string kind) { var answer = new Dictionary<string, object>(); answer["kind"] = kind; return answer; }
+
+  static Dictionary<string, object> Target(IntPtr process, long value) {
+    if (value == 0) return Kind("none");
+    IntPtr dup;
+    if (!DuplicateHandle(process, new IntPtr(value), GetCurrentProcess(), out dup, 0, false, 2)) return Kind("none");
+    try {
+      uint type = GetFileType(dup);
+      if (type == 1) {
+        var path = new StringBuilder(4096);
+        uint n = GetFinalPathNameByHandleW(dup, path, 4096, 0);
+        if (n == 0 || n >= 4096) { var denied = Kind("denied"); denied["why"] = "its output goes to a file that could not be named (error " + Marshal.GetLastWin32Error() + ")"; return denied; }
+        string p = path.ToString();
+        if (p.StartsWith(@"\\\\?\\UNC\\")) p = @"\\\\" + p.Substring(8); else if (p.StartsWith(@"\\\\?\\")) p = p.Substring(4);
+        var file = Kind("file"); file["path"] = p; return file;
+      }
+      uint mode;
+      if (type == 2) return Kind(GetConsoleMode(dup, out mode) ? "console" : "none");
+      if (type == 3) return Kind("pipe");
+      return Kind("none");
+    } finally { CloseHandle(dup); }
+  }
+
+  static Dictionary<string, object> Both(string why) {
+    var denied = Kind("denied"); denied["why"] = why;
+    var answer = new Dictionary<string, object>(); answer["stdout"] = denied; answer["stderr"] = denied; return answer;
+  }
+
+  public static Dictionary<string, object> Of(int pid) {
+    // PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_DUP_HANDLE | PROCESS_VM_READ
+    IntPtr process = OpenProcess(0x1000 | 0x0040 | 0x0010, false, pid);
+    if (process == IntPtr.Zero) {
+      int error = Marshal.GetLastWin32Error();
+      return Both(error == 5 ? "it runs as an administrator or as another account, which JaiRA may not look into" : error == 87 ? "no process " + pid + " is running" : "it could not be opened (error " + error + ")");
+    }
+    try {
+      bool wow; IsWow64Process(process, out wow);
+      bool self64 = IntPtr.Size == 8;
+      long parameters; int width; int got;
+      if (self64 && wow) {
+        IntPtr peb32 = IntPtr.Zero;
+        if (NtQueryInformationProcess(process, 26, ref peb32, IntPtr.Size, out got) != 0 || peb32 == IntPtr.Zero) return Both("its 32-bit process block could not be found");
+        width = 4; parameters = Read(process, peb32.ToInt64() + 0x10, 4);
+      } else if (!self64 && !wow && Environment.Is64BitOperatingSystem) {
+        return Both("it is a 64-bit process, and this reader runs as 32-bit");
+      } else {
+        Pbi pbi = new Pbi();
+        if (NtQueryInformationProcess(process, 0, ref pbi, Marshal.SizeOf(typeof(Pbi)), out got) != 0) return Both("its process block could not be found");
+        width = IntPtr.Size;
+        parameters = Read(process, pbi.PebBaseAddress.ToInt64() + (width == 8 ? 0x20 : 0x10), width);
+      }
+      var answer = new Dictionary<string, object>();
+      answer["stdout"] = Target(process, Read(process, parameters + (width == 8 ? 0x28 : 0x1C), width));
+      answer["stderr"] = Target(process, Read(process, parameters + (width == 8 ? 0x30 : 0x20), width));
+      return answer;
+    } catch (Exception e) {
+      return Both(e.Message);
+    } finally { CloseHandle(process); }
+  }
+}
+'@
+Out-Result ([JairaStdio]::Of([int]$A.pid))
+`;
+
+/**
+ * Reading a console's screen and scrollback (decision 0032, ruling 6): the reader leaves its own
+ * console, attaches to the target's, reads the screen buffer from its top through the cursor's row
+ * (each row's trailing blanks trimmed), and leaves it again. One request a line on stdin (a pid), one
+ * JSON answer a line on stdout — so one PowerShell serves every read while it is wanted.
+ */
+const CONSOLE_READER = `
+$ErrorActionPreference = 'Stop'
+$JairaIn = New-Object System.IO.StreamReader([Console]::OpenStandardInput(), (New-Object System.Text.UTF8Encoding($false)))
+$JairaOut = New-Object System.IO.StreamWriter([Console]::OpenStandardOutput(), (New-Object System.Text.UTF8Encoding($false)))
+Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class JairaConsole {
+  [StructLayout(LayoutKind.Sequential)] public struct Coord { public short X; public short Y; }
+  [StructLayout(LayoutKind.Sequential)] struct Rect { public short Left; public short Top; public short Right; public short Bottom; }
+  [StructLayout(LayoutKind.Sequential)] struct Info { public Coord Size; public Coord Cursor; public ushort Attributes; public Rect Window; public Coord MaxWindow; }
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool FreeConsole();
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool AttachConsole(int pid);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFileW(string name, uint access, uint share, IntPtr security, uint disposition, uint flags, IntPtr template);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetConsoleScreenBufferInfo(IntPtr handle, out Info info);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern bool ReadConsoleOutputCharacterW(IntPtr handle, [Out] char[] buffer, uint length, Coord at, out uint read);
+  public static string Read(int pid) {
+    FreeConsole();
+    if (!AttachConsole(pid)) {
+      int error = Marshal.GetLastWin32Error();
+      throw new Exception(error == 5 ? "its console could not be attached to (access denied)" : error == 6 || error == 31 ? "it has no console" : error == 87 ? "no process " + pid + " is running" : "its console could not be attached to (error " + error + ")");
+    }
+    IntPtr screen = new IntPtr(-1);
+    try {
+      screen = CreateFileW("CONOUT$", 0x80000000 | 0x40000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
+      if (screen == new IntPtr(-1)) throw new Exception("its console's screen could not be opened (error " + Marshal.GetLastWin32Error() + ")");
+      Info info;
+      if (!GetConsoleScreenBufferInfo(screen, out info)) throw new Exception("its console's screen could not be read (error " + Marshal.GetLastWin32Error() + ")");
+      int width = Math.Max(1, (int)info.Size.X), rows = info.Cursor.Y + 1;
+      int chunk = Math.Max(1, 32000 / width);
+      char[] buffer = new char[width * chunk];
+      var text = new StringBuilder();
+      for (int row = 0; row < rows; row += chunk) {
+        int n = Math.Min(chunk, rows - row);
+        uint got; Coord at = new Coord(); at.X = 0; at.Y = (short)row;
+        if (!ReadConsoleOutputCharacterW(screen, buffer, (uint)(width * n), at, out got)) throw new Exception("its console's screen could not be read (error " + Marshal.GetLastWin32Error() + ")");
+        for (int i = 0; i < n; i++) {
+          if (row + i > 0) text.Append('\\n');
+          text.Append(new string(buffer, i * width, width).TrimEnd(' ', '\\0'));
+        }
+      }
+      return text.ToString();
+    } finally {
+      if (screen != new IntPtr(-1)) CloseHandle(screen);
+      FreeConsole();
+    }
+  }
+}
+'@
+while ($true) {
+  $line = $JairaIn.ReadLine()
+  if ($null -eq $line) { break }
+  try { $answer = @{ text = [JairaConsole]::Read([int]$line) } }
+  catch { $e = $_.Exception; if ($e.InnerException) { $e = $e.InnerException }; $answer = @{ error = $e.Message } }
+  $JairaOut.WriteLine((ConvertTo-Json -InputObject $answer -Compress)); $JairaOut.Flush()
+}
+`;
+
+/** How long the console reader is kept after its last read. */
+const CONSOLE_READER_IDLE_MS = 60_000;
+
+/** The console reader's PowerShell, started on the first read and let go after a minute without one. */
+class ConsoleReader {
+  private child: ReturnType<typeof spawn> | undefined;
+  private queue: Promise<unknown> = Promise.resolve();
+  private idle: ReturnType<typeof setTimeout> | undefined;
+  private pending: { resolve: (text: string) => void; reject: (error: Error) => void } | undefined;
+  private buffer = "";
+
+  read(pid: number): Promise<string> {
+    const next = this.queue.then(() => this.ask(pid));
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  private ask(pid: number): Promise<string> {
+    if (this.idle !== undefined) clearTimeout(this.idle);
+    const child = this.start();
+    return new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.stop();
+        settle(() => reject(new Error("reading its console did not finish within 30 s")));
+      }, 30_000);
+      const settle = (fn: () => void): void => {
+        clearTimeout(timer);
+        this.pending = undefined;
+        this.idle = setTimeout(() => this.stop(), CONSOLE_READER_IDLE_MS);
+        this.idle.unref?.();
+        fn();
+      };
+      this.pending = { resolve: (text) => settle(() => resolve(text)), reject: (error) => settle(() => reject(error)) };
+      child.stdin!.write(`${pid}\n`);
+    });
+  }
+
+  private start(): ReturnType<typeof spawn> {
+    if (this.child !== undefined) return this.child;
+    const child = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-MTA", "-EncodedCommand", Buffer.from(CONSOLE_READER, "utf16le").toString("base64")], { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    this.child = child;
+    let errors = "";
+    child.stdout!.setEncoding("utf8");
+    child.stdout!.on("data", (chunk: string) => {
+      this.buffer += chunk;
+      for (let at = this.buffer.indexOf("\n"); at >= 0; at = this.buffer.indexOf("\n")) {
+        const line = this.buffer.slice(0, at).trim();
+        this.buffer = this.buffer.slice(at + 1);
+        if (line.length === 0) continue;
+        let answer: { text?: string; error?: string };
+        try {
+          answer = JSON.parse(line) as { text?: string; error?: string };
+        } catch {
+          answer = { error: `the console reader answered something that is not JSON: ${line.slice(0, 200)}` };
+        }
+        if (typeof answer.text === "string") this.pending?.resolve(answer.text);
+        else this.pending?.reject(new SystemToolRefusal(answer.error ?? "its console could not be read"));
+      }
+    });
+    child.stderr!.on("data", (chunk: Buffer) => (errors = (errors + chunk.toString("utf8")).slice(-2_000)));
+    const gone = (why: string): void => {
+      if (this.child === child) this.child = undefined;
+      this.buffer = "";
+      this.pending?.reject(new Error(why));
+    };
+    child.on("error", (e) => gone(e.message));
+    child.on("close", (code) => gone(`the console reader exited (${code ?? "no code"})${errors.trim().length > 0 ? `: ${errors.trim().split(/\r?\n/)[0]}` : ""}`));
+    child.stdin!.on("error", () => undefined);
+    // Kept only while reads want it: it never holds the engine open.
+    child.unref();
+    (child.stdin as unknown as { unref?: () => void }).unref?.();
+    (child.stdout as unknown as { unref?: () => void }).unref?.();
+    (child.stderr as unknown as { unref?: () => void }).unref?.();
+    return child;
+  }
+
+  private stop(): void {
+    const child = this.child;
+    this.child = undefined;
+    try {
+      child?.stdin?.end();
+      child?.kill();
+    } catch {
+      // Gone already.
+    }
+  }
+}
+
 /** A scratch file for a script to write into, removed after. */
 function withScratch<T>(name: string, use: (file: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "jaira-system-"));
@@ -850,8 +1149,29 @@ export class WindowsSystem implements SystemBackend {
     return listOf<ProcessRow>(await ps(PROCESSES, null));
   }
 
+  async owners(): Promise<Record<string, string>> {
+    const answer = await ps<Record<string, string> | null>(OWNERS, null);
+    return answer ?? {};
+  }
+
+  async groupMembers(group: string): Promise<string[]> {
+    return listOf<string>(await ps(GROUP_MEMBERS, { group }));
+  }
+
   stopProcess(pid: number, options: { started?: string; tree: boolean; force: boolean }): Promise<{ stopped: boolean; how: string }> {
     return ps(STOP_PROCESS, { pid, started: options.started ?? null, tree: options.tree, force: options.force });
+  }
+
+  /** Where `pid`'s stdout and stderr go, from its standard handles (decision 0032, ruling 6). */
+  outputTargets(pid: number): Promise<OutputTargets> {
+    return ps<OutputTargets>(STDIO, { pid });
+  }
+
+  private consoles: ConsoleReader | undefined;
+
+  /** `pid`'s console screen and scrollback, through one PowerShell kept while reads come. */
+  readConsole(pid: number): Promise<string> {
+    return (this.consoles ??= new ConsoleReader()).read(pid);
   }
 
   async services(): Promise<ServiceRow[]> {

@@ -98,6 +98,12 @@ export interface ExecResult {
   command: string;
   timedOut: boolean;
   aborted: boolean;
+  /**
+   * The command exited but something it started still held its output open, so it was answered at
+   * its exit plus OUTPUT_DRAIN_MS rather than when its pipes closed: what it left running is still
+   * there (decision 0032, ruling 5).
+   */
+  outputHeld?: boolean;
 }
 
 export interface Exec {
@@ -428,13 +434,14 @@ export class NodeExec implements Exec {
       });
 
       let drain: ReturnType<typeof setTimeout> | undefined;
+      let outputHeld = false;
       const finish = (code: number | null, signal: NodeJS.Signals | null): void => {
         if (settled) return;
         settled = true;
         if (drain !== undefined) clearTimeout(drain);
         cleanup();
         observeExit(code, signal);
-        resolve({ code, signal, stdout, ...(stdoutChunks !== undefined ? { stdoutBytes: new Uint8Array(Buffer.concat(stdoutChunks)) } : {}), stderr, command: printable, timedOut, aborted });
+        resolve({ code, signal, stdout, ...(stdoutChunks !== undefined ? { stdoutBytes: new Uint8Array(Buffer.concat(stdoutChunks)) } : {}), stderr, command: printable, timedOut, aborted, ...(outputHeld ? { outputHeld } : {}) });
       };
 
       // Normally the pipes close a moment after the exit, and the command ends there with all it wrote.
@@ -447,6 +454,7 @@ export class NodeExec implements Exec {
         drain = setTimeout(() => {
           if (settled) return;
           for (const stream of [child.stdout, child.stderr]) (stream as { unref?: () => void } | null)?.unref?.();
+          outputHeld = true;
           finish(code, signal);
         }, OUTPUT_DRAIN_MS);
       });

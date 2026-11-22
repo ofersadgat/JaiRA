@@ -49,7 +49,10 @@ import {
   type SystemBackend,
 } from "./system/types";
 import { WindowsSystem } from "./system/windows";
+import { SessionProcessError, PROCESS_WAIT_DEFAULT_MS, PROCESS_WAIT_MAX_MS, type SessionProcesses, type SessionProcessSummary } from "./sessionProcesses";
+import { isAlive } from "./leftRunning";
 import { MacSystem } from "./system/macos";
+import { ProcessOutputRefusal, ProcessOutputs, outputSourceFor, procOwner } from "./processOutput";
 
 export { SystemToolRefusal } from "./system/types";
 export type { SystemBackend } from "./system/types";
@@ -60,6 +63,8 @@ export const SYSTEM_TOOL_NAMES = [
   "power",
   "list_processes",
   "stop_process",
+  "read_process",
+  "wait_process",
   "list_services",
   "control_service",
   "list_software",
@@ -84,6 +89,11 @@ export { TOOL_IMAGES } from "@declarative-ai/json";
 export const SCREENSHOT_MAX_SIDE = 1568;
 
 export interface SystemToolOptions {
+  /**
+   * The task's own processes (decision 0032): what `list_processes`, `read_process`, `wait_process`
+   * and `stop_process` answer for at their default scope, `session`. Absent ⇒ the session has none.
+   */
+  processes?: SessionProcesses;
   /** The machine. Default: this one's ({@link systemBackendFor}); `null` ⇒ none, and every tool says so. */
   backend?: SystemBackend | null;
   /** The engine's own pid — what JaiRA's protected processes are found from. Default `process.pid`. */
@@ -327,6 +337,126 @@ function systemTool(name: string, spec: Omit<Tool, "run">, backend: SystemBacken
 
 const LIMIT = { type: "integer", minimum: 1, maximum: 500, description: "How many to list, at most (default 50)." } as const;
 
+/** Whose processes a process tool is about (decision 0032, ruling 4). */
+export const PROCESS_SCOPES = ["session", "jaira", "user", "group", "system", "all"] as const;
+export type ProcessScope = (typeof PROCESS_SCOPES)[number];
+
+const SCOPE_ARG = {
+  type: "string",
+  enum: [...PROCESS_SCOPES],
+  description:
+    "Whose processes: `session` (default) what this session started; `jaira` what any JaiRA session or JaiRA itself runs; `user` the signed-in user's that JaiRA did not start; `group` those whose account is in the OS user group named by `group`; `system` other accounts' (services, SYSTEM, root); `all` every one.",
+} as const;
+const GROUP_ARG = { type: "string", description: "With scope `group`: the OS user group (`docker`, `staff`, `Administrators`)." } as const;
+
+/** One of the machine's processes, said with who started it. */
+type ScopedRow = ProcessRow & { started_by: Exclude<ProcessScope, "group" | "all">; user?: string };
+
+/** An account as written by the OS (`DOMAIN\\name`, `name`), compared by its name, in any case. */
+const accountName = (account: string): string => account.split(/[\\/]/).pop()!.toLowerCase();
+
+/**
+ * The machine's processes, each placed (decision 0032, ruling 4): the session's (by pid), JaiRA's (the
+ * engine, the app around it, and everything under the engine), the signed-in user's, and the rest —
+ * which is where a process whose account cannot be read lands too.
+ */
+async function scopedRows(backend: SystemBackend, enginePid: number, session: readonly SessionProcessSummary[]): Promise<{ rows: ScopedRow[]; unplaced: number }> {
+  const rows = await backend.processes();
+  const owners = backend.owners !== undefined ? await backend.owners().catch(() => ({}) as Record<string, string>) : ({} as Record<string, string>);
+  const mine = new Set(session.filter((p) => p.running).map((p) => p.pid));
+  const jaira = new Set([...treeOf(rows, enginePid), ...[...protectedProcesses(rows, enginePid)].filter(([, why]) => /JaiRA/.test(why)).map(([pid]) => pid)]);
+  const os = await import("node:os");
+  const me = accountName(os.userInfo().username);
+  let unplaced = 0;
+  const placed = rows.map((row): ScopedRow => {
+    const user = owners[String(row.pid)];
+    const startedBy: ScopedRow["started_by"] = mine.has(row.pid) ? "session" : jaira.has(row.pid) ? "jaira" : user !== undefined && accountName(user) === me ? "user" : "system";
+    if (user === undefined && startedBy === "system") unplaced++;
+    return { ...row, started_by: startedBy, ...(user !== undefined ? { user } : {}) };
+  });
+  return { rows: placed, unplaced };
+}
+
+/** Which of `rows` a scope holds; `group` reads the group's members from the OS. */
+async function inScope(backend: SystemBackend, rows: readonly ScopedRow[], scope: ProcessScope, group: string | undefined): Promise<ScopedRow[]> {
+  switch (scope) {
+    case "all":
+      return [...rows];
+    case "jaira":
+      return rows.filter((r) => r.started_by === "jaira" || r.started_by === "session");
+    case "group": {
+      if (group === undefined) throw new SystemToolRefusal("scope `group` needs `group`: the OS user group whose members' processes to list");
+      if (backend.groupMembers === undefined) throw new SystemToolRefusal("this machine cannot say who is in a group");
+      const members = new Set((await backend.groupMembers(group)).map(accountName));
+      return rows.filter((r) => r.user !== undefined && members.has(accountName(r.user)));
+    }
+    default:
+      return rows.filter((r) => r.started_by === scope);
+  }
+}
+
+/** A session process as the process tools say it. */
+function sessionRow(p: SessionProcessSummary): Record<string, JsonValue> {
+  return {
+    pid: p.pid,
+    command: p.command,
+    started: new Date(p.startedAt).toISOString(),
+    started_by: "session",
+    how: p.how === "background" ? "run_in_background" : "left running by a command",
+    running: p.running,
+    ...(p.running ? {} : { exit_code: p.exitCode ?? null, ...(p.signal ? { signal: p.signal } : {}), ...(p.stopped ? { stopped: true } : {}) }),
+    ...(p.cwd !== undefined ? { cwd: p.cwd } : {}),
+    readable: p.output === "spawned" ? "whole, from its start" : `no: ${p.unreadableWhy ?? "its output is not kept"}`,
+  };
+}
+
+/** A process tool: the session's own need no backend (Linux too); the rest do. */
+function processTool(name: string, spec: Omit<Tool, "run">, backend: SystemBackend | undefined, body: (backend: SystemBackend | undefined, args: Record<string, unknown>, ctx: ExecServices | undefined) => Promise<unknown>): Tool {
+  return {
+    ...spec,
+    run: async (input, ctx) => {
+      try {
+        return (await body(backend, record(input), ctx)) as JsonValue;
+      } catch (e) {
+        if (e instanceof SystemToolRefusal || e instanceof SessionProcessError) return { error: e.message };
+        return { error: `${name}: ${(e as Error).message ?? String(e)}` };
+      }
+    },
+  };
+}
+
+const needBackend = (backend: SystemBackend | undefined, scope: ProcessScope): SystemBackend => {
+  if (backend === undefined) throw new SystemToolRefusal(`scope '${scope}' is built for Windows and macOS; this machine runs ${process.platform}. This session's own processes (scope 'session') can be listed here.`);
+  return backend;
+};
+
+/** Each tool set's followers of other programs' output (decision 0032, ruling 6), by its options. */
+const FOLLOWERS = new WeakMap<SystemToolOptions, ProcessOutputs>();
+
+/**
+ * Another program's pid, made sure to be in `scope` before its output is read or waited on — as
+ * stop_process does. Linux has no backend: there, `all` holds every process, `user` the engine's
+ * account's (by `/proc/<pid>`'s owner) and `system` the rest; `jaira` and `group` are not built.
+ */
+async function otherInScope(backend: SystemBackend | undefined, linux: boolean, enginePid: number, session: readonly SessionProcessSummary[], pid: number, scope: ProcessScope, group: string | undefined): Promise<void> {
+  if (backend !== undefined) {
+    const { rows } = await scopedRows(backend, enginePid, session);
+    const row = rows.find((r) => r.pid === pid);
+    if (row === undefined) throw new SystemToolRefusal(`no process ${pid} is running — list_processes lists them`);
+    if (!(await inScope(backend, rows, scope, group)).some((r) => r.pid === pid)) {
+      throw new SystemToolRefusal(`${row.name} (${pid}) is not in scope '${scope}': it is ${row.started_by === "session" ? "this session's (scope 'session')" : `${row.started_by}'s`}`);
+    }
+    return;
+  }
+  if (!linux) throw new SystemToolRefusal(`reading another program's output is not built yet on this machine (${process.platform}): only the processes this session started (scope 'session') can be read`);
+  const owner = procOwner(pid);
+  if (owner === undefined) throw new SystemToolRefusal(`no process ${pid} is running`);
+  const mine = owner === process.getuid?.();
+  if (scope === "all" || (scope === "user" && mine) || (scope === "system" && !mine)) return;
+  if (scope === "jaira" || scope === "group") throw new SystemToolRefusal(`scope '${scope}' is built for Windows and macOS; on Linux another program is read with scope 'user', 'system' or 'all'`);
+  throw new SystemToolRefusal(`${pid} is not in scope '${scope}': it is ${mine ? "the user's (scope 'user')" : "another account's (scope 'system')"}`);
+}
+
 /**
  * Per conversation, the last picture `screenshot` took: what its pixels map onto, so `control_input`
  * reads a click on it as a place on the screen.
@@ -412,14 +542,16 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
       async (b, args) => b.power(oneOf(args["action"], POWER_ACTIONS, "action"), args["delay_seconds"] === undefined ? 30 : count(args["delay_seconds"], "delay_seconds", 30, 86_400, 0)),
     ),
 
-    list_processes: tool(
+    list_processes: processTool(
       "list_processes",
       {
         description:
-          "List the programs running on this machine: each one's `pid` (what stop_process takes), parent, name, memory, processor time, when it started and its window's title. `name` keeps those whose name, path or window title holds it; `sort` orders them (default memory, largest first). Processes JaiRA itself needs are marked `protected` with why.",
+          "List running programs. By default (scope `session`) the processes this session started — with run_in_background, or left running by a command — each with its `pid`, command, whether it still runs, and whether read_process can read it. Other scopes list the machine's: each one's `pid`, parent, name, who started it (`started_by`), its account, memory, processor time and when it started. `name` keeps those whose name, path or window title holds it; `sort` orders them (default memory, largest first). Processes JaiRA itself needs are marked `protected` with why.",
         inputSchema: {
           type: "object",
           properties: {
+            scope: SCOPE_ARG,
+            group: GROUP_ARG,
             name: { type: "string", description: "Only those whose name, path or window title holds this, in any case." },
             sort: { type: "string", enum: ["memory", "cpu", "name", "pid", "started"] },
             limit: LIMIT,
@@ -427,8 +559,16 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
         },
         readOnly: true,
       },
+      backend,
       async (b, args) => {
-        const rows = await b.processes();
+        const scope = oneOf(args["scope"], PROCESS_SCOPES, "scope", "session");
+        const limit = count(args["limit"], "limit", 50, 500);
+        if (scope === "session") {
+          const mine = (options.processes?.list() ?? []).filter((p) => text(args["name"]) === undefined || p.command.toLowerCase().includes(text(args["name"])!.toLowerCase()));
+          return { ...(cut(mine.map(sessionRow), limit, "processes") as Record<string, JsonValue>), scope };
+        }
+        const machine = needBackend(b, scope);
+        const { rows, unplaced } = await scopedRows(machine, enginePid, options.processes?.list() ?? []);
         const kept = protectedProcesses(rows, enginePid);
         const sort = oneOf(args["sort"], ["memory", "cpu", "name", "pid", "started"] as const, "sort", "memory");
         const order: Record<typeof sort, (a: ProcessRow, b: ProcessRow) => number> = {
@@ -438,34 +578,61 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           pid: (x, y) => x.pid - y.pid,
           started: (x, y) => (startedAt(y) ?? 0) - (startedAt(x) ?? 0),
         };
-        const shown = matching(rows, text(args["name"]), ["name", "path", "window_title"])
+        const scoped = await inScope(machine, rows, scope, text(args["group"]));
+        const shown = matching(scoped, text(args["name"]), ["name", "path", "window_title"])
           .sort(order[sort])
-          .map((row) => (kept.has(row.pid) ? { ...row, protected: kept.get(row.pid)! } : row));
-        return cut(shown, count(args["limit"], "limit", 50, 500), "processes");
+          .map((row) => (kept.has(row.pid) && row.started_by !== "session" ? { ...row, protected: kept.get(row.pid)! } : row));
+        return {
+          ...(cut(shown, limit, "processes") as Record<string, JsonValue>),
+          scope,
+          ...(unplaced > 0 && scope !== "all" ? { unplaced: `${unplaced} processes' accounts could not be read (another account's, without an administrator); they are listed under system and all only` } : {}),
+        };
       },
     ),
 
-    stop_process: tool(
+    stop_process: processTool(
       "stop_process",
       {
         description:
-          "Stop a running program by its `pid` (from list_processes). With `tree`, what it started stops too. Without `force` a program with a window is asked to close first, and terminated if it has not in 5 s; with `force` it is terminated at once. JaiRA's own processes, and those the operating system needs, are refused.",
+          "Stop a running program by its `pid` (from list_processes), and what it started. By default (scope `session`) one this session started; other scopes stop one of the machine's, which must be in that scope. `signal: interrupt` sends Ctrl-C instead of stopping it. For the machine's: without `force` a program with a window is asked to close first, and terminated if it has not in 5 s; with `force` it is terminated at once; `tree` stops what it started too. JaiRA's own processes, and those the operating system needs, are refused.",
         inputSchema: {
           type: "object",
           properties: {
             pid: { type: "integer", minimum: 1 },
-            tree: { type: "boolean", description: "Stop what it started too (default false)." },
-            force: { type: "boolean", description: "Terminate at once rather than ask it to close (default false)." },
+            scope: SCOPE_ARG,
+            group: GROUP_ARG,
+            signal: { type: "string", enum: ["stop", "interrupt"], description: "`interrupt` is Ctrl-C (the session's own only); default `stop`." },
+            tree: { type: "boolean", description: "The machine's: stop what it started too (default false). The session's always stop with what they started." },
+            force: { type: "boolean", description: "The machine's: terminate at once rather than ask it to close (default false)." },
           },
           required: ["pid"],
         },
         readOnly: false,
       },
+      backend,
       async (b, args) => {
         const pid = pidOf(args["pid"]);
-        const rows = await b.processes();
+        const scope = oneOf(args["scope"], PROCESS_SCOPES, "scope", "session");
+        const mine = options.processes;
+        if (scope === "session") {
+          if (mine === undefined || !mine.has(pid)) throw new SystemToolRefusal(`${pid} is not a process this session started — list_processes lists them; another program is stopped with its scope (\`scope: "user"\`, …)`);
+          const how = oneOf(args["signal"], ["stop", "interrupt"] as const, "signal", "stop");
+          const was = mine.get(pid)!;
+          if (!was.running) return { pid, stopped: false, how: "it had already ended", ...sessionRow(was) };
+          mine.stop(pid, how);
+          return { pid, stopped: true, how: how === "interrupt" ? "sent Ctrl-C to it and what it started" : "stopped, with what it started" };
+        }
+        const machine = needBackend(b, scope);
+        const { rows } = await scopedRows(machine, enginePid, mine?.list() ?? []);
         const row = rows.find((r) => r.pid === pid);
         if (row === undefined) throw new SystemToolRefusal(`no process ${pid} is running — list_processes lists them`);
+        if (!(await inScope(machine, rows, scope, text(args["group"]))).some((r) => r.pid === pid)) {
+          throw new SystemToolRefusal(`${row.name} (${pid}) is not in scope '${scope}': it is ${row.started_by === "session" ? "this session's (scope 'session')" : `${row.started_by}'s`}`);
+        }
+        if (row.started_by === "session" && mine !== undefined) {
+          mine.stop(pid);
+          return { pid, name: row.name, stopped: true, how: "stopped, with what it started" };
+        }
         const kept = protectedProcesses(rows, enginePid);
         const tree = args["tree"] === true;
         const reached = tree ? treeOf(rows, pid) : [pid];
@@ -474,8 +641,137 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           const name = rows.find((r) => r.pid === refused)?.name ?? String(refused);
           throw new SystemToolRefusal(refused === pid ? `refused: ${row.name} (${pid}) — ${kept.get(pid)}` : `refused: stopping ${row.name} (${pid}) with its tree would stop ${name} (${refused}) — ${kept.get(refused)}`);
         }
-        const done = await b.stopProcess(pid, { ...(row.started !== undefined ? { started: row.started } : {}), tree, force: args["force"] === true });
+        const done = await machine.stopProcess(pid, { ...(row.started !== undefined ? { started: row.started } : {}), tree, force: args["force"] === true });
         return { pid, name: row.name, ...done, ...(tree ? { processes: reached.length } : {}) };
+      },
+    ),
+
+    read_process: processTool(
+      "read_process",
+      {
+        description:
+          "What a running program has printed, stdout and stderr in order: by default what is new since you last read it (pass `since`, the `offset` an answer gave, to read from there, or `tail` for its last lines). The processes this session started are read whole, from their start (the last million characters). Another program (its scope: `user`, `all`, …) is followed from your first read on: when its output goes to a file, that file's last part and then what it adds (`source: file`, with `path`); on Windows, when it writes to a console window, that console's screen and scrollback and then what is new (`source: console`). Output going to a pipe another program holds, or to another app's terminal, cannot be read (`source: unreadable`, with why). `from` says when following began; `whole` is true only for a file read from its start.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pid: { type: "integer", minimum: 1 },
+            scope: SCOPE_ARG,
+            tail: { type: "integer", minimum: 1, maximum: 10_000, description: "Its last this many lines instead of what is new." },
+            since: { type: "integer", minimum: 0, description: "Read from this offset (an earlier answer's `offset`)." },
+          },
+          required: ["pid"],
+        },
+        readOnly: true,
+      },
+      backend,
+      async (b, args) => {
+        const pid = pidOf(args["pid"]);
+        const scope = oneOf(args["scope"], PROCESS_SCOPES, "scope", "session");
+        const mine = options.processes;
+        const tail = args["tail"] === undefined ? undefined : count(args["tail"], "tail", 50, 10_000);
+        const since = args["since"] === undefined ? undefined : count(args["since"], "since", 0, Number.MAX_SAFE_INTEGER, 0);
+        if (scope !== "session" && !(mine?.has(pid) === true && mine.get(pid)!.running)) {
+          const linux = options.backend === undefined && process.platform === "linux";
+          await otherInScope(b, linux, enginePid, mine?.list() ?? [], pid, scope, text(args["group"]));
+          const source = outputSourceFor(b);
+          if (source === undefined) throw new SystemToolRefusal(`reading another program's output is not built yet on this machine (${process.platform})`);
+          let outputs = FOLLOWERS.get(options);
+          if (outputs === undefined) FOLLOWERS.set(options, (outputs = new ProcessOutputs(source)));
+          try {
+            const answer = await outputs.read(pid, { ...(tail !== undefined ? { tail } : {}), ...(since !== undefined ? { since } : {}) });
+            if (answer.output === null) return { ...answer, scope } as unknown as JsonValue;
+            return {
+              ...answer,
+              scope,
+              output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters; read with tail or since]\n${answer.output.slice(-50_000)}` : answer.output,
+            } as unknown as JsonValue;
+          } catch (e) {
+            if (e instanceof ProcessOutputRefusal) throw new SystemToolRefusal(e.message);
+            throw e;
+          }
+        }
+        if (mine === undefined || !mine.has(pid)) throw new SystemToolRefusal(`${pid} is not a process this session started — list_processes lists them`);
+        const answer = mine.read(pid, { ...(tail !== undefined ? { tail } : {}), ...(since !== undefined ? { since } : {}) });
+        if (answer.process.output !== "spawned") return { ...sessionRow(answer.process), output: null, why: answer.process.unreadableWhy ?? "its output is not kept" };
+        return {
+          ...sessionRow(answer.process),
+          output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters; read with tail or since]\n${answer.output.slice(-50_000)}` : answer.output,
+          offset: answer.offset,
+          ...(answer.dropped !== undefined ? { dropped: answer.dropped } : {}),
+        };
+      },
+    ),
+
+    wait_process: processTool(
+      "wait_process",
+      {
+        description:
+          "Wait until a running program exits, or (`until: output`) until what it prints after your last read matches `pattern` (a regular expression) — \"until the server says ready\" — or `timeout_ms` passes (default 30 s, at most 10 minutes). Answers with what it printed meanwhile, as read_process would. Another program (a scope other than `session`) is waited on to exit, or for output where read_process can read it (a file, a Windows console), followed from the first read or wait on.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            pid: { type: "integer", minimum: 1 },
+            scope: SCOPE_ARG,
+            until: { type: "string", enum: ["exit", "output"], description: "Default `exit`; `output` needs `pattern`." },
+            pattern: { type: "string", description: "With until: output — a regular expression, matched case-sensitively unless it starts with (?i)." },
+            timeout_ms: { type: "integer", minimum: 0, maximum: PROCESS_WAIT_MAX_MS },
+          },
+          required: ["pid"],
+        },
+        readOnly: true,
+      },
+      backend,
+      async (b, args, ctx) => {
+        const pid = pidOf(args["pid"]);
+        const scope = oneOf(args["scope"], PROCESS_SCOPES, "scope", "session");
+        const until = oneOf(args["until"], ["exit", "output"] as const, "until", "exit");
+        const timeoutMs = args["timeout_ms"] === undefined ? PROCESS_WAIT_DEFAULT_MS : count(args["timeout_ms"], "timeout_ms", PROCESS_WAIT_DEFAULT_MS, PROCESS_WAIT_MAX_MS, 0);
+        let pattern: RegExp | undefined;
+        if (until === "output") {
+          const source = text(args["pattern"]);
+          if (source === undefined) throw new SystemToolRefusal("until: output needs `pattern`");
+          try {
+            pattern = source.startsWith("(?i)") ? new RegExp(source.slice(4), "i") : new RegExp(source);
+          } catch (e) {
+            throw new SystemToolRefusal(`\`pattern\` is not a regular expression: ${(e as Error).message}`);
+          }
+        }
+        const mine = options.processes;
+        if (scope !== "session" && !(mine?.has(pid) === true && mine.get(pid)!.running)) {
+          const linux = options.backend === undefined && process.platform === "linux";
+          if (b !== undefined || linux) await otherInScope(b, linux, enginePid, mine?.list() ?? [], pid, scope, text(args["group"]));
+          if (pattern === undefined) {
+            const deadline = Date.now() + timeoutMs;
+            while (isAlive(pid) && Date.now() < deadline && ctx?.abortSignal?.aborted !== true) await new Promise((r) => setTimeout(r, 500));
+            const running = isAlive(pid);
+            return { pid, scope, running, timed_out: running };
+          }
+          const source = outputSourceFor(b);
+          if (source === undefined) throw new SystemToolRefusal(`reading another program's output is not built yet on this machine (${process.platform}), so it can only be waited on to exit (until: exit)`);
+          let outputs = FOLLOWERS.get(options);
+          if (outputs === undefined) FOLLOWERS.set(options, (outputs = new ProcessOutputs(source)));
+          try {
+            const { timedOut, ...answer } = await outputs.wait(pid, pattern, timeoutMs, ctx?.abortSignal);
+            return {
+              ...answer,
+              scope,
+              timed_out: timedOut,
+              output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters]\n${answer.output.slice(-50_000)}` : answer.output,
+            } as unknown as JsonValue;
+          } catch (e) {
+            if (e instanceof ProcessOutputRefusal) throw new SystemToolRefusal(e.message);
+            throw e;
+          }
+        }
+        if (mine === undefined || !mine.has(pid)) throw new SystemToolRefusal(`${pid} is not a process this session started — list_processes lists them`);
+        const answer = await mine.wait(pid, pattern !== undefined ? { pattern } : { exit: true }, timeoutMs, ctx?.abortSignal);
+        return {
+          ...sessionRow(answer.process),
+          ...(pattern !== undefined ? { matched: answer.matched, ...(answer.match !== undefined ? { match: answer.match } : {}) } : {}),
+          timed_out: answer.timedOut,
+          output: answer.output.length > 50_000 ? `…[${answer.output.length - 50_000} earlier characters]\n${answer.output.slice(-50_000)}` : answer.output,
+          offset: answer.offset,
+        };
       },
     ),
 

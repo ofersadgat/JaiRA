@@ -420,7 +420,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
       // tools of decision 0010 follow the web tools, then the CI tools of decision 0016, then `wait_for_event`
       // with the tasks and workflows. The System tools of decision 0019 sit between the shell and the web.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "list_services", "control_service", "list_software", "install_software", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "list_skills", "load_skill", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "read_process", "wait_process", "list_services", "control_service", "list_software", "install_software", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "list_skills", "load_skill", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -450,6 +450,10 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           power: "deny",
           list_processes: "allow",
           stop_process: "deny",
+          // Decision 0032: `read_process` asks outside what the session started — and the gate is handed
+          // the loosest of a tool's lines, its `--scope=session` line's `allow`, which the narrowing tightens.
+          read_process: "allow",
+          wait_process: "allow",
           list_services: "allow",
           control_service: "deny",
           list_software: "allow",
@@ -472,6 +476,13 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           hold_task: "deny",
           release_task: "deny",
           stop_task: "deny",
+          // The flag lines (decision 0032, ruling 1a), under their own names, which no tool is called by:
+          // read back from here by the narrowing and the shell's judge.
+          "shell --run_in_background": "deny",
+          "list_processes --scope=session": "allow",
+          "stop_process --scope=session": "deny",
+          "read_process --scope=session": "allow",
+          "wait_process --scope=session": "allow",
           ...PERMISSION_SET_MARKERS,
         },
         implementations: {},
@@ -485,7 +496,14 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         // Where it reads freely — `$PROJECT` and `$WORKTREE` — and the credentials that ask (decision
         // 0023 §7.1): the gate was handed each line's loosest, `allow`, and the narrowing reads these.
         // And every writer's `.jaira/` lines, and the machine key's (2026-11-17).
-        places: Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "shell", "runner:*", "script"].map((line) => [line, SHIPPED_READ_ONLY[line]])),
+        places: {
+          ...Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "shell", "runner:*", "script"].map((line) => [line, SHIPPED_READ_ONLY[line]])),
+          // A tool refined by flag lines: its own mode, since `tools` holds the loosest of its lines.
+          list_processes: { "**": "allow" },
+          stop_process: { "**": "deny" },
+          read_process: { "**": "ask" },
+          wait_process: { "**": "allow" },
+        },
       },
     });
     // The workflow tools reach the engine as the rest do: on the list, resolved against its registry.

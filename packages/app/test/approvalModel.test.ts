@@ -243,6 +243,25 @@ describe("the answer menu", () => {
     expect(widthsOf(approval, { "git commit | git": "git" })).toEqual(["git", "terraform plan", "script"]);
   });
 
+  it("offers a line started to keep running at its background lines, none of them read as a bare program (decision 0032)", () => {
+    const approval = decideCommand({}, "npm run dev", "posix", {
+      permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", "shell --run_in_background": "ask" }).permissionSet),
+      permissionSetSource: "$/permission-sets/ask-first",
+      background: true,
+    }).parts;
+    const what = whatChoices(approval);
+    expect(what.map((c) => c.options.map((o) => [o.width, o.program]))).toEqual([
+      [
+        ["shell --run_in_background npm run dev", false],
+        ["shell --run_in_background npm run", false],
+        ["shell --run_in_background npm", false],
+        ["shell --run_in_background", false],
+      ],
+    ]);
+    // "Add to the permission set" writes the flag line, narrowed to what the line runs.
+    expect(additionOf(approval, "allow")).toEqual({ "shell --run_in_background npm run dev": "allow" });
+  });
+
   it("says so, and offers only once and this run, when the permission set has no file", () => {
     const unwritable = "This permission set is written on the state itself, so there is no permission set file to add a line to.";
     const menu = answerMenu(pendingOf(judge("git commit -m wip", PERMISSION_SET, "inline"), { targets: [], unwritable }), "allow");

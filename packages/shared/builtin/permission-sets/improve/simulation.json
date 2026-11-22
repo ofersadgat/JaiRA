@@ -6,6 +6,7 @@
   "edit": {"**": "deny", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "**/.env": "deny", "**/.env.*": "deny", "**/*.pem": "deny", "**/id_rsa*": "deny", "~/.ssh": "deny", "~/.aws": "deny", "~/.claude/.credentials.json": "deny", "~/.codex/auth.json": "deny", "~/.jaira/system/machine.key": "deny"},
   "write_file": {"**": "deny", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "**/.env": "deny", "**/.env.*": "deny", "**/*.pem": "deny", "**/id_rsa*": "deny", "~/.ssh": "deny", "~/.aws": "deny", "~/.claude/.credentials.json": "deny", "~/.codex/auth.json": "deny", "~/.jaira/system/machine.key": "deny"},
   "shell": {"**": "deny", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny"},
+  "shell --run_in_background": "deny",
   "script": {"**": "deny", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny"},
   "runner:*": {"**": "deny", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny"},
   "runner:sudo": "deny",

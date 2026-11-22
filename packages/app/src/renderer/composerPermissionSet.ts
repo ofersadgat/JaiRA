@@ -17,6 +17,7 @@ import {
   MODE_WHEN_UNSET,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
+  parseToolFlagSubject,
   subjectKindOf,
   TOOL_SPEC_BY_NAME,
   toolsInCategory,
@@ -115,10 +116,10 @@ export function withoutSubject(permissionSet: PermissionSet, subject: string): P
   return edited(permissionSet, entries);
 }
 
-/** Add (or re-mode) a command subject, a runner's line, or `script`. */
+/** Add (or re-mode) a command subject, a runner's line, `script`, or a tool's flag line (`shell --run_in_background`). */
 export function withSubject(permissionSet: PermissionSet, subject: string, mode: PermissionSetMode): PermissionSet {
   const read = subjectKindOf(subject);
-  const kind = read === "script" || read === "runner" ? read : "command";
+  const kind = read === "script" || read === "runner" || read === "tool-flag" ? read : "command";
   return edited(permissionSet, { ...permissionSet.entries, [subject]: { kind, mode } });
 }
 
@@ -533,6 +534,11 @@ export function elsewhereOf(permissionSet: PermissionSet, subject: string): { li
     if (runsAFile(subject)) chain.push(SCRIPT_SUBJECT);
     chain.push(SHELL_TOOL);
   } else if (kind === "script") chain.push(SHELL_TOOL);
+  // A flag line (decision 0032, ruling 1a) falls to its tool's own line.
+  else if (kind === "tool-flag") {
+    const tool = parseToolFlagSubject(subject)?.tool;
+    if (tool !== undefined) chain.push(tool);
+  }
   else if (kind === "runner") {
     if (parseRunnerSubject(subject)?.program !== undefined) chain.push(RUNNER_GROUP_SUBJECT);
     else return undefined;

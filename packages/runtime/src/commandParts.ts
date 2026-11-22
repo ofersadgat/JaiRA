@@ -10,9 +10,12 @@
  * `policy.ts`.
  */
 import {
+  BACKGROUND_LINE,
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
+  flagLineModes,
   holdsShellLines,
+  parseToolFlagSubject,
   isAbsolutePath,
   isFunctionMode,
   linePlaces,
@@ -464,7 +467,8 @@ export function shellPermissionSetOf(permissionSet: PermissionSet): ShellPermiss
   if (!holdsShellLines(permissionSet)) return undefined;
   const places = linePlaces(permissionSet);
   return {
-    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) },
+    // The flag lines too: `shell --run_in_background …` judges a start that keeps running (decision 0032).
+    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet), ...flagLineModes(permissionSet) },
     ...(Object.keys(places).length > 0 ? { places } : {}),
     ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}),
   };
@@ -680,6 +684,65 @@ export function answerOfLines(permissionSet: ShellPermissionSet, keys: readonly 
   }
   const answer = walkLines(steps, 0, undefined, { specific: false }, where);
   return answer.mode === undefined ? undefined : answer;
+}
+
+// --- a start that keeps running (decision 0032) -------------------------------------------------------
+
+/**
+ * The `shell --run_in_background` lines that go on to name a COMMAND (`shell --run_in_background npm run
+ * dev`), as a set of their own keyed by that command — so a part is matched to them exactly as to a
+ * command line, by program, subcommand and flag ({@link matchCommandEntries}) — and the line each came from.
+ */
+function backgroundCommandsOf(permissionSet: ShellPermissionSet): { set: ShellPermissionSet; lineOf: Map<string, string> } {
+  const entries: Record<string, PermissionSetMode> = {};
+  const places: Record<string, Record<string, PermissionSetMode>> = {};
+  const lineOf = new Map<string, string>();
+  for (const key of new Set([...Object.keys(permissionSet.entries), ...Object.keys(permissionSet.places ?? {})])) {
+    const parsed = parseToolFlagSubject(key);
+    if (parsed?.tool !== "shell" || parsed.command === undefined || parsed.flags.length !== 1 || parsed.flags[0]!.name !== "run_in_background" || parsed.flags[0]!.value !== undefined) continue;
+    const command = parsed.command.replace(/\s+/g, " ");
+    lineOf.set(command, key);
+    if (Object.hasOwn(permissionSet.entries, key)) entries[command] = permissionSet.entries[key]!;
+    const own = placesOfLine(permissionSet, key);
+    if (own !== undefined) places[command] = { ...own };
+  }
+  return { set: { entries, ...(Object.keys(places).length > 0 ? { places } : {}) }, lineOf };
+}
+
+/**
+ * What a set says about starting `command` so that it keeps running (decision 0032, rulings 1 and 1a):
+ * the `shell --run_in_background` lines naming it, most specific first — `shell --run_in_background npm
+ * run dev` before `… npm` — then the bare `shell --run_in_background`, each line's places read as a shell
+ * line's are (a place none matches passing on to the next line). `specific` says a line NAMING the
+ * command answered, which is what lifts the built-in refusal of an escape (`policy.ts`).
+ *
+ * `undefined` when no such line says anything here — the caller's to answer; the policy ASKS.
+ */
+export function backgroundAnswerOf(permissionSet: ShellPermissionSet, command: ParsedCommand | undefined, where?: PartPlaces): PermissionSetAnswer | undefined {
+  const named = backgroundCommandsOf(permissionSet);
+  const lines = command !== undefined ? matchCommandEntries(named.set, command).map((match) => named.lineOf.get(match.entry.key)!) : [];
+  const answer = answerOfLines(permissionSet, [...lines, BACKGROUND_LINE], where);
+  if (answer === undefined) return undefined;
+  return { ...answer, specific: answer.entry !== undefined && answer.entry !== BACKGROUND_LINE };
+}
+
+/**
+ * The lines an answer about starting `command` to keep running may be kept at, narrowest first — the
+ * program with up to two of the words after it, then the bare line: `["shell --run_in_background npm run
+ * dev", "shell --run_in_background npm run", "shell --run_in_background npm", "shell
+ * --run_in_background"]`. A word a line could not hold as written (a path, a quoted string) ends it.
+ */
+export function backgroundWidthsOf(command: ParsedCommand | undefined): string[] {
+  if (command === undefined || command.dynamic === true) return [BACKGROUND_LINE];
+  const words = [command.program];
+  for (const word of operandsOf(command).slice(0, 2)) {
+    if (word.dynamic === true || !/^[a-z0-9][a-z0-9._:@-]*$/i.test(word.value)) break;
+    words.push(word.value.toLowerCase());
+  }
+  if (!/^[a-z0-9][a-z0-9._+-]*$/i.test(command.program)) return [BACKGROUND_LINE];
+  const out: string[] = [];
+  for (let n = words.length; n >= 1; n--) out.push(`${BACKGROUND_LINE} ${words.slice(0, n).join(" ")}`);
+  return [...out, BACKGROUND_LINE];
 }
 
 /** The answer of `steps[at]` and the lines after it, for the places in `calls` (all of the part's, when undefined). */

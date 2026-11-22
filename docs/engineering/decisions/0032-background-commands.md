@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0032-background-commands
 type: decision
-status: accepted
+status: built in part
 updated: 2026-11-21
 decides_for: [engineering/decisions/0019-system-tools, engineering/decisions/0028-agent-terminals, engineering/decisions/0030-the-agents-shell, engineering/decisions/0007-permissionSets, engineering/units/host-tools, engineering/units/process-exec, engineering/units/tool-policy]
 ---
@@ -372,6 +372,68 @@ The second draft's questions, its separate line, and the third draft's question,
 4. **Engine.** The lifetime of ruling 9, the end note, and the after-crash list.
 5. **Containment.** The Job Object on Windows, the systemd scope on Linux, and the `escaped` sweep.
 6. **Window.** Mocks for Processes and the card's background state, then the build.
+
+## Built (2026-11-21), in part
+
+The person, over the build: "build the rest too, including the processes view mocks. shouldnt process
+view just be a terminal view?" Yes: there is no Processes view. A process is a terminal, and the eight
+proposals in [docs/ui/assets/processes-view](../../ui/assets/processes-view/index.html) differ only in
+how the Terminals tab and the card hold background processes and other scopes. The view is built once
+one is chosen.
+
+- **Runtime.**
+  - `SessionProcesses` (`sessionProcesses.ts`) keeps a session's processes, keyed by pid and start
+    time. Output is kept for what it spawned, with a reader's place. It can read, wait for a pattern or
+    an exit, stop, stop all and the limit, and gives the end notes once each.
+  - `shell`'s `run_in_background` (`tools.ts` `runInBackground`) answers after 2 s with the pid and the
+    output so far, as its own process even for a live shell, and as the call's terminal.
+  - The leftover check (`settleLeftRunning`): `findLeftRunning` and `topsOf` (`leftRunning.ts`) find
+    what was left by the process group (POSIX), by parent and start time (Windows), and by the
+    containment group's members. It looks only when the output was held past the exit
+    (`ExecResult.outputHeld`, `exec.ts`) or the line names a background start (`mayLeaveRunning`).
+    Then it keeps or stops what it found, by `decideLeftRunning`.
+  - Containment (`containment.ts`): a Job Object per session through one PowerShell helper per engine
+    (no breakaway; deadlines, and a fall back to the walk), and a systemd user scope and slice per
+    session on Linux; macOS has none. `findEscaped` sweeps after a call for processes started through
+    WMI or the Task Scheduler (Windows), or re-parented to init with the session's marker (POSIX). The
+    session lists them as `escaped`.
+  - Reading another program's output (`processOutput.ts`, and the backends' `outputTargets` and
+    `readConsole`):
+    - Windows reads the target's standard handles from its PEB and names a file, a console, a pipe
+      or `NUL`; a console is read through `AttachConsole`.
+    - Linux reads `/proc/<pid>/fd`.
+    - macOS reads `lsof -F`.
+    - Followers start at the first read and end with the process or after 10 idle minutes.
+  - The process tools (`systemTools.ts`): `scope` on `list_processes` and `stop_process`, and
+    `read_process` and `wait_process` new. Accounts are read from the process token on Windows and
+    from `ps` on macOS. Group members come from `Get-LocalGroupMember` or ADSI, and `dscacheutil`.
+- **Permissions.**
+  - Tool flag lines (`toolFlags.ts`, `ToolSpec.flags`, the `tool-flag` subject kind): parsed and
+    refused with the spelling the tool offers. They are lowered under their own keys, matched most
+    flags first and then strictest, and the gate gets the loosest.
+  - `shell --run_in_background` is judged as a whole-line part of a backgrounded call. That covers
+    Claude's native `Bash`. A missing line asks.
+  - The escapes are refused by a built-in that `functions.shell.builtins` does not turn off. A line
+    naming the program on `shell --run_in_background` lifts it.
+  - The shipped sets' lines are as ruled.
+- **Engine.**
+  - One `SessionProcesses` and one containment group per task. They are let go on archive, delete,
+    move and quit.
+  - `processes.backgroundLimit`, and `processes.stopIdleAfterMinutes`, whose idle rule can only tell
+    on POSIX.
+  - The end notes go with the person's next message.
+
+**Not built yet:**
+- the window (the chosen proposal);
+- Claude's own `Bash` background processes attributed to the session;
+- the Tools card listing flag lines under their tool;
+- `read_process` and `wait_process` on the System card (`SYSTEM_AREAS`).
+
+**Chosen while building:**
+- A flag line alone does not offer its tool: the bare line still does.
+- POSIX `at` is refused but for listing and removal.
+- Windows' kill-on-close job, which Node puts every child in, also ends a session's processes if the
+  engine crashes. Nothing is left running unrecorded.
 
 ## Revisit when
 

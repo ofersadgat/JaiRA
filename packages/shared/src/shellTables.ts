@@ -175,7 +175,9 @@ export const EMBEDDERS: Readonly<Record<string, EmbedderSpec>> = {
   nice: { kind: "prefix", valueFlags: ["-n", "--adjustment"] },
   ionice: { kind: "prefix", valueFlags: ["-c", "-n", "-p", "--class", "--classdata"] },
   stdbuf: { kind: "prefix", valueFlags: ["-i", "-o", "-e"] },
-  setsid: { kind: "prefix" },
+  // Kept as a request of its own (decision 0032, ruling 7): a session of its own is out of every tree
+  // JaiRA follows, so the policy refuses `setsid` itself — what it runs is judged beside it as before.
+  setsid: { kind: "prefix", keep: true },
   command: { kind: "prefix" },
   builtin: { kind: "prefix" },
   watch: { kind: "prefix", valueFlags: ["-n", "--interval", "-d", "--differences"], line: true },

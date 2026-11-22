@@ -163,7 +163,37 @@ export interface ToolSpec {
    * 0019) until `runtime/systemTools.ts` served them. Nothing carries it today.
    */
   unserved?: true;
+  /**
+   * The arguments a line of this tool can be REFINED by (decision 0032, ruling 1a), by argument name —
+   * as a command's line is refined by its subcommand and flag (decision 0007 §4): `shell
+   * --run_in_background`, `list_processes --scope=user`, `stop_process --scope=group --group=docker`.
+   * What a flag line is and how a call is matched to one is `toolFlags.ts`.
+   *
+   * Only an argument named here can be written on a line: a set that names another is refused, with the
+   * spelling the tool offers. Absent, the tool's line cannot be refined, and `tool --x` is read as a
+   * command line, as it always was — which is what keeps `grep --include` a command of the program
+   * `grep` and not a flag of the tool.
+   */
+  flags?: Readonly<Record<string, ToolFlagSpec>>;
 }
+
+/**
+ * One argument a tool's line can be refined by (decision 0032, ruling 1a):
+ *
+ *  - `boolean`: written `tool --name`, matching a call that passes `name: true`;
+ *  - `choice`: written `tool --name=value`, one of `values`; a call that leaves the argument out has
+ *    the tool's `default`, and is matched as if it had passed it — `list_processes` with no `scope` is
+ *    `list_processes --scope=session`;
+ *  - `text`: written `tool --name=value`, any value without whitespace; matched as written, ignoring case
+ *    (a user group on Windows is `Administrators` or `administrators`).
+ */
+export type ToolFlagSpec = { type: "boolean" } | { type: "choice"; values: readonly string[]; default?: string } | { type: "text" };
+
+/** What every process tool's `scope` is (decision 0032, ruling 4), and its default: what this session started. */
+const PROCESS_SCOPE_FLAGS: Readonly<Record<string, ToolFlagSpec>> = {
+  scope: { type: "choice", values: ["session", "jaira", "user", "group", "system", "all"], default: "session" },
+  group: { type: "text" },
+};
 
 /**
  * The table.
@@ -260,13 +290,17 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     pathArgs: ["cwd"],
     // Where a line runs, and every path a part of it names as a file tool (decision 0023 §3.1).
     scope: "path",
+    // Decision 0032: a line started to keep running is a permission of its own, `shell --run_in_background`.
+    flags: { run_in_background: { type: "boolean" } },
   },
   // The System tools (decision 0019, `runtime/systemTools.ts`): the machine the engine runs on and its
   // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
   { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
   { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
-  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using" },
-  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program" },
+  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using", flags: PROCESS_SCOPE_FLAGS },
+  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program", flags: PROCESS_SCOPE_FLAGS },
+  { name: "read_process", label: "read_process", title: "Read process output", icon: "system", category: "system", hint: "what a running program has printed: whole for what this session started, from the first read for the rest", flags: PROCESS_SCOPE_FLAGS },
+  { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", flags: PROCESS_SCOPE_FLAGS },
   { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running" },
   { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "program", placeArgs: ["name"] },
   { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules" },

@@ -96,6 +96,9 @@ import { existsSync } from "node:fs";
 import { MarkFilter, shellQuote, withCwdMark, withoutMarks } from "./shellMarks";
 import { liveShellKindOf } from "./liveShell";
 import { callingAgentOf, startLive, type ShellChoice, type ShellSession } from "./shellSessions";
+import { SessionProcessError, type SessionProcesses } from "./sessionProcesses";
+import { findLeftRunning, isAlive, mayLeaveRunning, stopLeft, topsOf, type ProcessLister } from "./leftRunning";
+import { escapeSweepWorthIt, findEscaped, type Containment, type ContainmentGroup } from "./containment";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.runtime.tools");
@@ -122,6 +125,31 @@ export interface ToolOptions {
    * starts afresh at the workspace root, as it always did.
    */
   shells?: TaskShells;
+  /**
+   * The session's processes (decision 0032): where `run_in_background` starts one, and where what a
+   * foreground call left running is kept when the session may keep it. Absent, `run_in_background`
+   * is refused and nothing left running is looked for.
+   */
+  processes?: SessionProcesses;
+  /** What a foreground call left running: how to look for it, and whether the session may keep it. */
+  leftRunning?: LeftRunningOptions;
+  /**
+   * The session's containment (decision 0032, ruling 7): every command and background process joins its
+   * group (a Job Object on Windows, a systemd scope on Linux), what a call left is found among its
+   * members, and what got out anyway is swept for after the call. Absent: the walk alone.
+   */
+  containment?: { group: ContainmentGroup; engine?: Containment };
+}
+
+/** Decision 0032, ruling 5. */
+export interface LeftRunningOptions {
+  /** The machine's process list, which Windows needs to find what a call started (the System tools' backend). */
+  lister?: ProcessLister;
+  /**
+   * The permission set's answer for keeping `programs` running past the call: the
+   * `shell --run_in_background` line, narrowed by each program. Absent ⇒ kept (allow).
+   */
+  decide?: (left: { command: string; programs: readonly string[] }, ctx: ExecServices | undefined) => "allow" | "ask" | "deny";
 }
 
 /** A task's shell, as the shell tool is handed it. */
@@ -189,12 +217,17 @@ export function createShellTool(options: ToolOptions = {}): Tool {
       properties: {
         command: { type: "string", description: "The command line to run." },
         cwd: { type: "string", description: "Optional working directory, relative to the workspace root. Without it, the command starts where the previous one ended." },
+        run_in_background: {
+          type: "boolean",
+          description:
+            "Start the command and carry on (a dev server, a watcher): the call answers after about 2 s with its `pid` and what it printed so far, and it keeps running with no time limit. Read it with read_process, wait for it (\"until ready\") with wait_process, end it with stop_process. A command that leaves something running without this is stopped unless the session may keep it.",
+        },
       },
       required: ["command"],
     },
     readOnly: false,
     run: async (input, ctx) => {
-      const args = (input ?? {}) as { command?: unknown; cwd?: unknown };
+      const args = (input ?? {}) as { command?: unknown; cwd?: unknown; run_in_background?: unknown };
       const command = typeof args.command === "string" ? args.command : "";
       if (command.trim().length === 0) return { error: "no command given" };
 
@@ -217,6 +250,21 @@ export function createShellTool(options: ToolOptions = {}): Tool {
       const env: ExecEnv = options.execEnv ?? "windows";
       const [interpreter, ...prefix] = interpreterFor(env);
 
+      if (args.run_in_background === true) {
+        return withProcessNotes(
+          await runInBackground(options, {
+            command,
+            argv: [interpreter!, ...prefix],
+            env,
+            ...(root !== undefined ? { root } : {}),
+            ...(relative !== undefined && cwd !== undefined ? { cwd } : {}),
+            callId: ctx?.toolCallId,
+            agent: callingAgentOf(ctx),
+          }),
+          options,
+        );
+      }
+
       if (options.shells !== undefined && root !== undefined) {
         return runInTaskShell(exec, options.shells, options, {
           command,
@@ -227,18 +275,21 @@ export function createShellTool(options: ToolOptions = {}): Tool {
           callId: ctx?.toolCallId,
           agent: callingAgentOf(ctx),
           ...(ctx?.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
-        });
+          ctx,
+        }).then((answer) => withProcessNotes(answer, options));
       }
 
       const terminal = options.terminals?.open({ callId: ctx?.toolCallId, command, cwd, dialect: dialectFor(env) });
       if (terminal !== undefined) {
-        return runInTerminal(exec, terminal, [interpreter!, ...prefix, command], {
+        const run = await runInTerminal(exec, terminal, [interpreter!, ...prefix, command], {
           ...(cwd !== undefined ? { cwd } : {}),
+          ...(options.containment !== undefined ? { contain: options.containment.group } : {}),
           execEnv: env,
           limitMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           max: options.maxOutputChars ?? DEFAULT_MAX_OUTPUT,
           ...(ctx?.abortSignal !== undefined ? { abortSignal: ctx.abortSignal } : {}),
         });
+        return withProcessNotes(await settleLeftRunning(run, { command, dialect: dialectFor(env), callId: ctx?.toolCallId, ...(cwd !== undefined ? { cwd } : {}) }, options, ctx), options);
       }
 
       const result = await exec.run(interpreter, [...prefix, command], {
@@ -270,9 +321,11 @@ async function runInTerminal(
   exec: Exec,
   terminal: ShellCallTerminal | undefined,
   argv: readonly string[],
-  options: { cwd?: string; execEnv: ExecEnv; limitMs: number; max: number; abortSignal?: AbortSignal; onMark?: (kind: string, payload: string) => void },
-): Promise<Record<string, unknown>> {
-  const [file, ...args] = argv;
+  options: { cwd?: string; execEnv: ExecEnv; limitMs: number; max: number; abortSignal?: AbortSignal; onMark?: (kind: string, payload: string) => void; contain?: ContainmentGroup },
+): Promise<TerminalRun> {
+  const [file, ...args] = options.contain?.wrapArgv(argv) ?? [...argv];
+  const startedAt = Date.now();
+  let pid: number | undefined;
   const limit = new AbortController();
   // The turn's stop and the time limit, as one signal for exec to kill the tree on.
   const watch = new CallWatch(options.limitMs, () => limit.abort(), options.abortSignal);
@@ -281,13 +334,17 @@ async function runInTerminal(
   try {
     const result = await exec.run(file!, args, {
       ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+      ...(options.contain !== undefined ? { env: options.contain.env() } : {}),
       execEnv: options.execEnv,
       abortSignal: limit.signal,
       onOutput: (stream, chunk) => {
         const text = marks[stream].feed(chunk);
         if (text.length > 0) terminal?.output(text);
       },
-      interactive: (io) =>
+      interactive: (io) => {
+        pid = io.pid;
+        // Into the session's job before the line has started anything (Windows; a no-op elsewhere).
+        if (io.pid !== undefined) void options.contain?.add(io.pid);
         terminal?.attach({
           type: (text) => watch.type(text, (t) => io.write(t)),
           interrupt: () => {
@@ -299,18 +356,26 @@ async function runInTerminal(
             io.signal("SIGTERM");
           },
           endsAt: () => watch.endsAt,
-        }),
+        });
+      },
     });
     const typed = watch.done();
     const stopped = watch.stopped || (result.aborted && !watch.timedOut);
     terminal?.ended({ exitCode: result.code, signal: result.signal, timedOut: watch.timedOut, stopped });
     return {
-      exitCode: result.code,
-      stdout: clamp(withoutMarks(result.stdout), options.max),
-      stderr: clamp(withoutMarks(result.stderr), options.max),
-      ...(watch.timedOut ? { timedOut: true } : {}),
-      ...(stopped ? { stopped: true } : {}),
-      ...(typed.length > 0 ? { input: typed } : {}),
+      answer: {
+        exitCode: result.code,
+        stdout: clamp(withoutMarks(result.stdout), options.max),
+        stderr: clamp(withoutMarks(result.stderr), options.max),
+        ...(watch.timedOut ? { timedOut: true } : {}),
+        ...(stopped ? { stopped: true } : {}),
+        ...(typed.length > 0 ? { input: typed } : {}),
+      },
+      ...(pid !== undefined ? { pid } : {}),
+      startedAt,
+      outputHeld: result.outputHeld === true,
+      // A call that was stopped or ran out of time had its tree ended; what is left is not the session's to keep.
+      ended: stopped || watch.timedOut,
     };
   } catch (error) {
     watch.done();
@@ -390,7 +455,7 @@ async function runInTaskShell(
   exec: Exec,
   shells: TaskShells,
   options: ToolOptions,
-  call: { command: string; root: string; cwd?: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; agent: string | undefined; abortSignal?: AbortSignal },
+  call: { command: string; root: string; cwd?: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; agent: string | undefined; abortSignal?: AbortSignal; ctx?: ExecServices | undefined },
 ): Promise<Record<string, unknown>> {
   const session = shells.session;
   const notes: string[] = [];
@@ -485,7 +550,7 @@ async function runInTaskShell(
 async function runEmulated(
   exec: Exec,
   options: ToolOptions,
-  call: { command: string; root: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; abortSignal?: AbortSignal },
+  call: { command: string; root: string; env: ExecEnv; argv: readonly string[]; callId: string | undefined; abortSignal?: AbortSignal; ctx?: ExecServices | undefined },
   start: string,
   dialect: CommandDialect,
   limitMs: number,
@@ -496,8 +561,9 @@ async function runEmulated(
   let ended: string | undefined;
   const line = dialect === "posix" ? withCwdMark(call.command) : call.command;
   const terminal = options.terminals?.open({ callId: call.callId, command: call.command, cwd: start, dialect, shell: "emulated" });
-  const result = await runInTerminal(exec, terminal, [...call.argv, line], {
+  const run = await runInTerminal(exec, terminal, [...call.argv, line], {
     cwd: start,
+    ...(options.containment !== undefined ? { contain: options.containment.group } : {}),
     execEnv: call.env,
     limitMs,
     max,
@@ -507,7 +573,214 @@ async function runEmulated(
     },
   });
   if (dialect === "posix") session.cwd = ended ?? start;
-  return { ...result, cwd: session.cwd ?? start, shell: "emulated", ...(notes.length > 0 ? { note: notes.join(" ") } : {}) };
+  const result = await settleLeftRunning(run, { command: call.command, dialect, callId: call.callId, cwd: start }, options, call.ctx);
+  const note = [...notes, ...(typeof result["note"] === "string" ? [result["note"]] : [])];
+  return { ...result, cwd: session.cwd ?? start, shell: "emulated", ...(note.length > 0 ? { note: note.join(" ") } : {}) };
+}
+
+/** One watched run: the model's answer, and what the leftover check needs. */
+interface TerminalRun {
+  answer: Record<string, unknown>;
+  pid?: number;
+  startedAt: number;
+  outputHeld: boolean;
+  ended: boolean;
+}
+
+/**
+ * What a foreground call left running (decision 0032, ruling 5): kept as the session's when the
+ * permission set allows `shell --run_in_background` for it, stopped otherwise — before the call answers.
+ * Looked for only with a reason to ({@link mayLeaveRunning}, or output held past the exit).
+ */
+async function settleLeftRunning(
+  run: TerminalRun,
+  call: { command: string; dialect: CommandDialect; callId: string | undefined; cwd?: string },
+  options: ToolOptions,
+  ctx: ExecServices | undefined,
+): Promise<Record<string, unknown>> {
+  const settled = await keepOrStopLeft(run, call, options, ctx);
+  return sweepEscaped(settled.answer, run, call, options, settled.left);
+}
+
+/**
+ * What got out of every tree JaiRA follows during the call (ruling 7) — WMI, the Task Scheduler,
+ * `setsid` — listed under the session as `escaped`, so the person sees it and can stop it. Looked for
+ * only when it is cheap or the line gave a reason (`escapeSweepWorthIt`).
+ */
+async function sweepEscaped(
+  answer: Record<string, unknown>,
+  run: TerminalRun,
+  call: { command: string; dialect: CommandDialect; callId: string | undefined; cwd?: string },
+  options: ToolOptions,
+  left: readonly number[],
+): Promise<Record<string, unknown>> {
+  const keep = options.processes;
+  const contained = options.containment;
+  if (keep === undefined || contained === undefined) return answer;
+  const dialect = call.dialect === "posix" ? "posix" : "powershell";
+  if (!escapeSweepWorthIt(call.command, dialect, { ...(contained.engine !== undefined ? { containment: contained.engine } : {}) })) return answer;
+  let escaped;
+  try {
+    escaped = await findEscaped(
+      { from: run.startedAt, to: Date.now() },
+      {
+        ...(contained.engine !== undefined ? { containment: contained.engine } : {}),
+        ...(options.leftRunning?.lister !== undefined ? { lister: options.leftRunning.lister } : {}),
+        group: contained.group,
+        exclude: [...keep.list().map((p) => p.pid), ...left],
+      },
+    );
+  } catch (error) {
+    log.warn("could not look for what a command started outside JaiRA", { error: error instanceof Error ? error.message : String(error) });
+    return answer;
+  }
+  if (escaped.length === 0) return answer;
+  for (const e of escaped) {
+    keep.adopt({
+      pid: e.pid,
+      command: `${e.name}, started outside JaiRA by \`${call.command}\``,
+      how: "escaped",
+      ...(call.callId !== undefined ? { callId: call.callId } : {}),
+      stop: (signal) => stopLeft(e.pid, e.tree.map((pid) => ({ pid, name: e.name })), signal),
+      alive: () => isAlive(e.pid),
+    });
+  }
+  const named = escaped.map((e) => `${e.name} (pid ${e.pid}: ${e.why})`).join(", ");
+  const said = typeof answer["note"] === "string" ? `${answer["note"]} ` : "";
+  return {
+    ...answer,
+    escaped: escaped.map((e) => ({ pid: e.pid, program: e.name, why: e.why })),
+    note: `${said}This command started ${named} outside every process tree JaiRA follows. It is listed as this session's, escaped, and the person can see and stop it. Start what should keep running with run_in_background instead.`,
+  };
+}
+
+/** Keep or stop what the call left (ruling 5); says which pids it accounted for. */
+async function keepOrStopLeft(
+  run: TerminalRun,
+  call: { command: string; dialect: CommandDialect; callId: string | undefined; cwd?: string },
+  options: ToolOptions,
+  ctx: ExecServices | undefined,
+): Promise<{ answer: Record<string, unknown>; left: number[] }> {
+  const answer = run.answer;
+  const keep = options.processes;
+  const none = { answer, left: [] as number[] };
+  if (keep === undefined || run.pid === undefined) return none;
+  if (!run.outputHeld && !mayLeaveRunning(call.command, call.dialect === "posix" ? "posix" : "powershell")) return none;
+  const contained = options.containment;
+  const lister = contained?.engine?.lister(options.leftRunning?.lister) ?? options.leftRunning?.lister;
+  let all;
+  try {
+    all = await findLeftRunning(
+      run.pid,
+      run.startedAt,
+      lister,
+      undefined,
+      // The session's other processes are not this call's leftovers, whatever their start.
+      contained !== undefined ? { group: contained.group, exclude: keep.list().map((p) => p.pid) } : undefined,
+    );
+  } catch (error) {
+    log.warn("could not look for what a command left running", { error: error instanceof Error ? error.message : String(error) });
+    return none;
+  }
+  if (all.length === 0) return none;
+  const left = topsOf(all);
+  const programs = [...new Set(left.map((p) => p.name.replace(/\.exe$/i, "")))];
+  const verdict = run.ended ? "deny" : (options.leftRunning?.decide?.({ command: call.command, programs }, ctx) ?? "allow");
+  const named = left.map((p) => `${p.name} (pid ${p.pid})`).join(", ");
+  if (verdict === "allow") {
+    const started = left.map((p) =>
+      keep.adopt({
+        pid: p.pid,
+        command: `${p.name}, left running by \`${call.command}\``,
+        ...(call.callId !== undefined ? { callId: call.callId } : {}),
+        ...(call.cwd !== undefined ? { cwd: call.cwd } : {}),
+        stop: (signal) => stopLeft(p.pid, [p], signal),
+        alive: () => isAlive(p.pid),
+      }),
+    );
+    return {
+      left: all.map((p) => p.pid),
+      answer: {
+      ...answer,
+      started: started.map((s) => ({ pid: s.pid, program: s.command.split(",")[0] })),
+      note: `This command left ${named} running; they are now this session's processes (list_processes, read_process, wait_process, stop_process). Start what should keep running with run_in_background, so its output is kept.`,
+      },
+    };
+  }
+  stopLeft(run.pid, all);
+  return {
+    left: all.map((p) => p.pid),
+    answer: {
+    ...answer,
+    stoppedLeft: left.map((p) => ({ pid: p.pid, program: p.name })),
+    note:
+      verdict === "ask"
+        ? `This command left ${named} running, so they were stopped: keeping a process running needs the person's approval. Run it again with run_in_background, which asks them.`
+        : `This command left ${named} running, so they were stopped: starting a process that keeps running needs \`shell --run_in_background\`, which this session's permission set does not allow.`,
+    },
+  };
+}
+
+/**
+ * `run_in_background` (decision 0032, ruling 2): the command starts as its own process — not inside a
+ * live shell, which it would hold — in the task's current directory, with the live shell's last
+ * environment, and the call answers once it has had a moment to fail.
+ */
+async function runInBackground(
+  options: ToolOptions,
+  call: { command: string; argv: readonly string[]; env: ExecEnv; root?: string; cwd?: string; callId: string | undefined; agent: string | undefined },
+): Promise<Record<string, unknown>> {
+  const keep = options.processes;
+  if (keep === undefined) return { error: "running a command in the background is not available here" };
+  const session = options.shells?.session;
+  const start = call.cwd ?? (session?.cwd !== undefined && existsSync(session.cwd) ? session.cwd : undefined) ?? call.root;
+  const live = options.shells !== undefined && options.shells.choiceFor(call.agent).kind === "live";
+  const dialect = dialectFor(call.env);
+  const terminal = options.terminals?.open({ callId: call.callId, command: call.command, cwd: start, dialect, shell: "background" });
+  const max = options.maxOutputChars ?? DEFAULT_MAX_OUTPUT;
+  try {
+    const answer = await keep.background({
+      command: call.command,
+      argv: [...call.argv, call.command],
+      ...(start !== undefined ? { cwd: start } : {}),
+      execEnv: call.env,
+      ...(live && session?.env !== undefined ? { env: session.env } : {}),
+      ...(call.callId !== undefined ? { callId: call.callId } : {}),
+      ...(options.containment !== undefined ? { contain: options.containment.group } : {}),
+      onOutput: (text) => terminal?.output(text),
+      onStart: (io) =>
+        terminal?.attach({
+          type: (text) => io.write(text),
+          interrupt: () => io.signal("SIGINT"),
+          stop: () => {
+            if (io.pid !== undefined && keep.has(io.pid)) keep.stop(io.pid);
+            else io.signal("SIGTERM");
+          },
+          endsAt: () => undefined,
+        }),
+      onEnd: (end) => terminal?.ended({ exitCode: end.exitCode, signal: end.signal, timedOut: false, stopped: end.stopped }),
+    });
+    const p = answer.process;
+    return {
+      pid: p.pid,
+      running: p.running,
+      ...(p.running ? {} : { exitCode: p.exitCode ?? null }),
+      output: clamp(answer.output, max),
+      ...(start !== undefined ? { cwd: start } : {}),
+      shell: "background",
+    };
+  } catch (error) {
+    if (error instanceof SessionProcessError) return { error: error.message };
+    throw error;
+  }
+}
+
+/** What ended among the session's processes since the agent last heard, on this result's `note`. */
+function withProcessNotes(answer: Record<string, unknown>, options: ToolOptions): Record<string, unknown> {
+  const notes = options.processes?.takeNotes() ?? [];
+  if (notes.length === 0) return answer;
+  const said = typeof answer["note"] === "string" ? [answer["note"]] : [];
+  return { ...answer, note: [...said, ...notes].join("\n") };
 }
 
 /** Register JaiRA's tool set on a registry's `tools` facet. */

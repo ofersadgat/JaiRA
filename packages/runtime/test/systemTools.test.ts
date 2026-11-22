@@ -109,22 +109,22 @@ describe("stop_process and list_processes", () => {
   it("refuse JaiRA's own, and a tree that holds one", async () => {
     const machine = fakeMachine();
     const tools = createSystemTools({ backend: machine, enginePid: 100 });
-    expect((await run(tools, "stop_process", { pid: 100 }))["error"]).toMatch(/refused: node \(100\) — it is JaiRA's engine/);
-    expect((await run(tools, "stop_process", { pid: 110 }))["error"]).toMatch(/refused: cmd \(110\) — JaiRA started it/);
-    expect((await run(tools, "stop_process", { pid: 600, tree: true }))["error"]).toMatch(/would stop JaiRA \(601\) — it is part of the JaiRA app/);
+    expect((await run(tools, "stop_process", { pid: 100, scope: "all" }))["error"]).toMatch(/refused: node \(100\) — it is JaiRA's engine/);
+    expect((await run(tools, "stop_process", { pid: 110, scope: "all" }))["error"]).toMatch(/refused: cmd \(110\) — JaiRA started it/);
+    expect((await run(tools, "stop_process", { pid: 600, tree: true, scope: "all" }))["error"]).toMatch(/would stop JaiRA \(601\) — it is part of the JaiRA app/);
     expect(machine.calls.some(([name]) => name === "stopProcess")).toBe(false);
   });
 
   it("stop what an agent started, as the one listed", async () => {
     const machine = fakeMachine();
     const tools = createSystemTools({ backend: machine, enginePid: 100 });
-    expect(await run(tools, "stop_process", { pid: 112, tree: true })).toMatchObject({ pid: 112, stopped: true, processes: 2 });
+    expect(await run(tools, "stop_process", { pid: 112, tree: true, scope: "all" })).toMatchObject({ pid: 112, stopped: true, processes: 2 });
     expect(machine.calls.find(([name]) => name === "stopProcess")?.[1]).toEqual({ pid: 112, started: at(4), tree: true, force: false });
   });
 
   it("say which are protected, and why, in the list", async () => {
     const tools = createSystemTools({ backend: fakeMachine(), enginePid: 100 });
-    const listed = (await run(tools, "list_processes", { name: "node", sort: "pid" }))["processes"] as Array<{ pid: number; protected?: string }>;
+    const listed = (await run(tools, "list_processes", { name: "node", sort: "pid", scope: "all" }))["processes"] as Array<{ pid: number; protected?: string }>;
     expect(listed.map((row) => [row.pid, row.protected !== undefined])).toEqual([
       [100, true],
       [113, false],
@@ -229,7 +229,7 @@ describe("screenshot and control_input", () => {
 describe("where no System tool is built", () => {
   it("says so, rather than failing some other way", async () => {
     const tools = createSystemTools({ backend: null });
-    expect((await run(tools, "list_processes", {}))["error"]).toMatch(/built for Windows and macOS; this machine runs/);
+    expect((await run(tools, "list_processes", { scope: "all" }))["error"]).toMatch(/built for Windows and macOS; this machine runs/);
   });
 });
 

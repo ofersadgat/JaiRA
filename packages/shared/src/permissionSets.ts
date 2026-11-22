@@ -125,6 +125,7 @@ import {
 } from "./operationVocabulary";
 import { resolvePermissionStack, stackDeclOf } from "./permissionLayers";
 import { PLACE_ANYWHERE, placeKindOf } from "./places";
+import { parseToolFlagSubject, toolFlagProblem } from "./toolFlags";
 import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
 
 /** The subject that answers for everything no entry names. */
@@ -318,11 +319,15 @@ export function entryDeclOf(entry: EntryParts): PermissionSetEntryDecl {
  * (`mcp__figma`), which stands for every tool of it no line names — see `mcpModeOf` in `./mcp`.
  * Neither is a tool JaiRA serves: nothing is offered under it, and the agent that has the server
  * calls the tool by that name, which is what the line judges.
+ *
+ * `tool-flag` is a tool's line refined by its arguments (decision 0032, ruling 1a): `shell
+ * --run_in_background`, `list_processes --scope=user` — see `toolFlags.ts`. It offers nothing of its own:
+ * the tool is held by its bare line, and a flag line answers for the calls it matches.
  */
-export type SubjectKind = "tool" | "command" | "script" | "mcp" | "runner" | "other" | "unknown-tool";
+export type SubjectKind = "tool" | "tool-flag" | "command" | "script" | "mcp" | "runner" | "other" | "unknown-tool";
 
 export interface PermissionSetEntry {
-  kind: "tool" | "command" | "script" | "mcp" | "runner";
+  kind: "tool" | "tool-flag" | "command" | "script" | "mcp" | "runner";
   /**
    * The entry's own mode: its plain decision, or its place map's `**`. Absent where a block read back
    * ({@link permissionSetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a
@@ -380,6 +385,8 @@ export interface PermissionSetIssue {
  * know (`reed_file`, `Glob`): nothing is offered under it, which the linter says. `mcp__figma` and
  * `mcp__figma__get_code` are MCP subjects: a server's line and one of its tools'. `runner:*` and
  * `runner:npm` are the command runners' gate — the group's line and one runner's (`commandRunners.ts`).
+ * A tool's name followed by `--` flags (`shell --run_in_background`, `list_processes --scope=user`) is a
+ * FLAG line — read before the space makes it a command (`parseToolFlagSubject`, decision 0032 ruling 1a).
  */
 export function subjectKindOf(subject: string): SubjectKind {
   if (subject === OTHER_SUBJECT) return "other";
@@ -387,6 +394,7 @@ export function subjectKindOf(subject: string): SubjectKind {
   if (isMcpSubject(subject)) return "mcp";
   if (parseRunnerSubject(subject) !== undefined) return "runner";
   if (TOOL_SPEC_BY_NAME.has(subject)) return "tool";
+  if (parseToolFlagSubject(subject) !== undefined) return "tool-flag";
   if (/\s/.test(subject)) return "command";
   return /^[a-z][a-z0-9.+-]*$/.test(subject) ? "command" : "unknown-tool";
 }
@@ -457,11 +465,22 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
       warn(`'${subject}' is not a tool JaiRA knows — nothing is offered under that name, and a call by it answers to 'other'`);
       continue;
     }
+    if (kind === "tool-flag") {
+      // A flag the tool does not have, or a value its argument cannot take, refuses the line with the
+      // spelling the tool offers, as a misspelled tool name is told what it might have meant (ruling 1a).
+      const problem = toolFlagProblem(parseToolFlagSubject(subject)!);
+      if (problem !== undefined) {
+        error(problem);
+        continue;
+      }
+    }
     if (parts.unavailable === true && kind !== "tool" && kind !== "mcp") {
       error(
         kind === "other"
           ? `'other' cannot be unavailable — it names no one tool to take away; it can deny`
-          : `'${subject}' cannot be unavailable — what the model is handed is per tool, and it cannot be shown part of a shell: refuse it with deny, or make 'shell' unavailable`,
+          : kind === "tool-flag"
+            ? `'${subject}' cannot be unavailable — what the model is handed is per tool, not per argument: refuse these calls with deny, or make '${parseToolFlagSubject(subject)!.tool}' unavailable`
+            : `'${subject}' cannot be unavailable — what the model is handed is per tool, and it cannot be shown part of a shell: refuse it with deny, or make 'shell' unavailable`,
       );
       continue;
     }
@@ -949,12 +968,67 @@ export function gateToolModes(permissionSet: PermissionSet): Record<string, Perm
   const modes: Record<string, PermissionMode> = {};
   for (const [name, entry] of Object.entries(permissionSet.entries)) {
     if (entry.kind !== "tool") continue;
-    const mode = loosestModeOf(entry, toolElsewhere(permissionSet));
+    let mode = loosestModeOf(entry, toolElsewhere(permissionSet));
+    // A tool refined by FLAG lines (decision 0032, ruling 1a) is handed the loosest of them all, as a
+    // line with places is: the narrowing brings each call down to the line it matches, and only tightens
+    // — `list_processes: ask` beside `list_processes --scope=session: allow` lets a session's list
+    // through without asking only if the gate does not ask first.
+    for (const [, line] of flagLinesOf(permissionSet, name)) {
+      const flagged = loosestModeOf(line, toolElsewhere(permissionSet));
+      if (mode !== undefined && flagged !== undefined) mode = loosestMode(mode, flagged);
+    }
     if (mode !== undefined) modes[name] = gateModeOf(mode);
   }
   // A withheld shell has no line to read: nothing is offered, and the gate refuses it by name.
   if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = shellWithheld(permissionSet) ? "deny" : "ask";
   return modes;
+}
+
+/**
+ * A tool's FLAG lines (decision 0032, ruling 1a) — `list_processes --scope=user`, `shell
+ * --run_in_background` — as [subject, entry], in authored order: those a call's ARGUMENTS are matched
+ * against. A shell flag line that goes on to name a command (`shell --run_in_background npm run dev`) is
+ * not among them: it is a command line under the flag, which the shell's judge reads.
+ */
+export function flagLinesOf(permissionSet: PermissionSet, tool: string): Array<[string, PermissionSetEntry]> {
+  return Object.entries(permissionSet.entries).filter(([subject, entry]) => {
+    if (entry.kind !== "tool-flag" || entry.unavailable === true) return false;
+    const parsed = parseToolFlagSubject(subject);
+    return parsed?.tool === tool && parsed.command === undefined;
+  });
+}
+
+/** Does any line of the set refine `tool` by its arguments? */
+export function hasFlagLines(permissionSet: PermissionSet, tool: string): boolean {
+  return flagLinesOf(permissionSet, tool).length > 0;
+}
+
+/**
+ * Every flag line's OWN mode, by subject — the shell's command-naming ones among them — as
+ * {@link toolModes} gives a tool's: what a shell line's judge reads `shell --run_in_background …` from.
+ */
+export function flagLineModes(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
+  const out: Record<string, PermissionSetMode> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind === "tool-flag" && entry.mode !== undefined) out[subject] = entry.mode;
+  }
+  return out;
+}
+
+/**
+ * Every flag line's mode as the lowered block carries it: at its loosest ({@link loosestModeOf}), a
+ * function as `ask`, under its own subject in `permissions.tools` — where no tool is called by that
+ * name, so the upstream gate never reads it, and {@link permissionSetOfEnvironment} reads it back as the
+ * flag line it is. Its places, and a function it names, ride in `places` and `functions` as any line's do.
+ */
+function flagLineGateModes(permissionSet: PermissionSet): Record<string, PermissionMode> {
+  const out: Record<string, PermissionMode> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind !== "tool-flag" || entry.unavailable === true) continue;
+    const mode = loosestModeOf(entry, toolElsewhere(permissionSet));
+    if (mode !== undefined) out[subject] = gateModeOf(mode);
+  }
+  return out;
 }
 
 /**
@@ -1060,7 +1134,11 @@ export function permissionsOfPermissionSet(permissionSet: PermissionSet, source?
   // server's name for a tool no line names (`@jaira/runtime`'s `translatedGate`). None of them is in
   // the lowered LIST — nothing JaiRA registers is offered under them — so reading the block back finds
   // them as MCP entries ({@link permissionSetOfEnvironment}).
-  const tools = { ...gateToolModes(permissionSet), ...mcpGateModes(permissionSet), ...PERMISSION_SET_MARKERS };
+  //
+  // A FLAG line (`shell --run_in_background`, `list_processes --scope=user`) lowers into `tools` under its
+  // own subject the same way: no tool is called by that name, so the gate never reads it, and the
+  // narrowing and the shell's judge read it back from the block (decision 0032, ruling 1a).
+  const tools = { ...gateToolModes(permissionSet), ...mcpGateModes(permissionSet), ...flagLineGateModes(permissionSet), ...PERMISSION_SET_MARKERS };
   // ALWAYS written, empty when every held tool is ours. Upstream merges `permissions` per key down the
   // `environment` chain, so a child whose map chose no implementation and so wrote no key inherited its
   // parent's whole `implementations` — a parent's `grep: native` kept claude's `Grep` on a child whose
@@ -1085,13 +1163,24 @@ export function permissionsOfPermissionSet(permissionSet: PermissionSet, source?
   };
 }
 
-/** Every line with places, as `PermissionsDecl.places` carries it: the whole map in authored words, the own mode as `**`. */
+/**
+ * Every line with places, as `PermissionsDecl.places` carries it: the whole map in authored words, the
+ * own mode as `**`.
+ *
+ * And every tool refined by FLAG lines (decision 0032, ruling 1a), places or not: its `tools` mode is the
+ * gate's loosest over its flag lines ({@link gateToolModes}), never its own — the case `places` exists
+ * for, "where a line's gate mode is not its own, this is the line" — so its own mode rides here as `**`,
+ * and {@link permissionSetOfEnvironment} reads the bare line back as it was written.
+ */
 function loweredPlaces(permissionSet: PermissionSet): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {};
-  for (const [subject, places] of Object.entries(linePlaces(permissionSet))) {
-    const entry = permissionSet.entries[subject]!;
+  const placed = linePlaces(permissionSet);
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    const places = Object.hasOwn(placed, subject) ? placed[subject]! : undefined;
+    const refined = entry.kind === "tool" && entry.unavailable !== true && entry.mode !== undefined && hasFlagLines(permissionSet, subject);
+    if (places === undefined && !refined) continue;
     const map: Record<string, string> = entry.mode !== undefined ? { [PLACE_ANYWHERE]: modeWord(entry.mode) } : {};
-    for (const [place, mode] of Object.entries(places)) map[place] = modeWord(mode);
+    for (const [place, mode] of Object.entries(places ?? {})) map[place] = modeWord(mode);
     out[subject] = map;
   }
   return out;
@@ -1134,7 +1223,8 @@ export function permissionSetOfEnvironment(
     if (Object.hasOwn(entries, name) || isPermissionSetMarkKey(name)) continue;
     // An MCP line is never listed — nothing JaiRA registers is offered under it — so its mode here IS
     // the line, not a tool held back.
-    entries[name] = isMcpSubject(name) ? { kind: "mcp", mode } : { kind: "tool", mode, offered: false };
+    // A FLAG line is never listed either: it offers nothing, and refines the tool its bare line holds.
+    entries[name] = isMcpSubject(name) ? { kind: "mcp", mode } : subjectKindOf(name) === "tool-flag" ? { kind: "tool-flag", mode } : { kind: "tool", mode, offered: false };
   }
   for (const [subject, mode] of Object.entries(permissions?.subjects ?? {})) {
     const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
@@ -1185,7 +1275,7 @@ export function permissionSetOfEnvironment(
     const base: PermissionSetEntry =
       held !== undefined
         ? held
-        : kind === "command" || kind === "script" || kind === "runner"
+        : kind === "command" || kind === "script" || kind === "runner" || kind === "tool-flag"
           ? { kind }
           : { kind: "tool", offered: false };
     const { mode: _lowered, places: _places, ...rest } = base;

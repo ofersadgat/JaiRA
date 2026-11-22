@@ -44,6 +44,8 @@ import { callDialectOf } from "./callDialect";
 import {
   SHELL_SUBJECT,
   answerOfLines,
+  backgroundAnswerOf,
+  backgroundWidthsOf,
   classifyRequest,
   lookUp,
   makeCallOf,
@@ -60,8 +62,19 @@ import {
 import { dialectFor, type ExecEnv } from "./paths";
 import { filePackages, makeRunsOf, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
 import {
+  BACKGROUND_LINE,
+  flagLineModes,
   DEFAULT_ASK_ABOVE_BYTES,
   INLINE_PERMISSION_SET,
+  MODE_WHEN_UNSET,
+  callFlagWidthsOf,
+  callFlagsOf,
+  decisionsOf,
+  flagLineMatches,
+  flagLinesOf,
+  hasFlagLines,
+  modeStrictness,
+  parseToolFlagSubject,
   OTHER_SUBJECT,
   VERDICT_RANK,
   absolutize,
@@ -253,8 +266,74 @@ function matches(matcher: FloorMatcher, command: ParsedCommand): boolean {
   return true;
 }
 
-/** The built-in verdict for one command, or undefined when no built-in applies. */
+// --- decision 0032, ruling 7: what starts a process out of JaiRA's sight (deny) ---------------------
+
+/** What a refused escape says — to the agent, and on the part's row. */
+export const ESCAPE_REASON = "JaiRA could not see or stop what this starts; use run_in_background";
+
+/** The class-naming parameters of `Invoke-CimMethod` and `Invoke-WmiMethod`: one given that is not `Win32_Process` names another class. */
+const WMI_CLASS_PARAMETERS = ["-classname", "-class", "-path", "-inputobject", "-query", "-cimclass", "-resourceuri"];
+
+/**
+ * Does this command have ANOTHER program start a process — so that it is in no tree JaiRA follows, and
+ * JaiRA can neither list nor stop it (decision 0032, ruling 7)?
+ *
+ *  - `Invoke-CimMethod` or `Invoke-WmiMethod` calling `Create` on `Win32_Process` — the class named, or
+ *    none named at all (it arrives down a pipe: `Get-CimClass Win32_Process | Invoke-CimMethod -MethodName
+ *    Create`); `wmic process call create`. The process's parent is the WMI service;
+ *  - `schtasks /create`, `Register-ScheduledTask` and `Register-ScheduledJob`, `at` (but not its list or
+ *    removal), `crontab` when it installs a table (not `-l` or `-r`): the scheduler starts it, later;
+ *  - `setsid` and `disown`: a session of its own, a job the shell lets go of — out of the call's process
+ *    group, which is how POSIX finds what a call started (`leftRunning.ts`). Ruling 7 refuses them
+ *    "when the scope above is absent", and no systemd scope holds a session's processes yet;
+ *  - `launchctl submit`, and `systemd-run` — every one: JaiRA starts no scope an agent could name.
+ *
+ * A script file can do any of these where no line shows it; ruling 7's sweep for `escaped` processes is
+ * what sees those. This reads only what a line says.
+ */
+export function startsUntracked(command: ParsedCommand): boolean {
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((word) => word.value.toLowerCase().replace(/^["']|["']$/g, ""));
+  switch (command.program) {
+    case "invoke-cimmethod":
+    case "invoke-wmimethod": {
+      if (!words.includes("create")) return false;
+      if (words.includes("win32_process")) return true;
+      return !words.some((word) => powershellParameter(word, WMI_CLASS_PARAMETERS) !== undefined);
+    }
+    case "wmic":
+      return words.includes("process") && words.includes("call") && words.includes("create");
+    case "schtasks":
+      return words.some((word) => word === "/create" || word === "-create");
+    case "register-scheduledtask":
+    case "register-scheduledjob":
+    case "setsid":
+    case "disown":
+    case "systemd-run":
+      return true;
+    case "at":
+      // `at` alone lists (Windows), `-l` lists, `-r`/`-d` and `/delete` remove, `-c` prints a job.
+      return words.length > 0 && !words.some((word) => /^-[lrdc]$/.test(word) || word === "/delete");
+    case "crontab":
+      // `crontab -l` lists, `crontab -r` removes; `-e`, a file, or `-` installs a table.
+      return !words.some((word) => /^-[a-z]*[lr]/.test(word) && !/^-[a-z]*e/.test(word));
+    case "launchctl":
+      return command.subcommand === "submit";
+    default:
+      return false;
+  }
+}
+
+/**
+ * The built-in verdict for one command, or undefined when no built-in applies.
+ *
+ * The escapes ({@link startsUntracked}) are among them, refused first. `judgePart` reads those apart from
+ * the rest, because they stand whether `functions.shell.builtins` is on or off — that switch turns off
+ * the floor a disposable workspace does not need, and an escape is not about the workspace: it is a
+ * process nobody can list or stop after the task, wherever it runs — and only a `shell
+ * --run_in_background` line naming the program lifts it.
+ */
 export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; reason: string } | undefined {
+  if (startsUntracked(command)) return { action: "deny", reason: ESCAPE_REASON };
   for (const rule of DESTRUCTIVE) {
     if (matches(rule.match, command)) return { action: "deny", reason: rule.reason };
   }
@@ -470,6 +549,15 @@ export interface DecideCommandOptions {
    * a part names and every `cd` before it is resolved. Absent, words are taken as written.
    */
   expand?: ((word: string) => string) | undefined;
+  /**
+   * The line is started to KEEP RUNNING (decision 0032, ruling 1): the call says `run_in_background:
+   * true` — JaiRA's `shell`, or Claude's own `Bash` (the person's ruling 6, "same line"). Beside its
+   * parts, judged as any line's, the line is one more part, the whole of it, answered by the `shell
+   * --run_in_background` lines: narrowed by what it runs (`shell --run_in_background npm run dev` before
+   * `… npm` before the bare line), strictest wins — so a backgrounded line runs only if it may run AND
+   * may keep running.
+   */
+  background?: boolean | undefined;
 }
 
 const MAX_SCRIPT_DEPTH = 4;
@@ -755,9 +843,29 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
  *     Strictest again, and after (4): a remembered `rm` does not open a place the floor shut.
  */
 function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined, where: PartPlaces): Composed | undefined {
-  // (1) the built-ins
+  // (1) the built-ins — an escape first, which stands whatever `functions.shell.builtins` says (see
+  // `builtinVerdict`): another program starting a process out of every tree JaiRA follows is refused,
+  // unless a `shell --run_in_background` line NAMING the program says otherwise, and then that line is
+  // what answers for it (decision 0032, ruling 7) — the generic `shell --run_in_background` does not.
   let fromPolicy: Composed | undefined;
-  if (policy.builtins !== false) {
+  const escape = part.command !== undefined && startsUntracked(part.command);
+  if (escape) {
+    const lifted = options.permissionSet !== undefined ? backgroundAnswerOf(options.permissionSet, part.command, where) : undefined;
+    if (lifted?.specific === true && lifted.mode !== undefined && lifted.entry !== undefined) {
+      const reference = modeFunction(lifted.mode);
+      const at = lifted.place !== undefined ? ` in ${lifted.place}` : "";
+      const layer = layerOfLine(options.stack, lifted.entry, lifted.place);
+      fromPolicy = {
+        verdict: verdictOfMode(lifted.mode),
+        source: "permissionSet",
+        entry: lifted.entry,
+        ...(layer !== undefined ? { layer } : {}),
+        ...(reference !== undefined ? { function: reference } : {}),
+        ...(lifted.place !== undefined ? { place: lifted.place } : {}),
+        reason: reference !== undefined ? `the permission set's '${lifted.entry}'${at} is decided by the function '${reference}'` : `the permission set's '${lifted.entry}'${at} is ${modeWord(lifted.mode)}`,
+      };
+    } else fromPolicy = { verdict: "denied", source: "builtin", reason: ESCAPE_REASON };
+  } else if (policy.builtins !== false) {
     if (part.command !== undefined) {
       const builtin = builtinVerdict(part.command);
       if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
@@ -847,6 +955,84 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
 }
 
 /**
+ * A backgrounded line's own part (decision 0032, ruling 1): the whole line, answered by the `shell
+ * --run_in_background` lines for each thing it starts ({@link backgroundAnswerOf}, narrowed by what each
+ * request runs), the strictest kept — `npm run build && npm run dev` may keep running only if both may.
+ * An answer this run kept settles one that asks, as it settles any part; its widths are the background
+ * lines a person may keep the answer at (`shell --run_in_background npm run dev`, … `npm`, the bare line),
+ * which is also what "add to the permission set" writes.
+ *
+ * With no `shell --run_in_background` line at all — a set written before the line existed, or no set
+ * judging the line — it ASKS: not `other`, which answers for tools nobody named, and not the shell's
+ * own line, which says what may RUN. Starting what outlives the call is its own permission, and a set
+ * that never said so has not granted it (the ruled default for every shipped set but `full` is ask).
+ */
+function backgroundPart(started: ReadonlyArray<{ command?: ParsedCommand; where: PartPlaces }>, options: DecideCommandOptions, line: string): { part: CommandPart; command?: ParsedCommand } {
+  const asked = started.length > 0 ? started : [{ where: { of: () => [] } as PartPlaces }];
+  let worst: { composed: Composed; widths: string[]; command?: ParsedCommand } | undefined;
+  for (const start of asked) {
+    const widths = backgroundWidthsOf(start.command);
+    const answer = options.permissionSet !== undefined ? backgroundAnswerOf(options.permissionSet, start.command, start.where) : undefined;
+    let composed: Composed;
+    if (answer?.mode !== undefined && answer.entry !== undefined) {
+      const reference = modeFunction(answer.mode);
+      const at = answer.place !== undefined ? ` in ${answer.place}` : "";
+      const layer = layerOfLine(options.stack, answer.entry, answer.place);
+      composed = {
+        verdict: verdictOfMode(answer.mode),
+        source: "permissionSet",
+        entry: answer.entry,
+        ...(layer !== undefined ? { layer } : {}),
+        ...(reference !== undefined ? { function: reference } : {}),
+        ...(answer.place !== undefined ? { place: answer.place } : {}),
+        reason:
+          reference !== undefined
+            ? `the permission set's '${answer.entry}'${at} is decided by the function '${reference}'`
+            : `the permission set's '${answer.entry}'${at} is ${modeWord(answer.mode)} — this line is started to keep running`,
+      };
+    } else {
+      composed = {
+        verdict: "asks",
+        source: "default",
+        reason: options.permissionSet === undefined ? "no permission set judges a start that keeps running, so it asks" : `the permission set has no '${BACKGROUND_LINE}' line, and a start that keeps running asks`,
+      };
+    }
+    if (composed.verdict === "asks") {
+      const remembered = options.grants?.answerFor(widths);
+      if (remembered !== undefined) {
+        composed = { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, layer: RUNTIME_LAYER, reason: rememberedReason(remembered) };
+      }
+    }
+    if (worst === undefined || VERDICT_RANK[composed.verdict] > VERDICT_RANK[worst.composed.verdict]) worst = { composed, widths, ...(start.command !== undefined ? { command: start.command } : {}) };
+  }
+  const { composed, widths, command } = worst!;
+  const span: TextSpan = { start: 0, end: line.length };
+  return {
+    part: {
+      span,
+      matched: [{ ...span }],
+      text: line,
+      kind: "command",
+      subject: composed.source === "permissionSet" && composed.entry !== undefined ? composed.entry : widths[0]!,
+      ...(composed.verdict === "function" && command !== undefined
+        ? { command: { program: command.program, ...(command.subcommand !== undefined ? { subcommand: command.subcommand } : {}), args: [...command.args], flags: [...command.flags] } }
+        : {}),
+      verdict: composed.verdict,
+      decidedBy: {
+        source: composed.source,
+        ...(composed.entry !== undefined ? { entry: composed.entry } : {}),
+        ...(composed.verdict === "function" && composed.function !== undefined ? { function: composed.function } : {}),
+        ...(composed.place !== undefined ? { place: composed.place } : {}),
+        ...(composed.layer !== undefined ? { layer: composed.layer } : {}),
+        reason: composed.reason,
+      },
+      widths,
+    },
+    ...(command !== undefined ? { command } : {}),
+  };
+}
+
+/**
  * Decide a whole command line: take it apart, judge every part, and return the
  * strictest verdict — with the parts, which are what an approval shows.
  *
@@ -865,6 +1051,8 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   const packageOf = packageFolderOf(options.packages);
   // Runners whose inside is not looked at: one the gate refused, or one its own command line decided.
   const unlooked: TextSpan[] = [];
+  // What a backgrounded line starts (decision 0032): each request, with where it acts.
+  const started: Array<{ command?: ParsedCommand; where: PartPlaces }> = [];
   for (const request of taken.requests) {
     if (unlooked.some((span) => inside(request.span, span))) continue;
     const classified = classifyRequest(request, dialect);
@@ -878,6 +1066,11 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
     else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
     const where = partPlacesOf(classified, here, runs?.map((run) => run.dir), placeOptions, options.expand);
+    // What a backgrounded line starts, for its `shell --run_in_background` part below: every request but a
+    // runner that opens what it runs (that comes next, as requests of its own) and what is no request.
+    if (options.background === true && opened === undefined && classified.noRequest !== true) {
+      started.push({ ...(classified.unmodelled === undefined && classified.kind !== "unparsed" && classified.command !== undefined ? { command: classified.command } : {}), where });
+    }
     const gate = runnerGateFor(classified, options, where);
     // The runner's row, when it has one: what it runs is judged under it.
     let runner: number | undefined;
@@ -901,7 +1094,9 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     if (runs !== undefined && !decidedByName) {
       const through = line.slice(classified.span.start, classified.span.end);
       for (const run of runs) for (const scriptLine of run.lines) {
-        const inner = decideCommand(policy, scriptLine, "posix", { ...options, cwd: run.dir, root: run.dir, places: placeOptions, scriptDepth: (options.scriptDepth ?? 0) + 1 });
+        // What the script runs is judged as lines; whether it may keep running is the outer line's
+        // question, asked of what the line names (`npm run dev`), not of what the script holds.
+        const inner = decideCommand(policy, scriptLine, "posix", { ...options, cwd: run.dir, root: run.dir, places: placeOptions, scriptDepth: (options.scriptDepth ?? 0) + 1, background: false });
         const base = parts.length;
         for (const part of inner.parts.parts) {
           const { within, ...rest } = part;
@@ -984,6 +1179,13 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     });
     if (within !== undefined) part.within = within;
   });
+  // The line started to keep running is one more part, the whole line — after the parts it holds, and
+  // added once they know what encloses them, since it encloses them all and judges none of them.
+  if (options.background === true) {
+    const kept = backgroundPart(started, options, line);
+    parts.push(kept.part);
+    commands.push(kept.command);
+  }
 
   const payload = (verdict: CommandPartVerdict): CommandApproval => ({
     line,
@@ -1267,6 +1469,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         places: placesForCall(placeOptions, input),
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
+        // Started to keep running: our `shell`, or Claude's own `Bash`, whose raw input reaches here as
+        // the agent wrote it (`translatedGate` asks about it as `shell`) — one line for both (decision 0032).
+        ...(input["run_in_background"] === true ? { background: true } : {}),
       });
     const decision = decideUnder(permissionSetFor(authored));
     LINE_DECISIONS.set(input, decision);
@@ -1331,6 +1536,65 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     return decision.parts.verdict === "allowed" ? undefined : "ask";
   };
 
+  /**
+   * The set a direct call's FLAG lines are read off: the state's own block when it is a lowered map, else
+   * the permission set this policy was compiled for — as an MCP call's lines are.
+   */
+  const flagJudgingOf = (block: PermissionsDecl | undefined): { permissionSet: PermissionSet; source: string; stack?: PermissionStackDecl } | undefined =>
+    isLoweredPermissionSet(block)
+      ? { permissionSet: permissionSetOfEnvironment(undefined, block), source: block?.source ?? INLINE_PERMISSION_SET, ...(block?.stack !== undefined ? { stack: block.stack } : {}) }
+      : options.permissionSet !== undefined
+        ? { permissionSet: options.permissionSet, source: INLINE_PERMISSION_SET, ...(options.stack !== undefined ? { stack: options.stack } : {}) }
+        : undefined;
+
+  /** May a call of `tool` be tightened by a flag line? Read with no call in hand, off the block's keys where there is one. */
+  const flagNarrows = (tool: string, block: PermissionsDecl | undefined): boolean => {
+    // The shell's flag line is judged with its line, by `decideCommand` (`DecideCommandOptions.background`).
+    if (tool === SHELL_SUBJECT || TOOL_SPEC_BY_NAME.get(tool)?.flags === undefined) return false;
+    if (isLoweredPermissionSet(block)) return Object.keys(block?.tools ?? {}).some((key) => parseToolFlagSubject(key)?.tool === tool);
+    return options.permissionSet !== undefined && hasFlagLines(options.permissionSet, tool);
+  };
+
+  /**
+   * A direct call to a tool refined by FLAG lines, brought down to the answer of the line its arguments
+   * match ({@link flagLineAnswer}) — the gate was handed the loosest of them all (`gateToolModes`), so
+   * this only tightens. `null` for a tool no flag line refines, which the rest of the narrowing judges.
+   *
+   * An answer that asks is put to the person as one part whose widths are the call's own flags spelled
+   * as lines ({@link flagCallDecision}) — so "for this run" and "add to the permission set" keep
+   * `list_processes --scope=user`, not the whole tool — and is settled first by an answer this run kept.
+   * A function is noted for the approver, as a line's or a place's is; a refusal names its line.
+   */
+  const flagNarrowing = (name: string, input: unknown, block: PermissionsDecl | undefined): PermissionMode | undefined | null => {
+    if (!flagNarrows(name, block)) return null;
+    const judging = flagJudgingOf(block);
+    if (judging === undefined || !hasFlagLines(judging.permissionSet, name)) return null;
+    const answer = flagLineAnswer(name, input, judging.permissionSet, placesForCall(placeOptions, input));
+    if (answer === undefined) return null;
+    if (isFunctionMode(answer.mode)) {
+      noteFunctionCall(input, {
+        tool: name,
+        subject: answer.subject,
+        function: answer.mode.function,
+        ...(answer.place !== undefined ? { place: answer.place } : {}),
+        permissionSet: judging.source,
+      });
+      return "ask";
+    }
+    if (answer.mode === "ask") {
+      const decided = flagCallDecision(name, input, answer, judging.source, judging.stack, options.grants);
+      setCommandDecision(input, decided);
+      audit({ tool: name, action: decided.action, reason: decided.reason, parts: decided.parts, sessionId: "" });
+      if (decided.action === "deny") return "deny";
+      return decided.action === "allow" ? undefined : "ask";
+    }
+    if (answer.mode === "deny") {
+      notePlaceAnswer(input, { subject: answer.subject, mode: answer.mode, ...(answer.place !== undefined ? { place: answer.place } : {}) });
+      return "deny";
+    }
+    return undefined;
+  };
+
   const judgeCall: ScopeNarrowing = (tool, input, authored) => {
     // A block pinned under the old place tables refuses every call that names a place (see
     // {@link staleScopesDecision}) — before anything else reads it, since nothing else reads `scopes`.
@@ -1351,6 +1615,10 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       // Not a shell line. A tool whose line has PLACES is brought down to this call's own answer — the
       // gate was handed the line's loosest (decision 0023 §3.10) — and a place, or the line's `**`, that
       // names a function is noted for the approver there (`placeNarrowingFor`).
+      // A tool whose line is refined by FLAG lines (decision 0032, ruling 1a) is brought down to the line
+      // its arguments match — its places read there too — before any place of its bare line is.
+      const flagged = flagNarrowing(name, input, block);
+      if (flagged !== null) return flagged;
       const placed = placeNarrowing(tool, input, authored);
       if (placed !== undefined) return placed;
       // A tool whose line names a FUNCTION is decided by it, per call. The gate
@@ -1382,7 +1650,8 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       COMMAND_TOOLS.has(tool.name) ||
       parseMcpSubject(tool.name)?.tool !== undefined ||
       (authored !== undefined && Object.hasOwn(authored, "scopes")) ||
-      mayNarrow(placeNarrowing, tool, authored),
+      mayNarrow(placeNarrowing, tool, authored) ||
+      flagNarrows(standardOfAnyNative(tool.name) ?? tool.name, authored as PermissionsDecl | undefined),
   });
 
   const baseline: PermissionBaseline = {
@@ -1436,6 +1705,17 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   };
   const compiled: ExecPolicy = { baseline, smart, scopeOf, refusal };
   COMMAND_NARROWINGS.set(compiled, narrowing);
+  // What a foreground call left running is judged here too (decision 0032, ruling 5) — by the same set a
+  // backgrounded line would be. Keyed by `scopeOf`, which a copy of the policy keeps (`withAgentPermissionSet`
+  // spreads it with a new baseline).
+  LEFT_RUNNING_JUDGES.set(scopeOf, (authored, left) =>
+    leftRunningVerdict(permissionSetFor(authored)?.permissionSet, left, {
+      dialect,
+      ...(options.grants !== undefined ? { grants: options.grants } : {}),
+      ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
+      places: placeOptions,
+    }),
+  );
   return compiled;
 }
 
@@ -1476,6 +1756,169 @@ export function staleScopesDecision(tool: string, input: unknown, block: Permiss
     widths: [],
   };
   return { action: "deny", reason: STALE_SCOPES_REASON, parts: { line: text, dialect: "posix", parts: [part], verdict: "denied" } };
+}
+
+// --- a tool's line refined by its arguments (decision 0032, ruling 1a) -------------------------------
+
+/** What a tool's flag lines answer for one direct call, and which line said it. */
+export interface FlagLineAnswer {
+  mode: PermissionSetMode;
+  /** The line that answered: a flag line (`list_processes --scope=user`), the tool's bare line, or `other`. */
+  subject: string;
+  /** The place of that line that answered, when one did. */
+  place?: string;
+}
+
+/** How strict a line can be, for picking between two equally specific ones: the strictest of its own mode and its places. */
+const lineStrictness = (entry: { mode?: PermissionSetMode; places?: Record<string, PermissionSetMode> }): number =>
+  decisionsOf(entry).reduce((worst, mode) => Math.max(worst, modeStrictness(mode)), -1);
+
+/**
+ * What a set says about one direct call to a tool its FLAG lines refine (decision 0032, ruling 1a):
+ * every flag line the call's arguments match (`callFlagsOf` — a `scope` left out is its default,
+ * `session`), the most specific first — the one naming the most flags — and among equally specific ones
+ * the strictest; then the tool's bare line, which covers any call no flag line matches; then `other`.
+ * A line's places are read as a direct call's are (`toolPlaceAnswer`): a place none matches passes on
+ * to the next line where the line has no `**`.
+ *
+ * `undefined` when no flag line refines the tool, and the call is judged as it always was.
+ */
+export function flagLineAnswer(tool: string, input: unknown, permissionSet: PermissionSet, options: PlaceOptions = {}): FlagLineAnswer | undefined {
+  const lines = flagLinesOf(permissionSet, tool);
+  if (lines.length === 0) return undefined;
+  const call = callFlagsOf(tool, input);
+  const matching = lines
+    .map(([subject, entry], at) => ({ subject, entry, parsed: parseToolFlagSubject(subject)!, at }))
+    .filter((line) => flagLineMatches(line.parsed, call))
+    .sort((a, b) => b.parsed.flags.length - a.parsed.flags.length || lineStrictness(b.entry) - lineStrictness(a.entry) || a.at - b.at);
+  const bare = Object.hasOwn(permissionSet.entries, tool) ? permissionSet.entries[tool] : undefined;
+  const chain = [
+    ...matching.map((line) => ({ subject: line.subject, mode: line.entry.mode, places: line.entry.places })),
+    ...(bare !== undefined && bare.kind === "tool" && bare.unavailable !== true ? [{ subject: tool, mode: bare.mode, places: bare.places }] : []),
+  ];
+  const walk = (at: number): FlagLineAnswer => {
+    const line = chain[at];
+    if (line === undefined) return permissionSet.other !== undefined ? { mode: permissionSet.other, subject: OTHER_SUBJECT } : { mode: MODE_WHEN_UNSET, subject: tool };
+    if (line.places === undefined || Object.keys(line.places).length === 0) return line.mode !== undefined ? { mode: line.mode, subject: line.subject } : walk(at + 1);
+    // A line with no `**` speaks only at its places; elsewhere the next line answers.
+    const rest = line.mode === undefined ? walk(at + 1) : undefined;
+    const placed = toolPlaceAnswer(tool, { mode: line.mode, places: line.places }, rest?.mode, input, options);
+    if (placed === undefined) return line.mode !== undefined ? { mode: line.mode, subject: line.subject } : rest!;
+    if (placed.subject === OTHER_SUBJECT && rest !== undefined) return rest;
+    return { mode: placed.mode, subject: line.subject, ...(placed.place !== undefined ? { place: placed.place } : {}) };
+  };
+  return walk(0);
+}
+
+/**
+ * One direct call a flag line ASKS about, as the one-part decision a shell line's parts are: its line is
+ * the call's flags spelled as a line (`list_processes --scope=user`), and its widths those spellings
+ * narrowest first, then the bare tool ({@link callFlagWidthsOf}) — what "for this run" keeps and "add to
+ * the permission set" writes. An answer this run kept at one of them settles it first.
+ */
+export function flagCallDecision(tool: string, input: unknown, answer: FlagLineAnswer, source: string, stack?: PermissionStackDecl, grants?: CommandGrants): CommandDecision {
+  const widths = callFlagWidthsOf(tool, input);
+  const text = widths[0]!;
+  const span: TextSpan = { start: 0, end: text.length };
+  const remembered = grants?.answerFor(widths);
+  const verdict: CommandPartVerdict = remembered === undefined ? "asks" : remembered.decision === "allow" ? "allowed" : "denied";
+  const layer = layerOfLine(stack, answer.subject, answer.place);
+  const at = answer.place !== undefined ? ` in ${answer.place}` : "";
+  const part: CommandPart = {
+    span,
+    matched: [{ ...span }],
+    text,
+    kind: "tool",
+    subject: text,
+    verdict,
+    decidedBy:
+      remembered !== undefined
+        ? { source: "remembered", entry: remembered.width, layer: RUNTIME_LAYER, reason: rememberedReason(remembered) }
+        : { source: "permissionSet", entry: answer.subject, ...(answer.place !== undefined ? { place: answer.place } : {}), ...(layer !== undefined ? { layer } : {}), reason: `the permission set's '${answer.subject}'${at} asks` },
+    widths,
+  };
+  return {
+    action: verdict === "denied" ? "deny" : verdict === "allowed" ? "allow" : "require_approval",
+    reason: part.decidedBy.reason,
+    parts: { line: text, dialect: "posix", parts: [part], verdict, permissionSet: source, ...(stack !== undefined ? { stack: approvalStackOf(stack, grants !== undefined) } : {}) },
+  };
+}
+
+// --- what a foreground call left running (decision 0032, ruling 5) -----------------------------------
+
+/** Whether a session may keep what a foreground call left running. */
+export type LeftRunningVerdict = "allow" | "ask" | "deny";
+
+/** What a foreground call left running: the line it ran, and the programs still alive under it (`node`, `cmd` — no `.exe`). */
+export interface LeftRunning {
+  command: string;
+  programs: readonly string[];
+}
+
+const VERDICT_WORD: Record<CommandPartVerdict, LeftRunningVerdict> = { allowed: "allow", function: "ask", asks: "ask", denied: "deny" };
+
+/**
+ * Whether a session may keep what a foreground call left running (decision 0032, ruling 5): that is an
+ * implicit background start, judged by the `shell --run_in_background` lines as a backgrounded line is.
+ * For each program left running, a line NAMING it (`shell --run_in_background node`) answers; where none
+ * does, the line the call ran answers, as if it had been started in the background
+ * (`shell --run_in_background npm run dev`, then … `npm`, then the bare line). The strictest program
+ * decides. A line that names a function is `ask`: there is no call to hand it any more. An answer this
+ * run kept at one of those lines counts.
+ *
+ * With no set judging the shell, or no `shell --run_in_background` line in it, the answer is `ask` —
+ * the ruled default, as for a backgrounded line.
+ */
+export function leftRunningVerdict(
+  permissionSet: ShellPermissionSet | undefined,
+  left: LeftRunning,
+  options: { dialect?: CommandDialect; grants?: CommandGrants; root?: string; places?: PlaceOptions } = {},
+): LeftRunningVerdict {
+  if (permissionSet === undefined) return "ask";
+  const judged = decideCommand({ builtins: false }, left.command, options.dialect ?? "posix", {
+    permissionSet,
+    background: true,
+    ...(options.grants !== undefined ? { grants: options.grants } : {}),
+    ...(options.root !== undefined ? { root: options.root } : {}),
+    ...(options.places !== undefined ? { places: options.places } : {}),
+  });
+  const byLine = VERDICT_WORD[judged.parts.parts.at(-1)?.verdict ?? "asks"];
+  let worst: LeftRunningVerdict = left.programs.length === 0 ? byLine : "allow";
+  const rank: Record<LeftRunningVerdict, number> = { allow: 0, ask: 1, deny: 2 };
+  for (const program of left.programs) {
+    const command = takeApart(program.toLowerCase(), "posix").requests.find((request) => request.kind === "command");
+    const named = command?.kind === "command" ? backgroundAnswerOf(permissionSet, command.command) : undefined;
+    let verdict = byLine;
+    if (named?.specific === true && named.mode !== undefined) {
+      verdict = isFunctionMode(named.mode) ? "ask" : VERDICT_WORD[verdictOfMode(named.mode)];
+      if (verdict === "ask") {
+        const remembered = options.grants?.answerFor(backgroundWidthsOf(command?.kind === "command" ? command.command : undefined));
+        if (remembered !== undefined) verdict = remembered.decision;
+      }
+    }
+    if (rank[verdict] > rank[worst]) worst = verdict;
+  }
+  return worst;
+}
+
+/** Each compiled policy's own judge of a call's leftovers, by its `scopeOf` — see `compilePolicy`. */
+const LEFT_RUNNING_JUDGES = new WeakMap<object, (authored: PermissionsDecl | undefined, left: LeftRunning) => LeftRunningVerdict>();
+
+/**
+ * Whether the session may keep what a foreground `shell` call left running — what the engine wires as
+ * `ToolOptions.leftRunning.decide`: `(left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left)`.
+ *
+ * `policy` is the call's compiled policy (`ExecServices.policy`): it knows the permission set a
+ * conversation turn was compiled for, the run's remembered answers, the project's dialect and root.
+ * `authored` is the operation's own lowered block (`ExecServices.authored`), the nearer statement where
+ * there is one — a run's state, a turn's. A policy this module did not compile judges by the block
+ * alone; nothing to judge by at all is `ask`.
+ */
+export function decideLeftRunning(policy: ExecPolicy | undefined, authored: unknown, left: LeftRunning): LeftRunningVerdict {
+  const block = authored !== null && typeof authored === "object" ? (authored as PermissionsDecl) : undefined;
+  const judge = policy?.scopeOf !== undefined ? LEFT_RUNNING_JUDGES.get(policy.scopeOf) : undefined;
+  if (judge !== undefined) return judge(block, left);
+  return leftRunningVerdict(shellPermissionSetOfBlock(block)?.permissionSet, left);
 }
 
 /** The stricter of two modes, either of which may be unsaid. */
@@ -1883,7 +2326,14 @@ export function allowsCall(
     const mapping = mcpMappingOf(where.mcp, name);
     if (mapping === undefined) return mcpModeOf(permissionSet, name)?.mode === "allow";
     return decideMappedMcpCall(name, args, mapping, permissionSet, INLINE_PERMISSION_SET, {
-      shell: (call) => decideCommand(policy, typeof call["command"] === "string" ? call["command"] : "", dialect, { permissionSet: judgingSetOf(permissionSet), root: where.root, places, packages: where.packages }).parts,
+      shell: (call) =>
+        decideCommand(policy, typeof call["command"] === "string" ? call["command"] : "", dialect, {
+          permissionSet: judgingSetOf(permissionSet),
+          root: where.root,
+          places,
+          packages: where.packages,
+          ...(call["run_in_background"] === true ? { background: true } : {}),
+        }).parts,
       builtins: policy.builtins !== false,
     }).action === "allow";
   }
@@ -1896,6 +2346,9 @@ export function allowsCall(
     // A line with places answers at the call's place (decision 0023 §3.4); a native's `file_path` is its place.
     const entry = Object.hasOwn(permissionSet.entries, standard) ? permissionSet.entries[standard] : undefined;
     const input = args !== null && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+    // A tool refined by flag lines answers at the line its arguments match (decision 0032, ruling 1a).
+    const flagged = flagLineAnswer(standard, input, permissionSet, places);
+    if (flagged !== undefined) return flagged.mode === "allow";
     const placed = entry !== undefined ? toolPlaceAnswer(standard, entry, permissionSet.other, typeof input["file_path"] === "string" && input["path"] === undefined ? { ...input, path: input["file_path"] } : input, places) : undefined;
     return (placed?.mode ?? own(standard) ?? permissionSet.other ?? "ask") === "allow";
   }
@@ -1904,7 +2357,9 @@ export function allowsCall(
   const judging = judgingSetOf(permissionSet);
   const cwd = args !== null && typeof args === "object" && typeof (args as Record<string, unknown>)["cwd"] === "string" ? ((args as Record<string, unknown>)["cwd"] as string) : undefined;
   // An agent's own shell runs its line in its own language: Claude's `Bash` is POSIX, its `PowerShell` PowerShell.
-  return decideCommand(policy, line, nativeShellDialect(bare) ?? dialect, { permissionSet: judging, root: where.root, cwd, places, packages: where.packages }).action === "allow";
+  // Started to keep running — our `shell`, or Claude's `Bash` — it answers to `shell --run_in_background` too (decision 0032).
+  const background = args !== null && typeof args === "object" && (args as Record<string, unknown>)["run_in_background"] === true;
+  return decideCommand(policy, line, nativeShellDialect(bare) ?? dialect, { permissionSet: judging, root: where.root, cwd, places, packages: where.packages, ...(background ? { background } : {}) }).action === "allow";
 }
 
 /**
@@ -1915,7 +2370,7 @@ export function allowsCall(
 function judgingSetOf(permissionSet: PermissionSet): ShellPermissionSet {
   const places = linePlaces(permissionSet);
   return {
-    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) },
+    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet), ...flagLineModes(permissionSet) },
     ...(Object.keys(places).length > 0 ? { places } : {}),
     ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}),
   };

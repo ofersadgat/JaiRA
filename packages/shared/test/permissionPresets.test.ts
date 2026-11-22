@@ -117,8 +117,18 @@ const SYSTEM_TOOLS: Record<string, Record<string, PermissionSetMode>> = Object.f
   ...SYSTEM_CHANGES.map((name) => [name, { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "deny" }] as const),
 ]);
 
+/**
+ * The process tools decision 0032 added (ruling 4): `wait_process` is a look, as 0019 rules them, and
+ * `read_process` a look that asks in every set but `full` — another program's output can hold what the
+ * person did not mean to show. What a session started is the `--scope=session` lines', below.
+ */
+const PROCESS_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
+  read_process: { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "ask" },
+  wait_process: { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "allow" },
+};
+
 /** The tools with a table of their own here rather than a frozen preset's mode. */
-const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS, ...SYSTEM_TOOLS, ...SKILL_TOOLS };
+const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS, ...SYSTEM_TOOLS, ...PROCESS_TOOLS, ...SKILL_TOOLS };
 
 /** Every tool a conversation can be HANDED today — the nine the presets knew, the eight since, and the Git tools. */
 const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map((spec) => spec.name);
@@ -192,6 +202,27 @@ describe("the Git tools (decision 0010 §1)", () => {
       const keys = Object.keys(shipped(name) as Record<string, unknown>);
       expect(keys.slice(keys.indexOf("web_search") + 1, keys.indexOf("web_search") + 1 + forge.length), name).toEqual(forge);
     }
+  });
+});
+
+describe("a start that keeps running, and what a session started (decision 0032)", () => {
+  /** Ruling 1's table, and ruling 4's: the agent may always see, read, wait on and stop what it started, wherever it may run. */
+  const FLAG_LINES: Record<string, Record<string, PermissionSetMode>> = {
+    "shell --run_in_background": { "ask-first": "ask", "read-only": "deny", "read-only-scratch": "deny", auto: "ask", full: "allow" },
+    "list_processes --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    "read_process --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    "wait_process --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    "stop_process --scope=session": { "ask-first": "allow", "read-only": "deny", "read-only-scratch": "deny", auto: "allow", full: "allow" },
+  };
+
+  it.each(["ask-first", "read-only", "read-only-scratch", "auto", "full"])("%s writes them as flag lines, each at the ruled mode", (file) => {
+    const { permissionSet, issues } = parsePermissionSet(shipped(file));
+    expect(issues).toEqual([]);
+    for (const [subject, modes] of Object.entries(FLAG_LINES)) expect(permissionSet.entries[subject], `${file} ${subject}`).toEqual({ kind: "tool-flag", mode: modes[file] });
+  });
+
+  it("a simulation's pass never starts what keeps running", () => {
+    expect(parsePermissionSet(shipped("improve/simulation")).permissionSet.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "deny" });
   });
 });
 

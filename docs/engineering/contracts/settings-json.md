@@ -168,6 +168,8 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `artifacts.dir` | non-empty string | no, default `"artifacts"` | what `$ARTIFACT_DIR` expands to |
 | `artifacts.inlineMaxBytes` | non-negative integer | no, default `65536` | content below this is kept inline as well as placed; not a size limit |
 | `artifacts.askAboveBytes` | non-negative integer | no, default `4194304` | producing more than this asks a person; `0` never asks |
+| `processes.stopIdleAfterMinutes` | non-negative integer | no, default `0` | stop a session's background process idle this many minutes: nothing in its tree listens on a port, it has used no CPU, and nothing runs in the task; `0` never ([decision 0032](../decisions/0032-background-commands.md), ruling 9) |
+| `processes.backgroundLimit` | non-negative integer | no, default `0` | how many background processes a session may have running; past it `run_in_background` is refused and the running ones listed; `0` no limit |
 | `storage.journal`, `storage.conversations`, `storage.tasks`, `storage.artifacts` | `"file"` or `"db"` | no, default `"db"` | `file` also writes that concern to files as each change is saved, and imports them at open when they moved; `db` keeps it in the database alone, which is the truth either way ([decision 0018](../decisions/0018-one-truth-per-side.md) §11). The retired `"both"` is read as `"file"`; the modes are [storage-policy](../units/storage-policy.md) |
 | `storage.format` | `"claude"` or `"codex"` | no, default `"claude"` | the line shape a file-backed conversation is written in |
 | `workflows.path` | non-empty array of non-empty strings | no | each entry starts with `$` or is absolute; absent means the layer roots' `workflows` and `functions` in order |

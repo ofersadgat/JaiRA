@@ -28,6 +28,7 @@ import {
   SCRIPT_SUBJECT,
   SHELL_TOOL,
   parseRunnerSubject,
+  parseToolFlagSubject,
   placesMostSpecificFirst,
   resolvePlace,
   subjectKindOf,
@@ -82,7 +83,11 @@ export function lineChainOf(subject: string): string[] {
     if (runsAFile(subject)) chain.push(SCRIPT_SUBJECT);
     chain.push(SHELL_TOOL);
   } else if (kind === "script") chain.push(SHELL_TOOL);
-  else if (kind === "runner") {
+  else if (kind === "tool-flag") {
+    // A flag line (decision 0032, ruling 1a) passes a call it says nothing of to its tool's own line.
+    const tool = parseToolFlagSubject(subject)?.tool;
+    if (tool !== undefined) chain.push(tool);
+  } else if (kind === "runner") {
     // A runner line that says nothing passes to the group's, and no further: with no runner line the
     // runner is simply not looked inside (`answerOfLines` in `@jaira/runtime`), which `other` does not answer.
     if (parseRunnerSubject(subject)?.program !== undefined) chain.push(RUNNER_GROUP_SUBJECT);

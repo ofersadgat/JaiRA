@@ -3,7 +3,7 @@
  * standing sentences of the shell, `script` and the command runners. One table for every place a line is
  * drawn: Settings' permission sets, a state's Tools field, the composer's Tools card.
  */
-import { PLACE_ANYWHERE, SMART_FUNCTION, SYSTEM_AREAS, isFunctionMode, type PermissionMode, type PermissionSetMode, type PlaceKind } from "@jaira/shared/browser";
+import { PLACE_ANYWHERE, SMART_FUNCTION, TOOL_SPECS, isFunctionMode, type PermissionMode, type PermissionSetMode, type PlaceKind } from "@jaira/shared/browser";
 import { PATHS } from "./iconPaths";
 
 type IconName = keyof typeof PATHS;
@@ -12,7 +12,8 @@ export const TOOL_ICONS: Record<string, IconName> = {
   shell: "terminal",
   read_file: "read",
   write_file: "write",
-  ...Object.fromEntries(SYSTEM_AREAS.flatMap((area) => [[area.look, "system"], [area.change, "system"]])),
+  // Every System tool — an area's look and change, and the process tools no area pairs (decision 0032).
+  ...Object.fromEntries(TOOL_SPECS.filter((spec) => spec.category === "system").map((spec) => [spec.name, "system"])),
 };
 
 /** What the shell's line says in the Tools card: it is also where every unnamed command lands. */

@@ -52,6 +52,7 @@ import { parseRunnerSubject } from "./commandRunners";
 import { isMcpSubject } from "./mcp";
 import { modeStrictness, type PermissionSetMode } from "./operationVocabulary";
 import { absolutize, globToRegExp, normalizePath, specificityOf } from "./scopes";
+import { parseToolFlagSubject } from "./toolFlags";
 import { TOOL_SPEC_BY_NAME, type PlaceKind, type ToolSpec } from "./toolVocabulary";
 
 /** The place that is everywhere — how a place map gives itself a default (§3.4). */
@@ -77,6 +78,8 @@ const SITE_PROGRAMS: ReadonlySet<string> = new Set(["curl", "wget", "invoke-webr
  *
  *  - a standard tool: its {@link ToolSpec.scope} (`read_file` a path, `web_fetch` a site, `git_push` a
  *    branch, `start_task` a workflow; `web_search` and `screenshot` none);
+ *  - a tool's FLAG line (`shell --run_in_background`, `stop_process --scope=user` — decision 0032, ruling
+ *    1a): the tool's own, since the line refines the tool's calls and they name the place they named;
  *  - `script`, `shell`, `runner:*` and every runner's own line: a path — where it runs, and every path
  *    a part names as a file tool — except `runner:ssh`, which is about the HOST it reaches;
  *  - a command line: a path, except `git push` (the branch pushed to) and the network programs
@@ -95,6 +98,8 @@ export function placeKindOf(subject: string): PlaceKind | undefined {
   if (runner !== undefined) return runner.program === "ssh" ? "host" : "path";
   const spec = TOOL_SPEC_BY_NAME.get(normalized);
   if (spec !== undefined) return spec.scope;
+  const flagged = parseToolFlagSubject(normalized);
+  if (flagged !== undefined) return TOOL_SPEC_BY_NAME.get(flagged.tool)?.scope;
   const words = normalized.toLowerCase().split(" ");
   if (words[0] === "git" && words[1] === "push") return "branch";
   if (SITE_PROGRAMS.has(words[0]!)) return "site";

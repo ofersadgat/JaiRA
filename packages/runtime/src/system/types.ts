@@ -191,14 +191,42 @@ export type InputStep =
   | { action: "wait"; seconds: number }
   | { action: "cursor_position" };
 
+/**
+ * Where one of a process's standard streams goes (decision 0032, ruling 6): a regular `file` (read and
+ * followed), a Windows `console` (its screen read by attaching), or something JaiRA cannot read — a
+ * `pipe` or `socket` another program holds, a `tty` (another app's terminal), `none` (closed, or the
+ * null device), or `denied` (the process could not be looked into, with why).
+ */
+export interface OutputTarget {
+  kind: "file" | "console" | "pipe" | "socket" | "tty" | "none" | "denied";
+  /** `file`: the file, absolute. `tty`: the device. */
+  path?: string;
+  /** `denied`: why. */
+  why?: string;
+}
+
+/** A process's stdout and stderr, each's target. */
+export interface OutputTargets {
+  stdout: OutputTarget;
+  stderr: OutputTarget;
+}
+
 /** The machine, as the System tools reach it. Every method may throw; the message reaches the model. */
 export interface SystemBackend {
   readonly os: "windows" | "macos";
   readSystem(about: SystemAbout, log: LogQuery): Promise<JsonValue>;
   power(action: PowerAction, delaySeconds: number): Promise<JsonValue>;
   processes(): Promise<ProcessRow[]>;
+  /** Each process's account, by pid, where the OS lets it be read (decision 0032, ruling 4). */
+  owners?(): Promise<Record<string, string>>;
+  /** The accounts in an OS user group. */
+  groupMembers?(group: string): Promise<string[]>;
   /** Stop one process (and, with `tree`, what it started) — the one started at `started`, if given. */
   stopProcess(pid: number, options: { started?: string; tree: boolean; force: boolean }): Promise<{ stopped: boolean; how: string }>;
+  /** Where `pid`'s stdout and stderr go (decision 0032, ruling 6). A process gone or not opened answers `denied` with why. */
+  outputTargets?(pid: number): Promise<OutputTargets>;
+  /** Windows: the screen and scrollback of `pid`'s console, rows joined by `\n`, through the cursor's row. */
+  readConsole?(pid: number): Promise<string>;
   services(): Promise<ServiceRow[]>;
   controlService(name: string, action: ServiceAction, startType?: StartType): Promise<ServiceRow>;
   software(kind: SoftwareKind): Promise<SoftwareRow[]>;

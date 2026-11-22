@@ -693,9 +693,15 @@ import {
   isWslEnv,
   listensOnAPort,
   processTreeOf,
+  Containment,
+  decideLeftRunning,
+  SessionProcesses,
   shellChoiceOf,
   ShellSessions,
+  systemBackendFor,
   treeCpuSeconds,
+  type ContainmentGroup,
+  type LeftRunningOptions,
   type LiveShell,
   type TaskShells,
 } from "@jaira/runtime";
@@ -3830,6 +3836,7 @@ export class AppService {
     session.suspendedAtClose.delete(taskId);
     this.dropRecoveredAsks(session, (r) => r.taskId === taskId);
     this.shells.forget(taskId);
+    this.letProcessesGo(taskId, "moved off this machine");
     for (const [requestId, owner] of [...session.requestTask]) if (owner === taskId) session.requestTask.delete(requestId);
     this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
     this.publishFor(session, { type: "store:invalidate", scope: "board" });
@@ -4643,6 +4650,10 @@ export class AppService {
     // Live shells are their own process groups: they would outlive the engine.
     clearInterval(this.shellReaper);
     this.shells.closeAll("was closed when the app quit");
+    // A session's background processes are stopped with the app (decision 0032, ruling 9).
+    clearInterval(this.processReaper);
+    for (const taskId of new Set([...this.sessionProcesses.keys(), ...this.processGroups.keys()])) this.letProcessesGo(taskId, "the app quit");
+    this.containment.close();
     clearInterval(this.placementTimer);
     clearInterval(this.headTimer);
     clearInterval(this.archiveTimer);
@@ -6670,7 +6681,16 @@ export class AppService {
       // Our own tools, so an agent's commands go through the policy at all: an agent
       // calling its native shell would be invisible to it (DESIGN §10.1). Each call is a terminal a
       // window can watch and type into (decision 0028).
-      registerTools(registry, { execEnv: config.execEnvironment, exec, terminals: this.terminals.forTask(taskId, open.key), shells: this.taskShells(open, taskId, config) });
+      registerTools(registry, {
+        execEnv: config.execEnvironment,
+        exec,
+        terminals: this.terminals.forTask(taskId, open.key),
+        shells: this.taskShells(open, taskId, config),
+        // Decision 0032: what the agent starts with run_in_background, and what a command leaves running.
+        processes: this.processesOf(taskId, open, config),
+        leftRunning: this.leftRunningFor(open, taskId),
+        containment: { group: this.processGroupOf(taskId), engine: this.containment },
+      });
       // A state can also run a command directly, without delegating to an agent; it
       // gates itself with the same policy (DESIGN §10.1).
       registerCommandFunction(registry, { execEnv: config.execEnvironment, exec });
@@ -6780,7 +6800,8 @@ export class AppService {
       }),
     );
     // The System tools (decision 0019): this machine. A screenshot is the task's artifact, as a CI download is.
-    registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, taskId) });
+    // The process tools' default scope is this task's own processes (decision 0032, ruling 4).
+    registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, taskId), processes: this.processesOf(taskId, open, config) });
 
     // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
     // and a run resolves `environment.tools` through the engine instead, so it has to be folded in
@@ -7825,6 +7846,11 @@ export class AppService {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
     request = { ...request, message: expandArtifactCommand(request.message) };
+    // What ended among the task's background processes since the agent last heard goes with the
+    // person's message (decision 0032, ruling 8), as their own commands do (decision 0028, ruling 8).
+    // Only the person's own messages: one the app sends for them is not where they would look.
+    const ended = origin.by === undefined ? (this.sessionProcesses.get(request.taskId)?.takeNotes() ?? []) : [];
+    if (ended.length > 0) request = { ...request, message: `${request.message}\n\n${ended.length === 1 ? "A background process ended" : "Background processes ended"}:\n\n${ended.join("\n\n")}` };
     const open = this.session(request.project);
     // In line behind the message before it — taken now, before any await (see above).
     const line = `${this.refOfSession(open)}/${request.taskId}`;
@@ -8283,6 +8309,111 @@ export class AppService {
     timer.unref?.();
     return timer;
   })();
+
+// --- a session's background processes (decision 0032) ----------------------
+
+  /** Each task's processes its agent started and left running. */
+  private readonly sessionProcesses = new Map<string, SessionProcesses>();
+  /**
+   * Where every process a task's commands start is kept together (ruling 7): one Job Object per task on
+   * Windows, one systemd slice on Linux, through one helper per engine; nothing on macOS.
+   */
+  private readonly containment = new Containment();
+  private readonly processGroups = new Map<string, ContainmentGroup>();
+  /** The settings each task's processes answer to, as its last run or turn read them. */
+  private readonly processSettings = new Map<string, { stopIdleAfterMinutes: number; backgroundLimit: number }>();
+  /** When each background process's tree last used the CPU, and how much it had used then. */
+  private readonly processCpu = new Map<string, { seconds: number; since: number }>();
+  private readonly processReaper: ReturnType<typeof setInterval> = (() => {
+    const timer = setInterval(() => this.reapIdleProcesses(), SHELL_REAP_EVERY_MS);
+    timer.unref?.();
+    return timer;
+  })();
+
+  /** A task's processes, made on first use; the settings are the task's latest. */
+  private processesOf(taskId: string, open: ProjectSession, config: JairaConfigOf): SessionProcesses {
+    this.shellOwners.set(taskId, open);
+    this.processSettings.set(taskId, { stopIdleAfterMinutes: config.processes?.stopIdleAfterMinutes ?? 0, backgroundLimit: config.processes?.backgroundLimit ?? 0 });
+    let kept = this.sessionProcesses.get(taskId);
+    if (kept === undefined) {
+      kept = new SessionProcesses(new NodeExec(), { limit: () => this.processSettings.get(taskId)?.backgroundLimit ?? 0 });
+      this.sessionProcesses.set(taskId, kept);
+    }
+    return kept;
+  }
+
+  /** A task's processes if it has any, for the System tools (which do not read the config). */
+  private processesIfAny(taskId: string): SessionProcesses | undefined {
+    return this.sessionProcesses.get(taskId);
+  }
+
+  /** What a task's command left running: Windows finds it through the System tools' process list; the permission decides. */
+  private leftRunningFor(_open: ProjectSession, _taskId: string): LeftRunningOptions {
+    const backend = systemBackendFor();
+    return {
+      ...(backend !== undefined ? { lister: () => backend.processes() } : {}),
+      // The call's own permission set: `shell --run_in_background`, narrowed by each program left (ruling 5).
+      decide: (left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left),
+    };
+  }
+
+  /** A task's containment group, made on first use (and the engine's helper with it). */
+  private processGroupOf(taskId: string): ContainmentGroup {
+    let group = this.processGroups.get(taskId);
+    if (group === undefined) {
+      void this.containment.ready();
+      group = this.containment.group(taskId);
+      this.processGroups.set(taskId, group);
+    }
+    return group;
+  }
+
+  /** The task lets its processes go: every one still running is stopped, and its group with what is left in it. */
+  private letProcessesGo(taskId: string, why: string): void {
+    const group = this.processGroups.get(taskId);
+    if (group !== undefined) {
+      this.processGroups.delete(taskId);
+      // What the session's processes started and nothing else reached: the group's members.
+      void group.stopAll().finally(() => group.close());
+    }
+    const kept = this.sessionProcesses.get(taskId);
+    if (kept === undefined) return;
+    const stopped = kept.stopAll();
+    this.sessionProcesses.delete(taskId);
+    this.processSettings.delete(taskId);
+    if (stopped > 0) this.log({ level: "info", source: "process", message: `stopped ${stopped} background process${stopped === 1 ? "" : "es"}: ${why}`, taskId });
+  }
+
+  /**
+   * `processes.stopIdleAfterMinutes` (decision 0032, ruling 9), once a minute: a background process is
+   * stopped when nothing in its tree listens on a port, the tree has used no CPU for that long, and
+   * nothing runs in its task — the idle live shell's rule. Where the platform cannot say (`ps` and
+   * `lsof` are POSIX's), nothing is stopped.
+   */
+  private reapIdleProcesses(): void {
+    const now = Date.now();
+    for (const [taskId, kept] of this.sessionProcesses) {
+      const minutes = this.processSettings.get(taskId)?.stopIdleAfterMinutes ?? 0;
+      if (minutes <= 0) continue;
+      const open = this.shellOwners.get(taskId);
+      if (open !== undefined && open.live.has(taskId)) continue;
+      for (const p of kept.running()) {
+        const key = `${taskId}:${p.pid}:${p.startedAt}`;
+        const seconds = treeCpuSeconds(p.pid);
+        if (seconds === undefined) continue;
+        const seen = this.processCpu.get(key);
+        if (seen === undefined || seconds > seen.seconds + 0.01) {
+          this.processCpu.set(key, { seconds, since: now });
+          continue;
+        }
+        if (now - seen.since < minutes * 60_000) continue;
+        if (listensOnAPort(processTreeOf(p.pid)) !== false) continue;
+        this.processCpu.delete(key);
+        kept.stop(p.pid);
+        this.log({ level: "info", source: "process", message: `stopped \`${p.command}\` (${p.pid}): idle ${minutes} minutes (processes.stopIdleAfterMinutes)`, taskId });
+      }
+    }
+  }
 
   /** A task's shell for its `shell` tool: its session, the shell each agent is set to, and where a live one cannot run. */
   private taskShells(open: ProjectSession, taskId: string, config: JairaConfigOf): TaskShells {
@@ -10794,6 +10925,8 @@ export class AppService {
     const session = this.session(request.project);
     const now = Date.now();
     const changed = request.taskIds.filter((taskId) => (request.undo === true ? session.project.runtime.unarchive(taskId, now) : session.project.runtime.archive(taskId, now)));
+    // A closed task lets its background processes go (decision 0032, ruling 9).
+    if (request.undo !== true) for (const taskId of changed) this.letProcessesGo(taskId, "the task was archived");
     if (changed.length > 0) {
       // An archived task waits on nobody; an unarchived one is waiting again on whatever it was.
       this.refreshRecoveredAsks(session);
@@ -10848,6 +10981,7 @@ export class AppService {
    */
   async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
     const session = this.session(project);
+    this.letProcessesGo(taskId, "the task was deleted");
     const live = session.live.get(taskId);
     if (live !== undefined && this.isProgramConversation(session, taskId)) {
       this.cancelTaskIn(session, taskId);

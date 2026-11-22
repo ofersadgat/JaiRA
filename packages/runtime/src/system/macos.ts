@@ -27,6 +27,7 @@ import {
   type InstallResult,
   type LogQuery,
   type OpenRequest,
+  type OutputTargets,
   type PowerAction,
   type ProcessRow,
   type ReadSettingsRequest,
@@ -42,6 +43,7 @@ import {
   type WindowRow,
   type WriteSettingsRequest,
 } from "./types";
+import { lsofTargets } from "../processOutput";
 
 /** Run a program to its end, its arguments an array; `input` on stdin. */
 export function run(program: string, args: readonly string[], options: { timeoutMs?: number; input?: string | Uint8Array; signal?: AbortSignal } = {}): Promise<{ code: number; stdout: string; stderr: string; bytes: Buffer }> {
@@ -428,6 +430,33 @@ export class MacSystem implements SystemBackend {
 
   async processes(): Promise<ProcessRow[]> {
     return parsePs(await out("/bin/ps", ["-axo", "pid=,ppid=,rss=,time=,lstart=,comm="]));
+  }
+
+  /** Each process's account (decision 0032, ruling 4): `ps` reads every one's. */
+  async owners(): Promise<Record<string, string>> {
+    const owners: Record<string, string> = {};
+    for (const line of (await out("/bin/ps", ["-axo", "pid=,user="])).split(/\r?\n/)) {
+      const m = /^\s*(\d+)\s+(\S+)\s*$/.exec(line);
+      if (m !== null) owners[m[1]!] = m[2]!;
+    }
+    return owners;
+  }
+
+  /**
+   * Where `pid`'s stdout and stderr go (decision 0032, ruling 6): `lsof` on descriptors 1 and 2, each
+   * one's type and name. `lsof` says nothing of another account's process without root.
+   */
+  async outputTargets(pid: number): Promise<OutputTargets> {
+    const done = await run("/usr/sbin/lsof", ["-a", "-p", String(pid), "-d", "1,2", "-F", "ftn"], { timeoutMs: 15_000 });
+    return lsofTargets(done.stdout, done.code === 0 ? undefined : firstLines(done.stderr) || `no descriptors of ${pid} could be listed — it has ended, or it is another account's`);
+  }
+
+  /** A group's members as Directory Services lists them (`users:`); those for whom it is only the primary group are not. */
+  async groupMembers(group: string): Promise<string[]> {
+    const text = await out("/usr/bin/dscacheutil", ["-q", "group", "-a", "name", group]);
+    if (!/^name:/m.test(text)) throw new SystemToolRefusal(`there is no group '${group}' on this Mac`);
+    const users = /^users:\s*(.*)$/m.exec(text)?.[1] ?? "";
+    return users.split(/\s+/).filter((u) => u.length > 0);
   }
 
   async stopProcess(pid: number, options: { started?: string; tree: boolean; force: boolean }): Promise<{ stopped: boolean; how: string }> {

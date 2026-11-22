@@ -45,6 +45,7 @@ export * from "./structured";
 export * from "./unifiedDiff";
 export * from "./grammars";
 export * from "./toolVocabulary";
+export * from "./toolFlags";
 export * from "./toolDisplay";
 export * from "./agentTools";
 export * from "./permissionSets";

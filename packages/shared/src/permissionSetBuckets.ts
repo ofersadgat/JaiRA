@@ -20,6 +20,7 @@ import { modeWord, sameMode, SMART_MODE, type PermissionModeDecl, type ToolImple
 import { holdsTool, MODE_WHEN_UNSET, modeDeclOf, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
 import { RESERVED_LAYER_IDS } from "./permissionLayers";
 import type { SetLayer } from "./view";
+import { parseToolFlagSubject } from "./toolFlags";
 
 /** The bucket a conversation opens on when nothing it inherits is any bucket's permission set: the top level. */
 export const DEFAULT_PERMISSION_SET_BUCKET = "";
@@ -61,6 +62,11 @@ export function permissionSetSignature(permissionSet: PermissionSet, registered?
       if (entry.unavailable === true) lines.push([subject, modeDeclOf(entry), ""]);
       if (!holdsTool(permissionSet, subject)) continue;
       lines.push([subject, modeDeclOf(entry), entry.implementation ?? "app"]);
+    } else if (entry.kind === "tool-flag") {
+      // A flag line refines its tool (decision 0032, ruling 1a): stale with it where the tool is.
+      const tool = parseToolFlagSubject(subject)?.tool;
+      if (known !== undefined && tool !== undefined && !known.has(tool)) continue;
+      lines.push([subject, modeDeclOf(entry), ""]);
     } else {
       lines.push([subject, modeDeclOf(entry), ""]);
     }
