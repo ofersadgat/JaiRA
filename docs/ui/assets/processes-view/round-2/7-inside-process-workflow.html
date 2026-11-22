@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/terminal-card">
+<meta name="state" content="processes as terminals, round 2 · Inside the Process workflow">
+<meta name="captured" content="2026-11-21">
+<meta name="reflects" content="proposed">
+<title>processes · round 2 · 7 Inside the Process workflow</title>
+<link rel="stylesheet" href="processes.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-place-main" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></symbol>
+<symbol id="i-place-split" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></symbol>
+<symbol id="i-place-panel" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-cross" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></symbol>
+<symbol id="i-escape" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+<symbol id="i-adopt" viewBox="0 0 24 24"><path d="M4 12h11"/><path d="m11 8 4 4-4 4"/><path d="M19 5v14"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M2.5 19.5c1.2-3 3.6-4.5 6.5-4.5s5.3 1.5 6.5 4.5"/><path d="M16 4.3a3.5 3.5 0 0 1 0 6.4"/><path d="M18 15.3c1.6.7 2.8 2.1 3.5 4.2"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><path d="M7 7h10v10H7Z"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A9.9 9.9 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.6 6 10 6a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8Z"/><path d="M14 3v5h5"/></symbol>
+<symbol id="i-window" viewBox="0 0 24 24"><path d="M4 5h16v14H4Z"/><path d="M4 9h16"/><path d="M7 13l2 1.5L7 16"/></symbol>
+<symbol id="i-pipe" viewBox="0 0 24 24"><path d="M3 9h12a3 3 0 0 1 3 3v8"/><path d="M3 15h9a0 0 0 0 1 0 0v5"/><path d="M21 20h-6"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M8 3h8l-1 6 3 3H6l3-3Z"/></symbol>
+<symbol id="i-fold" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/><path d="m9 10 2 2-2 2"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5Z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-diff" viewBox="0 0 24 24"><path d="M12 4v8M8 8h8"/><path d="M8 18h8"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14"/><path d="M15 5v14"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4Z"/><path d="M10 21h4"/></symbol>
+<symbol id="i-read" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.8 4.4L18 9.2l-4.2 1.8L12 15.4l-1.8-4.4L6 9.2l4.2-1.8Z"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="i-tree" viewBox="0 0 24 24"><path d="M5 4v13a2 2 0 0 0 2 2h3"/><path d="M5 9h5"/><path d="M14 7h6v4h-6Z"/><path d="M14 17h6v4h-6Z"/></symbol>
+<symbol id="i-table" viewBox="0 0 24 24"><path d="M4 5h16v14H4Z"/><path d="M4 10h16"/><path d="M4 14.5h16"/><path d="M10 5v14"/></symbol>
+<symbol id="i-dock" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M3 13h18"/></symbol>
+<symbol id="i-anthropic" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+</defs></svg>
+<p class="mockup-caption">processes as terminals · round 2 · Tasks · Process workflow · 7 of 9 · Inside the Process workflow</p>
+<div class="mockup-stage">
+<div class="px-win folded" style=""><nav class="px-rail"><div class="tog"></div>
+<div class="px-ritem"><span class="g">▦</span><span class="lbl">All tasks</span></div>
+<div class="px-ritem"><span class="g">✻</span><span class="lbl">All chats</span><b class="badge">3</b></div>
+<hr>
+<div class="px-ritem on"><span class="av">to</span><span class="lbl">topodiff</span><b class="badge">4</b></div>
+<div class="px-ritem"><span class="av">ja</span><span class="lbl">JaiRA</span></div>
+<div class="px-ritem"><span class="av">de</span><span class="lbl">declarative…</span></div>
+<div class="px-ritem open"><span class="av">+</span><span class="lbl">Open</span></div>
+<div class="foot"><div class="px-ritem"><span class="g">⚙</span><span class="lbl">Settings</span><b class="badge warn">1</b></div></div></nav><div class="px-body"><div class="px-room"><div class="px-tasks"><div class="px-tb-head"><span class="dim">›</span><span class="proj"><i></i>topodiff</span><span class="dim">›</span><span class="proj wf"><svg class="i sm" aria-hidden="true"><use href="#i-terminal"/></svg>Process</span><span class="dim" style="font-size:12.5px">12 process tasks · 7 running · 1 waiting for input</span><span class="grow"></span><span class="px-seg"><span class="on">This project</span><span>All projects</span></span><span class="px-select"><svg class="i sm" aria-hidden="true"><use href="#i-user"/></svg>+ Mine <svg class="i xs" aria-hidden="true"><use href="#i-chev"/></svg></span></div>
+<div class="px-states"><span class="lbl">Process</span><span class="dim" style="font-size:12px">built in · its states are the process's</span>
+<span class="grow"></span><span class="px-snode "><b>starting</b><i>0</i></span><span class="px-sarrow ">→</span><span class="px-snode on"><b>running</b><i>2</i></span><span class="px-sarrow ">→</span><span class="px-snode on"><b>listening</b><i>5</i></span><span class="px-sarrow back">⇄</span><span class="px-snode warn"><b>waiting for input</b><i>1</i></span><span class="px-sends">ends</span><span class="px-snode ok"><b>exited 0</b><i>1</i></span><span class="px-snode bad"><b>exited ≠ 0</b><i>2</i></span><span class="px-snode dim"><b>stopped</b><i>1</i></span></div>
+<div class="px-cols lanes" style="grid-template-columns: minmax(0, .55fr) minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, .9fr) minmax(0, 1fr) minmax(0, .9fr)">
+<div class="px-col "><div class="px-colh">starting<span class="n">0</span></div><div class="empty">—</div></div>
+<div class="px-col "><div class="px-colh">running<span class="n">2</span></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">tsc --noEmit</span></div>
+<div class="row2"><span class="px-origin">this turn</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>12s</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">vitest --watch</span></div>
+<div class="row2"><span class="px-origin bg">run_in_background</span></div>
+<div class="foot"><span class="from">↰ from <a>Word-level diff spans</a></span><span>22m</span></div></div></div>
+<div class="px-col wide"><div class="px-colh">listening<span class="n">5</span></div><div class="px-tcard proc lane  hov"><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">one dev</span><span class="px-places" role="group" aria-label="Where to show it"><span class="" title="Open in the main view"><svg class="i " aria-hidden="true"><use href="#i-place-main"/></svg></span><span class="" title="Open in a split"><svg class="i " aria-hidden="true"><use href="#i-place-split"/></svg></span><span class="" title="Open in the side panel"><svg class="i " aria-hidden="true"><use href="#i-place-panel"/></svg></span></span><span class="px-more" title="More"><svg class="i " aria-hidden="true"><use href="#i-more"/></svg></span></div>
+<div class="row2"><span class="px-pmark ">:8145</span><span class="px-origin bg">run_in_background</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>4m</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">serve dist</span></div>
+<div class="row2"><span class="px-pmark ">:5050</span><span class="px-origin left"><svg class="i " aria-hidden="true"><use href="#i-adopt"/></svg>left running</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>9m</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">node.exe</span></div>
+<div class="row2"><span class="px-pmark ">:8144</span><span class="px-origin esc"><svg class="i " aria-hidden="true"><use href="#i-escape"/></svg>escaped · WMI</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>13m</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">storybook</span></div>
+<div class="row2"><span class="px-pmark ">:6006</span><span class="px-origin left"><svg class="i " aria-hidden="true"><use href="#i-adopt"/></svg>left running</span></div>
+<div class="foot"><span class="from">↰ from <a>Hunk headers in the gutter ✓</a></span><span>1h</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">postgres</span></div>
+<div class="row2"><span class="px-pmark ">:5432</span><span class="px-origin mine"><svg class="i " aria-hidden="true"><use href="#i-user"/></svg>Mine · watched</span></div>
+<div class="foot"><span>no parent task</span><span>09:12</span></div></div></div>
+<div class="px-col "><div class="px-colh">waiting for input<span class="n">1</span></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">prisma migrate dev</span></div>
+<div class="row2"><span class="px-origin bg">run_in_background</span></div><div class="note">Apply 1 pending migration? (y/N)</div>
+<div class="foot"><span class="from">↰ from <a>Word-level diff spans</a></span><span>2m</span></div></div></div>
+<div class="px-col "><div class="px-colh">exited 0<span class="n">1</span></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">fixture build</span></div>
+<div class="row2"><span class="px-pmark ok">exit 0</span><span class="px-origin bg">run_in_background</span></div>
+<div class="foot"><span class="from">↰ from <a>Nightly fixture refresh</a></span><span>04:10</span></div></div></div>
+<div class="px-col "><div class="px-colh">exited ≠ 0<span class="n">2</span></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">drizzle-kit studio</span></div>
+<div class="row2"><span class="px-pmark bad">exit 1</span><span class="px-origin bg">run_in_background</span></div><div class="note">Claude was told</div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>10:51</span></div></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">fixture-sync</span></div>
+<div class="row2"><span class="px-pmark bad">exit 1</span><span class="px-origin bg">run_in_background</span></div><div class="note">Claude was told</div>
+<div class="foot"><span class="from">↰ from <a>Nightly fixture refresh</a></span><span>04:12</span></div></div></div>
+<div class="px-col "><div class="px-colh">stopped<span class="n">1</span></div><div class="px-tcard proc lane  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">one dev --port 8146</span></div>
+<div class="row2"><span class="px-origin bg">run_in_background</span></div><div class="note">stopped by you</div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>10:40</span></div></div></div>
+</div></div></div></div></div>
+</div>
+<div class="px-why"><h2>7 · Inside the Process workflow</h2><ul>
+<li>Opened like any workflow, <b>Process</b> shows its states: a strip in the shape of its state machine (<code>starting → running → listening ⇄ waiting for input</code>, and the ends <code>exited 0</code>, <code>exited ≠ 0</code>, <code>stopped</code>), each with its count, and under it a lane per state.</li>
+<li>Each process task sits in its current state. <code>one dev</code> is listening on :8145. <code>serve dist</code> is listening and left running. The escaped <code>node.exe</code> is listening, marked escaped. <code>storybook</code> is still listening for a done task, and <code>postgres</code> is listening, watched from Mine with no parent task. <code>prisma migrate dev</code> waits for input, <code>drizzle-kit studio</code> exited 1 (Claude was told), and <code>one dev --port 8146</code> was stopped by you.</li>
+<li>The two origins that matter most read across the lanes without needing lanes of their own: amber for escaped, dashed for left running. Hover a card (<code>one dev</code>) for the three places and <code>…</code>.</li>
+<li><code>This project | All projects</code> and <code>+ Mine</code> widen what the workflow holds: the same scopes as the Terminals tab.</li></ul></div>
+</body>
+</html>

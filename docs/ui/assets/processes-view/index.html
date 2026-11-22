@@ -1,9 +1,29 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>processes as terminals · eight proposals</title>
+<html lang="en"><head><meta charset="utf-8"><title>processes as terminals · proposals</title>
 <link rel="stylesheet" href="processes.css">
 <script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
-<style>body{font-family:var(--font-app);color:var(--text);background:var(--bg)} iframe{width:1780px;height:1250px;border:0;display:block;margin:0 0 28px} h1{font-size:18px;margin:0 0 4px} h2{font-size:14px;margin:0 0 2px} p{color:var(--dim);margin:0 0 18px}</style></head>
-<body class="mockup"><h1>Processes as terminals: eight proposals</h1><p>No Processes view: an agent's background, left-running and escaped processes, and any process from another scope, are terminals (decisions 0028 and 0032). Same session on every board: topodiff on win-desk. Add #dark to the address for the dark theme.</p>
+<style>iframe{width:1780px;height:1250px;border:0;display:block;margin:0 0 28px} h1{font-size:18px;margin:0 0 4px} h2{font-size:14px;margin:0 0 2px} h3{font-size:16px;margin:28px 0 10px;padding-top:14px;border-top:1px solid var(--line)} p{color:var(--dim);margin:0 0 18px}</style></head>
+<body class="mockup"><h1>Processes as terminals</h1><p>No Processes view: an agent's background, left-running and escaped processes, and any process from another scope, are terminals (decisions 0028 and 0032). Same session on every board: topodiff on win-desk. Add #dark to the address for the dark theme.</p>
+<h3>Round 2</h3><p>Round 1's 7 (the card) everywhere, 6's List/Tree toggle with hover places and open-in-line, and a process as a task: its workflow is the built-in Process, whose states are the process states.</p>
+<h2>1 · The card, live in its row</h2><p>Round 1's 7 kept: a background command's card stays live in its row (ports, CPU and memory, a load trace, the log, Tell Claude when it prints…, Stop). It is the one card every place shows.</p>
+<iframe src="round-2/1-card-in-row.html" title="The card, live in its row" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>2 · The Terminals tab, List</h2><p>List mode: hovering a row shows the same three places and … as the card; pressing a row opens it in line, the row becoming the card (here the dev server and postgres).</p>
+<iframe src="round-2/2-list.html" title="The Terminals tab, List" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>3 · The Terminals tab, Tree</h2><p>Tree mode: session, process, children (cmd, node, esbuild, conhost), the escaped node.exe under WmiPrvSE.exe; a hovered node shows the same places, and the escaped one is open in line.</p>
+<iframe src="round-2/3-tree.html" title="The Terminals tab, Tree" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>4 · The card in a split</h2><p>Split pressed on the card: the same card fills a split beside the chat, Split lit on it, on the row in the transcript, and on the row in the Terminals tab.</p>
+<iframe src="round-2/4-in-a-split.html" title="The card in a split" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>5 · The card in the main view</h2><p>Main view pressed: the card takes the main view (the conversation a ‹ away), Main lit on it and on its row in the Terminals tab.</p>
+<iframe src="round-2/5-in-the-main-view.html" title="The card in the main view" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>6 · A process is a task</h2><p>Every process is a task whose workflow is the built-in Process: a column on the board like Session or Planning, its cards' badges are process states, and the sidebar lists processes as task rows.</p>
+<iframe src="round-2/6-process-is-a-task.html" title="A process is a task" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>7 · Inside the Process workflow</h2><p>Going into the Process column opens the pseudo-workflow: its states as a strip and as lanes, every process task sitting in its current state, its origin on its card.</p>
+<iframe src="round-2/7-inside-process-workflow.html" title="Inside the Process workflow" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>8 · A process task, opened</h2><p>Opening a process task opens its task view, and that view is the card: crumbs topodiff › Process › one dev, its Process state and the states it went through, its origin and its parent task.</p>
+<iframe src="round-2/8-process-task-opened.html" title="A process task, opened" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h2>9 · Process tasks nested in the sidebar</h2><p>The sidebar's Tasks tab nests each process task under the task that started it, with its Process state on the row; a done parent with a live child stays findable, and an orphan (postgres from Mine) stands alone.</p>
+<iframe src="round-2/9-nested-in-the-sidebar.html" title="Process tasks nested in the sidebar" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
+<h3>Round 1</h3>
 <h2>1 · Sections and a scope switch</h2><p>The Terminals tab grows sections (Background, This turn, Escaped, Ended) and a scope switch at its top; another scope's process opens like any terminal.</p>
 <iframe src="1-sections.html" title="Sections and a scope switch" onload="if(location.hash==='#dark'){this.contentWindow.location.hash='dark';this.contentWindow.document.documentElement.dataset.theme='dark'}"></iframe>
 <h2>2 · Scope chips over one list</h2><p>Scopes are chips that add to one list (This conversation + Mine); every row is a terminal with a status glyph, and a row opens in place before it is placed.</p>

@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/components/terminal-card">
+<meta name="state" content="processes as terminals, round 2 · A process is a task">
+<meta name="captured" content="2026-11-21">
+<meta name="reflects" content="proposed">
+<title>processes · round 2 · 6 A process is a task</title>
+<link rel="stylesheet" href="processes.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body class="mockup">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-terminal" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-place-main" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></symbol>
+<symbol id="i-place-split" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></symbol>
+<symbol id="i-place-panel" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18.5" cy="12" r="1.3" fill="currentColor"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="i-cross" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><path d="M9 9h9a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Z"/><path d="M5 15V5a1 1 0 0 1 1-1h9"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M12 8v5"/><path d="M12 16.5h.01"/></symbol>
+<symbol id="i-escape" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+<symbol id="i-adopt" viewBox="0 0 24 24"><path d="M4 12h11"/><path d="m11 8 4 4-4 4"/><path d="M19 5v14"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M2.5 19.5c1.2-3 3.6-4.5 6.5-4.5s5.3 1.5 6.5 4.5"/><path d="M16 4.3a3.5 3.5 0 0 1 0 6.4"/><path d="M18 15.3c1.6.7 2.8 2.1 3.5 4.2"/></symbol>
+<symbol id="i-chip" viewBox="0 0 24 24"><path d="M7 7h10v10H7Z"/><path d="M10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-eyeoff" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 6.1A9.9 9.9 0 0 1 12 6c6.4 0 10 6 10 6a17 17 0 0 1-3.2 3.9"/><path d="M6.6 6.6A17 17 0 0 0 2 12s3.6 6 10 6a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8Z"/><path d="M14 3v5h5"/></symbol>
+<symbol id="i-window" viewBox="0 0 24 24"><path d="M4 5h16v14H4Z"/><path d="M4 9h16"/><path d="M7 13l2 1.5L7 16"/></symbol>
+<symbol id="i-pipe" viewBox="0 0 24 24"><path d="M3 9h12a3 3 0 0 1 3 3v8"/><path d="M3 15h9a0 0 0 0 1 0 0v5"/><path d="M21 20h-6"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M8 3h8l-1 6 3 3H6l3-3Z"/></symbol>
+<symbol id="i-fold" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/><path d="m9 10 2 2-2 2"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5Z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-diff" viewBox="0 0 24 24"><path d="M12 4v8M8 8h8"/><path d="M8 18h8"/></symbol>
+<symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14"/><path d="M15 5v14"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4Z"/><path d="M10 21h4"/></symbol>
+<symbol id="i-read" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M21 11.5 12.5 20a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 1.8 4.4L18 9.2l-4.2 1.8L12 15.4l-1.8-4.4L6 9.2l4.2-1.8Z"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="i-tree" viewBox="0 0 24 24"><path d="M5 4v13a2 2 0 0 0 2 2h3"/><path d="M5 9h5"/><path d="M14 7h6v4h-6Z"/><path d="M14 17h6v4h-6Z"/></symbol>
+<symbol id="i-table" viewBox="0 0 24 24"><path d="M4 5h16v14H4Z"/><path d="M4 10h16"/><path d="M4 14.5h16"/><path d="M10 5v14"/></symbol>
+<symbol id="i-dock" viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M3 13h18"/></symbol>
+<symbol id="i-anthropic" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M17.3041 3.541h-3.6718l6.696 16.918H24Zm-10.6082 0L0 20.459h3.7442l1.3693-3.5527h7.0052l1.3693 3.5528h3.7442L10.5363 3.5409Zm-.3712 10.2232 2.2914-5.9456 2.2914 5.9456Z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+</defs></svg>
+<p class="mockup-caption">processes as terminals · round 2 · Tasks · the Process workflow · 6 of 9 · A process is a task</p>
+<div class="mockup-stage">
+<div class="px-win" style="grid-template-columns: 67px 300px 4px minmax(0, 1fr)"><nav class="px-rail"><div class="tog"></div>
+<div class="px-ritem"><span class="g">▦</span><span class="lbl">All tasks</span></div>
+<div class="px-ritem"><span class="g">✻</span><span class="lbl">All chats</span><b class="badge">3</b></div>
+<hr>
+<div class="px-ritem on"><span class="av">to</span><span class="lbl">topodiff</span><b class="badge">4</b></div>
+<div class="px-ritem"><span class="av">ja</span><span class="lbl">JaiRA</span></div>
+<div class="px-ritem"><span class="av">de</span><span class="lbl">declarative…</span></div>
+<div class="px-ritem open"><span class="av">+</span><span class="lbl">Open</span></div>
+<div class="foot"><div class="px-ritem"><span class="g">⚙</span><span class="lbl">Settings</span><b class="badge warn">1</b></div></div></nav><nav class="px-sb">
+<div class="px-sb-head"><b>topodiff</b><span class="pick"><svg class="i sm" aria-hidden="true"><use href="#i-monitor"/></svg><i></i><svg class="i xs" aria-hidden="true"><use href="#i-chev"/></svg><s></s><svg class="i sm" aria-hidden="true"><use href="#i-folder"/></svg><svg class="i xs" aria-hidden="true"><use href="#i-chev"/></svg></span><span class="gear">⚙</span></div>
+<div class="px-sb-seg"><span>Files</span><span class="on">Tasks</span><span>Chat</span></div>
+<div class="px-sb-new"><span class="new"><span>+ New</span></span></div>
+<div class="px-sb-sort"><span>▤ Status ᵥ</span><span class="grow"></span><span>State</span><span>Name</span><span class="on">Updated ↓</span></div>
+<div class="px-sb-grp" style="color:var(--sb-accent)">Running<span class="n">7</span></div>
+<div class="px-sbt sel " style="--d:0"><div class="l1"><span class="tw"></span><span class="box"></span><span class="ellip nm">Dev server and the gutter</span><span class="st ">session</span><small>now</small></div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">one dev</span><span class="st acc">listening</span><small>4m</small></div><div class="l2">↰ Dev server and the gutter</div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">tsc --noEmit</span><span class="st acc">running</span><small>12s</small></div><div class="l2">↰ Dev server and the gutter</div></div>
+<div class="px-sbt  hov" style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">serve dist</span><span class="grow"></span><span class="px-places sb"><span><svg class="i " aria-hidden="true"><use href="#i-place-main"/></svg></span><span><svg class="i " aria-hidden="true"><use href="#i-place-split"/></svg></span><span><svg class="i " aria-hidden="true"><use href="#i-place-panel"/></svg></span></span></div><div class="l2">↰ Dev server and the gutter · left running</div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg esc"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">node.exe</span><span class="st acc">listening</span><small>13m</small></div><div class="l2">↰ Dev server and the gutter · escaped</div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">vitest --watch</span><span class="st acc">running</span><small>22m</small></div><div class="l2">↰ Word-level diff spans</div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">storybook</span><span class="st acc">listening</span><small>1h</small></div><div class="l2">↰ Hunk headers in the gutter · left running</div></div>
+<div class="px-sb-grp" style="color:var(--sb-warn)">Waiting for you<span class="n">2</span></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="box"></span><span class="ellip nm">Word-level diff spans</span><span class="st warn">human review</span><small>4m</small></div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">prisma migrate dev</span><span class="st warn">input</span><small>2m</small></div><div class="l2">↰ Word-level diff spans</div></div>
+<div class="px-sb-grp" style="color:#ff8a80">Failed<span class="n">2</span></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">drizzle-kit studio</span><span class="st bad">exited 1</span><small>10:51</small></div><div class="l2">↰ Dev server and the gutter</div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="pg "><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ellip nm">fixture-sync</span><span class="st bad">exited 1</span><small>04:12</small></div><div class="l2">↰ Nightly fixture refresh</div></div>
+<div class="px-sb-grp" style="color:var(--sb-ok)">Done<span class="n">4</span></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="box"></span><span class="ellip nm">Hunk headers in the gutter</span><span class="st ">completed</span><small>1h</small></div></div>
+<div class="px-sbt  " style="--d:0"><div class="l1"><span class="tw"></span><span class="box"></span><span class="ellip nm">Nightly fixture refresh</span><span class="st ">completed</span><small>6h</small></div></div>
+</nav><div class="px-splitter"></div><div class="px-body"><div class="px-room"><div class="px-tasks"><div class="px-tb-head"><span class="dim">›</span><span class="proj"><i></i>topodiff</span><span class="cnt acc">▶ 8</span><span class="cnt warn">⏸ 2</span><span class="cnt bad">✗ 2</span><span class="cnt ok">✓ 4</span><span class="newt">+ New task</span></div><div class="px-cols" style="grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.25fr)">
+<div class="px-col"><div class="px-colh">Session<span class="n">3</span></div><div class="px-tcard sel"><div class="top"><span class="ttl">Dev server and the gutter</span><span class="px-tst run">▶ running</span></div><div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span></div><div class="px-kids"><span class="px-kid">↳ 6 processes</span><span class="dim" style="font-size:12px">4 running · 1 escaped · 1 exited 1</span></div><div class="foot"><span>12 steps</span><span>now</span></div></div>
+<div class="px-tcard "><div class="top"><span class="ttl">Hunk headers in the gutter</span><span class="px-tst done">✓ done</span></div><div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span></div><div class="px-kids"><span class="px-kid">↳ 1 process</span><span class="dim" style="font-size:12px">storybook still listening</span></div><div class="foot"><span>completed</span><span>1 h ago</span></div></div>
+<div class="px-tcard "><div class="top"><span class="ttl">Seed the diff cache</span><span class="px-tst done">✓ done</span></div><div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span></div><div class="foot"><span>completed</span><span>1 d ago</span></div></div></div>
+<div class="px-col"><div class="px-colh">Planning<span class="n">1</span></div><div class="px-tcard "><div class="top"><span class="ttl">Word-level diff spans</span><span class="px-tst wait">⏸ waiting for you</span></div><div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-sub" style="color:var(--dim)">↩ Human Review</span></div><div class="px-kids"><span class="px-kid">↳ 2 processes</span><span class="dim" style="font-size:12px">1 waiting for input</span></div><div class="foot"><span>feature/plan/human_review</span><span>4 m ago</span></div></div><div style="height:10px"></div><div class="px-colh">Control<span class="n">0</span></div><div class="empty">—</div></div>
+<div class="px-col"><div class="px-colh">Events<span class="n">1</span></div><div class="px-tcard "><div class="top"><span class="ttl">Nightly fixture refresh</span><span class="px-tst done">✓ done</span></div><div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span></div><div class="px-kids"><span class="px-kid">↳ 2 processes</span><span class="dim" style="font-size:12px">1 exited 1</span></div><div class="foot"><span>completed</span><span>6 h ago</span></div></div><div style="height:10px"></div><div class="px-colh">Hello-world self-test<span class="n">0</span></div><div class="empty">—</div></div>
+<div class="px-col proccol"><div class="px-colh"><span class="px-open">Process <svg class="i sm" aria-hidden="true"><use href="#i-right"/></svg></span><span class="dim" style="font:400 12px var(--font-app);margin-left:8px">built in</span><span class="n">12</span></div><div class="px-tcard proc sel "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">one dev</span><span class="px-tst listen">◉ listening <b>:8145</b></span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin bg">run_in_background</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>4m</span></div></div>
+<div class="px-tcard proc  hov"><span class="px-hovacts"><span class="px-places" role="group" aria-label="Where to show it"><span class="" title="Open in the main view"><svg class="i " aria-hidden="true"><use href="#i-place-main"/></svg></span><span class="" title="Open in a split"><svg class="i " aria-hidden="true"><use href="#i-place-split"/></svg></span><span class="" title="Open in the side panel"><svg class="i " aria-hidden="true"><use href="#i-place-panel"/></svg></span></span><span class="px-more" title="More"><svg class="i " aria-hidden="true"><use href="#i-more"/></svg></span></span><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">serve dist</span><span class="px-tst listen">◉ listening <b>:5050</b></span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin left"><svg class="i " aria-hidden="true"><use href="#i-adopt"/></svg>left running</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>9m</span></div></div>
+<div class="px-tcard proc  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">node.exe</span><span class="px-tst listen">◉ listening <b>:8144</b></span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin esc"><svg class="i " aria-hidden="true"><use href="#i-escape"/></svg>escaped · WMI</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>13m</span></div></div>
+<div class="px-tcard proc  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">prisma migrate dev</span><span class="px-tst wait">⏸ waiting for input</span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin bg">run_in_background</span></div><div class="note">Apply 1 pending migration? (y/N)</div>
+<div class="foot"><span class="from">↰ from <a>Word-level diff spans</a></span><span>2m</span></div></div>
+<div class="px-tcard proc  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">tsc --noEmit</span><span class="px-tst run">▶ running</span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin">this turn</span></div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>12s</span></div></div>
+<div class="px-tcard proc  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">storybook</span><span class="px-tst listen">◉ listening <b>:6006</b></span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin left"><svg class="i " aria-hidden="true"><use href="#i-adopt"/></svg>left running</span></div>
+<div class="foot"><span class="from">↰ from <a>Hunk headers in the gutter ✓</a></span><span>1h</span></div></div>
+<div class="px-finished">FINISHED<span class="grow"></span>4</div>
+<div class="px-tcard proc  "><div class="top"><span class="px-pglyph"><svg class="i " aria-hidden="true"><use href="#i-terminal"/></svg></span><span class="ttl">drizzle-kit studio</span><span class="px-tst fail">✗ exited 1</span></div>
+<div class="row2"><span class="px-mchip"><i></i>win-desk / topodiff</span><span class="px-origin bg">run_in_background</span></div><div class="note">Claude was told · terminating connection due to administrator command</div>
+<div class="foot"><span class="from">↰ from <a>Dev server and the gutter</a></span><span>10:51</span></div></div></div>
+</div></div></div></div></div>
+</div>
+<div class="px-why"><h2>6 · A process is a task</h2><ul>
+<li><b>A process is a task.</b> Its type is process and its workflow is the built-in <b>Process</b>. On the board that is a column among Session, Planning and Events, and its cards are task cards: title, a badge with the state (<code>◉ listening :8145</code>, <code>▶ running</code>, <code>⏸ waiting for input</code>, <code>✗ exited 1</code>), the machine and workspace chip, and the time.</li>
+<li>Where it came from is a fact of the task, beside the machine chip: <code>run_in_background</code>, <code>this turn</code>, <code>left running</code>, <code>escaped · WMI</code>, <code>Mine · watched</code>. The task that started it is its parent: the card says <code>↰ from Dev server and the gutter</code>, and the parent's card counts it (<code>↳ 6 processes · 4 running · 1 escaped · 1 exited 1</code>).</li>
+<li><em>Why left running and escaped are origins, not states:</em> a state says what the process is doing now and what can come next. <code>serve</code> and the escaped <code>node.exe</code> are both listening, and they will exit or be stopped like any other. Left running and escaped say how they came to be the task's, and that never changes, so they sit with the other facts. As states they would hide that both are listening on a port.</li>
+<li>The sidebar's Tasks tab lists processes as task rows in the same status groups (Running, Waiting for you, Failed, Done), with a process glyph, their Process state and <code>↰ from …</code> under the title. Hover gives the three places (<code>serve dist</code>); the selected task's children are highlighted on the board.</li>
+<li>Pressing the column's head (<code>Process ›</code>) goes into the workflow (board 7). Pressing a card opens the task, which is its card (board 8).</li></ul></div>
+</body>
+</html>

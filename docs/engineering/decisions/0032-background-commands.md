@@ -339,6 +339,54 @@ The second draft's questions, its separate line, and the third draft's question,
    not readable as `spawned`: its output goes to Claude Code's own files. `read_process` reads those as
    `file` where they can be found.
 
+## The view (the person, 2026-11-21)
+
+Over [the proposals](../../ui/assets/processes-view/index.html):
+- On round 1: "I think 7 is the closest with the card, appearing in terminals, split view, etc. I like
+  the toggle for tree/list view of 6, but mouse over should give the same main view, split view, context
+  view buttons and if you click on it, it should open in line. we probably also want a section of tasks
+  to show processes, the task can have substates which represent process states."
+- On round 2: "The idea is to treat a process as a workflow that goes through the different process
+  states. Therefore, processes isnt a separate section, its simply a task type like any other. Then, you
+  can go into that pseudo workflow to see the different ones in their own states. The same applies to
+  the left bar: a process should appear just like a task."
+- Then: "Yes, build it". What is built is round 2, boards 1–9.
+
+1. **The card (round 1, board 7)** is a process wherever it is shown: in the chat row, opened in place
+   in the Terminals tab, in a split, in the main view and in the side panel. It shows:
+   - the ports, as links;
+   - the pid, CPU, memory and a load trace;
+   - the last lines of output;
+   - "Tell Claude when it prints…", which takes a pattern and sends the task a message when the output
+     matches it;
+   - `Stop` and the three place buttons.
+2. **The Terminals tab has a List | Tree toggle** (round 1, board 6):
+   - List mode is the rows.
+   - Tree mode goes from the session to its processes to what they started, with the escaped ones
+     under the program that started them (`WmiPrvSE.exe`), and the other scopes folded below.
+   - Hovering a row or node shows the three place buttons, `…` and `Stop`. Clicking it opens it in
+     place as the card.
+3. **A process is a task.**
+   - Its type is `process`, and its workflow is the built-in `Process`.
+   - Its states are starting → running → listening (a port is open) ⇄ waiting for input, ending in
+     exited 0, exited ≠ 0 or stopped.
+   - Where it came from is a fact of the task, not a state: `run_in_background`, this turn, left
+     running, escaped, Claude's own `Bash`, or watched from another scope. A process left running or
+     escaped is still listening, and still exits or is stopped like any other.
+   - Its parent is the task whose agent started it.
+4. **On the Tasks board, `Process` is a column** like any workflow, and each process is an ordinary task
+   card with its state, machine, origin and parent. The parent's card counts its processes. Opening the
+   column shows the workflow: a state strip with counts, and a lane per state. "This project | All
+   projects" and "+ Mine" widen it to the Terminals tab's scopes.
+5. **Opening a process task** opens its task view, which is the card. The crumbs read
+   project › Process › name, and the view shows its parent and the states it went through.
+6. **In the sidebar's Tasks tab**, a process is a task row in the same status groups, with a process
+   glyph. A Nested | Flat toggle shows processes under the task that started them; a done task keeps
+   its live process under it.
+7. **What a process task is not.** It is not persisted as a task file. It lives as long as the engine
+   keeps the process: the task lets it go, or the app quits. A watched process from another scope is
+   one only while it is watched.
+
 ## Consequences
 
 - An agent can run a dev server and work against it, on every executor that uses JaiRA's shell. You see
