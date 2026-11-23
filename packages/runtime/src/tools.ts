@@ -1025,7 +1025,11 @@ export function gateTools(options: {
             const what = lineNarrowing(tool, input, block);
             return where === undefined || what === undefined ? (where ?? what) : strictestOf(where, what);
           },
-          { narrows: (tool: { name: string; readOnly?: boolean }, block: Parameters<ScopeNarrowing>[2]) => mayNarrow(placeNarrowing, tool, block) || mayNarrow(lineNarrowing, tool, block) },
+          {
+            narrows: (tool: { name: string; readOnly?: boolean }, block: Parameters<ScopeNarrowing>[2]) => mayNarrow(placeNarrowing, tool, block) || mayNarrow(lineNarrowing, tool, block),
+            // What the line's narrowing reads that only the machine knows, readied before it is asked.
+            ...(lineNarrowing.prepare !== undefined ? { prepare: lineNarrowing.prepare } : {}),
+          },
         );
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
   const gate = createToolGate(() => {
@@ -1312,7 +1316,7 @@ export function toolPlaceAnswer(tool: string, line: PlacedLine, other: Permissio
   const spec = TOOL_SPEC_BY_NAME.get(tool);
   const kind = spec?.scope ?? placeKindOf(tool);
   if (kind === undefined) return undefined;
-  const calls = callPlacesOf(spec, input, options.root);
+  const calls = callPlacesOf(spec, input, options.root, options);
   const resolved = resolvePlaces(line.places, kind, calls, options);
   const answers: ToolPlaceAnswer[] = [];
   if (resolved.decision !== undefined) {
@@ -1485,7 +1489,7 @@ function directCallDecision(
   const kind = spec?.scope ?? placeKindOf(tool);
   if (kind === undefined) return undefined;
   // A path as a shell part's is: resolved against the project, so the dialog and the record name one place.
-  const places = callPlacesOf(spec, input, options.root).map((place) => (kind === "path" && options.root !== undefined && !isAbsolutePath(place) ? absolutize(place, options.root) : place));
+  const places = callPlacesOf(spec, input, options.root, options).map((place) => (kind === "path" && options.root !== undefined && !isAbsolutePath(place) ? absolutize(place, options.root) : place));
   const at = places[0];
   if (at === undefined) return undefined;
   const layer = layerOfLine(block.stack, answer.subject, answer.place);

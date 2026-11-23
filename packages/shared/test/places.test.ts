@@ -5,8 +5,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PermissionSetMode } from "../src/operationVocabulary";
-import { placeKindOf, placesMostSpecificFirst, resolvePlace, resolvePlaces, type PlaceOptions } from "../src/places";
-import { TOOL_SPECS } from "../src/toolVocabulary";
+import { callPlacesOf, placeKindOf, placesMostSpecificFirst, placeWidthsOf, resolvePlace, resolvePlaces, unknownProgramPlace, type PlaceOptions } from "../src/places";
+import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
 
 const ROOT = "C:/UbuntuCode/JaiRA";
 const OPTIONS: PlaceOptions = { root: ROOT, named: { "~": "C:/Users/Ofer", $WORKTREE: "C:/UbuntuCode/JaiRA-wt/t1" } };
@@ -39,7 +39,11 @@ describe("the kind of place a line is about (§3.1)", () => {
     ["read_pipeline", "repository"],
     ["start_task", "workflow"],
     ["move_task", "workflow"],
+    ["list_processes", "program"],
+    ["list_processes --scope=session", "program"],
     ["stop_process", "program"],
+    ["read_process", "program"],
+    ["wait_process", "program"],
     ["control_service", "program"],
     ["open_app", "program"],
   ])("'%s' is about a %s", (subject, kind) => {
@@ -159,6 +163,21 @@ describe("branches (§3.3)", () => {
     expect(at({ "anthropics/*": "allow", "anthropics/secret": "deny" }, "repository", "Anthropics/Secret")!.decision).toBe("deny");
     expect(at({ "feature/*": "allow" }, "workflow", "Feature/x")).toBeUndefined();
     expect(at({ "node*": "allow", "**": "ask" }, "program", "node.exe")!.place).toBe("node*");
+  });
+
+  it("reads a process named by its pid as the program it is, and one nobody can name as matched by `**` alone", () => {
+    const stop = TOOL_SPEC_BY_NAME.get("stop_process");
+    const programOfPid = (pid: number) => (pid === 4242 ? "node" : undefined);
+    expect(callPlacesOf(stop, { pid: 4242 }, undefined, { programOfPid })).toEqual(["node"]);
+    expect(callPlacesOf(stop, { pid: 9999 }, undefined, { programOfPid })).toEqual([unknownProgramPlace(9999)]);
+    expect(callPlacesOf(stop, { pid: 4242 })).toEqual(["(pid 4242)"]);
+    expect(callPlacesOf(stop, {})).toEqual([]);
+    // A resolver that throws names nothing.
+    expect(callPlacesOf(stop, { pid: 4242 }, undefined, { programOfPid: () => { throw new Error("x"); } })).toEqual(["(pid 4242)"]);
+    for (const place of ["*", "pid*", "(*", "node"]) expect(at({ [place]: "allow" }, "program", "(pid 9999)"), place).toBeUndefined();
+    expect(at({ node: "allow", "**": "deny" }, "program", "(pid 9999)")!.place).toBe("**");
+    expect(placeWidthsOf("program", "(pid 9999)")).toEqual([{ width: "anywhere", place: "**" }]);
+    expect(placeWidthsOf("program", "node")).toEqual([{ width: "this", place: "node" }, { width: "anywhere", place: "**" }]);
   });
 });
 

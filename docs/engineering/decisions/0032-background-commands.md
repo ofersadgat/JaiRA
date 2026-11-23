@@ -174,6 +174,13 @@ Each process tool takes `scope`, default `session`. Its permissions are flag lin
 `list_processes --scope=user`, `stop_process --scope=system`. The tool's bare line covers any scope
 that no flag line names.
 
+A shell command that lists or stops processes (`ps`, `pgrep`, `kill`, `Get-Process`, `tasklist`,
+`taskkill`, …) is judged as the tool at scope `all` (amended 2026-11-23, "a shell tool call calling ps
+and other command line utilities which get the process list should apply the same permissions as
+list_processes"). It reaches every process the account can, so it answers to a `--scope=all` line
+before the bare line. It never answers to a `--scope=session` line, because a command does not know
+which processes are the session's. Which programs it is about is [0023](0023-overlays-and-scopes.md) §3.1.
+
 | Scope | What it holds |
 | --- | --- |
 | `session` | Processes this task's agent started, through any call, and everything under them. The default. |

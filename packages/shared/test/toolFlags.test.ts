@@ -35,7 +35,7 @@ describe("a flag line is a subject of its own", () => {
     expect(placeKindOf("shell --run_in_background")).toBe("path");
     expect(placeKindOf("shell --run_in_background npm run dev")).toBe("path");
     expect(placeKindOf("stop_process --scope=user")).toBe("program");
-    expect(placeKindOf("list_processes --scope=user")).toBeUndefined();
+    expect(placeKindOf("list_processes --scope=user")).toBe("program");
   });
 });
 
@@ -71,9 +71,10 @@ describe("reading a set with flag lines", () => {
     expect(permissionSet.entries).toEqual({});
   });
 
-  it("refuses unavailable on a flag line, and a place map where the tool takes no place", () => {
+  it("refuses unavailable on a flag line, and takes a place map of the tool's kind on one", () => {
     expect(parsePermissionSet({ "list_processes --scope=user": "unavailable" }).issues[0]?.message).toMatch(/cannot be unavailable — what the model is handed is per tool, not per argument/);
-    expect(parsePermissionSet({ "list_processes --scope=user": { "**": "ask", x: "allow" } }).issues[0]?.message).toMatch(/takes no place/);
+    // Every tool a line can refine takes a place (the shell a path, the process tools a program).
+    expect(parsePermissionSet({ "list_processes --scope=user": { "**": "ask", node: "allow" } }).issues).toEqual([]);
   });
 });
 

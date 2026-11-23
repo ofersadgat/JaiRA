@@ -750,6 +750,19 @@ describe("a line's value (decision 0023 §1)", () => {
     expect(permissionSet.other).toBeUndefined();
   });
 
+  it("takes a map of programs on every process tool's line, bare and refined by its scope", () => {
+    const { permissionSet, issues } = parsePermissionSet({
+      list_processes: { node: "allow", "**": "ask" },
+      "list_processes --scope=user": { "python*": "allow" },
+      "list_processes --scope=session": "allow",
+      stop_process: { "**": "ask" },
+      read_process: { "**": "allow" },
+      wait_process: { "**": "allow" },
+    });
+    expect(issues).toEqual([]);
+    expect(permissionSet.entries["list_processes"]).toMatchObject({ mode: "ask", places: { node: "allow" } });
+  });
+
   it("allows unavailable on a tool, the shell and an MCP line, and a place map on a command, script, a runner and MCP", () => {
     const { issues } = parsePermissionSet({
       read_file: "unavailable",

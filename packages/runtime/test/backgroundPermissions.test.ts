@@ -45,9 +45,34 @@ describe("a direct call is judged by the flag line its arguments match (ruling 1
   });
 
   it("a flag line with places and no `**` passes a call none of them matches to the next line", () => {
-    // A `stop_process` call names a pid, no program: no place of the line matches it.
+    // A `stop_process` call names a pid, and no machine is handed in to name its program: no place of the line matches it.
     const set = setOf({ stop_process: "ask", "stop_process --scope=user": { node: "allow" } });
     expect(flagLineAnswer("stop_process", { scope: "user", pid: 4 }, set)).toEqual({ mode: "ask", subject: "stop_process" });
+  });
+
+  it("judges a process list per program at the line it reaches, the shipped `--scope=session` line standing as it did", () => {
+    const set = setOf({
+      "list_processes --scope=session": "allow",
+      list_processes: { node: "allow", "**": "ask" },
+      "list_processes --scope=all": { "python*": "allow" },
+      other: "deny",
+    });
+    // The session's own, filtered or not, as the shipped sets allow them.
+    expect(flagLineAnswer("list_processes", {}, set)).toEqual({ mode: "allow", subject: "list_processes --scope=session" });
+    expect(flagLineAnswer("list_processes", { name: "python" }, set)).toEqual({ mode: "allow", subject: "list_processes --scope=session" });
+    // The machine's: the bare line, per program.
+    expect(flagLineAnswer("list_processes", { scope: "user", name: "node" }, set)).toEqual({ mode: "allow", subject: "list_processes", place: "node" });
+    expect(flagLineAnswer("list_processes", { scope: "user", name: "python" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
+    expect(flagLineAnswer("list_processes", { scope: "user" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
+    // A flag line's own places, then — where none matches and it has no `**` — the bare line's.
+    expect(flagLineAnswer("list_processes", { scope: "all", name: "python3" }, set)).toEqual({ mode: "allow", subject: "list_processes --scope=all", place: "python*" });
+    expect(flagLineAnswer("list_processes", { scope: "all", name: "node" }, set)).toEqual({ mode: "allow", subject: "list_processes", place: "node" });
+    expect(flagLineAnswer("list_processes", { scope: "all" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
+    const policy = compilePolicy({}, { permissionSet: set });
+    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "user", name: "node" } as never, undefined as never)).toBeUndefined();
+    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "user", name: "python" } as never, undefined as never)).toBe("ask");
+    expect(allowsCall({}, set, "list_processes", { scope: "user", name: "node" }, "posix")).toBe(true);
+    expect(allowsCall({}, set, "list_processes", { scope: "user" }, "posix")).toBe(false);
   });
 
   it("is what the compiled policy narrows a call to — from the turn's set and from a state's lowered block", () => {

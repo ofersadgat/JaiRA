@@ -116,6 +116,13 @@ export interface ToolSpec {
    */
   placeArgs?: readonly string[];
   /**
+   * For a tool whose {@link scope} is `program`: the arguments that name a running process by its pid
+   * (`stop_process`'s `pid`). A pid is no program, so the call is about the program the process IS,
+   * read off the machine when the call is judged (`PlaceOptions.programOfPid`, `places.ts`); a process
+   * whose program cannot be read matches only `**`.
+   */
+  pidArgs?: readonly string[];
+  /**
    * True when JaiRA has no implementation of its own, so `app` is not a choice that can be made.
    *
    * Listed anyway, and that is the point: a tool we cannot SERVE is still a tool we can GOVERN. The
@@ -297,10 +304,15 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
   { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
   { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
-  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using", flags: PROCESS_SCOPE_FLAGS },
-  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program", flags: PROCESS_SCOPE_FLAGS },
-  { name: "read_process", label: "read_process", title: "Read process output", icon: "system", category: "system", hint: "what a running program has printed: whole for what this session started, from the first read for the rest", flags: PROCESS_SCOPE_FLAGS },
-  { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", flags: PROCESS_SCOPE_FLAGS },
+  // The process tools are about a PROGRAM, as `control_service` and `open_app` are (decision 0023 §3.1).
+  // A list names its program by its `name` filter; a list with none shows every program, so it is about
+  // no one of them, and only the line's `**` answers it (or the line below, where the map has no `**`):
+  // `{ "node": "allow" }` must not let a listing of everything through. The others name a `pid`: the
+  // call is about the program that process is, read off the machine when it is judged.
+  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using", scope: "program", placeArgs: ["name"], flags: PROCESS_SCOPE_FLAGS },
+  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
+  { name: "read_process", label: "read_process", title: "Read process output", icon: "system", category: "system", hint: "what a running program has printed: whole for what this session started, from the first read for the rest", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
+  { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
   { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running" },
   { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "program", placeArgs: ["name"] },
   { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules" },

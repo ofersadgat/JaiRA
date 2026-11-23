@@ -255,12 +255,44 @@ to read and offer them:
 | branch | `git_push`, `git_merge`, `git push` in the shell | the remote and branch pushed to, or the branch merged into |
 | repository | merge-request and CI tools | `owner/name` on the forge |
 | workflow | `start_task`, `move_task` | the workflow id |
-| program | `stop_process`, `control_service`, `open_app` | the process, service or app name |
+| program | `list_processes`, `stop_process`, `read_process`, `wait_process`, `control_service`, `open_app`; the shell's process commands (`ps`, `pgrep`, `kill`, `pkill`, `Get-Process`, `Stop-Process`, `tasklist`, `taskkill`, …) | the process, service or app name: `list_processes`'s `name` filter, `control_service`'s `name`, `open_app`'s `app`, the program a `pid` is, and the programs and pids a process command names |
 | host | `runner:ssh` | the host |
 | none | `web_search`, `screenshot` | — (a query names no place) |
 
 A map on a line whose tool takes no place is refused by the linter. An MCP tool the configuration maps
 to a standard tool takes that tool's place.
+
+The process tools are one family, and all take a program (amended 2026-11-22 and 2026-11-23).
+
+- **A list** names its program by its filter, as written, so
+  `"list_processes": { "node": "allow", "**": "ask" }` lists `node` without asking. A list with no
+  filter shows every program, so no one program's place answers for it. It goes to the line's `**`, or
+  to the next line where the map has none (§3.4), so a map naming `node` never lets a listing of
+  everything through.
+- **A pid** is about the program that process is, read off the machine when the call is judged
+  (`stop_process`, `read_process`, `wait_process`). A process the machine cannot name (it has ended,
+  or the account cannot see it) is `(pid 4242)`, which only `**` matches. A call about it and a named
+  one takes the stricter answer.
+  - The gate's narrowing is synchronous, and on Windows reading a pid's program is a second of
+    `tasklist`. So it is read beforehand, in the narrowing's `prepare` (declarative-ai's
+    `ScopeNarrowing.prepare`, awaited by `decideToolCall`), and only when the set judging the call
+    has program places on a process tool's line. Linux reads `/proc` and macOS one `ps`, at once.
+- **The shell's process commands** answer as the tool they are (decision 0019 §3), at the same places:
+  - the programs they name: `pgrep node`, `killall node`, `pidof`, `ps -C`, `Get-Process node`,
+    `Stop-Process -Name node`, `taskkill /IM node.exe`, `tasklist /FI "IMAGENAME eq node.exe"`;
+  - the programs the pids they name are: `kill 4242`, `Stop-Process 4242`, `taskkill /PID 4242`,
+    `ps -p`, `top -p`. A line run inside WSL or a container names pids the engine cannot read, so
+    they are `(pid …)`;
+  - stricter where a command can stop more than it names: `pkill node` matches `node` anywhere in a
+    name, so it is about `*node*` (it stops `nodemon` too); only `-x` or `^node$` names `node`.
+    `pkill -f` (the whole command line), a pattern that is no plain name, a job (`%1`) and a word the
+    line decides as it runs (`kill $PID`) are about no one program;
+  - nothing, where they name none (`ps aux`, `top`, `Get-Process`, `tasklist`): every program, so the
+    line's `**` answers.
+- **Flag lines.** The `--scope=` lines (decision 0032, ruling 1a) take the same places. A shell command
+  reaches every process the account can, so it answers to a `--scope=all` line before the tool's bare
+  line, and never to a `--scope=session` line. The shipped sets'
+  `"list_processes --scope=session": "allow"` lines stand as they were.
 
 **3.2 Paths.**
 - A bare path is that folder and everything under it: `"C:"`, `"src"`, `"~/.ssh"`. A path containing

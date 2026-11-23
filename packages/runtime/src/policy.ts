@@ -41,6 +41,7 @@ import type { FunctionInputs } from "@declarative-ai/exec";
 import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
+import { programOfPidOnMachine, warmProgramsOfPids } from "./programOfPid";
 import {
   SHELL_SUBJECT,
   answerOfLines,
@@ -102,6 +103,7 @@ import {
   linePlaces,
   normalizePath,
   placeKindOf,
+  programPlacesOfPids,
   shellSubjects,
   toolModes,
   placeWidthsOf,
@@ -686,6 +688,10 @@ function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: r
         const host = part.command !== undefined ? sshHostOf(part.command) : undefined;
         return host !== undefined ? [host] : [];
       }
+      case "program":
+        // A process command's programs, and the programs its pids are, read off the machine only now
+        // that a line with program places asks (`processTargets.ts`).
+        return part.processes !== undefined ? [...part.processes.programs, ...programPlacesOfPids(part.processes.pids, placeOptions)] : [];
       default:
         return [];
     }
@@ -1347,6 +1353,18 @@ export interface CompilePolicyOptions {
    * a run. A part that would ask and was allowed at one of its widths no longer asks.
    */
   grants?: CommandGrants;
+  /**
+   * The program a running process is, by its pid — how a call naming a process by its pid (`stop_process`,
+   * `kill 4242`) answers at its line's program places (decision 0023 §3.1). Absent, this machine is
+   * asked (`programOfPidOnMachine`); `null`, no pid names a program, and such a call answers at `**`.
+   */
+  programOfPid?: ((pid: number) => string | undefined) | null;
+  /**
+   * Reads the programs of these pids ahead of {@link programOfPid}, which must answer at once — awaited
+   * by the gate before the narrowing is asked (`ScopeNarrowing.prepare`). Absent, with
+   * {@link programOfPid} absent too, this machine's (`warmProgramsOfPids`, which lists on Windows only).
+   */
+  warmProgramsOfPids?: ((pids: readonly number[]) => Promise<void>) | null;
 }
 
 export interface PolicyAuditEntry {
@@ -1379,10 +1397,18 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const audit = (entry: PolicyAuditEntry): void => options.onDecision?.(entry);
   // What a line's PLACES are resolved against (decision 0023 §3.2): the workspace a relative place is
   // written from, and where the named places are on this machine.
+  // A process named by its pid is about the program it is, read off the machine (`programOfPid.ts`).
+  const programOfPid = options.programOfPid === undefined ? programOfPidOnMachine : (options.programOfPid ?? undefined);
   const placeOptions: PlaceOptions = {
     ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
     named: namedPlacesOf(options.workspaceRoot, options.worktree),
+    ...(programOfPid !== undefined ? { programOfPid } : {}),
   };
+  // A shell line's pids are those of where it runs: this machine's natively, and nothing this engine can
+  // read inside WSL or a container — there, a pid is about no one program.
+  const native = options.execEnv === undefined || options.execEnv === "windows";
+  const linePlaceOptions: PlaceOptions = native ? placeOptions : { ...placeOptions, programOfPid: undefined };
+  const warm = options.warmProgramsOfPids === undefined ? (options.programOfPid === undefined ? warmProgramsOfPids : undefined) : (options.warmProgramsOfPids ?? undefined);
 
   const verdictFor = (tool: string, req: PermissionRequest): SmartVerdict => {
     const input = req.input as Record<string, unknown>;
@@ -1466,7 +1492,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         packages: filePackages,
         scopeOf: partScopeFor(options.scopes, options.workspaceRoot),
         // `$AGENT_WORKSPACE` is the calling agent's folder.
-        places: placesForCall(placeOptions, input),
+        places: placesForCall(linePlaceOptions, input),
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
         // Started to keep running: our `shell`, or Claude's own `Bash`, whose raw input reaches here as
@@ -1645,6 +1671,18 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // What may be tightened, read with no call in hand: a shell line, an MCP tool, any tool under a block
   // pinned to the old place tables — and a tool whose line has places. A tool whose line names a
   // function is `ask` at the gate already.
+  /**
+   * Readies the programs of the pids a call names (decision 0023 §3.1, amended 2026-11-23) before the
+   * narrowing reads them — a process tool's `pid`, a shell line's `kill 4242` — where reading one is
+   * slow (Windows), and only where the set judging the call has program places on a process tool's line:
+   * every other call, and every other set, pays nothing.
+   */
+  const preparePrograms = async (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]): Promise<void> => {
+    if (warm === undefined || !processPlacesIn(authored as PermissionsDecl | undefined, options.permissionSet)) return;
+    const pids = pidsNamedBy(tool.name, input, dialect, native);
+    if (pids.length > 0) await warm(pids);
+  };
+
   const commandNarrowing: ScopeNarrowing = Object.assign(judgeCall, {
     narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) =>
       COMMAND_TOOLS.has(tool.name) ||
@@ -1682,7 +1720,10 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const narrowing: ScopeNarrowing = Object.assign(
     (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) =>
       alwaysAsks(tool) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored),
-    { narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => alwaysAsks(tool) || mayNarrow(commandNarrowing, tool, authored) },
+    {
+      narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => alwaysAsks(tool) || mayNarrow(commandNarrowing, tool, authored),
+      prepare: preparePrograms,
+    },
   );
   // Where, then what: the floor's answer and the call's own, the stricter kept.
   const scopeOf: ScopeNarrowing = Object.assign(
@@ -1692,7 +1733,10 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       if (where === undefined || what === undefined) return where ?? what;
       return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
     },
-    { narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => mayNarrow(places, tool, authored) || mayNarrow(narrowing, tool, authored) },
+    {
+      narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => mayNarrow(places, tool, authored) || mayNarrow(narrowing, tool, authored),
+      prepare: preparePrograms,
+    },
   );
   /**
    * What the agent reads for a refused call: who refused it, from what upstream says of WHICH step did
@@ -1713,13 +1757,43 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       dialect,
       ...(options.grants !== undefined ? { grants: options.grants } : {}),
       ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
-      places: placeOptions,
+      places: linePlaceOptions,
     }),
   );
   return compiled;
 }
 
 const MODE_RANK: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+
+/** The process tools, whose lines a program place answers on (`ToolSpec.scope` `program` with a `scope` flag). */
+const PROCESS_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process", "read_process", "wait_process"]);
+
+/** Whether a set has places on a process tool's line, bare or refined by a flag — read off the block where it is a lowered map, else off the set. */
+function processPlacesIn(block: PermissionsDecl | undefined, permissionSet: PermissionSet | undefined): boolean {
+  const keys = isLoweredPermissionSet(block) ? Object.keys(block?.places ?? {}) : permissionSet !== undefined ? Object.keys(linePlaces(permissionSet)) : [];
+  return keys.some((key) => PROCESS_TOOLS.has(parseToolFlagSubject(key)?.tool ?? key));
+}
+
+/**
+ * The pids one call names: a process tool's (`ToolSpec.pidArgs`), and those a shell line's process
+ * commands name (`kill 4242`, `Stop-Process -Id 4242`) — where the line runs on this machine.
+ */
+export function pidsNamedBy(tool: string, input: unknown, dialect: CommandDialect, native = true): number[] {
+  const args = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  if (COMMAND_TOOLS.has(tool)) {
+    const line = commandOf(args);
+    if (line === undefined || !native) return [];
+    const spoken = callDialectOf(args, tool) ?? dialect;
+    const pids = takeApart(line, spoken).requests.flatMap((request) => classifyRequest(request, spoken)?.processes?.pids ?? []);
+    return [...new Set(pids)];
+  }
+  const spec = TOOL_SPEC_BY_NAME.get(standardOfAnyNative(tool) ?? tool);
+  return (spec?.pidArgs ?? []).flatMap((name) => {
+    const value = args[name];
+    const pid = typeof value === "number" ? value : typeof value === "string" && /^d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
+    return pid !== undefined && Number.isInteger(pid) && pid > 0 ? [pid] : [];
+  });
+}
 
 /** What a call pinned under the old place tables is refused with — the agent reads it, and so does the row. */
 export const STALE_SCOPES_REASON =

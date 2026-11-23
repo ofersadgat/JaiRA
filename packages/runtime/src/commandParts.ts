@@ -13,6 +13,8 @@ import {
   BACKGROUND_LINE,
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
+  callFlagsOf,
+  flagLineMatches,
   flagLineModes,
   holdsShellLines,
   parseToolFlagSubject,
@@ -56,9 +58,22 @@ import {
   type PackageScriptRunner,
   type UtilitySpec,
 } from "@jaira/shared";
+import { processTargetsOf, type ProcessTargets } from "./processTargets";
 
 /** The subject that answers for "any other command" — the shell tool's own entry. */
 export const SHELL_SUBJECT = "shell";
+
+/** The process tools a shell command can be (`ps` is `list_processes`, `kill` is `stop_process`). */
+const PROCESS_COMMAND_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process"]);
+
+/**
+ * The `scope` a shell command that lists or stops processes is judged at (decision 0032, ruling 4,
+ * amended 2026-11-23): a command reaches every process the account can — `ps -e`, `Get-Process`,
+ * `tasklist`, `pkill` — so it answers to a `--scope=all` flag line before the tool's bare line, as a
+ * direct call at that scope does. It never answers to a `--scope=session` line: a command does not
+ * know which processes are the session's.
+ */
+export const SHELL_PROCESS_SCOPE = "all";
 
 /** A request with its subject named, and not yet judged. */
 export interface ClassifiedPart {
@@ -80,6 +95,11 @@ export interface ClassifiedPart {
   unmodelled?: string;
   /** `cd`, `echo`, `pwd`, `test`, `true`: a part only if a rule, the floor or a path makes it one. */
   noRequest?: boolean;
+  /**
+   * For a part that IS a process tool (`ps`, `pgrep node`, `kill 4242`, `Stop-Process -Name node`): the
+   * programs and pids it names (`processTargetsOf`), the places its tool's line answers it at.
+   */
+  processes?: ProcessTargets;
 }
 
 const spanOfWords = (words: readonly CommandWord[]): TextSpan[] => {
@@ -336,7 +356,8 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     dialect,
   );
   if (system !== undefined) {
-    return { ...base, kind: "tool", subject: system, tool: system, matched: programSpan, widths: [commandSubjectOk(program) ? program : system] };
+    const processes = PROCESS_COMMAND_TOOLS.has(system) ? processTargetsOf(command, dialect) : undefined;
+    return { ...base, kind: "tool", subject: system, tool: system, matched: programSpan, widths: [commandSubjectOk(program) ? program : system], ...(processes !== undefined ? { processes } : {}) };
   }
 
   // A file utility is the standard tool on its path.
@@ -659,6 +680,8 @@ export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart, 
     for (const named of matchCommandEntries(permissionSet, part.command)) step(named.entry.key, true, spanOfWords(named.words));
   }
   const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : SHELL_SUBJECT;
+  // A process command answers to its tool's flag lines at the scope a command reaches, as a direct call does.
+  if (part.kind === "tool" && part.processes !== undefined) for (const key of processFlagLinesOf(permissionSet, subject)) step(key, false);
   step(subject, false);
   // §3.4: elsewhere, `npm run build` is `script`'s, then `shell`'s, then `other`'s. A part that is a
   // FILE TOOL is not "any other command": `cat x` is `read_file`'s, then `other`'s, as it always was.
@@ -666,6 +689,26 @@ export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart, 
   const fallback: PermissionSetAnswer =
     permissionSet.other !== undefined ? { mode: permissionSet.other, entry: OTHER_SUBJECT, specific: false } : { mode: "ask", specific: false };
   return walkLines(steps, 0, undefined, fallback, where);
+}
+
+/**
+ * The flag lines of a process tool a shell command answers to, most specific first — those a direct
+ * call at {@link SHELL_PROCESS_SCOPE} would match (`list_processes --scope=all`), the one naming the
+ * most flags first and, among equals, the strictest, as `flagLineAnswer` orders a direct call's.
+ */
+function processFlagLinesOf(permissionSet: ShellPermissionSet, tool: string): string[] {
+  const call = callFlagsOf(tool, { scope: SHELL_PROCESS_SCOPE });
+  const keys = [...new Set([...Object.keys(permissionSet.entries), ...Object.keys(permissionSet.places ?? {})])];
+  return keys
+    .map((key, at) => ({ key, at, parsed: parseToolFlagSubject(key) }))
+    .filter((line) => line.parsed?.tool === tool && line.parsed.command === undefined && hasLine(permissionSet, line.key) && flagLineMatches(line.parsed, call))
+    .sort(
+      (a, b) =>
+        b.parsed!.flags.length - a.parsed!.flags.length ||
+        lineRank(permissionSet, b.key, permissionSet.entries[b.key]) - lineRank(permissionSet, a.key, permissionSet.entries[a.key]) ||
+        a.at - b.at,
+    )
+    .map((line) => line.key);
 }
 
 /**

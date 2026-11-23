@@ -114,6 +114,37 @@ export interface PlaceOptions {
   named?: Partial<Record<NamedPlace, string>> | undefined;
   /** Whether a PATH compares with case. Default false, as `scopes.ts` decides and for its reason: insensitive errs toward the stricter place. */
   caseSensitive?: boolean | undefined;
+  /**
+   * The program a running process is, by its pid (`node`, as {@link programName} spells it) — how a
+   * call that names a process by its pid (`stop_process`, `kill 4242`) is about a PROGRAM place. The
+   * machine's answer, handed in; `undefined` for a pid it cannot name. Absent, or with no answer, the
+   * pid is {@link unknownProgramPlace}, which only `**` matches.
+   */
+  programOfPid?: ((pid: number) => string | undefined) | undefined;
+}
+
+/**
+ * The place of a process whose program cannot be read — a pid the machine cannot name (it has ended,
+ * or belongs to an account the engine cannot see), `(pid 4242)`, or a name decided only when the line
+ * runs, `($NAME)`. Only `**` matches it, so no place naming a program lets a process through that might
+ * not be that program, and a call about it and a named one takes the stricter answer.
+ */
+export function unknownProgramPlace(what: number | string): string {
+  return `${UNKNOWN_PROGRAM}${typeof what === "number" ? `pid ${what}` : what})`;
+}
+const UNKNOWN_PROGRAM = "(";
+
+/** The programs a call naming these pids is about: each one's program, or {@link unknownProgramPlace}. */
+export function programPlacesOfPids(pids: readonly number[], options: PlaceOptions = {}): string[] {
+  return pids.map((pid) => {
+    let program: string | undefined;
+    try {
+      program = options.programOfPid?.(pid);
+    } catch {
+      program = undefined;
+    }
+    return program !== undefined && program.trim() !== "" ? program.trim() : unknownProgramPlace(pid);
+  });
 }
 
 /** The place that answered, and its decision. */
@@ -335,6 +366,8 @@ export function branchRank(place: string, branch: string, _options: PlaceOptions
 /** A place of one of the kinds named by a word (repository, workflow, program, host): exact over glob, longer prefix first. */
 function plainRank(kind: PlaceKind, place: string, name: string): Rank | undefined {
   // A forge's `owner/name`, a program and a host name are read without case; a workflow id with it.
+  // A process whose program could not be read is matched by `**` alone.
+  if (kind === "program" && name.trim().startsWith(UNKNOWN_PROGRAM) && place.trim() !== PLACE_ANYWHERE) return undefined;
   return nameRank(place.trim(), name.trim(), kind === "workflow");
 }
 
@@ -449,11 +482,15 @@ export function placesMostSpecificFirst(kind: PlaceKind, places: readonly string
  * (`origin:main` where the call names its remote), a workflow started, a program named. Empty when
  * the call names no place of its kind that can be read (`git_push` with no branch: the current one is
  * the forge's to know), and the line's own mode — or the line below it — answers (§3.4).
+ *
+ * A process named by its pid ({@link ToolSpec.pidArgs}) is about the program it is, as
+ * `options.programOfPid` reads it — {@link unknownProgramPlace} where that cannot be read.
  */
 export function callPlacesOf(
-  spec: Pick<ToolSpec, "scope" | "pathArgs" | "urlArgs" | "placeArgs"> | undefined,
+  spec: Pick<ToolSpec, "scope" | "pathArgs" | "urlArgs" | "placeArgs" | "pidArgs"> | undefined,
   input: unknown,
   root?: string,
+  options: Pick<PlaceOptions, "programOfPid"> = {},
 ): string[] {
   if (spec?.scope === undefined) return [];
   const args: Record<string, unknown> = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
@@ -464,6 +501,14 @@ export function callPlacesOf(
     return paths.length > 0 ? paths : root !== undefined && (spec.pathArgs ?? []).length > 0 ? [root] : [];
   }
   if (spec.scope === "site") return strings(spec.urlArgs);
+  if (spec.scope === "program" && spec.pidArgs !== undefined) {
+    const pids = spec.pidArgs.flatMap((name) => {
+      const value = args[name];
+      const pid = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
+      return pid !== undefined && Number.isInteger(pid) && pid > 0 ? [pid] : [];
+    });
+    if (pids.length > 0) return [...strings(spec.placeArgs), ...programPlacesOfPids(pids, options)];
+  }
   const named = strings(spec.placeArgs);
   if (spec.scope !== "branch") return named;
   const remote = typeof args["remote"] === "string" && args["remote"].trim() !== "" ? args["remote"].trim() : undefined;
@@ -549,7 +594,8 @@ export function placeWidthsOf(kind: PlaceKind, at: string, options: PlaceWidthOp
       break;
     }
     default:
-      push("this", at.trim());
+      // A process whose program could not be read has no place narrower than anywhere.
+      if (!(kind === "program" && at.trim().startsWith(UNKNOWN_PROGRAM))) push("this", at.trim());
   }
   push("anywhere", PLACE_ANYWHERE);
   return out;
