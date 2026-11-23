@@ -996,13 +996,21 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
  * the listed tasks' records by `operation_records_scope` (task_id first); no conversation is loaded.
  * A message a program answers after its opening moves no task row — the run stays `running` through
  * every one — so the row's own clock cannot say this.
+ *
+ * Not a program's wait for the next message (its `input()`, decision 0029 §2), as `answering` reads
+ * it in {@link taskSummaries}: that record is the conversation listening, not saying anything. A quit
+ * fails the open wait and the next start opens a fresh one, so counting it lit every conversation
+ * that was waiting on the person as unread after each restart (2026-11-22: "the issue where a chat
+ * gets marked as unseen even though it was seen is back"). The message that ends a wait is the call
+ * that starts right after it, which is counted.
  */
 export function lastMessageTimes(project: Project, taskIds: readonly string[]): Map<string, number> {
   if (taskIds.length === 0) return new Map();
   const rows = project.db
     .prepare(
       `SELECT task_id, MAX(CASE WHEN status = 'completed' AND ended_at IS NOT NULL THEN ended_at ELSE started_at END) AS at
-         FROM operation_records WHERE task_id IN (SELECT value FROM json_each(?)) GROUP BY task_id`,
+         FROM operation_records WHERE task_id IN (SELECT value FROM json_each(?))
+          AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input' GROUP BY task_id`,
     )
     .all(JSON.stringify(taskIds)) as Array<{ task_id: string; at: number | null }>;
   return new Map(rows.flatMap((r) => (r.at === null ? [] : [[r.task_id, r.at] as [string, number]])));

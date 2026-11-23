@@ -46,6 +46,25 @@ it("is absent before any call, then the newest reply, or the message a call stil
   expect(last()).toBe(300);
 });
 
+it("does not move for a program's wait for the next message, which a restart opens again", () => {
+  const task = createTask(project, { title: "talk", workflow: "chat/session" });
+  const last = (): number | undefined => taskSummaries(project).find((t) => t.taskId === task.id)?.lastMessageAt;
+  const wait = (id: string, status: string, startedAt: number, endedAt?: number): void =>
+    void project.db
+      .prepare(`INSERT INTO operation_records (id, task_id, status, request_json, started_at, ended_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(id, task.id, status, JSON.stringify({ kind: "function", functionRef: "input" }), startedAt, endedAt ?? null);
+  record("reply", task.id, "completed", 100, 150);
+  // The program listens; the app quits, which fails the wait; the next start listens again.
+  wait("w1", "failed", 160, 500);
+  wait("w2", "open", 600);
+  expect(last()).toBe(150);
+  // The person answers: the wait completes, and the call that answers them is what moves the clock.
+  project.db.prepare(`UPDATE operation_records SET status = 'completed', ended_at = 700 WHERE id = 'w2'`).run();
+  expect(last()).toBe(150);
+  record("turn", task.id, "open", 701);
+  expect(last()).toBe(701);
+});
+
 it("is each listed task's own, in one read, and leaves the others alone", () => {
   const a = createTask(project, { title: "a", workflow: "chat/session" });
   const b = createTask(project, { title: "b", workflow: "chat/session" });
