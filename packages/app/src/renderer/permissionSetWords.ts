@@ -85,7 +85,7 @@ export function placeWordsOf(kind: PlaceKind, place: string): string | undefined
 /**
  * A place's glyph, by what it names: a FILE (a pattern that pins files — a glob not ending in `/**`) is
  * a sheet with its corner turned, any other path a folder; a site the globe; a branch or a repository
- * the git glyph; a workflow the workflow's; a program the machine.
+ * the git glyph; a workflow the workflow's; what the System tools act on the machine.
  */
 export function placeGlyphOf(kind: PlaceKind, place: string): IconName {
   const text = place.trim();
@@ -101,6 +101,13 @@ export function placeGlyphOf(kind: PlaceKind, place: string): IconName {
     case "workflow":
       return "workflow";
     case "program":
+    case "area":
+    case "package":
+    case "service":
+    case "owner":
+    case "machine":
+    case "action":
+    case "manager":
       return "system";
   }
 }
@@ -133,6 +140,20 @@ export function placeExample(kind: PlaceKind): string {
       return "a process, service or app name";
     case "host":
       return "a host name";
+    case "area":
+      return "a part of the machine like logs/System, registry/HKCU/Software or environment/PATH";
+    case "package":
+      return "a package id like Git.Git or node";
+    case "service":
+      return "a service name like spooler or nginx";
+    case "owner":
+      return "whose it is: session, jaira, user, system, or account:<name>";
+    case "machine":
+      return "a machine name, as Settings → Machines shows it";
+    case "action":
+      return "what is done, like stop, lock or uninstall";
+    case "manager":
+      return "a package manager: winget, powershell or brew";
   }
 }
 

@@ -241,33 +241,18 @@ describe("a direct call is brought down from the gate's loosest mode to its own 
     expect(call({ start_task: { "feature/**": "allow", "**": "deny" } }, "start_task", { state: "feature/product" })).toBe("allow");
   });
 
-  it("reads a program off a process list's filter, and judges a list of every program at `**` alone", () => {
+  it("leaves a list to filter its rows: what it asked for is no place (decision 0023 §3.1, amended 2026-11-23)", () => {
     const decl = { list_processes: { node: "allow", "**": "ask" } };
-    expect(call(decl, "list_processes", { name: "node" })).toBe("allow");
-    expect(call(decl, "list_processes", { name: "Node", scope: "user" })).toBe("allow");
-    expect(call(decl, "list_processes", { name: "python" })).toBe("ask");
-    // No filter lists every program: no one place answers for it, so `node` lets none of it through.
-    expect(call(decl, "list_processes", {})).toBe("ask");
-    expect(call(decl, "list_processes", { name: "  " })).toBe("ask");
-    // A filter is a place, as written: one wider than the place (`o` lists node and more) does not match it.
-    expect(call(decl, "list_processes", { name: "o" })).toBe("ask");
-    // Where the map has no `**`, an unfiltered list falls to the next line, as any place none matches does.
-    expect(call({ list_processes: { node: "allow" }, other: "deny" }, "list_processes", {})).toBe("deny");
-    expect(call({ list_processes: { "node*": "allow" }, other: "deny" }, "list_processes", { name: "nodemon" })).toBe("allow");
+    // The gate is handed the line's loosest — allow — and the tool shows only what the set allows.
+    expect(block(decl).tools!["list_processes"]).toBe("allow");
+    expect(call(decl, "list_processes", { name: "python" })).toBeUndefined();
+    expect(call(decl, "list_processes", {})).toBeUndefined();
   });
 
-  it("puts a process list that asks to the person at its program, with the widths a program offers", () => {
-    const input = { name: "python" };
-    expect(call({ list_processes: { node: "allow", "**": "ask" } }, "list_processes", input)).toBe("ask");
-    const part = commandDecisionOf(input)!.parts.parts[0]!;
-    expect(part.subject).toBe("list_processes");
-    expect(part.where).toEqual({ kind: "program", at: "python", widths: [{ width: "this", place: "python" }, { width: "anywhere", place: "**" }] });
-  });
-
-  it("answers a pid-naming process tool at its line's `**` where no machine names the pid's program", () => {
+  it("answers a pid nobody can name — no machine is handed in — at the strictest of its kind", () => {
     for (const tool of ["stop_process", "read_process", "wait_process"]) {
       expect(call({ [tool]: { node: "allow", "**": "ask" } }, tool, { pid: 4 }), tool).toBe("ask");
-      expect(call({ [tool]: { node: "deny", "**": "allow" } }, tool, { pid: 4 }), tool).toBe("allow");
+      expect(call({ [tool]: { node: "deny", "**": "allow" } }, tool, { pid: 4 }), tool).toBe("deny");
     }
   });
 

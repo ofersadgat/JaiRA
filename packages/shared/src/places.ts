@@ -77,7 +77,7 @@ const SITE_PROGRAMS: ReadonlySet<string> = new Set(["curl", "wget", "invoke-webr
  * when its calls name no place, and a map on it is refused.
  *
  *  - a standard tool: its {@link ToolSpec.scope} (`read_file` a path, `web_fetch` a site, `git_push` a
- *    branch, `start_task` a workflow; `web_search` and `screenshot` none);
+ *    branch, `start_task` a workflow; `screenshot` and `stop_process` a program; `web_search` and `read_system` none);
  *  - a tool's FLAG line (`shell --run_in_background`, `stop_process --scope=user` — decision 0032, ruling
  *    1a): the tool's own, since the line refines the tool's calls and they name the place they named;
  *  - `script`, `shell`, `runner:*` and every runner's own line: a path — where it runs, and every path
@@ -115,12 +115,31 @@ export interface PlaceOptions {
   /** Whether a PATH compares with case. Default false, as `scopes.ts` decides and for its reason: insensitive errs toward the stricter place. */
   caseSensitive?: boolean | undefined;
   /**
-   * The program a running process is, by its pid (`node`, as {@link programName} spells it) — how a
-   * call that names a process by its pid (`stop_process`, `kill 4242`) is about a PROGRAM place. The
-   * machine's answer, handed in; `undefined` for a pid it cannot name. Absent, or with no answer, the
-   * pid is {@link unknownProgramPlace}, which only `**` matches.
+   * What this machine knows about the processes, windows and the machine itself a call is about — how a
+   * call naming a pid, a window or keys is about a PROGRAM and an OWNER (decision 0023 §3.1, amended
+   * 2026-11-23). The machine's answers, handed in; what it cannot answer is {@link unknownProgramPlace}.
    */
-  programOfPid?: ((pid: number) => string | undefined) | undefined;
+  facts?: MachineFacts | undefined;
+}
+
+/** What a process, or the process a window belongs to, is: its program (`node`) and whose it is. */
+export interface ProcessFacts {
+  /** As `programName` spells it: `C:\\…\\node.exe` is `node`. */
+  program?: string | undefined;
+  /** Whose it is, as OWNER places: `session`, `jaira`, `user` or `system`, and `account:<name>`. */
+  owner?: readonly string[] | undefined;
+}
+
+/** What the machine answers, at once, about what a call names — read beforehand where that is slow. */
+export interface MachineFacts {
+  /** This machine's name, as Settings → Machines shows it. */
+  machine?: (() => string | undefined) | undefined;
+  process?: ((pid: number) => ProcessFacts | undefined) | undefined;
+  window?: ((windowId: number) => ProcessFacts | undefined) | undefined;
+  /** The window that has the keyboard. */
+  focused?: (() => number | undefined) | undefined;
+  /** The windows on the screen — what a picture of a display shows. */
+  onScreen?: (() => readonly number[] | undefined) | undefined;
 }
 
 /**
@@ -136,14 +155,32 @@ const UNKNOWN_PROGRAM = "(";
 
 /** The programs a call naming these pids is about: each one's program, or {@link unknownProgramPlace}. */
 export function programPlacesOfPids(pids: readonly number[], options: PlaceOptions = {}): string[] {
-  return pids.map((pid) => {
-    let program: string | undefined;
-    try {
-      program = options.programOfPid?.(pid);
-    } catch {
-      program = undefined;
-    }
-    return program !== undefined && program.trim() !== "" ? program.trim() : unknownProgramPlace(pid);
+  return pids.map((pid) => programOrUnknown(() => options.facts?.process?.(pid)?.program, pid));
+}
+
+/** The programs a call naming these windows is about: each one's program, or `(window 1234)`. */
+export function programPlacesOfWindows(windowIds: readonly number[], options: PlaceOptions = {}): string[] {
+  return windowIds.map((id) => programOrUnknown(() => options.facts?.window?.(id)?.program, `window ${id}`));
+}
+
+/** What a reader names, or {@link unknownProgramPlace} where it names nothing or throws. */
+function programOrUnknown(read: () => string | undefined, what: number | string): string {
+  let program: string | undefined;
+  try {
+    program = read();
+  } catch {
+    program = undefined;
+  }
+  return program !== undefined && program.trim() !== "" ? program.trim() : unknownProgramPlace(what);
+}
+
+/** The positive whole numbers a call gives under `names` — the pids, or the window ids, it is about. */
+export function idsOf(input: unknown, names: readonly string[] | undefined): number[] {
+  const args: Record<string, unknown> = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  return (names ?? []).flatMap((name) => {
+    const value = args[name];
+    const id = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
+    return id !== undefined && Number.isSafeInteger(id) && id > 0 ? [id] : [];
   });
 }
 
@@ -366,13 +403,70 @@ export function branchRank(place: string, branch: string, _options: PlaceOptions
 /** A place of one of the kinds named by a word (repository, workflow, program, host): exact over glob, longer prefix first. */
 function plainRank(kind: PlaceKind, place: string, name: string): Rank | undefined {
   // A forge's `owner/name`, a program and a host name are read without case; a workflow id with it.
-  // A process whose program could not be read is matched by `**` alone.
-  if (kind === "program" && name.trim().startsWith(UNKNOWN_PROGRAM) && place.trim() !== PLACE_ANYWHERE) return undefined;
   return nameRank(place.trim(), name.trim(), kind === "workflow");
+}
+
+/** A part of the machine as a place compares it: `/`-separated, without case, no slash at either end. */
+function areaText(text: string): string {
+  return text.trim().replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "").toLowerCase();
+}
+
+/**
+ * How specific an AREA place is about one part of the machine (`logs/system`,
+ * `registry/hkcu/software/x/name`), or `undefined` when it does not match it. Read as a path is: the
+ * same part first, then a bare place holding it (`registry/HKCU` holds everything under that hive) or
+ * a glob matching it, the one with more literal segments first and, among equals, the bare one; `**`
+ * last.
+ */
+export function areaRank(place: string, call: string, _options: PlaceOptions = {}): Rank | undefined {
+  const want = areaText(place);
+  const at = areaText(call);
+  if (place.trim() === PLACE_ANYWHERE) return [0, 0, 0];
+  if (want === at) return [2, want.split("/").length, 1];
+  if (isGlob(want)) {
+    let matcher: RegExp;
+    try {
+      matcher = globToRegExp(want, "i");
+    } catch {
+      return undefined;
+    }
+    if (!matcher.test(at)) return undefined;
+    const literal = want.slice(0, literalPrefixLength(want));
+    return [1, literal.split("/").filter((segment) => segment !== "").length, 0];
+  }
+  return at.startsWith(`${want}/`) ? [1, want.split("/").length, 1] : undefined;
+}
+
+/** Whether a call place is one nothing could read (`(pid 4242)`, `(pointer)`) — {@link unknownProgramPlace}. */
+export function isUnreadPlace(call: string): boolean {
+  return call.trim().startsWith(UNKNOWN_PROGRAM);
+}
+
+/** What joins the names of ONE owner — whose it is, and the account it runs as: `user;account:ofer`. */
+export const OWNER_ALIAS = ";";
+
+/**
+ * How specific an OWNER place is about whose a resource is. One owner has several names (`user` and
+ * `account:ofer`, joined by {@link OWNER_ALIAS}); the place matches its most specific: the account named,
+ * then whose it is, then `jaira` over a session's (every session is JaiRA's), then a glob
+ * (`account:*`), then `**`.
+ */
+export function ownerRank(place: string, owner: string, _options: PlaceOptions = {}): Rank | undefined {
+  const want = place.trim().toLowerCase();
+  if (want === PLACE_ANYWHERE) return [0, 0];
+  let best: Rank | undefined;
+  for (const name of owner.split(OWNER_ALIAS).map((n) => n.trim().toLowerCase())) {
+    const glob = isGlob(want) ? nameRank(want, name, false) : undefined;
+    const rank: Rank | undefined = want === name ? [name.startsWith("account:") ? 4 : 3, want.length] : want === "jaira" && name === "session" ? [2, 0] : glob === undefined ? undefined : [1, glob[1] ?? 0];
+    if (rank !== undefined && (best === undefined || compareRank(rank, best) > 0)) best = rank;
+  }
+  return best;
 }
 
 /** How specific a place of `kind` is about one call place, or `undefined` when it does not match it. */
 export function placeRank(kind: PlaceKind, place: string, call: string, options: PlaceOptions = {}): Rank | undefined {
+  // What nothing could read is matched by `**` alone.
+  if (isUnreadPlace(call) && place.trim() !== PLACE_ANYWHERE) return undefined;
   switch (kind) {
     case "path":
       return pathRank(place, call, options);
@@ -380,6 +474,10 @@ export function placeRank(kind: PlaceKind, place: string, call: string, options:
       return siteRank(place, call, options);
     case "branch":
       return branchRank(place, call, options);
+    case "area":
+      return areaRank(place, call, options);
+    case "owner":
+      return ownerRank(place, call, options);
     default:
       return plainRank(kind, place, call);
   }
@@ -462,6 +560,11 @@ export function placesMostSpecificFirst(kind: PlaceKind, places: readonly string
         const { remote, branch } = splitRemote(text);
         return [isGlob(branch) ? 0 : 1, literalPrefixLength(branch), remote !== undefined ? 1 : 0];
       }
+      case "area": {
+        const normalized = areaText(text);
+        const literal = isGlob(normalized) ? normalized.slice(0, literalPrefixLength(normalized)) : normalized;
+        return [literal.split("/").filter((segment) => segment !== "").length, isGlob(normalized) ? 0 : 1];
+      }
       default:
         return [isGlob(text) ? 0 : 1, literalPrefixLength(text)];
     }
@@ -484,35 +587,129 @@ export function placesMostSpecificFirst(kind: PlaceKind, places: readonly string
  * the forge's to know), and the line's own mode — or the line below it — answers (§3.4).
  *
  * A process named by its pid ({@link ToolSpec.pidArgs}) is about the program it is, as
- * `options.programOfPid` reads it — {@link unknownProgramPlace} where that cannot be read.
+ * `options.facts` know it, and a window ({@link ToolSpec.windowArgs}) the program it belongs to — {@link unknownProgramPlace} where that cannot be read. Input
+ * steps ({@link ToolSpec.inputArgs}) are about the program that has the keyboard, and a pointer step
+ * about no one program ({@link inputPlacesOf}). A part of the machine is read by {@link areaPlacesOf}.
  */
 export function callPlacesOf(
-  spec: Pick<ToolSpec, "scope" | "pathArgs" | "urlArgs" | "placeArgs" | "pidArgs"> | undefined,
+  spec: (Pick<ToolSpec, "scope" | "pathArgs" | "urlArgs" | "placeArgs" | "pidArgs" | "windowArgs" | "inputArgs" | "pathOptional"> & { name?: string }) | undefined,
   input: unknown,
   root?: string,
-  options: Pick<PlaceOptions, "programOfPid"> = {},
+  options: Pick<PlaceOptions, "facts"> = {},
 ): string[] {
   if (spec?.scope === undefined) return [];
   const args: Record<string, unknown> = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  // An argument is a string, or a list of them (`write_clipboard`'s `files`).
   const strings = (names: readonly string[] | undefined): string[] =>
-    (names ?? []).flatMap((name) => (typeof args[name] === "string" && (args[name] as string).trim() !== "" ? [(args[name] as string).trim()] : []));
+    (names ?? []).flatMap((name) => (Array.isArray(args[name]) ? (args[name] as unknown[]) : [args[name]]).flatMap((value) => (typeof value === "string" && value.trim() !== "" ? [value.trim()] : [])));
   if (spec.scope === "path") {
     const paths = strings(spec.pathArgs);
-    return paths.length > 0 ? paths : root !== undefined && (spec.pathArgs ?? []).length > 0 ? [root] : [];
+    return paths.length > 0 ? paths : root !== undefined && (spec.pathArgs ?? []).length > 0 && spec.pathOptional !== true ? [root] : [];
   }
   if (spec.scope === "site") return strings(spec.urlArgs);
-  if (spec.scope === "program" && spec.pidArgs !== undefined) {
-    const pids = spec.pidArgs.flatMap((name) => {
-      const value = args[name];
-      const pid = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
-      return pid !== undefined && Number.isInteger(pid) && pid > 0 ? [pid] : [];
-    });
-    if (pids.length > 0) return [...strings(spec.placeArgs), ...programPlacesOfPids(pids, options)];
+  if (spec.scope === "area") return spec.name !== undefined ? areaPlacesOf(spec.name, args) : [];
+  if (spec.scope === "program") {
+    const pids = idsOf(args, spec.pidArgs);
+    const windows = idsOf(args, spec.windowArgs);
+    const input = (spec.inputArgs ?? []).flatMap((name) => inputPlacesOf(args[name], options));
+    if (pids.length > 0 || windows.length > 0 || input.length > 0)
+      return [...strings(spec.placeArgs), ...programPlacesOfPids(pids, options), ...programPlacesOfWindows(windows, options), ...input];
   }
   const named = strings(spec.placeArgs);
   if (spec.scope !== "branch") return named;
   const remote = typeof args["remote"] === "string" && args["remote"].trim() !== "" ? args["remote"].trim() : undefined;
   return named.map((branch) => (remote !== undefined && !branch.includes(":") ? `${remote}:${branch}` : branch));
+}
+
+/** Input steps that go to the window that has the keyboard. */
+const KEYBOARD_STEPS: ReadonlySet<string> = new Set(["type", "key", "hold_key"]);
+/** Input steps that act at nothing: waiting, and reading where the pointer is. */
+const IDLE_STEPS: ReadonlySet<string> = new Set(["wait", "cursor_position"]);
+
+/**
+ * The programs input steps are about (`control_input`'s `steps`): a keyboard step the program whose
+ * window has the keyboard, as `options.facts` knows it (`(focused window)` where it cannot be
+ * read); a pointer step — a move, a click, a drag, a scroll — the window under the pointer as the step
+ * runs, which nobody can name beforehand, so `(pointer)`, which only `**` matches; waiting nothing.
+ */
+export function inputPlacesOf(steps: unknown, options: Pick<PlaceOptions, "facts"> = {}): string[] {
+  if (!Array.isArray(steps)) return [];
+  const actions = steps.map((step) => (step !== null && typeof step === "object" && typeof (step as Record<string, unknown>)["action"] === "string" ? ((step as Record<string, unknown>)["action"] as string) : ""));
+  const out: string[] = [];
+  if (actions.some((action) => KEYBOARD_STEPS.has(action))) out.push(programOrUnknown(() => focusedWindowOf(options.facts)?.program, "focused window"));
+  if (actions.some((action) => !KEYBOARD_STEPS.has(action) && !IDLE_STEPS.has(action))) out.push(unknownProgramPlace("pointer"));
+  return out;
+}
+
+/** The window that has the keyboard, as the facts know it. */
+export function focusedWindowOf(facts: MachineFacts | undefined): ProcessFacts | undefined {
+  const id = facts?.focused?.();
+  return id === undefined ? undefined : facts?.window?.(id);
+}
+
+/** Whether input steps type keys, and whether they move the pointer — `control_input`'s actions. */
+export function inputActionsOf(steps: unknown): { keys: boolean; pointer: boolean } {
+  const actions = Array.isArray(steps)
+    ? steps.map((step) => (step !== null && typeof step === "object" && typeof (step as Record<string, unknown>)["action"] === "string" ? ((step as Record<string, unknown>)["action"] as string) : ""))
+    : [];
+  return { keys: actions.some((a) => KEYBOARD_STEPS.has(a)), pointer: actions.some((a) => !KEYBOARD_STEPS.has(a) && !IDLE_STEPS.has(a)) };
+}
+
+/** Windows' registry hives, by every spelling a key may start with, as a place spells them. */
+const HIVES: Readonly<Record<string, string>> = {
+  hkey_current_user: "HKCU",
+  hkcu: "HKCU",
+  hkey_local_machine: "HKLM",
+  hklm: "HKLM",
+  hkey_classes_root: "HKCR",
+  hkcr: "HKCR",
+  hkey_users: "HKU",
+  hku: "HKU",
+  hkey_current_config: "HKCC",
+  hkcc: "HKCC",
+};
+
+/** A registry key as a machine place spells it: `HKEY_CURRENT_USER\\Software\\X` and `HKCU:\\Software\\X` are `HKCU/Software/X`. */
+function registryKey(key: string): string {
+  const parts = key
+    .trim()
+    .replace(/^registry::/i, "")
+    .split(/[\\/]+/)
+    .filter((part) => part !== "");
+  if (parts.length === 0) return "";
+  const hive = parts[0]!.replace(/:$/, "").toLowerCase();
+  return [HIVES[hive] ?? parts[0]!.replace(/:$/, ""), ...parts.slice(1)].join("/");
+}
+
+/**
+ * The part of the machine a call reads or changes, as an AREA place (decision 0023 §3.1, amended
+ * 2026-11-23):
+ *  - `read_system`: what it reads — `summary` (the default), `hardware`, `disks`, `network`,
+ *    `users`, or `logs`, and `logs/System` for one log;
+ *  - `read_settings` and `write_settings`: the area, then the key and the name under it —
+ *    `registry/HKCU/Software/Foo/Bar` (the hive spelled short), `defaults/com.apple.dock/autohide`,
+ *    `environment/PATH`, `time`, `time_zone`. A read of a whole key, or of every variable, is about
+ *    everything under it (`environment/**`).
+ */
+export function areaPlacesOf(tool: string, input: unknown): string[] {
+  const args: Record<string, unknown> = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  const text = (name: string): string | undefined => (typeof args[name] === "string" && (args[name] as string).trim() !== "" ? (args[name] as string).trim() : undefined);
+  if (tool === "read_system") {
+    const about = text("about") ?? "summary";
+    const log = text("log");
+    return [about === "logs" && log !== undefined ? `logs/${log.replace(/[\\/]+/g, "/")}` : about];
+  }
+  if (tool === "read_settings" || tool === "write_settings") {
+    const area = text("area");
+    if (area === undefined) return [];
+    const key = text("key");
+    const name = text("name");
+    const under = area === "registry" ? (key !== undefined ? registryKey(key) : undefined) : area === "defaults" ? key : undefined;
+    const at = [area, under, name].filter((part) => part !== undefined && part !== "").join("/");
+    // A read of a whole key, or of every variable, reads everything under it.
+    return [tool === "read_settings" && name === undefined && area !== "time" ? `${at}/**` : at];
+  }
+  return [];
 }
 
 // --- the widths an answer may be remembered at (§3.8) ---------------------------
@@ -593,9 +790,18 @@ export function placeWidthsOf(kind: PlaceKind, at: string, options: PlaceWidthOp
       if (slash > 0) push("prefix", `${branch.slice(0, slash)}/**`);
       break;
     }
+    case "area": {
+      // A part of the machine, and the one that holds it — the key a value is under, the logs a log is.
+      const text = at.trim().replace(/\\/g, "/").replace(/^\/|\/$/g, "");
+      if (isUnreadPlace(text)) break;
+      push("this", text);
+      const slash = text.lastIndexOf("/");
+      if (slash > 0) push("folder", text.slice(0, slash));
+      break;
+    }
     default:
       // A process whose program could not be read has no place narrower than anywhere.
-      if (!(kind === "program" && at.trim().startsWith(UNKNOWN_PROGRAM))) push("this", at.trim());
+      if (!isUnreadPlace(at)) push("this", at.trim());
   }
   push("anywhere", PLACE_ANYWHERE);
   return out;

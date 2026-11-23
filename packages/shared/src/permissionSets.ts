@@ -126,7 +126,8 @@ import {
 import { resolvePermissionStack, stackDeclOf } from "./permissionLayers";
 import { PLACE_ANYWHERE, placeKindOf } from "./places";
 import { parseToolFlagSubject, toolFlagProblem } from "./toolFlags";
-import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
+import { KIND_JOIN, kindedPlace, kindOfKey } from "./resources";
+import { PLACE_KINDS, TOOL_SPEC_BY_NAME, type PlaceKind } from "./toolVocabulary";
 
 /** The subject that answers for everything no entry names. */
 export const OTHER_SUBJECT = "other";
@@ -270,6 +271,21 @@ function readPlaceMap(map: Record<string, unknown>): EntryParts | { error: strin
   for (const [rawPlace, decision] of entries) {
     const place = rawPlace.trim();
     if (place.length === 0) return { error: "a place cannot be empty — `**` is everywhere" };
+    // A kind's own rule map (decision 0023 §3.1, amended 2026-11-23): its places kept as `owner=session`,
+    // its `**` as `owner=**`. Which kinds a line may name is its tool's, checked where the tool is known.
+    if (isPlainObject(decision) && (PLACE_KINDS as readonly string[]).includes(place)) {
+      const inner = Object.entries(decision);
+      if (inner.length === 0) return { error: `'${place}' names no place — write the ${place}s it decides for` };
+      for (const [rawInner, innerDecision] of inner) {
+        const at = rawInner.trim();
+        if (at.length === 0) return { error: `a place of '${place}' cannot be empty — \`**\` is every one` };
+        const read = readDecision(innerDecision);
+        if ("error" in read) return { error: `at '${place}' '${at}': ${read.error}` };
+        if ("unavailable" in read) return { error: `at '${place}' '${at}': unavailable is never a place's decision — refuse it there with deny` };
+        places[kindedPlace(place as PlaceKind, at)] = read.mode;
+      }
+      continue;
+    }
     if (place === "mode" || place === "implementation") {
       return { error: `it names '${place}' beside other places — an entry object is { "mode", "implementation" } alone, and a path named ${place} is written './${place}'` };
     }
@@ -301,8 +317,17 @@ export function modeDeclOf(entry: EntryParts): PermissionModeDecl {
   if (entry.unavailable === true) return UNAVAILABLE;
   const places = entry.places ?? {};
   if (Object.keys(places).length === 0) return modeWord(entry.mode ?? MODE_WHEN_UNSET);
-  const out: Record<string, string> = entry.mode !== undefined ? { [PLACE_ANYWHERE]: modeWord(entry.mode) } : {};
-  for (const [place, mode] of Object.entries(places)) out[place] = modeWord(mode);
+  const out: Record<string, string | Record<string, string>> = entry.mode !== undefined ? { [PLACE_ANYWHERE]: modeWord(entry.mode) } : {};
+  for (const [place, mode] of Object.entries(places)) {
+    const kind = kindOfKey(place);
+    if (kind === undefined) {
+      out[place] = modeWord(mode);
+      continue;
+    }
+    const map = (typeof out[kind] === "object" ? out[kind] : {}) as Record<string, string>;
+    map[place.slice(place.indexOf(KIND_JOIN) + 1)] = modeWord(mode);
+    out[kind] = map;
+  }
   return out;
 }
 
@@ -420,6 +445,52 @@ export function normalizeSubject(subject: string): string {
  * MCP line may hold a map: the place it takes is the standard tool's the configuration maps it to,
  * which a set alone cannot say.
  */
+/** The process tools, whose `--scope=` lines were permissions until 2026-11-23. */
+const OWNER_SCOPED_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process", "read_process", "wait_process"]);
+/** An old `--scope=` value, as the OWNER place it stands for. */
+const OWNER_OF_SCOPE: Readonly<Record<string, string>> = { session: "session", jaira: "jaira", user: "user", system: "system", all: PLACE_ANYWHERE };
+
+/**
+ * A set's lines with each old `<process tool> --scope=<scope>` line folded into its tool's line as an
+ * OWNER rule (decision 0023 §3.1, amended 2026-11-23): what the agent asks for is no permission, whose
+ * the process is is. `"stop_process --scope=session": "allow"` beside `"stop_process": "ask"` is
+ * `"stop_process": { "owner": { "session": "allow" }, "**": "ask" }`. Each is said as a warning; a line
+ * that cannot be folded — one with places, `--scope=group` — is refused, saying what to write.
+ */
+function ownerLinesFolded(decl: Record<string, unknown>, issues: PermissionSetIssue[]): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const owners = new Map<string, Record<string, unknown>>();
+  for (const [rawSubject, value] of Object.entries(decl)) {
+    const match = /^([a-z_]+)\s+--scope=([a-z]+)$/i.exec(normalizeSubject(rawSubject));
+    const tool = match?.[1]?.toLowerCase();
+    if (match === null || tool === undefined || !OWNER_SCOPED_TOOLS.has(tool)) {
+      out[rawSubject] = value;
+      continue;
+    }
+    const owner = OWNER_OF_SCOPE[match[2]!.toLowerCase()];
+    if (owner === undefined || typeof value !== "string") {
+      issues.push({
+        path: rawSubject,
+        severity: "error",
+        message: `'${rawSubject}' decided by what the agent asked for; a permission decides by whose the process is — write it on '${tool}' as { "owner": { "session" | "jaira" | "user" | "system": … } }`,
+      });
+      continue;
+    }
+    issues.push({ path: rawSubject, severity: "warning", message: `'${rawSubject}' is read as '${tool}': { "owner": { "${owner}": ${JSON.stringify(value)} } } — what the agent asks for is no permission; whose the process is is` });
+    const map = owners.get(tool) ?? {};
+    map[owner] = value;
+    owners.set(tool, map);
+  }
+  for (const [tool, map] of owners) {
+    const key = Object.keys(out).find((k) => normalizeSubject(k) === tool) ?? tool;
+    const bare = out[key];
+    const base: Record<string, unknown> = typeof bare === "string" ? { [PLACE_ANYWHERE]: bare } : isPlainObject(bare) && !isEntryWrapper(bare) ? { ...bare } : bare === undefined ? {} : { ...(bare as Record<string, unknown>) };
+    const existing = isPlainObject(base["owner"]) ? (base["owner"] as Record<string, unknown>) : {};
+    out[key] = { ...base, owner: { ...map, ...existing } };
+  }
+  return out;
+}
+
 export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSet; issues: PermissionSetIssue[] } {
   const permissionSet: PermissionSet = { entries: {} };
   const issues: PermissionSetIssue[] = [];
@@ -427,7 +498,7 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
     issues.push({ path: "", message: "a permission set is a map from a subject to a mode", severity: "error" });
     return { permissionSet, issues };
   }
-  for (const [rawSubject, value] of Object.entries(decl)) {
+  for (const [rawSubject, value] of Object.entries(ownerLinesFolded(decl, issues))) {
     const subject = normalizeSubject(rawSubject);
     const error = (message: string): void => void issues.push({ path: rawSubject, message, severity: "error" });
     const warn = (message: string): void => void issues.push({ path: rawSubject, message, severity: "warning" });
@@ -487,6 +558,17 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
     if (parts.places !== undefined && kind !== "mcp" && (kind === "other" || placeKindOf(subject) === undefined)) {
       error(`'${subject}' takes no place — ${kind === "other" ? "it names no one tool" : "its calls name none"}, so a map of places means nothing on it; write one decision`);
       continue;
+    }
+    if (parts.places !== undefined && kind === "tool") {
+      const spec = TOOL_SPEC_BY_NAME.get(subject);
+      const own = [spec?.scope, ...(spec?.dimensions ?? [])].filter((k): k is PlaceKind => k !== undefined);
+      const stray = Object.keys(parts.places)
+        .map(kindOfKey)
+        .find((k) => k !== undefined && !own.includes(k));
+      if (stray !== undefined) {
+        error(`'${subject}' has no '${stray}' — what it acts on is decided by ${own.join(", ")}`);
+        continue;
+      }
     }
     const implementation = parts.implementation;
     if (kind === "other") {

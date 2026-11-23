@@ -13,9 +13,11 @@ import {
   BACKGROUND_LINE,
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
-  callFlagsOf,
-  flagLineMatches,
   flagLineModes,
+  kindedPlace,
+  resolveResource,
+  TOOL_SPEC_BY_NAME,
+  type ResourcePlaces,
   holdsShellLines,
   parseToolFlagSubject,
   isAbsolutePath,
@@ -58,7 +60,8 @@ import {
   type PackageScriptRunner,
   type UtilitySpec,
 } from "@jaira/shared";
-import { processTargetsOf, type ProcessTargets } from "./processTargets";
+import { processTargetsOf, stopActionsOf, type ProcessTargets } from "./processTargets";
+import { systemResourceOf } from "./systemTargets";
 
 /** The subject that answers for "any other command" — the shell tool's own entry. */
 export const SHELL_SUBJECT = "shell";
@@ -66,14 +69,6 @@ export const SHELL_SUBJECT = "shell";
 /** The process tools a shell command can be (`ps` is `list_processes`, `kill` is `stop_process`). */
 const PROCESS_COMMAND_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process"]);
 
-/**
- * The `scope` a shell command that lists or stops processes is judged at (decision 0032, ruling 4,
- * amended 2026-11-23): a command reaches every process the account can — `ps -e`, `Get-Process`,
- * `tasklist`, `pkill` — so it answers to a `--scope=all` flag line before the tool's bare line, as a
- * direct call at that scope does. It never answers to a `--scope=session` line: a command does not
- * know which processes are the session's.
- */
-export const SHELL_PROCESS_SCOPE = "all";
 
 /** A request with its subject named, and not yet judged. */
 export interface ClassifiedPart {
@@ -100,6 +95,12 @@ export interface ClassifiedPart {
    * programs and pids it names (`processTargetsOf`), the places its tool's line answers it at.
    */
   processes?: ProcessTargets;
+  /**
+   * For a part that is a System tool whose resource is read off the command (a service, a package, a
+   * setting, what it does): its places by kind (`ResourcePlaces`) — what the command names, and what it
+   * could not read as a place nobody could (decision 0023 §3.1, amended 2026-11-23).
+   */
+  resource?: ResourcePlaces;
 }
 
 const spanOfWords = (words: readonly CommandWord[]): TextSpan[] => {
@@ -343,7 +344,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     const named: FlagNamer = dialect === "powershell" ? powershellFlag : exactFlag;
     const given = [...operandsOf(command, opener.valueFlags ?? [], named).slice(opener.sub !== undefined ? 1 : 0), ...(dialect === "powershell" ? valuesOf(command, ["-path", "-literalpath", "-lp"], powershellFlag) : [])].map((w) => w.value);
     if (handed || openerTool(given, dialect) === "script") return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], paths: given, widths: [SCRIPT_SUBJECT] };
-    return { ...base, kind: "tool", subject: "open_app", tool: "open_app", matched: programSpan, widths: [commandSubjectOk(program) ? program : "open_app"] };
+    return { ...base, kind: "tool", subject: "open_app", tool: "open_app", matched: programSpan, widths: [commandSubjectOk(program) ? program : "open_app"], resource: systemResourceOf("open_app", command, dialect)! };
   }
 
   // A program that acts on the machine, where a System tool does that: `kill` is `stop_process`,
@@ -356,8 +357,11 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     dialect,
   );
   if (system !== undefined) {
-    const processes = PROCESS_COMMAND_TOOLS.has(system) ? processTargetsOf(command, dialect) : undefined;
-    return { ...base, kind: "tool", subject: system, tool: system, matched: programSpan, widths: [commandSubjectOk(program) ? program : system], ...(processes !== undefined ? { processes } : {}) };
+    const targets = PROCESS_COMMAND_TOOLS.has(system) ? processTargetsOf(command, dialect) : undefined;
+    const processes = targets !== undefined && system === "stop_process" ? { ...targets, actions: stopActionsOf(command, dialect) } : targets;
+    // What it acts on, of every kind its line decides by (decision 0023 §3.1, amended 2026-11-23).
+    const resource = processes === undefined ? systemResourceOf(system, command, dialect) : undefined;
+    return { ...base, kind: "tool", subject: system, tool: system, matched: programSpan, widths: [commandSubjectOk(program) ? program : system], ...(processes !== undefined ? { processes } : {}), ...(resource !== undefined ? { resource } : {}) };
   }
 
   // A file utility is the standard tool on its path.
@@ -388,7 +392,8 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
       // A file cmdlet handed the registry reads or changes the machine's settings, not a file.
       if (places.length > 0 && places.every((w) => REGISTRY_PATH.test(w.value))) {
         tool = tool === "write_file" ? "write_settings" : "read_settings";
-        return { ...base, kind: "tool", subject: tool, tool, matched: programSpan, widths: [commandSubjectOk(program) ? program : tool] };
+        const resource = systemResourceOf(tool, command, dialect);
+        return { ...base, kind: "tool", subject: tool, tool, matched: programSpan, widths: [commandSubjectOk(program) ? program : tool], ...(resource !== undefined ? { resource } : {}) };
       }
     }
     return {
@@ -640,6 +645,11 @@ export function matchCommandEntry(permissionSet: ShellPermissionSet, command: Pa
 export interface PartPlaces {
   /** The places the part is about for the line `line`, of kind `kind` — empty when it names none that can be read. */
   of(kind: PlaceKind, line: string): readonly string[];
+  /**
+   * For a part that is a System tool, its resource's places of every kind (decision 0023 §3.1, amended
+   * 2026-11-23) — what a line deciding by several kinds answers it at.
+   */
+  resource?(line: string): ResourcePlaces | undefined;
   /** What a path place is resolved against: the project root and the named places. */
   options?: PlaceOptions | undefined;
 }
@@ -680,36 +690,39 @@ export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart, 
     for (const named of matchCommandEntries(permissionSet, part.command)) step(named.entry.key, true, spanOfWords(named.words));
   }
   const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : SHELL_SUBJECT;
-  // A process command answers to its tool's flag lines at the scope a command reaches, as a direct call does.
-  if (part.kind === "tool" && part.processes !== undefined) for (const key of processFlagLinesOf(permissionSet, subject)) step(key, false);
   step(subject, false);
   // §3.4: elsewhere, `npm run build` is `script`'s, then `shell`'s, then `other`'s. A part that is a
   // FILE TOOL is not "any other command": `cat x` is `read_file`'s, then `other`'s, as it always was.
   if (part.kind === "script") step(SHELL_SUBJECT, false);
   const fallback: PermissionSetAnswer =
     permissionSet.other !== undefined ? { mode: permissionSet.other, entry: OTHER_SUBJECT, specific: false } : { mode: "ask", specific: false };
-  return walkLines(steps, 0, undefined, fallback, where);
+  const answer = walkLines(steps, 0, undefined, fallback, where);
+  // A command that is a tool refined by flag lines this does not read off the command (`shutdown /r` is
+  // `power`, but which action?) could be any of them: it takes the strictest of what each flag line, and
+  // the bare line, answers — so `power --action=restart: deny` is not passed by the shell's spelling of it.
+  if (part.kind !== "tool" || part.processes !== undefined || subject === SHELL_SUBJECT) return answer;
+  const at = steps.findIndex((s) => s.key === subject);
+  let worst = answer;
+  for (const key of unreadFlagLinesOf(permissionSet, subject)) {
+    const mode = Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined;
+    const places = placesOfLine(permissionSet, key);
+    const flagged: LineStep = { key, specific: false, ...(mode !== undefined ? { mode } : {}), ...(places !== undefined ? { places } : {}) };
+    const chain = at === -1 ? [...steps, flagged] : [...steps.slice(0, at), flagged, ...steps.slice(at)];
+    const next = walkLines(chain, 0, undefined, fallback, where);
+    if (MODE_RANK(next.mode ?? "ask") > MODE_RANK(worst.mode ?? "ask")) worst = next;
+  }
+  return worst;
 }
 
-/**
- * The flag lines of a process tool a shell command answers to, most specific first — those a direct
- * call at {@link SHELL_PROCESS_SCOPE} would match (`list_processes --scope=all`), the one naming the
- * most flags first and, among equals, the strictest, as `flagLineAnswer` orders a direct call's.
- */
-function processFlagLinesOf(permissionSet: ShellPermissionSet, tool: string): string[] {
-  const call = callFlagsOf(tool, { scope: SHELL_PROCESS_SCOPE });
+/** Every flag line of `tool` the set writes (none naming a command) — what a command that is the tool, whose arguments are not read, could match. */
+function unreadFlagLinesOf(permissionSet: ShellPermissionSet, tool: string): string[] {
   const keys = [...new Set([...Object.keys(permissionSet.entries), ...Object.keys(permissionSet.places ?? {})])];
-  return keys
-    .map((key, at) => ({ key, at, parsed: parseToolFlagSubject(key) }))
-    .filter((line) => line.parsed?.tool === tool && line.parsed.command === undefined && hasLine(permissionSet, line.key) && flagLineMatches(line.parsed, call))
-    .sort(
-      (a, b) =>
-        b.parsed!.flags.length - a.parsed!.flags.length ||
-        lineRank(permissionSet, b.key, permissionSet.entries[b.key]) - lineRank(permissionSet, a.key, permissionSet.entries[a.key]) ||
-        a.at - b.at,
-    )
-    .map((line) => line.key);
+  return keys.filter((key) => {
+    const parsed = parseToolFlagSubject(key);
+    return parsed?.tool === tool && parsed.command === undefined && hasLine(permissionSet, key);
+  });
 }
+
 
 /**
  * What a chain of lines, most specific first, says about a part — each line's places, then its own
@@ -806,6 +819,18 @@ function walkLines(
     ...(place !== undefined ? { place } : {}),
   });
   if (line.places === undefined) return line.mode !== undefined ? answer(line.mode) : walkLines(steps, at + 1, calls, fallback, where);
+  // A System tool's line, deciding by the kinds of place its resources have: every kind must allow the
+  // part's resource — the strictest of their answers — and where one is unmatched, the line's own mode,
+  // else the next line.
+  const spec = TOOL_SPEC_BY_NAME.get(parseToolFlagSubject(line.key)?.tool ?? line.key);
+  const resource = spec !== undefined && (spec.dimensions ?? []).length > 0 ? where?.resource?.(line.key) : undefined;
+  if (spec !== undefined && resource !== undefined) {
+    const resolved = resolveResource(line.places, spec, resource, where?.options ?? {});
+    const answers: PermissionSetAnswer[] = [];
+    if (resolved.decision !== undefined) answers.push(answer(resolved.decision, resolved.kind === undefined || resolved.kind === spec.scope ? resolved.place : kindedPlace(resolved.kind, resolved.place ?? "**")));
+    if (resolved.unmatched || resolved.decision === undefined) answers.push(line.mode !== undefined ? answer(line.mode) : walkLines(steps, at + 1, undefined, fallback, where));
+    return answers.reduce((worst, next) => (MODE_RANK(next.mode ?? "ask") > MODE_RANK(worst.mode ?? "ask") ? next : worst));
+  }
   const kind = placeKindOf(line.key) ?? "path";
   // What the part is about, as this line's kind reads it: carried down from a line of the same kind
   // that matched none of them, else read afresh — a `git push` line's branches mean nothing to `git`'s folders.

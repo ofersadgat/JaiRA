@@ -64,6 +64,8 @@ export interface RunPolicyOptions {
   onRefused?: ((refused: RuleRefusal) => void) | undefined;
   /** The task's shell — see `CompilePolicyOptions.shellAt` (decision 0030). */
   shellAt?: CompilePolicyOptions["shellAt"];
+  /** What the machine knows about the task's processes and windows — see `CompilePolicyOptions.machine`. */
+  machine?: CompilePolicyOptions["machine"];
 }
 
 /**
@@ -87,6 +89,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
     ...(options.onRefused !== undefined ? { onRefused: options.onRefused } : {}),
     ...(options.shellAt !== undefined ? { shellAt: options.shellAt } : {}),
+    ...(options.machine !== undefined ? { machine: options.machine } : {}),
     // What the configured servers' tools count as (decision 0019, ruling 5).
     ...(config.mcp !== undefined ? { mcp: config.mcp } : {}),
   });

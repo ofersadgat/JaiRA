@@ -26,7 +26,9 @@
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { TOOL_IMAGES } from "@declarative-ai/json";
-import { EMBEDDERS, SCRIPT_INTERPRETERS, isSystemProgram, openerTool, programName } from "@jaira/shared";
+import { EMBEDDERS, SCRIPT_INTERPRETERS, isSystemProgram, openerTool, programName, unknownProgramPlace, OWNER_ALIAS, type ResourcePlaces } from "@jaira/shared";
+import type { ToolGate } from "@declarative-ai/permissions";
+import { askToShow, judgeResources } from "./resourceJudges";
 import type { CiArtifactSink } from "./ciArtifacts";
 import {
   INSTALL_ACTIONS,
@@ -275,6 +277,46 @@ function placeOf(value: string, ctx: ExecServices | undefined, cwd: string | und
 /** Cut a list to a limit, saying how many there were. */
 const cut = <T>(rows: readonly T[], limit: number, key: string): JsonValue => ({ count: rows.length, ...(rows.length > limit ? { shown: limit } : {}), [key]: rows.slice(0, limit) as unknown as JsonValue }) as JsonValue;
 
+/**
+ * A list's rows, kept to what the set its call is decided under allows (decision 0023 §3.1, amended
+ * 2026-11-23): each row judged as a resource by its tool's line (`judgeResources`), every kind of place
+ * it has. A row the set refuses is left out; the rows it asks about are put to the person once, named
+ * (`askToShow`), and shown or left out by the answer — answered already where nothing on the line
+ * allows, so the gate asked before the call ran. With no places on the line, every row is shown: the
+ * gate's mode was the whole answer. Filtered before `limit` cuts, so a limit counts what may be shown.
+ */
+async function allowedRows<T>(
+  ctx: ExecServices | undefined,
+  tool: string,
+  rows: readonly T[],
+  resourceOf: (row: T) => ResourcePlaces,
+  nameOf: (row: T) => string,
+  noun: string,
+): Promise<{ rows: T[]; leftOut?: Record<string, JsonValue> }> {
+  const judged = judgeResources(ctx as Parameters<typeof judgeResources>[0], tool, rows.map(resourceOf));
+  if (judged === undefined) return { rows: [...rows] };
+  const asked: T[] = [];
+  let refused = 0;
+  const verdict = new Map<T, "show" | "ask" | "hide">();
+  rows.forEach((row, at) => {
+    const mode = judged.verdicts[at]?.mode ?? "ask";
+    if (mode === "allow" || (mode === "ask" && judged.answeredByGate)) verdict.set(row, "show");
+    else if (mode === "ask") {
+      verdict.set(row, "ask");
+      asked.push(row);
+    } else {
+      verdict.set(row, "hide");
+      refused++;
+    }
+  });
+  const shownAsked = asked.length > 0 && (await askToShow((ctx as { gate?: ToolGate } | undefined)?.gate, tool, asked.map(nameOf), noun)) === true;
+  const kept = rows.filter((row) => verdict.get(row) === "show" || (shownAsked && verdict.get(row) === "ask"));
+  const unshown = shownAsked ? 0 : asked.length;
+  if (refused + unshown === 0) return { rows: kept };
+  const why = [...(refused > 0 ? [`the permission set refuses ${refused}`] : []), ...(unshown > 0 ? [`it asks about ${unshown}, and ${shownAsked ? "" : "they were not shown"}`.replace(/, and $/, "")] : [])].join("; ");
+  return { rows: kept, leftOut: { left_out: refused + unshown, why: `${refused + unshown} ${noun} left out: ${why}` } };
+}
+
 /** Rows whose name (or any of `fields`) holds `filter`, in any case. */
 function matching<T extends object>(rows: readonly T[], filter: string | undefined, fields: ReadonlyArray<keyof T>): T[] {
   if (filter === undefined) return [...rows];
@@ -407,6 +449,12 @@ export async function placedProcesses(backend: SystemBackend, scope: Exclude<Pro
   const enginePid = options.enginePid ?? process.pid;
   const { rows, unplaced } = await scopedRows(backend, enginePid, options.session ?? []);
   return { rows: await inScope(backend, rows, scope, options.group), unplaced, protectedWhy: protectedProcesses(rows, enginePid) };
+}
+
+/** A machine's process as a resource (decision 0023 §3.1): its program, and whose it is. */
+function processResource(row: ScopedRow): ResourcePlaces {
+  // One owner, by its names: whose it is, and the account it runs as.
+  return { program: [programName(row.name)], owner: [[row.started_by, ...(row.user !== undefined ? [`account:${(row.user.split(/[\\/]/).pop() ?? row.user).toLowerCase()}`] : [])].join(OWNER_ALIAS)] };
 }
 
 /** A session process as the process tools say it. */
@@ -607,12 +655,13 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
         readOnly: true,
       },
       backend,
-      async (b, args) => {
+      async (b, args, ctx) => {
         const scope = oneOf(args["scope"], PROCESS_SCOPES, "scope", "session");
         const limit = count(args["limit"], "limit", 50, 500);
         if (scope === "session") {
-          const mine = (options.processes?.list() ?? []).filter((p) => text(args["name"]) === undefined || p.command.toLowerCase().includes(text(args["name"])!.toLowerCase()));
-          return { ...(cut(mine.map(sessionRow), limit, "processes") as Record<string, JsonValue>), scope };
+          const named = (options.processes?.list() ?? []).filter((p) => text(args["name"]) === undefined || p.command.toLowerCase().includes(text(args["name"])!.toLowerCase()));
+          const mine = await allowedRows(ctx, "list_processes", named, (p) => ({ program: [programName(p.command.trim().split(/\s+/)[0] ?? p.command)], owner: ["session"] }), (p) => `${p.command} (${p.pid})`, "processes");
+          return { ...(cut(mine.rows.map(sessionRow), limit, "processes") as Record<string, JsonValue>), scope, ...(mine.leftOut ?? {}) };
         }
         const machine = needBackend(b, scope);
         const { rows, unplaced } = await scopedRows(machine, enginePid, options.processes?.list() ?? []);
@@ -626,12 +675,12 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           started: (x, y) => (startedAt(y) ?? 0) - (startedAt(x) ?? 0),
         };
         const scoped = await inScope(machine, rows, scope, text(args["group"]));
-        const shown = matching(scoped, text(args["name"]), ["name", "path", "window_title"])
-          .sort(order[sort])
-          .map((row) => (kept.has(row.pid) && row.started_by !== "session" ? { ...row, protected: kept.get(row.pid)! } : row));
+        const allowed = await allowedRows(ctx, "list_processes", matching(scoped, text(args["name"]), ["name", "path", "window_title"]), processResource, (row) => `${row.name} (${row.started_by}, ${row.pid})`, "processes");
+        const shown = allowed.rows.sort(order[sort]).map((row) => (kept.has(row.pid) && row.started_by !== "session" ? { ...row, protected: kept.get(row.pid)! } : row));
         return {
           ...(cut(shown, limit, "processes") as Record<string, JsonValue>),
           scope,
+          ...(allowed.leftOut ?? {}),
           ...(unplaced > 0 && scope !== "all" ? { unplaced: `${unplaced} processes' accounts could not be read (another account's, without an administrator); they are listed under system and all only` } : {}),
         };
       },
@@ -873,10 +922,11 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
         },
         readOnly: true,
       },
-      async (b, args) => {
+      async (b, args, ctx) => {
         const state = oneOf(args["state"], ["running", "stopped", "all"] as const, "state", "all");
         const rows = matching(await b.services(), text(args["name"]), ["name", "display_name"]).filter((row) => state === "all" || row.status === state);
-        return cut(rows.sort((x, y) => x.name.localeCompare(y.name)), count(args["limit"], "limit", 100, 500), "services");
+        const allowed = await allowedRows(ctx, "list_services", rows, (row) => ({ service: [row.name] }), (row) => row.name, "services");
+        return { ...(cut(allowed.rows.sort((x, y) => x.name.localeCompare(y.name)), count(args["limit"], "limit", 100, 500), "services") as Record<string, JsonValue>), ...(allowed.leftOut ?? {}) };
       },
     ),
 
@@ -920,10 +970,11 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
         },
         readOnly: true,
       },
-      async (b, args) => {
+      async (b, args, ctx) => {
         const kind = oneOf(args["kind"], SOFTWARE_KINDS, "kind", "programs");
         const rows = matching(await b.software(kind), text(args["name"]), ["name", "publisher", "id"]);
-        return cut(rows.sort((x, y) => x.name.localeCompare(y.name)), count(args["limit"], "limit", 100, 500), "software");
+        const allowed = await allowedRows(ctx, "list_software", rows, (row) => ({ package: [row.id ?? row.name] }), (row) => row.id ?? row.name, "packages");
+        return { ...(cut(allowed.rows.sort((x, y) => x.name.localeCompare(y.name)), count(args["limit"], "limit", 100, 500), "software") as Record<string, JsonValue>), ...(allowed.leftOut ?? {}) };
       },
     ),
 
@@ -1081,7 +1132,23 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
         inputSchema: { type: "object", properties: { app: { type: "string" }, limit: LIMIT } },
         readOnly: true,
       },
-      async (b, args) => cut(matching(await b.windows(), text(args["app"]), ["app", "title"]), count(args["limit"], "limit", 50, 500), "windows"),
+      async (b, args, ctx) => {
+        const rows = matching(await b.windows(), text(args["app"]), ["app", "title"]);
+        // Whose each window is, read only where the set decides by places on the line.
+        const owners = judgeResources(ctx as Parameters<typeof judgeResources>[0], "list_windows", []) !== undefined ? new Map((await scopedRows(b, enginePid, options.processes?.list() ?? [])).rows.map((row) => [row.pid, row] as const)) : undefined;
+        const allowed = await allowedRows(
+          ctx,
+          "list_windows",
+          rows,
+          (row) => {
+            const owner = owners?.get(row.pid);
+            return owner !== undefined ? processResource(owner) : { program: [programName(row.app)], owner: [unknownProgramPlace(row.pid)] };
+          },
+          (row) => `${row.title || row.app} (${row.app})`,
+          "windows",
+        );
+        return { ...(cut(allowed.rows, count(args["limit"], "limit", 50, 500), "windows") as Record<string, JsonValue>), ...(allowed.leftOut ?? {}) };
+      },
     ),
 
     open_app: tool(

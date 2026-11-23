@@ -250,49 +250,111 @@ to read and offer them:
 
 | Place | Tools and lines | Read off the call |
 | --- | --- | --- |
-| path | `read_file`, `glob`, `grep`, `edit`, `write_file`, `show_artifact`; `script` (the file run); `shell`, every command line and `runner:*` (where it runs, and every path it names as a file tool) | the path arguments; a command's working directory and file arguments |
+| path | `read_file`, `glob`, `grep`, `edit`, `write_file`, `show_artifact`, `write_clipboard` (the files it puts on the clipboard; text alone names none); `script` (the file run); `shell`, every command line and `runner:*` (where it runs, and every path it names as a file tool) | the path arguments; a command's working directory and file arguments |
 | site | `web_fetch`; network programs in the shell (`curl`, `wget`, `Invoke-WebRequest`) | the URL's host, then path |
 | branch | `git_push`, `git_merge`, `git push` in the shell | the remote and branch pushed to, or the branch merged into |
 | repository | merge-request and CI tools | `owner/name` on the forge |
 | workflow | `start_task`, `move_task` | the workflow id |
-| program | `list_processes`, `stop_process`, `read_process`, `wait_process`, `control_service`, `open_app`; the shell's process commands (`ps`, `pgrep`, `kill`, `pkill`, `Get-Process`, `Stop-Process`, `tasklist`, `taskkill`, …) | the process, service or app name: `list_processes`'s `name` filter, `control_service`'s `name`, `open_app`'s `app`, the program a `pid` is, and the programs and pids a process command names |
+| program | `list_processes`, `stop_process`, `read_process`, `wait_process`, `list_windows`, `open_app`, `screenshot`, `control_input`; the shell's process commands | a process's program, by its name or by what the machine says its pid is; a window's process's; the program that has the keyboard |
 | host | `runner:ssh` | the host |
-| none | `web_search`, `screenshot` | — (a query names no place) |
+| service | `list_services`, `control_service`; `systemctl`, `service`, `sc`, `net start`, `*-Service`, `launchctl`, `brew services` | the service's name |
+| package | `list_software`, `install_software`; the package managers in the shell | the package, by the manager's id (`Git.Git`, `node`) |
+| area | `read_system`, `read_settings`, `write_settings`; `reg`, `setx`, `defaults`, the registry cmdlets, `sysctl`, `timedatectl` | a part of the machine, written as a path: what `read_system` reads (`summary`, `users`, `logs/System`), a setting's area, key and name (`registry/HKCU/Software/Foo/Bar`, `environment/PATH`, `time_zone`) |
+| machine | `read_clipboard`; and a kind of every System tool's resource | the machine's name, as Settings → Machines shows it; `wsl:<distro>` or `container` for a shell line run there |
+| action | `power`; and a kind of `stop_process`, `control_service`, `install_software`, `write_settings`, `open_app`, `control_input` | what the call does: `lock`, `restart`, `stop`, `force`, `uninstall`, `delete`, `keys`, `pointer` |
+| none | `web_search` | — (a query names no place) |
 
 A map on a line whose tool takes no place is refused by the linter. An MCP tool the configuration maps
 to a standard tool takes that tool's place.
 
-The process tools are one family, and all take a program (amended 2026-11-22 and 2026-11-23).
+**3.1a Resources** (amended 2026-11-22 and 2026-11-23). The person: "make sure that they all have the
+ability to have correct permission scopes … some of those might be process scopes, machine scopes", "think
+about the resource that each of these tool is using/accessing and think about what permissions apply to
+that resource", and then "the llm can filter/limit its query by scope if it wants, but the point of this is
+for permissions … permissions are combined via intersection. i.e. both apply".
 
-- **A list** names its program by its filter, as written, so
-  `"list_processes": { "node": "allow", "**": "ask" }` lists `node` without asking. A list with no
-  filter shows every program, so no one program's place answers for it. It goes to the line's `**`, or
-  to the next line where the map has none (§3.4), so a map naming `node` never lets a listing of
-  everything through.
-- **A pid** is about the program that process is, read off the machine when the call is judged
-  (`stop_process`, `read_process`, `wait_process`). A process the machine cannot name (it has ended,
-  or the account cannot see it) is `(pid 4242)`, which only `**` matches. A call about it and a named
-  one takes the stricter answer.
-  - The gate's narrowing is synchronous, and on Windows reading a pid's program is a second of
-    `tasklist`. So it is read beforehand, in the narrowing's `prepare` (declarative-ai's
-    `ScopeNarrowing.prepare`, awaited by `decideToolCall`), and only when the set judging the call
-    has program places on a process tool's line. Linux reads `/proc` and macOS one `ps`, at once.
-- **The shell's process commands** answer as the tool they are (decision 0019 §3), at the same places:
-  - the programs they name: `pgrep node`, `killall node`, `pidof`, `ps -C`, `Get-Process node`,
-    `Stop-Process -Name node`, `taskkill /IM node.exe`, `tasklist /FI "IMAGENAME eq node.exe"`;
-  - the programs the pids they name are: `kill 4242`, `Stop-Process 4242`, `taskkill /PID 4242`,
-    `ps -p`, `top -p`. A line run inside WSL or a container names pids the engine cannot read, so
-    they are `(pid …)`;
-  - stricter where a command can stop more than it names: `pkill node` matches `node` anywhere in a
-    name, so it is about `*node*` (it stops `nodemon` too); only `-x` or `^node$` names `node`.
-    `pkill -f` (the whole command line), a pattern that is no plain name, a job (`%1`) and a word the
-    line decides as it runs (`kill $PID`) are about no one program;
-  - nothing, where they name none (`ps aux`, `top`, `Get-Process`, `tasklist`): every program, so the
-    line's `**` answers.
-- **Flag lines.** The `--scope=` lines (decision 0032, ruling 1a) take the same places. A shell command
-  reaches every process the account can, so it answers to a `--scope=all` line before the tool's bare
-  line, and never to a `--scope=session` line. The shipped sets'
-  `"list_processes --scope=session": "allow"` lines stand as they were.
+- **A System tool touches resources, and a resource has a place of several kinds.** A process has a
+  program, an owner and a machine. A window is its process's. A service has a name and a machine; a
+  package an id, a manager and a machine; a setting an area, an owner (the user's or the machine's) and a
+  machine. What a call does to it is an `action`. The tool's own kind is its `ToolSpec.scope`, and the
+  others are its `dimensions`:
+
+  | Tool | Its kind | Its other kinds |
+  | --- | --- | --- |
+  | `list_processes` (filtered), `read_process`, `wait_process` | program | owner, machine |
+  | `stop_process` | program | owner, machine, action (`stop`, `interrupt`, `force`, `tree`) |
+  | `list_windows` (filtered), `screenshot` | program | owner, machine |
+  | `open_app` | program | owner, machine, action, path, site |
+  | `control_input` | program | owner, machine, action (`keys`, `pointer`) |
+  | `list_services` (filtered), `control_service` | service | machine; action for `control_service` |
+  | `list_software` (filtered), `install_software` | package | machine; action and manager for `install_software` |
+  | `read_system`, `read_settings` | area | machine; owner for `read_settings` |
+  | `write_settings` | area | owner, machine, action (`set`, `delete`) |
+  | `power` | action | machine |
+  | `read_clipboard` | machine | — |
+  | `write_clipboard` | path | machine |
+
+- **A line writes a rule map per kind**, and every kind must allow a resource: its answer is the strictest
+  of its kinds' answers. Within a kind, the most specific place that matches answers, as one map always
+  did. A kind with no `**` of its own answers what it does not name by the line's `**`, else the next
+  line (§3.4), so `"action": { "force": "deny" }` beside `"**": "ask"` asks about a plain stop; write
+  `"action": { "force": "deny", "**": "allow" }` for "refuse only a forced stop".
+
+  ```json
+  "stop_process": {
+    "owner":   { "session": "allow", "**": "ask" },
+    "program": { "node": "allow", "**": "ask" },
+    "action":  { "force": "deny", "**": "allow" },
+    "**": "ask"
+  }
+  ```
+
+  The tool's own kind is also written flat, as before (`{ "node": "allow" }`). The line keeps the other
+  kinds' places as `owner=session` and writes them back as their maps; a kind the tool's resources do not
+  have is refused, naming the ones they do.
+- **What the agent asked for is no permission.** `list_processes`' `scope` and `name`, `list_windows`'
+  `app`, only narrow what the call touches. The old `<process tool> --scope=<scope>` lines are read as
+  OWNER rules on their tool's line, with a warning; the shipped sets write `"owner": { "session": … }`.
+- **Owner.** `session` (this task's processes, as `list_processes` places them), `jaira` (JaiRA's own and
+  its sessions', holding a session's), `user`, `system`, and `account:<name>`. One process's owner has
+  several names (`user` and `account:ofer`); a place matches its most specific. A setting's owner is
+  `user` for `HKCU`, the user's variables and `defaults`, `system` for the other hives, machine-wide
+  variables and the time.
+- **Machine.** The machine's name, as Settings → Machines shows it. A shell line run inside WSL or a
+  container is on `wsl:<distro>` or `container`, and reads no pid of this machine's.
+- **Read off the machine, before the gate asks.** A pid's program and owner, a window's, the window that
+  has the keyboard and the windows on the screen are read by the task's `MachineFactsCache` (the System
+  backend's listings, placed as `list_processes` places them; `/proc` on Linux), in the narrowing's
+  `prepare` — declarative-ai's `ScopeNarrowing.prepare`, awaited by `decideToolCall` — and only where
+  the set judging the call decides by places on a line of a tool that reaches them.
+- **A resource nobody can name could be anything.** A pid that has ended or cannot be read, a window
+  that cannot, a name the line decides as it runs: `(pid 4242)`, which takes the strictest answer of its
+  kind, and the line's `**` too. The dialog offers no narrower answer than anywhere for it.
+- **A list is filtered** (`ToolSpec.lists`: `list_processes`, `list_windows`, `list_services`,
+  `list_software`). It is not judged by what it asked for: the gate is handed its line's loosest answer,
+  and the tool judges each row it would show as a resource. A row the set refuses is left out; the rows it
+  asks about are put to the person once, named ("the permission set asks about 2 more processes: python
+  (user), …"), and shown on a yes; the answer says how many were left out and why. Where nothing on the
+  line allows, the gate asked before the call ran, and the rows that ask are shown with it.
+- **What cannot be filtered takes the strictest answer of everything it touches**: a picture of a whole
+  display (every window on the screen), a pointer step (every window it could reach), a shell's `ps aux`
+  (every process: nothing filters what it prints), `read_settings` of a whole key or of every variable
+  (`environment/**`: every place under it, and every one holding it).
+- **The shell's System commands are read for the same places** (`processTargets.ts`, `systemTargets.ts`):
+  - processes: the programs and pids a command names, what it does to them (`kill -9` is `force`), and
+    for a command that names a program but no pid, an owner nobody could read. `pkill node` is about
+    `*node*` (it stops `nodemon` too); only `-x` or `^node$` names `node`; `pkill -f` is about no one
+    program;
+  - services: `systemctl <verb> <unit>`, `service <name> <verb>`, `sc <verb> <name>`, `net start|stop`,
+    `Start-/Stop-/Restart-/Suspend-/Resume-/Set-Service`, `launchctl`, `brew services`;
+  - software: the package managers' verbs and packages, `npm -g`, `Install-Module` and its kind;
+  - settings: `reg add|delete|query`, `setx [/M]`, `defaults write|delete|read`, the registry cmdlets,
+    `sysctl`, `timedatectl`, `tzutil`;
+  - power: `shutdown -r|-h|/r|/s|/l|/h|/a`, `reboot`, `poweroff`, `halt`, `systemctl reboot|poweroff|suspend`,
+    `loginctl lock-session`, `Restart-Computer`, `Stop-Computer`, `pmset sleepnow`;
+  - openers (`open`, `xdg-open`, `start`, `Invoke-Item`): the file or the link, as `open_app`'s.
+
+  A kind a reader does not read is a place nobody could read, never one the part is not about.
 
 **3.2 Paths.**
 - A bare path is that folder and everything under it: `"C:"`, `"src"`, `"~/.ssh"`. A path containing

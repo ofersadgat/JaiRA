@@ -38,10 +38,11 @@
  *     built-ins alone.
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
-import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
+import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict, ToolGate } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
-import { programOfPidOnMachine, warmProgramsOfPids } from "./programOfPid";
+import { blockNowOf, REVEALS, RESOURCE_JUDGES, type ResourceVerdict } from "./resourceJudges";
+import { MachineFactsCache, type MachineFactsSource, type MachineReading } from "./machineFacts";
 import {
   SHELL_SUBJECT,
   answerOfLines,
@@ -104,6 +105,11 @@ import {
   normalizePath,
   placeKindOf,
   programPlacesOfPids,
+  OWNER_ALIAS,
+  unknownProgramPlace,
+  type ResourcePlaces,
+  idsOf,
+  inputActionsOf,
   shellSubjects,
   toolModes,
   placeWidthsOf,
@@ -134,7 +140,7 @@ import {
 } from "@jaira/shared";
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
 import { declaredNative, standardOfAnyNative } from "./agentTools";
-import { mayNarrow, partScopeFor, placeNarrowingFor, scopeNarrowingFor, toolPlaceAnswer } from "./tools";
+import { lineResourceAnswer, mayNarrow, partScopeFor, placeNarrowingFor, scopeNarrowingFor, toolPlaceAnswer } from "./tools";
 import { namedPlacesOf, placesForCall } from "./linePlaces";
 import { mcpCallOf } from "./mcpServers";
 import { deniedEarlier, refusalWords, takeRefusal, type RefusedBy } from "./refusals";
@@ -699,9 +705,43 @@ function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: r
   return {
     of,
     options: placeOptions,
+    resource: (line) => partResourceOf(part, line, placeOptions),
     // The place the dialog offers widths of: a path the part names before the directory it runs in.
     primary: (kind, line) => (kind === "path" ? (paths[0] ?? named[0] ?? dirs[0]) : of(kind, line)[0]),
   };
+}
+
+/**
+ * The places of every kind a part that is a System tool is about (decision 0023 §3.1, amended
+ * 2026-11-23), for its tool's line: the machine it runs on; for a process command, the programs it names
+ * and the programs and owners its pids are (read off the machine), what it does to them, and — where it
+ * names a program but no pid (`pgrep node`) — an owner nobody could read, since it reaches anyone's;
+ * a command that names no process at all (`ps aux`, `tasklist`) reaches every one, and nothing filters
+ * what it prints, so every kind is a place nobody could read and takes the strictest answer. Any other
+ * System command, what its reader read (`ClassifiedPart.resource`).
+ */
+function partResourceOf(part: ClassifiedPart, line: string, placeOptions: PlaceOptions): ResourcePlaces | undefined {
+  const tool = parseToolFlagSubject(line)?.tool ?? line;
+  if (part.kind !== "tool" || part.tool !== tool) return undefined;
+  const machineName = placeOptions.facts?.machine?.() ?? unknownProgramPlace("machine");
+  const processes = part.processes;
+  if (processes === undefined) {
+    // A kind its reader did not read is one nobody could, never one the part is not about — save a file
+    // or a link, which a part that opens none is not about.
+    const spec = TOOL_SPEC_BY_NAME.get(tool);
+    const out: ResourcePlaces = { ...(part.resource ?? {}), machine: [machineName] };
+    for (const kind of [spec?.scope, ...(spec?.dimensions ?? [])]) if (kind !== undefined && kind !== "path" && kind !== "site" && out[kind] === undefined) out[kind] = [unknownProgramPlace(kind)];
+    return out;
+  }
+  const facts = processes.pids.map((pid) => ({ pid, facts: placeOptions.facts?.process?.(pid) }));
+  let program = [...processes.programs, ...programPlacesOfPids(processes.pids, placeOptions)];
+  let owner = facts.map(({ pid, facts: f }) => (f?.owner !== undefined && f.owner.length > 0 ? f.owner.join(OWNER_ALIAS) : unknownProgramPlace(pid)));
+  if (processes.programs.length > 0) owner.push(unknownProgramPlace("anyone's"));
+  if (program.length === 0) {
+    program = [unknownProgramPlace("every process")];
+    owner = [unknownProgramPlace("anyone's")];
+  }
+  return { program, owner, machine: [machineName], ...(processes.actions !== undefined ? { action: processes.actions } : {}) };
 }
 
 /** The folder of the nearest `package.json` at or above a path, read through a package reader — the dialog's "the package" width. */
@@ -1354,17 +1394,15 @@ export interface CompilePolicyOptions {
    */
   grants?: CommandGrants;
   /**
-   * The program a running process is, by its pid — how a call naming a process by its pid (`stop_process`,
-   * `kill 4242`) answers at its line's program places (decision 0023 §3.1). Absent, this machine is
-   * asked (`programOfPidOnMachine`); `null`, no pid names a program, and such a call answers at `**`.
+   * What the machine knows about the processes and windows a call is about, and its own name — the
+   * places a System tool's resources have beside what the call names (decision 0023 §3.1, amended
+   * 2026-11-23): a process's program and owner, a window's, the window that has the keyboard, the
+   * windows on the screen. Read before the narrowing is asked (`ScopeNarrowing.prepare`), and only
+   * where the set judging a call decides by places on a line of a tool that reaches them. Absent, this
+   * machine's (`MachineFactsCache`, with no session of its own); `null`, none, and every such place is
+   * one nobody could read.
    */
-  programOfPid?: ((pid: number) => string | undefined) | null;
-  /**
-   * Reads the programs of these pids ahead of {@link programOfPid}, which must answer at once — awaited
-   * by the gate before the narrowing is asked (`ScopeNarrowing.prepare`). Absent, with
-   * {@link programOfPid} absent too, this machine's (`warmProgramsOfPids`, which lists on Windows only).
-   */
-  warmProgramsOfPids?: ((pids: readonly number[]) => Promise<void>) | null;
+  machine?: MachineFactsSource | null;
 }
 
 export interface PolicyAuditEntry {
@@ -1397,18 +1435,19 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const audit = (entry: PolicyAuditEntry): void => options.onDecision?.(entry);
   // What a line's PLACES are resolved against (decision 0023 §3.2): the workspace a relative place is
   // written from, and where the named places are on this machine.
-  // A process named by its pid is about the program it is, read off the machine (`programOfPid.ts`).
-  const programOfPid = options.programOfPid === undefined ? programOfPidOnMachine : (options.programOfPid ?? undefined);
+  // What the machine knows about the processes and windows a call reaches (`machineFacts.ts`).
+  const machine = options.machine === null ? undefined : (options.machine ?? new MachineFactsCache());
   const placeOptions: PlaceOptions = {
     ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
     named: namedPlacesOf(options.workspaceRoot, options.worktree),
-    ...(programOfPid !== undefined ? { programOfPid } : {}),
+    ...(machine !== undefined ? { facts: machine.facts } : {}),
   };
   // A shell line's pids are those of where it runs: this machine's natively, and nothing this engine can
   // read inside WSL or a container — there, a pid is about no one program.
   const native = options.execEnv === undefined || options.execEnv === "windows";
-  const linePlaceOptions: PlaceOptions = native ? placeOptions : { ...placeOptions, programOfPid: undefined };
-  const warm = options.warmProgramsOfPids === undefined ? (options.programOfPid === undefined ? warmProgramsOfPids : undefined) : (options.warmProgramsOfPids ?? undefined);
+  const linePlaceOptions: PlaceOptions = native
+    ? placeOptions
+    : { ...placeOptions, facts: { machine: () => (typeof options.execEnv === "object" && "wsl" in options.execEnv ? `wsl:${options.execEnv.wsl}` : "container") } };
 
   const verdictFor = (tool: string, req: PermissionRequest): SmartVerdict => {
     const input = req.input as Record<string, unknown>;
@@ -1622,6 +1661,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   };
 
   const judgeCall: ScopeNarrowing = (tool, input, authored) => {
+    // A list's rows the set asks about, put to the person once (`askToShow`).
+    const reveal = input !== null && typeof input === "object" ? REVEALS.get(input) : undefined;
+    if (reveal !== undefined) {
+      setCommandDecision(input, revealDecision(reveal));
+      return "ask";
+    }
     // A block pinned under the old place tables refuses every call that names a place (see
     // {@link staleScopesDecision}) — before anything else reads it, since nothing else reads `scopes`.
     const stale = staleScopesDecision(tool.name, input, authored as PermissionsDecl | undefined);
@@ -1672,15 +1717,16 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // pinned to the old place tables — and a tool whose line has places. A tool whose line names a
   // function is `ask` at the gate already.
   /**
-   * Readies the programs of the pids a call names (decision 0023 §3.1, amended 2026-11-23) before the
-   * narrowing reads them — a process tool's `pid`, a shell line's `kill 4242` — where reading one is
-   * slow (Windows), and only where the set judging the call has program places on a process tool's line:
+   * Reads what the machine knows about the processes and windows a call names (decision 0023 §3.1, amended 2026-11-23)
+   * before the narrowing reads them — a process tool's `pid`, a shell line's `kill 4242`, a screenshot's
+   * `window_id` — where reading one is slow (Windows' `tasklist`, a listing of the desktop's windows),
+   * and only where the set judging the call has program places on the line of a tool that reads them:
    * every other call, and every other set, pays nothing.
    */
   const preparePrograms = async (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]): Promise<void> => {
-    if (warm === undefined || !processPlacesIn(authored as PermissionsDecl | undefined, options.permissionSet)) return;
-    const pids = pidsNamedBy(tool.name, input, dialect, native);
-    if (pids.length > 0) await warm(pids);
+    if (machine === undefined || !machinePlacesIn(authored as PermissionsDecl | undefined, options.permissionSet)) return;
+    const reading = readingOf(tool.name, input, dialect, native);
+    if (reading !== undefined) await machine.read(reading);
   };
 
   const commandNarrowing: ScopeNarrowing = Object.assign(judgeCall, {
@@ -1752,6 +1798,22 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // What a foreground call left running is judged here too (decision 0032, ruling 5) — by the same set a
   // backgrounded line would be. Keyed by `scopeOf`, which a copy of the policy keeps (`withAgentPermissionSet`
   // spreads it with a new baseline).
+  RESOURCE_JUDGES.set(scopeOf, (block, tool, resources) => {
+    // The state's own block where it is a lowered map, else the set this policy was compiled for.
+    const judging = isLoweredPermissionSet(block) ? block : options.permissionSet !== undefined ? permissionsOfPermissionSet(options.permissionSet, undefined, options.stack) : undefined;
+    const map = judging?.places !== undefined && Object.hasOwn(judging.places, tool) ? judging.places[tool] : undefined;
+    if (judging === undefined || map === undefined || Object.keys(map).length === 0) return undefined;
+    const read = permissionSetOfEnvironment(undefined, { places: { [tool]: map }, ...(judging.functions !== undefined ? { functions: judging.functions } : {}), ...(judging.other !== undefined ? { other: judging.other } : {}) });
+    const line = read.entries[tool];
+    if (line === undefined) return undefined;
+    const machineName = placeOptions.facts?.machine?.();
+    const verdicts = resources.map((resource): ResourceVerdict => {
+      const answer = lineResourceAnswer(tool, { mode: line.mode, places: line.places }, read.other, machineName !== undefined && resource.machine === undefined ? { ...resource, machine: [machineName] } : resource, placeOptions);
+      return { mode: answer.mode === "allow" ? "allow" : answer.mode === "deny" ? "deny" : "ask", ...(answer.place !== undefined ? { place: answer.place } : {}) };
+    });
+    const modes = [line.mode, ...Object.values(line.places ?? {})].filter((mode): mode is PermissionSetMode => mode !== undefined);
+    return { verdicts, answeredByGate: modes.length > 0 && modes.every((mode) => modeStrictness(mode) >= modeStrictness("ask")) };
+  });
   LEFT_RUNNING_JUDGES.set(scopeOf, (authored, left) =>
     leftRunningVerdict(permissionSetFor(authored)?.permissionSet, left, {
       dialect,
@@ -1765,13 +1827,35 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
 
 const MODE_RANK: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
 
-/** The process tools, whose lines a program place answers on (`ToolSpec.scope` `program` with a `scope` flag). */
-const PROCESS_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process", "read_process", "wait_process"]);
+/**
+ * The tools whose program places are read off the machine: the process tools (a pid, and a shell
+ * command's pids — `ps -p` is `list_processes`), and the tools that name a window (`ToolSpec.windowArgs`).
+ */
+const MACHINE_PROGRAM_TOOLS: ReadonlySet<string> = new Set(["list_processes", "stop_process", "read_process", "wait_process", "screenshot", "open_app", "control_input"]);
 
-/** Whether a set has places on a process tool's line, bare or refined by a flag — read off the block where it is a lowered map, else off the set. */
-function processPlacesIn(block: PermissionsDecl | undefined, permissionSet: PermissionSet | undefined): boolean {
+/** Whether a set has places on such a tool's line, bare or refined by a flag — read off the block where it is a lowered map, else off the set. */
+function machinePlacesIn(block: PermissionsDecl | undefined, permissionSet: PermissionSet | undefined): boolean {
   const keys = isLoweredPermissionSet(block) ? Object.keys(block?.places ?? {}) : permissionSet !== undefined ? Object.keys(linePlaces(permissionSet)) : [];
-  return keys.some((key) => PROCESS_TOOLS.has(parseToolFlagSubject(key)?.tool ?? key));
+  return keys.some((key) => MACHINE_PROGRAM_TOOLS.has(parseToolFlagSubject(key)?.tool ?? key));
+}
+
+/**
+ * What a call needs read off the machine before its narrowing is asked: the pids it names (a process
+ * tool's, a shell line's `kill 4242`), the windows it names, the window that has the keyboard where it
+ * types, and the windows on the screen where it points or pictures a whole display. `undefined` when it
+ * reaches nothing on the machine.
+ */
+export function readingOf(tool: string, input: unknown, dialect: CommandDialect, native = true): MachineReading | undefined {
+  const name = standardOfAnyNative(tool) ?? tool;
+  const spec = TOOL_SPEC_BY_NAME.get(name);
+  const args = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  const pids = pidsNamedBy(tool, input, dialect, native);
+  const windows = idsOf(args, spec?.windowArgs);
+  const steps = (spec?.inputArgs ?? []).map((arg) => inputActionsOf(args[arg]));
+  const focus = steps.some((s) => s.keys);
+  const onScreen = steps.some((s) => s.pointer) || (name === "screenshot" && windows.length === 0);
+  if (pids.length === 0 && windows.length === 0 && !focus && !onScreen) return undefined;
+  return { ...(pids.length > 0 ? { pids } : {}), ...(windows.length > 0 ? { windows } : {}), ...(focus ? { focus } : {}), ...(onScreen ? { onScreen } : {}) };
 }
 
 /**
@@ -1787,12 +1871,7 @@ export function pidsNamedBy(tool: string, input: unknown, dialect: CommandDialec
     const pids = takeApart(line, spoken).requests.flatMap((request) => classifyRequest(request, spoken)?.processes?.pids ?? []);
     return [...new Set(pids)];
   }
-  const spec = TOOL_SPEC_BY_NAME.get(standardOfAnyNative(tool) ?? tool);
-  return (spec?.pidArgs ?? []).flatMap((name) => {
-    const value = args[name];
-    const pid = typeof value === "number" ? value : typeof value === "string" && /^d+$/.test(value.trim()) ? Number(value.trim()) : undefined;
-    return pid !== undefined && Number.isInteger(pid) && pid > 0 ? [pid] : [];
-  });
+  return idsOf(args, TOOL_SPEC_BY_NAME.get(standardOfAnyNative(tool) ?? tool)?.pidArgs);
 }
 
 /** What a call pinned under the old place tables is refused with — the agent reads it, and so does the row. */
@@ -1996,15 +2075,26 @@ const LEFT_RUNNING_JUDGES = new WeakMap<object, (authored: PermissionsDecl | und
  * opened with, which had no `shell --run_in_background` line, so the server was stopped as `ask` where
  * the same start through `run_in_background` was allowed.
  */
+/** The decision a request to show asked-about rows is put to the person as. */
+function revealDecision(reveal: { tool: string; shown: readonly string[]; noun: string }): CommandDecision {
+  const named = reveal.shown.slice(0, 8).join(", ") + (reveal.shown.length > 8 ? `, and ${reveal.shown.length - 8} more` : "");
+  const reason = `the permission set asks about ${reveal.shown.length} more ${reveal.noun}: ${named}`;
+  const span: TextSpan = { start: 0, end: reveal.tool.length };
+  const part: CommandPart = {
+    span,
+    matched: [{ ...span }],
+    text: reveal.tool,
+    kind: "tool",
+    subject: reveal.tool,
+    verdict: "asks",
+    decidedBy: { source: "permissionSet", entry: reveal.tool, reason },
+    widths: [],
+  };
+  return { action: "require_approval", reason, parts: { line: reveal.tool, dialect: "posix", parts: [part], verdict: "asks" } };
+}
+
 export function decideLeftRunning(policy: ExecPolicy | undefined, authored: unknown, left: LeftRunning, scope?: { instanceId: string }): LeftRunningVerdict {
-  const stated = authored !== null && typeof authored === "object" ? (authored as PermissionsDecl) : undefined;
-  // The engine's own reading (`blockNow`). Its `sessionId` is the ledger's key, which a tool's services
-  // do not carry; JaiRA's `permissionsOf` reads the instance alone.
-  const now =
-    policy?.permissionsOf !== undefined && scope !== undefined
-      ? policy.permissionsOf({ sessionId: scope.instanceId, instanceId: scope.instanceId }, stated as AuthoredPermissions | undefined)
-      : stated;
-  const block = now !== null && typeof now === "object" ? (now as PermissionsDecl) : undefined;
+  const block = blockNowOf(policy, authored, scope);
   const judge = policy?.scopeOf !== undefined ? LEFT_RUNNING_JUDGES.get(policy.scopeOf) : undefined;
   if (judge !== undefined) return judge(block, left);
   return leftRunningVerdict(shellPermissionSetOfBlock(block)?.permissionSet, left);

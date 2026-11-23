@@ -35,6 +35,7 @@ import {
   permissionSetLayersOf,
   type PermissionSetIssue,
   type PermissionSetReader,
+  modeDeclOf,
 } from "../src/permissionSets";
 
 /** A reader over an in-memory set of permission set files, keyed by the reference that names them. */
@@ -736,7 +737,8 @@ describe("a line's value (decision 0023 §1)", () => {
     [{ other: "unavailable" }, /'other' cannot be unavailable/],
     [{ read_file: { src: "unavailable" } }, /unavailable is never a place's decision/],
     [{ web_search: { "**": "allow", "news.example": "deny" } }, /'web_search' takes no place/],
-    [{ screenshot: { "**": "allow", primary: "deny" } }, /'screenshot' takes no place/],
+    [{ list_tasks: { "**": "allow", x: "deny" } }, /'list_tasks' takes no place/],
+    [{ stop_process: { area: { logs: "deny" } } }, /'stop_process' has no 'area' — what it acts on is decided by program, owner, machine, action/],
     [{ other: { "**": "deny", src: "allow" } }, /'other' takes no place — it names no one tool/],
     [{ read_file: {} }, /names no place/],
     [{ read_file: { "": "allow" } }, /a place cannot be empty/],
@@ -750,17 +752,19 @@ describe("a line's value (decision 0023 §1)", () => {
     expect(permissionSet.other).toBeUndefined();
   });
 
-  it("takes a map of programs on every process tool's line, bare and refined by its scope", () => {
-    const { permissionSet, issues } = parsePermissionSet({
-      list_processes: { node: "allow", "**": "ask" },
-      "list_processes --scope=user": { "python*": "allow" },
-      "list_processes --scope=session": "allow",
-      stop_process: { "**": "ask" },
-      read_process: { "**": "allow" },
-      wait_process: { "**": "allow" },
-    });
+  it("takes a rule map per kind of place a tool's resources have, kept as `kind=place` and written back as maps", () => {
+    const decl = {
+      stop_process: { node: "allow", owner: { session: "allow", "**": "ask" }, action: { force: "deny" }, "**": "ask" },
+      power: { lock: "allow", "**": "ask" },
+      read_clipboard: { desk: "allow", "**": "deny" },
+      write_settings: { area: { "registry/HKCU": "allow" }, owner: { system: "deny" } },
+    };
+    const { permissionSet, issues } = parsePermissionSet(decl);
     expect(issues).toEqual([]);
-    expect(permissionSet.entries["list_processes"]).toMatchObject({ mode: "ask", places: { node: "allow" } });
+    expect(permissionSet.entries["stop_process"]).toEqual({ kind: "tool", mode: "ask", places: { node: "allow", "owner=session": "allow", "owner=**": "ask", "action=force": "deny" } });
+    expect(permissionSet.entries["write_settings"]).toEqual({ kind: "tool", places: { "area=registry/HKCU": "allow", "owner=system": "deny" } });
+    expect(modeDeclOf(permissionSet.entries["stop_process"]!)).toEqual({ "**": "ask", node: "allow", owner: { session: "allow", "**": "ask" }, action: { force: "deny" } });
+    expect(parsePermissionSet({ stop_process: { owner: {} } }).issues[0]?.message).toMatch(/'owner' names no place/);
   });
 
   it("allows unavailable on a tool, the shell and an MCP line, and a place map on a command, script, a runner and MCP", () => {

@@ -479,10 +479,6 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           // The flag lines (decision 0032, ruling 1a), under their own names, which no tool is called by:
           // read back from here by the narrowing and the shell's judge.
           "shell --run_in_background": "deny",
-          "list_processes --scope=session": "allow",
-          "stop_process --scope=session": "deny",
-          "read_process --scope=session": "allow",
-          "wait_process --scope=session": "allow",
           ...PERMISSION_SET_MARKERS,
         },
         implementations: {},
@@ -498,11 +494,9 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         // And every writer's `.jaira/` lines, and the machine key's (2026-11-17).
         places: {
           ...Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "shell", "runner:*", "script"].map((line) => [line, SHIPPED_READ_ONLY[line]])),
-          // A tool refined by flag lines: its own mode, since `tools` holds the loosest of its lines.
-          list_processes: { "**": "allow" },
-          stop_process: { "**": "deny" },
-          read_process: { "**": "ask" },
-          wait_process: { "**": "allow" },
+          // What the session started, read freely (decision 0032, ruling 4): an OWNER rule (decision 0023
+          // §3.1, amended 2026-11-23), the line's own mode beside it, since `tools` holds its loosest.
+          read_process: { "**": "ask", "owner=session": "allow" },
         },
       },
     });

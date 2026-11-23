@@ -29,6 +29,11 @@ import {
   absolutize,
   ALWAYS_GRANTED_TOOLS,
   callPlacesOf,
+  kindedPlace,
+  PLACE_ANYWHERE,
+  resolveResource,
+  resourceOfCall,
+  type ResourcePlaces,
   gateModeOf,
   isAbsolutePath,
   isFunctionMode,
@@ -1316,6 +1321,12 @@ export function toolPlaceAnswer(tool: string, line: PlacedLine, other: Permissio
   const spec = TOOL_SPEC_BY_NAME.get(tool);
   const kind = spec?.scope ?? placeKindOf(tool);
   if (kind === undefined) return undefined;
+  // A tool that LISTS is judged by the rows it would show, never by what it asked for: the tool filters
+  // them (`systemTools.ts`), and the gate's mode — the line's loosest — lets it run.
+  if (spec?.lists === true) return undefined;
+  // A tool whose resources have several kinds of place: every kind must allow the resource (decision
+  // 0023 §3.1, amended 2026-11-23) — the strictest of their answers, and the line's own where one is unmatched.
+  if (spec !== undefined && (spec.dimensions ?? []).length > 0) return lineResourceAnswer(tool, line, other, resourceOfCall(spec, input, options.root, options), options);
   const calls = callPlacesOf(spec, input, options.root, options);
   const resolved = resolvePlaces(line.places, kind, calls, options);
   const answers: ToolPlaceAnswer[] = [];
@@ -1326,6 +1337,26 @@ export function toolPlaceAnswer(tool: string, line: PlacedLine, other: Permissio
   if (calls.length === 0 || resolved.unmatched.length > 0) {
     answers.push(line.mode !== undefined ? { mode: line.mode, subject: tool } : other !== undefined ? { mode: other, subject: OTHER_SUBJECT } : { mode: MODE_WHEN_UNSET, subject: tool });
   }
+  return answers.reduce((worst, next) => (modeStrictness(next.mode) > modeStrictness(worst.mode) ? next : worst));
+}
+
+/**
+ * What a tool's line answers for one RESOURCE — its places of every kind (`resolveResource`): the
+ * strictest answer any kind gives, and the line's own mode — else `other`, else
+ * {@link MODE_WHEN_UNSET} — where a kind is unmatched (decision 0023 §3.1, amended 2026-11-23). The
+ * place that decided is `owner=user` where it was of another kind than the tool's own.
+ */
+export function lineResourceAnswer(tool: string, line: PlacedLine, other: PermissionSetMode | undefined, resource: ResourcePlaces, options: PlaceOptions = {}): ToolPlaceAnswer {
+  const spec = TOOL_SPEC_BY_NAME.get(tool);
+  const own: ToolPlaceAnswer = line.mode !== undefined ? { mode: line.mode, subject: tool } : other !== undefined ? { mode: other, subject: OTHER_SUBJECT } : { mode: MODE_WHEN_UNSET, subject: tool };
+  if (line.places === undefined || Object.keys(line.places).length === 0) return own;
+  const resolved = resolveResource(line.places, spec, resource, options);
+  const answers: ToolPlaceAnswer[] = [];
+  if (resolved.decision !== undefined) {
+    const place = resolved.kind === undefined || resolved.kind === spec?.scope ? resolved.place : kindedPlace(resolved.kind, resolved.place ?? PLACE_ANYWHERE);
+    answers.push({ mode: resolved.decision, subject: tool, ...(place !== undefined ? { place } : {}) });
+  }
+  if (resolved.unmatched || resolved.decision === undefined) answers.push(own);
   return answers.reduce((worst, next) => (modeStrictness(next.mode) > modeStrictness(worst.mode) ? next : worst));
 }
 

@@ -28,13 +28,15 @@ import { powershellParameter, programName, unknownProgramPlace, type CommandDial
 export interface ProcessTargets {
   programs: string[];
   pids: number[];
+  /** For a command that stops processes, what it does to them ({@link stopActionsOf}). */
+  actions?: string[];
 }
 
 const isFlag = (token: string): boolean => token.startsWith("-") && token !== "-" && token !== "--";
 const PID = /^\d+$/;
 
 /** One command's words after its program: each flag's value, by the flag's canonical name, and its operands. */
-interface Walked {
+export interface Walked {
   values: Array<{ flag: string; word: CommandWord }>;
   flags: string[];
   operands: CommandWord[][];
@@ -44,7 +46,7 @@ interface Walked {
  * Walks POSIX words: a listed flag takes the next word (or its own `=value`, or for one letter the rest
  * of the word, `-p1234`); an unlisted flag takes nothing.
  */
-function walkPosix(command: ParsedCommand, valued: readonly string[]): Walked {
+export function walkPosix(command: ParsedCommand, valued: readonly string[]): Walked {
   const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1);
   const out: Walked = { values: [], flags: [], operands: [] };
   let flagsOver = false;
@@ -73,7 +75,7 @@ function walkPosix(command: ParsedCommand, valued: readonly string[]): Walked {
 }
 
 /** Walks cmd's words: a switch is `/x` or `-x` in any case; a listed one takes the next word. */
-function walkCmd(command: ParsedCommand, valued: readonly string[]): Walked {
+export function walkCmd(command: ParsedCommand, valued: readonly string[]): Walked {
   const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1);
   const out: Walked = { values: [], flags: [], operands: [] };
   for (let i = 0; i < words.length; i++) {
@@ -90,7 +92,7 @@ function walkCmd(command: ParsedCommand, valued: readonly string[]): Walked {
 }
 
 /** Walks a cmdlet's words: its parameters in any case and cut short; a valued one takes the next word and its array elements. */
-function walkPowershell(command: ParsedCommand, known: readonly string[], valued: readonly string[]): Walked {
+export function walkPowershell(command: ParsedCommand, known: readonly string[], valued: readonly string[]): Walked {
   const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1);
   const out: Walked = { values: [], flags: [], operands: [] };
   for (let i = 0; i < words.length; i++) {
@@ -271,3 +273,31 @@ export function processTargetsOf(command: ParsedCommand, dialect: CommandDialect
   }
 }
 
+
+/**
+ * What a command that stops processes does to them, as ACTION places (`stop_process`'s): `stop`, or
+ * `interrupt` for Ctrl-C's signal, and `force` where it kills outright (`kill -9`, `taskkill /F`,
+ * `Stop-Process -Force`), `tree` where it takes what they started too (`taskkill /T`).
+ */
+export function stopActionsOf(command: ParsedCommand, dialect: CommandDialect): string[] {
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  if (dialect === "powershell" && command.program === "stop-process") {
+    return ["stop", ...(words.some((w) => isFlag(w) && powershellParameter(w.replace(/:$/, ""), ["-force", "-passthru", "-whatif", "-confirm", "-name", "-id", "-inputobject"]) === "-force") ? ["force"] : [])];
+  }
+  if (command.program === "taskkill") {
+    const flags = words.filter((w) => /^[/-][a-z]+$/i.test(w)).map((w) => w.slice(1).toLowerCase());
+    return ["stop", ...(flags.includes("f") ? ["force"] : []), ...(flags.includes("t") ? ["tree"] : [])];
+  }
+  // A signal: `-9`, `-KILL`, `-SIGKILL`, `-s KILL`, `--signal=9`.
+  const signals: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (word === "-s" || word === "-n" || word === "--signal") signals.push((words[i + 1] ?? "").toUpperCase());
+    else if (word.startsWith("--signal=")) signals.push(word.slice("--signal=".length).toUpperCase());
+    else if (/^-(SIG)?[A-Z0-9]+$/i.test(word) && !/^-[a-z]$/.test(word)) signals.push(word.slice(1).toUpperCase());
+  }
+  const named = signals.map((signal) => signal.replace(/^SIG/, ""));
+  if (named.some((signal) => signal === "KILL" || signal === "9")) return ["stop", "force"];
+  if (named.some((signal) => signal === "INT" || signal === "2")) return ["interrupt"];
+  return ["stop"];
+}

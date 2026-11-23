@@ -354,7 +354,7 @@ export interface CallSubjects {
  * would be the widest possible guess about the one call we understand least.
  */
 export function subjectsOf(
-  spec: { pathArgs?: readonly string[]; urlArgs?: readonly string[] } | undefined,
+  spec: { pathArgs?: readonly string[]; urlArgs?: readonly string[]; pathOptional?: true } | undefined,
   input: unknown,
   root?: string,
 ): CallSubjects {
@@ -362,16 +362,17 @@ export function subjectsOf(
   if (spec === undefined) return out;
   const args: Record<string, unknown> =
     input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  // A path argument is a string, or a list of them (`write_clipboard`'s `files`).
   for (const name of spec.pathArgs ?? []) {
-    const value = args[name];
-    if (typeof value === "string" && value.trim() !== "") out.paths.push(value);
+    for (const value of Array.isArray(args[name]) ? (args[name] as unknown[]) : [args[name]]) if (typeof value === "string" && value.trim() !== "") out.paths.push(value);
   }
   for (const name of spec.urlArgs ?? []) {
     const value = args[name];
     if (typeof value === "string" && value.trim() !== "") out.urls.push(value);
   }
   // About the workspace, when it names no place of its own and takes paths at all.
-  if (out.paths.length === 0 && (spec.pathArgs ?? []).length > 0 && root !== undefined) out.paths.push(root);
+  // A tool whose paths are optional (`write_clipboard` with only text) is then about none.
+  if (out.paths.length === 0 && (spec.pathArgs ?? []).length > 0 && spec.pathOptional !== true && root !== undefined) out.paths.push(root);
   return out;
 }
 

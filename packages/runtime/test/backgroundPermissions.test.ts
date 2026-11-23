@@ -7,102 +7,51 @@
 import { describe, expect, it } from "vitest";
 import { lowerPermissionSet, parsePermissionSet, type PermissionSetDecl } from "@jaira/shared";
 import { shellPermissionSetOf } from "../src/commandParts";
-import { CommandGrants, ESCAPE_REASON, allowsCall, commandDecisionOf, compilePolicy, decideCommand, decideLeftRunning, flagLineAnswer, leftRunningVerdict } from "../src/policy";
+import { CommandGrants, ESCAPE_REASON, allowsCall, commandDecisionOf, compilePolicy, decideCommand, decideLeftRunning, leftRunningVerdict } from "../src/policy";
 
 const setOf = (decl: PermissionSetDecl) => parsePermissionSet(decl).permissionSet;
 const shellOf = (decl: PermissionSetDecl) => shellPermissionSetOf(setOf(decl))!;
 
-describe("a direct call is judged by the flag line its arguments match (ruling 1a)", () => {
+describe("what a session started is judged by whose the process is, not by what the agent asked (ruling 4, amended 2026-11-23)", () => {
+  // An old set's `--scope=` lines, read as OWNER rules (decision 0023 §3.1).
   const PROCESSES = setOf({
     list_processes: "allow",
     "list_processes --scope=user": "ask",
     stop_process: "ask",
     "stop_process --scope=session": "allow",
-    "stop_process --scope=group": "allow",
-    "stop_process --scope=group --group=docker": "deny",
     read_process: "deny",
     "read_process --scope=all": "allow",
     other: "deny",
   });
+  /** The machine: 4 is this session's, 5 the user's. */
+  const machine = { facts: { machine: () => "desk", process: (pid: number) => ({ 4: { program: "node", owner: ["session"] }, 5: { program: "python", owner: ["user"] } })[pid] }, read: async () => undefined };
 
-  it("the flag line beats the bare line where it matches, and the bare line covers the rest", () => {
-    expect(flagLineAnswer("list_processes", { scope: "user" }, PROCESSES)).toEqual({ mode: "ask", subject: "list_processes --scope=user" });
-    // No session line: the bare line covers it — a left-out scope is the default, session.
-    expect(flagLineAnswer("list_processes", { scope: "session" }, PROCESSES)).toEqual({ mode: "allow", subject: "list_processes" });
-    expect(flagLineAnswer("list_processes", {}, PROCESSES)).toEqual({ mode: "allow", subject: "list_processes" });
-    expect(flagLineAnswer("stop_process", { pid: 4 }, PROCESSES)).toEqual({ mode: "allow", subject: "stop_process --scope=session" });
-    expect(flagLineAnswer("stop_process", { pid: 4, scope: "system" }, PROCESSES)).toEqual({ mode: "ask", subject: "stop_process" });
+  it("reads the old lines as owner rules on their tools' lines", () => {
+    expect(PROCESSES.entries["stop_process"]).toEqual({ kind: "tool", mode: "ask", places: { "owner=session": "allow" } });
+    expect(PROCESSES.entries["list_processes"]).toEqual({ kind: "tool", mode: "allow", places: { "owner=user": "ask" } });
+    expect(PROCESSES.entries["read_process"]).toEqual({ kind: "tool", mode: "deny", places: { "owner=**": "allow" } });
   });
 
-  it("the line naming the most flags decides", () => {
-    expect(flagLineAnswer("stop_process", { pid: 4, scope: "group", group: "docker" }, PROCESSES)).toEqual({ mode: "deny", subject: "stop_process --scope=group --group=docker" });
-    expect(flagLineAnswer("stop_process", { pid: 4, scope: "group", group: "staff" }, PROCESSES)).toEqual({ mode: "allow", subject: "stop_process --scope=group" });
-  });
-
-  it("between equally specific lines, the strictest wins", () => {
-    const set = setOf({ stop_process: "allow", "stop_process --scope=group": "allow", "stop_process --group=docker": "ask" });
-    expect(flagLineAnswer("stop_process", { scope: "group", group: "docker" }, set)).toEqual({ mode: "ask", subject: "stop_process --group=docker" });
-  });
-
-  it("a flag line with places and no `**` passes a call none of them matches to the next line", () => {
-    // A `stop_process` call names a pid, and no machine is handed in to name its program: no place of the line matches it.
-    const set = setOf({ stop_process: "ask", "stop_process --scope=user": { node: "allow" } });
-    expect(flagLineAnswer("stop_process", { scope: "user", pid: 4 }, set)).toEqual({ mode: "ask", subject: "stop_process" });
-  });
-
-  it("judges a process list per program at the line it reaches, the shipped `--scope=session` line standing as it did", () => {
-    const set = setOf({
-      "list_processes --scope=session": "allow",
-      list_processes: { node: "allow", "**": "ask" },
-      "list_processes --scope=all": { "python*": "allow" },
-      other: "deny",
-    });
-    // The session's own, filtered or not, as the shipped sets allow them.
-    expect(flagLineAnswer("list_processes", {}, set)).toEqual({ mode: "allow", subject: "list_processes --scope=session" });
-    expect(flagLineAnswer("list_processes", { name: "python" }, set)).toEqual({ mode: "allow", subject: "list_processes --scope=session" });
-    // The machine's: the bare line, per program.
-    expect(flagLineAnswer("list_processes", { scope: "user", name: "node" }, set)).toEqual({ mode: "allow", subject: "list_processes", place: "node" });
-    expect(flagLineAnswer("list_processes", { scope: "user", name: "python" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
-    expect(flagLineAnswer("list_processes", { scope: "user" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
-    // A flag line's own places, then — where none matches and it has no `**` — the bare line's.
-    expect(flagLineAnswer("list_processes", { scope: "all", name: "python3" }, set)).toEqual({ mode: "allow", subject: "list_processes --scope=all", place: "python*" });
-    expect(flagLineAnswer("list_processes", { scope: "all", name: "node" }, set)).toEqual({ mode: "allow", subject: "list_processes", place: "node" });
-    expect(flagLineAnswer("list_processes", { scope: "all" }, set)).toEqual({ mode: "ask", subject: "list_processes" });
-    const policy = compilePolicy({}, { permissionSet: set });
-    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "user", name: "node" } as never, undefined as never)).toBeUndefined();
-    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "user", name: "python" } as never, undefined as never)).toBe("ask");
-    expect(allowsCall({}, set, "list_processes", { scope: "user", name: "node" }, "posix")).toBe(true);
-    expect(allowsCall({}, set, "list_processes", { scope: "user" }, "posix")).toBe(false);
-  });
-
-  it("is what the compiled policy narrows a call to — from the turn's set and from a state's lowered block", () => {
+  it("judges a direct call by whose the process is, whatever scope it asked for", () => {
     for (const [policy, block] of [
-      [compilePolicy({}, { permissionSet: PROCESSES }), undefined],
-      [compilePolicy({}), lowerPermissionSet(PROCESSES).permissions],
+      [compilePolicy({}, { permissionSet: PROCESSES, machine }), undefined],
+      [compilePolicy({}, { machine }), lowerPermissionSet(PROCESSES).permissions],
     ] as const) {
-      const ask = { scope: "user" };
-      expect(policy.scopeOf!({ name: "list_processes" }, ask as never, block as never)).toBe("ask");
-      // The person is asked about the flag line, and may keep the answer there.
-      expect(commandDecisionOf(ask)?.parts.parts[0]?.widths).toEqual(["list_processes --scope=user", "list_processes"]);
-      expect(policy.scopeOf!({ name: "list_processes" }, {} as never, block as never)).toBeUndefined();
-      expect(policy.scopeOf!({ name: "stop_process" }, { scope: "group", group: "docker" } as never, block as never)).toBe("deny");
-      // The gate is handed the loosest, so a call a flag line allows is never asked about first.
-      expect(policy.baseline?.tools?.["read_process"] ?? lowerPermissionSet(PROCESSES).permissions?.tools?.["read_process"]).toBe("allow");
+      expect(policy.scopeOf!({ name: "stop_process" }, { pid: 4 } as never, block as never)).toBe("allow");
+      expect(policy.scopeOf!({ name: "stop_process" }, { pid: 4, scope: "user" } as never, block as never)).toBe("allow");
+      const theirs = { pid: 5, scope: "session" };
+      expect(policy.scopeOf!({ name: "stop_process" }, theirs as never, block as never)).toBe("ask");
+      expect(commandDecisionOf(theirs)?.parts.parts[0]?.decidedBy).toMatchObject({ entry: "stop_process" });
+      expect(policy.scopeOf!({ name: "read_process" }, { pid: 5 } as never, block as never)).toBe("allow");
     }
   });
 
-  it("an answer kept for this run at the flag line settles the next call it matches", () => {
-    const grants = new CommandGrants();
-    grants.remember("list_processes --scope=user", "allow");
-    const policy = compilePolicy({}, { permissionSet: PROCESSES, grants });
-    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "user" } as never, undefined as never)).toBeUndefined();
-    expect(policy.scopeOf!({ name: "list_processes" }, { scope: "all" } as never, undefined as never)).toBeUndefined();
-  });
-
   it("is what allowsCall judges a direct call by", () => {
-    expect(allowsCall({}, PROCESSES, "list_processes", { scope: "user" }, "posix")).toBe(false);
+    expect(allowsCall({}, PROCESSES, "stop_process", { pid: 4 }, "posix")).toBe(false);
+    // It reads no machine: whose a recorded pid was is nobody's to say, so an owner rule takes its strictest.
+    expect(allowsCall({}, PROCESSES, "read_process", { pid: 4 }, "posix")).toBe(false);
+    // A list is filtered as it runs; recorded, the line's own mode answers it.
     expect(allowsCall({}, PROCESSES, "list_processes", {}, "posix")).toBe(true);
-    expect(allowsCall({}, PROCESSES, "stop_process", {}, "posix")).toBe(true);
   });
 });
 

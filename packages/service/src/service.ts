@@ -260,6 +260,7 @@ import {
   type AutopilotAsk,
   causesOfEvents,
   compilePolicy,
+  MachineFactsCache,
   enabledAdapters,
   failureMessage,
   enabledGenericAgents,
@@ -7256,6 +7257,8 @@ export class AppService {
         onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
         // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
         shellAt: () => this.shellAt(taskId, config.execEnvironment),
+        // What the machine knows about this task's processes and windows, and its name (decision 0023 §3.1).
+        machine: new MachineFactsCache({ processes: this.processesOf(taskId, open, config), name: this.fleet.identity().label }),
       }),
       permissionsOf: (call, stated) => {
         const governed = live.permissionSet !== undefined && composerGoverns(call.instanceId);

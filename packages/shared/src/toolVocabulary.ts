@@ -66,10 +66,32 @@ export type ToolIconName = "read" | "search" | "write" | "terminal" | "system" |
 
 /**
  * The kinds of PLACE a line's decision can be narrowed to (decision 0023 §3.1): a path on the disk, a
- * site on the network, a branch, a repository on the forge (`owner/name`), a workflow id, a program
- * (a process, a service or an app, by name), and a host a runner reaches (`runner:ssh`).
+ * site on the network, a branch, a repository on the forge (`owner/name`), a workflow id, a host a
+ * runner reaches (`runner:ssh`) — and what the System tools act on: a program (a process's, an app's
+ * or a window's, by name), a service, a package of installed software (`Git.Git`), a part of the
+ * machine (an `area`: `logs/System`, `registry/HKCU/Software/x`, `environment/PATH`, written as a
+ * path is), whose it is (an `owner`: `session`, `jaira`, `user`, `system`, `account:<name>`),
+ * which machine (`machine`, by its name in Settings → Machines), what is done to it (an `action`:
+ * `stop`, `lock`, `uninstall`), and the package manager that does it (`manager`).
  */
-export type PlaceKind = "path" | "site" | "branch" | "repository" | "workflow" | "program" | "host";
+export type PlaceKind =
+  | "path"
+  | "site"
+  | "branch"
+  | "repository"
+  | "workflow"
+  | "program"
+  | "host"
+  | "area"
+  | "package"
+  | "service"
+  | "owner"
+  | "machine"
+  | "action"
+  | "manager";
+
+/** Every kind of place, for a reader that checks a word against them. */
+export const PLACE_KINDS: readonly PlaceKind[] = ["path", "site", "branch", "repository", "workflow", "program", "host", "area", "package", "service", "owner", "machine", "action", "manager"];
 
 export interface ToolSpec {
   /** The LOGICAL name — what a workflow authors, what a policy is written against. */
@@ -101,7 +123,7 @@ export interface ToolSpec {
    * which say where in the call the place is read; this says what kind of thing it is, which is what
    * the matcher, the card and the dialog need to know to read and offer one.
    *
-   * Absent for a tool whose calls name no place (`web_search`: a query is no place; `screenshot`), and
+   * Absent for a tool whose calls name no place (`web_search`: a query is no place; `read_system`), and
    * a place map on such a line is refused by the linter. Command lines, `script` and `runner:*` are not
    * tools and have no spec — `placeKindOf` in `places.ts` answers for every subject.
    */
@@ -122,6 +144,41 @@ export interface ToolSpec {
    * whose program cannot be read matches only `**`.
    */
   pidArgs?: readonly string[];
+  /**
+   * For a tool whose {@link scope} is `program`: the arguments that name a window on the desktop
+   * (`screenshot`'s `window_id`). The call is about the program the window belongs to, read off the
+   * machine when the call is judged (`PlaceOptions.programOfWindow`); a window that cannot be read
+   * matches only `**`.
+   */
+  windowArgs?: readonly string[];
+  /**
+   * For a tool whose {@link scope} is `program`: the argument holding input steps (`control_input`'s
+   * `steps`). Keys go to the window that has the keyboard, so a call of only keyboard steps is about
+   * that window's program, read off the desktop when it is judged; a pointer step goes to whatever window
+   * is under the pointer as it runs, which nobody can say beforehand, so a call with one is about no one
+   * program, and only `**` answers it.
+   */
+  inputArgs?: readonly string[];
+  /**
+   * The OTHER kinds of place a call's resources have, beside {@link scope} (decision 0023 §3.1, amended
+   * 2026-11-23): a process has a program (its {@link scope}), and an owner and a machine too. A line
+   * writes a rule map per kind — `{ "owner": { "session": "allow" }, "program": { "node": "allow" } }`,
+   * kept as `owner=session` and `node` — and a resource is answered by the strictest of its kinds'
+   * answers: every kind must allow it. What the agent asked for (`list_processes`' `scope`, its
+   * `name` filter) only narrows what it touches; it is never what a permission matches.
+   */
+  dimensions?: readonly PlaceKind[];
+  /**
+   * True for a tool that LISTS resources (`list_processes`, `list_windows`): it is not judged by what
+   * it asked for, but its answer is filtered — each row it would show judged as a resource, the ones the
+   * set refuses left out, the ones it asks about put to the person once.
+   */
+  lists?: true;
+  /**
+   * For a tool whose {@link scope} is `path`: a call naming none of {@link pathArgs} is about no path,
+   * rather than the project root (`write_clipboard` with only `text` reads no file).
+   */
+  pathOptional?: true;
   /**
    * True when JaiRA has no implementation of its own, so `app` is not a choice that can be made.
    *
@@ -196,11 +253,6 @@ export interface ToolSpec {
  */
 export type ToolFlagSpec = { type: "boolean" } | { type: "choice"; values: readonly string[]; default?: string } | { type: "text" };
 
-/** What every process tool's `scope` is (decision 0032, ruling 4), and its default: what this session started. */
-const PROCESS_SCOPE_FLAGS: Readonly<Record<string, ToolFlagSpec>> = {
-  scope: { type: "choice", values: ["session", "jaira", "user", "group", "system", "all"], default: "session" },
-  group: { type: "text" },
-};
 
 /**
  * The table.
@@ -301,30 +353,30 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     flags: { run_in_background: { type: "boolean" } },
   },
   // The System tools (decision 0019, `runtime/systemTools.ts`): the machine the engine runs on and its
-  // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
-  { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
-  { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
-  // The process tools are about a PROGRAM, as `control_service` and `open_app` are (decision 0023 §3.1).
-  // A list names its program by its `name` filter; a list with none shows every program, so it is about
-  // no one of them, and only the line's `**` answers it (or the line below, where the map has no `**`):
-  // `{ "node": "allow" }` must not let a listing of everything through. The others name a `pid`: the
-  // call is about the program that process is, read off the machine when it is judged.
-  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using", scope: "program", placeArgs: ["name"], flags: PROCESS_SCOPE_FLAGS },
-  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
-  { name: "read_process", label: "read_process", title: "Read process output", icon: "system", category: "system", hint: "what a running program has printed: whole for what this session started, from the first read for the rest", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
-  { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", scope: "program", pidArgs: ["pid"], flags: PROCESS_SCOPE_FLAGS },
-  { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running" },
-  { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "program", placeArgs: ["name"] },
-  { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules" },
-  { name: "install_software", label: "install_software", title: "Install software", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module" },
-  { name: "read_settings", label: "read_settings", title: "Read settings", icon: "system", category: "system", hint: "the machine's settings: the registry, preferences, environment, time and time zone" },
-  { name: "write_settings", label: "write_settings", title: "Change settings", icon: "system", category: "system", hint: "change a setting of the machine" },
-  { name: "read_clipboard", label: "read_clipboard", title: "Read clipboard", icon: "system", category: "system", hint: "what is on the clipboard" },
-  { name: "write_clipboard", label: "write_clipboard", title: "Write clipboard", icon: "system", category: "system", hint: "put text or an image on the clipboard" },
-  { name: "list_windows", label: "list_windows", title: "List windows", icon: "system", category: "system", hint: "the apps and windows open on the desktop" },
-  { name: "open_app", label: "open_app", title: "Open app", icon: "system", category: "system", hint: "launch an app, open a file or a link in its app, focus or close a window", scope: "program", placeArgs: ["app"] },
-  { name: "screenshot", label: "screenshot", title: "Take screenshot", icon: "system", category: "system", hint: "a picture of the screen, or of one window" },
-  { name: "control_input", label: "control_input", title: "Control mouse & keyboard", icon: "system", category: "system", hint: "move and click the mouse, scroll, type and press keys" },
+  // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change. Each is scoped by
+  // the RESOURCES it touches (decision 0023 §3.1, amended 2026-11-23): a process, a window, a service, a
+  // package, a setting, the machine itself — each with its kinds of place (`scope`, then `dimensions`),
+  // answered by the strictest of them. A list is filtered to what the set allows (`lists`); what cannot
+  // be filtered — a picture of a whole display, a shell's `ps aux` — takes the strictest answer of
+  // everything it could touch.
+  { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs", scope: "area", dimensions: ["machine"] },
+  { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine", scope: "action", dimensions: ["machine"] },
+  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using", scope: "program", dimensions: ["owner", "machine"], lists: true },
+  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program", pidArgs: ["pid"], dimensions: ["owner", "machine", "action"] },
+  { name: "read_process", label: "read_process", title: "Read process output", icon: "system", category: "system", hint: "what a running program has printed: whole for what this session started, from the first read for the rest", scope: "program", pidArgs: ["pid"], dimensions: ["owner", "machine"] },
+  { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", scope: "program", pidArgs: ["pid"], dimensions: ["owner", "machine"] },
+  { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running", scope: "service", dimensions: ["machine"], lists: true },
+  { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "service", placeArgs: ["name"], dimensions: ["machine", "action"] },
+  { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules", scope: "package", dimensions: ["machine"], lists: true },
+  { name: "install_software", label: "install_software", title: "Install software", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module", scope: "package", placeArgs: ["id"], dimensions: ["machine", "action", "manager"] },
+  { name: "read_settings", label: "read_settings", title: "Read settings", icon: "system", category: "system", hint: "the machine's settings: the registry, preferences, environment, time and time zone", scope: "area", dimensions: ["owner", "machine"] },
+  { name: "write_settings", label: "write_settings", title: "Change settings", icon: "system", category: "system", hint: "change a setting of the machine", scope: "area", dimensions: ["owner", "machine", "action"] },
+  { name: "read_clipboard", label: "read_clipboard", title: "Read clipboard", icon: "system", category: "system", hint: "what is on the clipboard", scope: "machine" },
+  { name: "write_clipboard", label: "write_clipboard", title: "Write clipboard", icon: "system", category: "system", hint: "put text or an image on the clipboard", scope: "path", pathArgs: ["image_path", "files"], pathOptional: true, dimensions: ["machine"] },
+  { name: "list_windows", label: "list_windows", title: "List windows", icon: "system", category: "system", hint: "the apps and windows open on the desktop", scope: "program", dimensions: ["owner", "machine"], lists: true },
+  { name: "open_app", label: "open_app", title: "Open app", icon: "system", category: "system", hint: "launch an app, open a file or a link in its app, focus or close a window", scope: "program", placeArgs: ["app"], windowArgs: ["window_id"], dimensions: ["owner", "machine", "action", "path", "site"] },
+  { name: "screenshot", label: "screenshot", title: "Take screenshot", icon: "system", category: "system", hint: "a picture of the screen, or of one window", scope: "program", windowArgs: ["window_id"], dimensions: ["owner", "machine"] },
+  { name: "control_input", label: "control_input", title: "Control mouse & keyboard", icon: "system", category: "system", hint: "move and click the mouse, scroll, type and press keys", scope: "program", inputArgs: ["steps"], dimensions: ["owner", "machine", "action"] },
   {
     name: "web_fetch",
     label: "fetch",

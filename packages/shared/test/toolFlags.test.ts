@@ -1,16 +1,12 @@
 /**
- * A tool's line refined by its arguments (decision 0032, ruling 1a): `shell --run_in_background`,
- * `list_processes --scope=user`. Read, refused when it names what the tool does not offer, lowered and
- * read back, and handed to the gate at its loosest.
+ * A tool's line refined by its arguments (decision 0032, ruling 1a): `shell --run_in_background`. Read,
+ * refused when it names what the tool does not offer, lowered and read back, and handed to the gate at
+ * its loosest. The process tools' old `--scope=` lines are no flag lines any more: what the agent asks
+ * for is no permission, whose the process is is (decision 0023 §3.1, amended 2026-11-23) — they are read
+ * as OWNER rules on their tool's line.
  */
 import { describe, expect, it } from "vitest";
-import {
-  gateToolModes,
-  lowerPermissionSet,
-  parsePermissionSet,
-  permissionSetOfEnvironment,
-  subjectKindOf,
-} from "../src/permissionSets";
+import { gateToolModes, lowerPermissionSet, parsePermissionSet, permissionSetOfEnvironment, subjectKindOf } from "../src/permissionSets";
 import { addToPermissionSetText } from "../src/permissionSetEdit";
 import { placeKindOf } from "../src/places";
 import { callFlagWidthsOf, callFlagsOf, flagLineMatches, parseToolFlagSubject } from "../src/toolFlags";
@@ -18,8 +14,6 @@ import { callFlagWidthsOf, callFlagsOf, flagLineMatches, parseToolFlagSubject } 
 describe("a flag line is a subject of its own", () => {
   it("is a tool's name followed by its flags — the shell's may go on to name a command", () => {
     expect(subjectKindOf("shell --run_in_background")).toBe("tool-flag");
-    expect(subjectKindOf("list_processes --scope=user")).toBe("tool-flag");
-    expect(subjectKindOf("stop_process --scope=group --group=docker")).toBe("tool-flag");
     expect(subjectKindOf("shell --run_in_background npm run dev")).toBe("tool-flag");
     expect(parseToolFlagSubject("shell --run_in_background npm run dev")).toEqual({ tool: "shell", flags: [{ name: "run_in_background" }], command: "npm run dev" });
   });
@@ -34,8 +28,6 @@ describe("a flag line is a subject of its own", () => {
   it("takes the place its tool takes", () => {
     expect(placeKindOf("shell --run_in_background")).toBe("path");
     expect(placeKindOf("shell --run_in_background npm run dev")).toBe("path");
-    expect(placeKindOf("stop_process --scope=user")).toBe("program");
-    expect(placeKindOf("list_processes --scope=user")).toBe("program");
   });
 });
 
@@ -45,25 +37,17 @@ describe("reading a set with flag lines", () => {
       shell: "ask",
       "shell --run_in_background": "deny",
       "shell --run_in_background npm run dev": "allow",
-      list_processes: "ask",
-      "list_processes --scope=session": "allow",
-      "stop_process --scope=user": { "**": "ask", node: "allow" },
+      "shell --run_in_background npm": { "packages/app": "allow" },
     });
     expect(issues).toEqual([]);
     expect(permissionSet.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "deny" });
     expect(permissionSet.entries["shell --run_in_background npm run dev"]).toEqual({ kind: "tool-flag", mode: "allow" });
-    expect(permissionSet.entries["list_processes --scope=session"]).toEqual({ kind: "tool-flag", mode: "allow" });
-    expect(permissionSet.entries["stop_process --scope=user"]).toEqual({ kind: "tool-flag", mode: "ask", places: { node: "allow" } });
+    expect(permissionSet.entries["shell --run_in_background npm"]).toEqual({ kind: "tool-flag", places: { "packages/app": "allow" } });
   });
 
   it.each([
     ["shell --background", "'--background' is not a flag of shell — 'shell' takes --run_in_background"],
-    ["list_processes --scope=everyone", "'everyone' is not a scope — '--scope' is one of session, jaira, user, group, system, all"],
-    ["list_processes --sort=cpu", "'--sort' is not a flag of list_processes — 'list_processes' takes --scope=session|jaira|user|group|system|all, --group=<group>"],
     ["shell --run_in_background=true", "'--run_in_background' takes no value — write '--run_in_background' alone"],
-    ["list_processes --scope", "'--scope' takes a value — --scope=session|jaira|user|group|system|all"],
-    ["list_processes --scope=user --scope=all", "'--scope' is named twice — a line names each flag once"],
-    ["list_processes --scope=user node", "'node' follows the flags, and only the shell's line names a command after them — 'list_processes' takes --scope=session|jaira|user|group|system|all, --group=<group>"],
     ["read_file --path=x", "'--path' is not a flag of read_file — 'read_file' takes no flag — a line for it is 'read_file' alone"],
   ])("refuses '%s', saying what the tool offers", (subject, message) => {
     const { permissionSet, issues } = parsePermissionSet({ [subject]: "allow" });
@@ -71,55 +55,61 @@ describe("reading a set with flag lines", () => {
     expect(permissionSet.entries).toEqual({});
   });
 
-  it("refuses unavailable on a flag line, and takes a place map of the tool's kind on one", () => {
-    expect(parsePermissionSet({ "list_processes --scope=user": "unavailable" }).issues[0]?.message).toMatch(/cannot be unavailable — what the model is handed is per tool, not per argument/);
-    // Every tool a line can refine takes a place (the shell a path, the process tools a program).
-    expect(parsePermissionSet({ "list_processes --scope=user": { "**": "ask", node: "allow" } }).issues).toEqual([]);
+  it("refuses unavailable on a flag line", () => {
+    expect(parsePermissionSet({ "shell --run_in_background": "unavailable" }).issues[0]?.message).toMatch(/cannot be unavailable — what the model is handed is per tool, not per argument/);
+  });
+});
+
+describe("a process tool's old `--scope=` line", () => {
+  it("is read as an OWNER rule on its tool's line, saying so", () => {
+    const { permissionSet, issues } = parsePermissionSet({
+      list_processes: "ask",
+      "list_processes --scope=session": "allow",
+      "stop_process --scope=user": "deny",
+      "read_process --scope=all": "ask",
+    });
+    expect(issues.map((i) => i.severity)).toEqual(["warning", "warning", "warning"]);
+    expect(issues[0]!.message).toMatch(/is read as 'list_processes': \{ "owner": \{ "session": "allow" \} \}/);
+    expect(permissionSet.entries["list_processes"]).toEqual({ kind: "tool", mode: "ask", places: { "owner=session": "allow" } });
+    expect(permissionSet.entries["stop_process"]).toEqual({ kind: "tool", places: { "owner=user": "deny" } });
+    expect(permissionSet.entries["read_process"]).toEqual({ kind: "tool", places: { "owner=**": "ask" } });
+    expect(Object.keys(permissionSet.entries).some((key) => key.includes("--scope"))).toBe(false);
+  });
+
+  it("is refused where it cannot be read so — with places, or a group", () => {
+    expect(parsePermissionSet({ "stop_process --scope=user": { node: "allow" } }).issues[0]).toMatchObject({ severity: "error", message: expect.stringMatching(/write it on 'stop_process' as \{ "owner"/) });
+    expect(parsePermissionSet({ "stop_process --scope=group": "allow" }).issues[0]).toMatchObject({ severity: "error" });
   });
 });
 
 describe("matching a call", () => {
-  it("reads a left-out scope as its default, session", () => {
-    expect([...callFlagsOf("list_processes", {})]).toEqual([["scope", "session"]]);
-    expect([...callFlagsOf("stop_process", { pid: 1, scope: "group", group: "docker" })]).toEqual([
-      ["scope", "group"],
-      ["group", "docker"],
-    ]);
+  it("reads a call's flags", () => {
     expect([...callFlagsOf("shell", { command: "npm run dev", run_in_background: true })]).toEqual([["run_in_background", true]]);
     expect([...callFlagsOf("shell", { command: "npm test" })]).toEqual([]);
+    expect([...callFlagsOf("list_processes", { scope: "user" })]).toEqual([]);
   });
 
-  it("matches a line naming only flags the call has, at its values", () => {
-    const call = callFlagsOf("stop_process", { scope: "group", group: "Docker" });
-    expect(flagLineMatches(parseToolFlagSubject("stop_process --scope=group")!, call)).toBe(true);
-    expect(flagLineMatches(parseToolFlagSubject("stop_process --scope=group --group=docker")!, call)).toBe(true);
-    expect(flagLineMatches(parseToolFlagSubject("stop_process --scope=group --group=staff")!, call)).toBe(false);
-    expect(flagLineMatches(parseToolFlagSubject("stop_process --scope=user")!, call)).toBe(false);
+  it("matches a line naming only flags the call has", () => {
+    expect(flagLineMatches(parseToolFlagSubject("shell --run_in_background")!, callFlagsOf("shell", { run_in_background: true }))).toBe(true);
+    expect(flagLineMatches(parseToolFlagSubject("shell --run_in_background")!, callFlagsOf("shell", {}))).toBe(false);
   });
 
   it("offers the call's own flags as the lines an answer may be kept at, narrowest first", () => {
-    expect(callFlagWidthsOf("list_processes", { scope: "user" })).toEqual(["list_processes --scope=user", "list_processes"]);
-    expect(callFlagWidthsOf("stop_process", { scope: "group", group: "docker" })).toEqual(["stop_process --scope=group --group=docker", "stop_process --scope=group", "stop_process"]);
-    expect(callFlagWidthsOf("stop_process", { scope: "group", group: "Domain Users" })).toEqual(["stop_process --scope=group", "stop_process"]);
+    expect(callFlagWidthsOf("shell", { run_in_background: true })).toEqual(["shell --run_in_background", "shell"]);
+    expect(callFlagWidthsOf("shell", {})).toEqual(["shell"]);
   });
 });
 
 describe("lowering a set with flag lines", () => {
   const { permissionSet } = parsePermissionSet({
     shell: "ask",
-    "shell --run_in_background": "ask",
-    list_processes: "ask",
-    "list_processes --scope=session": "allow",
-    stop_process: "deny",
-    "stop_process --scope=session": "allow",
+    "shell --run_in_background": "allow",
     read_process: "ask",
     other: "deny",
   });
 
   it("hands the gate each tool at the loosest of its lines, so the narrowing only tightens", () => {
     const gate = gateToolModes(permissionSet);
-    expect(gate["list_processes"]).toBe("allow");
-    expect(gate["stop_process"]).toBe("allow");
     expect(gate["read_process"]).toBe("ask");
     // The shell's line is read per line, whatever it says.
     expect(gate["shell"]).toBe("ask");
@@ -129,13 +119,10 @@ describe("lowering a set with flag lines", () => {
 
   it("is read back exactly: each tool's own mode, and each flag line", () => {
     const lowered = lowerPermissionSet(permissionSet);
-    expect(lowered.tools).not.toContain("list_processes --scope=session");
-    expect(lowered.permissions?.tools?.["list_processes --scope=session"]).toBe("allow");
+    expect(lowered.tools).not.toContain("shell --run_in_background");
+    expect(lowered.permissions?.tools?.["shell --run_in_background"]).toBe("allow");
     const read = permissionSetOfEnvironment(lowered.tools, lowered.permissions);
-    expect(read.entries["list_processes"]).toMatchObject({ kind: "tool", mode: "ask" });
-    expect(read.entries["stop_process"]).toMatchObject({ kind: "tool", mode: "deny" });
-    expect(read.entries["list_processes --scope=session"]).toEqual({ kind: "tool-flag", mode: "allow" });
-    expect(read.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "ask" });
+    expect(read.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "allow" });
     expect(read.entries["read_process"]).toMatchObject({ kind: "tool", mode: "ask" });
   });
 });
@@ -146,10 +133,9 @@ describe("an answer kept as a flag line", () => {
   "shell": "ask",
   "other": "deny"
 }
-`, { "shell --run_in_background npm run dev": "allow", "list_processes --scope=user": "deny" });
+`, { "shell --run_in_background npm run dev": "allow" });
     const { permissionSet, issues } = parsePermissionSet(JSON.parse(text));
     expect(issues).toEqual([]);
     expect(permissionSet.entries["shell --run_in_background npm run dev"]).toEqual({ kind: "tool-flag", mode: "allow" });
-    expect(permissionSet.entries["list_processes --scope=user"]).toEqual({ kind: "tool-flag", mode: "deny" });
   });
 });

@@ -206,19 +206,28 @@ describe("the Git tools (decision 0010 §1)", () => {
 });
 
 describe("a start that keeps running, and what a session started (decision 0032)", () => {
-  /** Ruling 1's table, and ruling 4's: the agent may always see, read, wait on and stop what it started, wherever it may run. */
-  const FLAG_LINES: Record<string, Record<string, PermissionSetMode>> = {
-    "shell --run_in_background": { "ask-first": "ask", "read-only": "deny", "read-only-scratch": "deny", auto: "ask", full: "allow" },
-    "list_processes --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
-    "read_process --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
-    "wait_process --scope=session": { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
-    "stop_process --scope=session": { "ask-first": "allow", "read-only": "deny", "read-only-scratch": "deny", auto: "allow", full: "allow" },
+  /** Ruling 1's table. */
+  const BACKGROUND: Record<string, PermissionSetMode> = { "ask-first": "ask", "read-only": "deny", "read-only-scratch": "deny", auto: "ask", full: "allow" };
+  /**
+   * Ruling 4's table: the agent may always see, read, wait on and stop what it started, wherever it may
+   * run — written since 2026-11-23 as the process tools' OWNER rule for `session` (decision 0023 §3.1).
+   */
+  const SESSION: Record<string, Record<string, PermissionSetMode>> = {
+    list_processes: { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    read_process: { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    wait_process: { "ask-first": "allow", "read-only": "allow", "read-only-scratch": "allow", auto: "allow", full: "allow" },
+    stop_process: { "ask-first": "allow", "read-only": "deny", "read-only-scratch": "deny", auto: "allow", full: "allow" },
   };
 
-  it.each(["ask-first", "read-only", "read-only-scratch", "auto", "full"])("%s writes them as flag lines, each at the ruled mode", (file) => {
+  it.each(["ask-first", "read-only", "read-only-scratch", "auto", "full"])("%s writes them at the ruled mode — a start as a flag line, the session's own as an owner rule", (file) => {
     const { permissionSet, issues } = parsePermissionSet(shipped(file));
     expect(issues).toEqual([]);
-    for (const [subject, modes] of Object.entries(FLAG_LINES)) expect(permissionSet.entries[subject], `${file} ${subject}`).toEqual({ kind: "tool-flag", mode: modes[file] });
+    expect(permissionSet.entries["shell --run_in_background"], file).toEqual({ kind: "tool-flag", mode: BACKGROUND[file] });
+    for (const [tool, modes] of Object.entries(SESSION)) {
+      const entry = permissionSet.entries[tool]!;
+      expect(entry.places?.["owner=session"] ?? entry.mode, `${file} ${tool}`).toBe(modes[file]);
+      expect(Object.keys(permissionSet.entries).some((key) => key.startsWith(`${tool} `)), `${file} ${tool}`).toBe(false);
+    }
   });
 
   it("a simulation's pass never starts what keeps running", () => {

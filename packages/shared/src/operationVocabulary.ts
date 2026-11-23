@@ -191,9 +191,16 @@ export type PermissionDecisionDecl = string;
  * A PLACE MAP as authored: place → decision (`{ "src": "allow", "infra": "deny", "**": "ask" }`). A map
  * speaks only at its places (§3.4); `**` is how it gives itself a default. `unavailable` is refused
  * inside one. A path literally named `mode` or `implementation` is written `./mode`, because an object
- * whose keys are only those two is the entry wrapper (`PermissionSetEntryDecl`).
+ * whose keys are only those two is the entry wrapper (`PermissionSetEntryDecl`). A key that is a KIND of
+ * place the line's tool decides by holds that kind's own map ({@link KindMapDecl}).
  */
-export type PlaceMapDecl = Record<string, PermissionDecisionDecl>;
+export type PlaceMapDecl = Record<string, PermissionDecisionDecl | KindMapDecl>;
+
+/**
+ * One KIND's rule map inside a place map (decision 0023 §3.1, amended 2026-11-23): `"owner": { "session": "allow" }`
+ * on a line whose tool's resources have owners. Every kind must allow a resource.
+ */
+export type KindMapDecl = Record<string, PermissionDecisionDecl>;
 
 /** A line's value as authored: a decision everywhere, or a place map (decision 0023 §1). */
 export type PermissionModeDecl = PermissionDecisionDecl | PlaceMapDecl;
