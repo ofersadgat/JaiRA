@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { ChatPlanView, ChatSettings, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { actOnWaiting, useWaiting } from "@jaira/ui/limitsStore";
-import { contextTotalOf, costOfConversation, lastContextOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
+import { contextNowOf, contextTotalOf, costOfConversation, lastContextOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
 import { invoke } from "@jaira/ui/store";
 import { ChatError } from "../chat/ChatThread";
 import { Composer } from "../chat/Composer";
@@ -321,8 +321,9 @@ export function RunComposer({
   }
 
   // How full the conversation being continued is, and what it has cost (the rows the panel holds).
-  const contextReading = instanceId !== undefined ? lastContextOf(source.sessions[String(instanceId)]) : undefined;
   const contextTotal = instanceId !== undefined ? contextTotalOf(source.sessions[String(instanceId)]) : undefined;
+  // A compaction since the last reading is what the conversation holds now (`contextNowOf`).
+  const contextReading = instanceId !== undefined ? contextNowOf(lastContextOf(source.sessions[String(instanceId)]), contextTotal, undefined) : undefined;
   const conversationCost = instanceId !== undefined ? costOfConversation(source.sessionHistory, String(instanceId)) : undefined;
   return (
     <>

@@ -57,6 +57,7 @@ export function verbOf(status: LiveStatus): string {
   if (status.kind === "writing") return "Writing";
   if (status.kind === "answering") return "Answering";
   if (status.kind === "thinking") return "Thinking";
+  if (status.kind === "compacting") return "Compacting";
   if (status.kind === "running") {
     // The approval prompt is the turn waiting on the PERSON, not on a program.
     if (status.name === APPROVAL_PROMPT_FUNCTION) return "Waiting for you";
@@ -70,6 +71,7 @@ export function verbOf(status: LiveStatus): string {
 /** What it is doing it TO, when there is something to name: the call a tool's own call is about, first. */
 export function whatOf(status: LiveStatus): string {
   if (status.kind === "writing") return status.path ?? toolDisplayOf(status.name).title;
+  if (status.kind === "compacting") return "the conversation";
   if (status.kind !== "running") return "";
   const about = status.about !== undefined ? callWords(status.about.name, status.about.summary) : undefined;
   if (status.name === APPROVAL_PROMPT_FUNCTION) return about !== undefined ? `to approve · ${about}` : status.summary.length > 0 ? `to approve · ${status.summary}` : "to approve a command";

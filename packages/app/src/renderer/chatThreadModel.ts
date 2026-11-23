@@ -14,7 +14,7 @@ import { useWaiting } from "./limitsStore";
 import { invoke, syncCache } from "./store";
 import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
-import { contextTotalOf } from "./runConversationModel";
+import { contextNowOf, contextTotalOf } from "./runConversationModel";
 import { conversationAnswering, isProgramConversation, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
 import { programCallsOf, weaveProgramCalls, type ProgramCall } from "./programCalls";
@@ -376,10 +376,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const answering = conversationAnswering(surface.detail?.instances, running, surface.producing[taskId] ?? 0);
   /** This conversation's messages waiting for the allowance — held, or refused and set to try again. */
   const waitingHere = useWaiting().filter((item) => item.kind === "message" && item.taskId === taskId);
-  /** How full the conversation is: the reading on its last answer. */
-  const lastContext = useMemo(() => [...(thread?.session.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context, [thread]);
   /** How much the conversation has carried in all: that, and what its compactions took out of it. */
   const contextTotal = useMemo(() => contextTotalOf(thread?.session), [thread]);
+  /** How full the conversation is: the reading on its last answer, or what a compaction since it left. */
+  const liveEntries = (surface.live ?? afterglow)?.entries;
+  const lastContext = useMemo(
+    () => contextNowOf([...(thread?.session.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context, contextTotal, liveEntries),
+    [thread, contextTotal, liveEntries],
+  );
   /** Compact now — the agent's own `/compact`, which only a claude agent takes. */
   const model = plan?.effective.model ?? "";
   const onCompact = /^claude-(cli|code)\//.test(model) ? (focus?: string) => send(focus !== undefined ? `/compact ${focus}` : "/compact") : undefined;

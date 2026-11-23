@@ -1015,7 +1015,11 @@ export function liveEntriesOf(entry: JsonValue, within?: string): Array<Transcri
       ...times,
     });
   }
-  if (rec["kind"] === "event") return eventEntry(rec["event"] as JsonValue);
+  if (rec["kind"] === "event") {
+    // `LiveTurnLog.apply` stamps the item with when it arrived, which is how long a wait has gone on.
+    const at = typeof rec["at"] === "number" ? rec["at"] : undefined;
+    return eventEntry(rec["event"] as JsonValue).map((row) => (row.kind === "event" && at !== undefined && row.at === undefined ? { ...row, at } : row));
+  }
   return [{ kind: "tool", name: "stream", summary: "", args: entry }];
 }
 
@@ -1048,6 +1052,12 @@ export type LiveStatus =
    * person reads the wait by ("Fetch page · https://example.com"), not the host call's own arguments.
    */
   | { kind: "running"; name: string; summary: string; since?: number; about?: { name: string; summary: string }; checker?: string }
+  /**
+   * The agent is compacting its conversation — claude's own `status: "compacting"`, which it says before
+   * a compaction and clears (`status: null`, then the `compact_boundary`) once it is done. A minute or
+   * more in which nothing else arrives, and which used to read "Working" (the person, 2026-11-22).
+   */
+  | { kind: "compacting"; since?: number }
   /** Something is running and has said nothing yet. The honest floor: a turn that has started. */
   | { kind: "working" };
 
@@ -1069,6 +1079,8 @@ export function liveStatusOf(
   running: boolean,
 ): LiveStatus | null {
   if (!running) return null;
+  const compacting = compactingSince(entries);
+  if (compacting !== undefined) return { kind: "compacting", ...(compacting !== null ? { since: compacting } : {}) };
   if (tail?.writing !== undefined) {
     const path = writingPath(tail.writing.head);
     return { kind: "writing", name: tail.writing.name, chars: tail.writing.chars, ...(path !== undefined ? { path } : {}) };
@@ -1112,6 +1124,33 @@ export function liveStatusOf(
     };
   }
   return { kind: "working" };
+}
+
+/**
+ * When the agent began compacting, when that is the newest thing it said since the last message: the
+ * time of the first `status: "compacting"` in the run of them (claude says it more than once in one
+ * compaction), `null` for one that carries no time, `undefined` when it is not compacting. Any other
+ * status (`null` once done, `requesting`) or the boundary itself ends it.
+ */
+function compactingSince(entries: readonly TranscriptEntry[]): number | null | undefined {
+  let since: number | null | undefined;
+  for (let i = entries.length - 1; i >= 0; i -= 1) {
+    const entry = entries[i]!;
+    if (entry.kind === "message" || entry.kind === "compaction") break;
+    const status = agentStatusOf(entry);
+    if (status === undefined) continue;
+    if (status !== "compacting") break;
+    since = entry.kind === "event" && entry.at !== undefined ? entry.at : null;
+  }
+  return since;
+}
+
+/** An agent's `system`/`status` line's status: the word, `null` when it clears one, `undefined` for any other row. */
+function agentStatusOf(entry: TranscriptEntry): string | null | undefined {
+  if (entry.kind !== "event" || entry.detail === null || typeof entry.detail !== "object" || Array.isArray(entry.detail)) return undefined;
+  const line = entry.detail as Record<string, unknown>;
+  if (line["subtype"] !== "status") return undefined;
+  return typeof line["status"] === "string" ? line["status"] : null;
 }
 
 /** The call a tool's call was made BY — searched back from it, since a caller comes before what it calls. */

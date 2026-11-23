@@ -18,7 +18,7 @@
 import { describe, expect, it } from "vitest";
 import { contextFill, formatAge, formatTokens, toneOfContext, type ContextReading, type LimitAccountView, type LimitReading, type LimitsView, type SessionView } from "@jaira/shared/browser";
 import { accountFor } from "../src/renderer/limitsStore";
-import { contextTotalOf } from "../src/renderer/runConversationModel";
+import { contextNowOf, contextTotalOf } from "../src/renderer/runConversationModel";
 import { entriesOf, eventEntry } from "../src/renderer/transcript";
 import { modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "../src/renderer/usageCards";
 import { USAGE_PREVIEW_EXAMPLES, figureOf, keyFigureOf, weeklyFigureOf, weeklyTitleOf } from "../src/renderer/usageFigure";
@@ -173,6 +173,21 @@ describe("the conversation", () => {
 
   it("holds what the compaction left when no reading has come since", () => {
     expect(contextTotalOf(conversation([reply({ used: 900000 }), reply()], [{ index: 1, event: STREAMED }]))).toEqual({ held: 8788, compacted: 958421, compactions: 1 });
+  });
+
+  it("shows the composer what a compaction since the last reading left, not the reading before it", () => {
+    const last = { ...CONTEXT, used: 900000, breakdown: [{ name: "Messages", tokens: 880000 }] };
+    // Nothing since: the reading as it is.
+    expect(contextNowOf(last, { held: 900000, compacted: 0, compactions: 0 }, undefined)).toBe(last);
+    // A `/compact` after the last answer, on record: no answer since carries a reading of its own.
+    const compacted = contextNowOf(last, contextTotalOf(conversation([reply({ used: 900000 }), reply()], [{ index: 1, event: STREAMED }])), undefined);
+    expect(compacted).toMatchObject({ used: 8788, window: CONTEXT.window, model: CONTEXT.model });
+    // The breakdown described the context before the compaction.
+    expect(compacted?.breakdown).toBeUndefined();
+    // Mid-turn, live: the turn still being answered compacted, and its reading only comes when it ends.
+    const live = [{ kind: "message", role: "user", content: "go on" }, { kind: "event", at: 1, event: { type: "provider_event", payload: STREAMED } }];
+    expect(contextNowOf(last, { held: 900000, compacted: 0, compactions: 0 }, live as never)).toMatchObject({ used: 8788 });
+    expect(contextNowOf(undefined, undefined, live as never)).toBeUndefined();
   });
 
   it("counts a drop nobody reported, and nothing when the context only grew", () => {

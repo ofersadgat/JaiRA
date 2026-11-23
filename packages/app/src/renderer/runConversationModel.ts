@@ -123,6 +123,45 @@ export function lastContextOf(view: SessionView | null | undefined): ContextRead
   return [...(view?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context;
 }
 
+/**
+ * How full a conversation is NOW, for the composer's meter: the last answer's reading, unless a
+ * compaction has happened since it — in the turn still being answered (`live`: the raw entries of the
+ * live tail), or after the last reading on record (`total.held`, which a compaction after the last
+ * reading sets: a `/compact` has no answer to carry a reading of its own). Then the figure the
+ * compaction said it left, on the same window, without the breakdown, which described the context
+ * before it. The meter used to keep the pre-compaction figure until the next turn ended — for an
+ * auto-compaction an hour into a long turn, that was the rest of the hour (the person, 2026-11-22).
+ */
+export function contextNowOf(
+  reading: ContextReading | undefined,
+  total: ContextTotal | undefined,
+  live: readonly JsonValue[] | undefined,
+): ContextReading | undefined {
+  if (reading === undefined) return undefined;
+  const used = liveCompactedTo(live) ?? total?.held ?? reading.used;
+  if (used === reading.used) return reading;
+  return {
+    used,
+    window: reading.window,
+    model: reading.model,
+    ...(reading.autoCompactAt !== undefined ? { autoCompactAt: reading.autoCompactAt } : {}),
+    at: reading.at,
+  };
+}
+
+/** What the newest compaction in a live tail's entries left the context at, when one said so. */
+function liveCompactedTo(entries: readonly JsonValue[] | undefined): number | undefined {
+  for (let i = (entries?.length ?? 0) - 1; i >= 0; i -= 1) {
+    const rec = entries![i] as { kind?: unknown; event?: unknown; parentToolUseId?: unknown } | null;
+    // A subagent's compaction is of its own conversation, not this one.
+    if (rec?.kind !== "event" || rec.parentToolUseId !== undefined) continue;
+    const event = (rec.event ?? {}) as { type?: unknown; payload?: unknown };
+    const said = compactionOfEvent(event.type === "provider_event" ? event.payload : event);
+    if (said !== undefined) return said.after;
+  }
+  return undefined;
+}
+
 /** What a conversation has carried in all: what it holds now, and what its compactions took out of it. */
 export interface ContextTotal {
   held: number;

@@ -43,6 +43,7 @@ import {
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
 import { register, signalsOf, type LiveCalls } from "./liveHandles";
+import { forgetSeenFiles } from "./fileTools";
 import { withContinuation, type ContinuationPorts } from "./continuation";
 import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/promptop";
 import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
@@ -778,6 +779,13 @@ export interface TurnDelta {
  * Draining is a floating promise. Awaiting it would hold `result` open until the stream closed, which
  * would make watching a run slower than not watching one.
  */
+/** Whether an executor event is an agent's compaction boundary (claude's `system`/`compact_boundary`). */
+export function isCompactionEvent(event: unknown): boolean {
+  const e = event as { type?: unknown; payload?: unknown } | null;
+  const line = (e?.type === "provider_event" ? e.payload : e) as { subtype?: unknown } | null | undefined;
+  return line?.subtype === "compact_boundary";
+}
+
 export function withTurnStream(
   sink: (delta: TurnDelta) => void,
   inner: Executor<ExecServices, WorkflowMetrics>,
@@ -847,6 +855,9 @@ export function withTurnStream(
                 } as JsonValue,
               };
             } else {
+              // A compaction leaves the agent a summary of the files it read, not the files: what
+              // `write_file` measures a write against is forgotten with them (`SeenFiles.forget`).
+              if (taskId !== undefined && isCompactionEvent(event)) forgetSeenFiles(taskId);
               payload = { ...delta, entry: { kind: "event", event: event as unknown as JsonValue } as JsonValue };
             }
             try {

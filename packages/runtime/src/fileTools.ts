@@ -87,6 +87,21 @@ export class SeenFiles {
   hashOf(taskId: string, file: string): string | undefined {
     return this.hashes.get(seenKey(taskId, file));
   }
+  /**
+   * Forget every file the task's agent saw — its conversation was compacted. What it read is a summary
+   * now, not the file, so a write after it is a write over a file it no longer holds, which is the
+   * write this guard exists to refuse (the person, 2026-11-22: "does the tool check … properly reset
+   * when compaction happens?" — it did not; a read from before a compaction let a write through after).
+   */
+  forget(taskId: string): void {
+    const prefix = `${taskId}\u0000`;
+    for (const key of [...this.hashes.keys()]) if (key.startsWith(prefix)) this.hashes.delete(key);
+  }
+}
+
+/** Forget what the task's agent saw, in the process's own {@link SeenFiles} — see {@link SeenFiles.forget}. */
+export function forgetSeenFiles(taskId: string): void {
+  PROCESS_SEEN.forget(taskId);
 }
 
 /** One file as {@link SeenFiles} keys it: absolute, slashes forward, case folded where the disk folds it. */

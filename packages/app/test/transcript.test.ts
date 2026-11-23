@@ -835,6 +835,23 @@ describe("what the model is doing right now, as one line", () => {
     ).toMatchObject({ kind: "writing", name: "show_artifact", path: "a.html", chars: 900 });
   });
 
+  it("says the agent is compacting while it is, from the first time it said so, and not after", () => {
+    // What claude streams around an automatic compaction (a record of 2026-10-31): `compacting`, said
+    // twice, then `null` with the result, then the boundary.
+    const status = (s: string | null, at: number): TranscriptEntry => ({ kind: "event", tone: "plain", text: "system: status", at, detail: { type: "system", subtype: "status", status: s } });
+    const asked: TranscriptEntry = { kind: "message", role: "user", text: "go on" };
+    const compacting = [asked, status("compacting", 100), { kind: "event", tone: "plain", text: "system: task_updated", at: 120 } as TranscriptEntry, status("compacting", 140)];
+    expect(liveStatusOf(compacting, null, true)).toEqual({ kind: "compacting", since: 100 });
+    expect(statusVerbOf(liveStatusOf(compacting, null, true)!)).toBe("Compacting");
+    expect(liveStatusOf([...compacting, status(null, 190)], null, true)).toEqual({ kind: "working" });
+    expect(liveStatusOf([...compacting, { kind: "compaction", trigger: "auto" }], null, true)).toEqual({ kind: "working" });
+    // A compaction from an earlier stretch is not what this one is doing.
+    expect(liveStatusOf([status("compacting", 100), asked], null, true)).toEqual({ kind: "working" });
+    // Live, the item carries when it arrived and the event its line.
+    const live = entriesOf(null, [], { text: "", entries: [{ kind: "event", at: 500, event: { type: "provider_event", payload: { type: "system", subtype: "status", status: "compacting" } } }] }, []);
+    expect(liveStatusOf(live, null, true)).toEqual({ kind: "compacting", since: 500 });
+  });
+
   it("waits on the NEWEST unanswered call, since parallel ones settle one at a time", () => {
     const entries: TranscriptEntry[] = [
       { kind: "tool", name: "read_file", summary: "a.ts", ok: true, result: {} },

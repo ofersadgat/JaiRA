@@ -23,7 +23,7 @@ import {
   READ_FILE,
   WRITE_FILE,
 } from "../src/fileTools";
-import { newRegistry } from "../src/wiring";
+import { newRegistry, withTurnStream } from "../src/wiring";
 import { noteCallAgent } from "../src/callAgent";
 import type { AgentToolDeclaration } from "@jaira/shared";
 
@@ -376,6 +376,43 @@ describe("a write over a file the agent has not read (t-elvj5dhzoy, 2026-11-11)"
     seen.saw("t-1", join(dir, "a.md"), "x");
     expect(seen.hashOf("t-1", join(dir, "a.md"))).toBeDefined();
     expect(seen.hashOf("t-2", join(dir, "a.md"))).toBeUndefined();
+  });
+
+  it("holds a write after a compaction to a fresh read, though the file was read before it", async () => {
+    const { write, read } = tools("$DEFAULT");
+    writeFileSync(join(dir, "Sidebar.tsx"), "export const a = 1;\n");
+    await call(read, byAgent({ path: "Sidebar.tsx" }));
+    // The agent's turn streams claude's compaction boundary, as the live stream carries it.
+    const compacting = {
+      capabilities: {},
+      metrics: { merge: (a: unknown) => a },
+      start: () => ({
+        events: (async function* () {
+          yield { type: "provider_event", payload: { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 967172, post_tokens: 18858 } } };
+        })(),
+        result: Promise.resolve({ value: "done", metrics: { durationMs: 0 } }),
+        cancel: async () => undefined,
+      }),
+    };
+    await withTurnStream(() => undefined, compacting as never, undefined, "t-1").start({ kind: "prompt" } as never, {} as never).result;
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await call(write, byAgent({ path: "Sidebar.tsx", content: "x" }))).toMatchObject({
+      error: expect.stringMatching(/have not read it/) as unknown as string,
+    });
+    await call(read, byAgent({ path: "Sidebar.tsx" }));
+    expect(await call(write, byAgent({ path: "Sidebar.tsx", content: "export const a = 2;\n" }))).toMatchObject({ path: "Sidebar.tsx" });
+  });
+
+  it("forgets what a task saw when its conversation is compacted, and only that task's", () => {
+    const seen = new SeenFiles();
+    seen.saw("t-1", join(dir, "a.md"), "x");
+    seen.saw("t-1", join(dir, "b.md"), "y");
+    seen.saw("t-10", join(dir, "a.md"), "x");
+    seen.forget("t-1");
+    expect(seen.hashOf("t-1", join(dir, "a.md"))).toBeUndefined();
+    expect(seen.hashOf("t-1", join(dir, "b.md"))).toBeUndefined();
+    // A task id the forgotten one is a prefix of is another task.
+    expect(seen.hashOf("t-10", join(dir, "a.md"))).toBeDefined();
   });
 });
 
