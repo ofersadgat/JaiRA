@@ -1020,12 +1020,22 @@ function reloadAfterCrash(win: BrowserWindow, reason: string): void {
  * Debug/CI affordance: with `JAIRA_CAPTURE=<file.png>` the window is screenshotted
  * once the first paint has settled and the app exits. It makes the UI verifiable
  * from a headless script (and in CI) instead of only by eye.
+ *
+ * A capture that fails says why and exits 1. It used to be an unhandled rejection the app outlived
+ * until something else quit it with 0, which the release's smoke test could only report as "exit 0,
+ * no capture" (a GitHub Intel Mac with no GPU, `UnknownVizError`, 2026-11-21 and 22).
  */
 async function captureAndExit(win: BrowserWindow, file: string): Promise<void> {
   const settleMs = Number(process.env["JAIRA_CAPTURE_DELAY_MS"] ?? 1200);
   await new Promise((r) => setTimeout(r, settleMs));
-  const image = await win.webContents.capturePage();
-  await writeFile(file, image.toPNG());
+  try {
+    const image = await win.webContents.capturePage();
+    await writeFile(file, image.toPNG());
+  } catch (e) {
+    console.error(`capture failed: ${(e as Error).message}`);
+    app.exit(1);
+    return;
+  }
   console.log(`captured ${file}`);
   app.quit();
 }

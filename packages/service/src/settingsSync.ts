@@ -295,7 +295,13 @@ export class SettingsSync {
   private readonly scanTimer: ReturnType<typeof setInterval>;
   private readonly pullTimer: ReturnType<typeof setInterval>;
   private readonly pulling = new Set<string>();
-  /** Changes stamped here but not by a look (a removal through JaiRA): offered with the next look's. */
+  /**
+   * Changes stamped here and not yet offered: a removal through JaiRA, and what a look stamped when it was
+   * not the offer's own — the one `take`, `answer` and `pullFrom` take first. Dropping those lost the
+   * change until the next pull, up to a minute: two machines kicked together, the one taking the other's
+   * offer stamped its own hand deletion there, and its own offer then found nothing new (settingsSync.test
+   * "carries Shared, Just you and your project's files each way", failing now and then in CI, 2026-11-22).
+   */
   private readonly unoffered = new Set<string>();
   /** What the log has been told about a file left here, so a look once a minute says it once. */
   private readonly told = new Set<string>();
@@ -605,7 +611,13 @@ export class SettingsSync {
       changed.push(key);
     }
     if (first || firstFiles || changed.length > 0) this.write({ ...file, looked: true, lookedFiles: true });
+    for (const key of changed) this.unoffered.add(key);
     return changed;
+  }
+
+  /** A look that is not the offer's: what it stamped is offered shortly, not left for the next pull. */
+  private look(): void {
+    if (this.scan().length > 0) this.kick();
   }
 
   /**
@@ -638,14 +650,13 @@ export class SettingsSync {
 
   /** Look again now, and offer every machine online what changed. */
   async offer(): Promise<void> {
-    let changed: string[];
     try {
-      changed = this.scan();
+      this.scan();
     } catch (e) {
       this.options.ports.log("warn", `settings sync could not read this machine's settings: ${(e as Error).message}`);
       return;
     }
-    const keys = new Set([...changed, ...this.unoffered]);
+    const keys = new Set(this.unoffered);
     this.unoffered.clear();
     if (keys.size === 0) return;
     const pieces = this.piecesOf(keys);
@@ -671,7 +682,7 @@ export class SettingsSync {
     if (client === undefined) return 0;
     this.pulling.add(machineId);
     try {
-      this.scan();
+      this.look();
       const answer = (await client.invoke("settings:pull", { stamps: this.stamps() })) as { pieces?: SyncedPiece[] } | null;
       const taken = this.take(Array.isArray(answer?.pieces) ? answer.pieces : [], this.options.fleet.labelOf(machineId));
       this.stampExchange();
@@ -696,7 +707,7 @@ export class SettingsSync {
   /** What this machine holds that is newer than `theirs`: the answer to `settings:pull` — only `only`'s keys, when named. */
   answer(theirs: Record<string, SyncStamp>, only?: readonly string[]): SyncedPiece[] {
     if (!this.on()) return [];
-    this.scan();
+    this.look();
     const file = this.read();
     const asked = only !== undefined ? new Set(only) : undefined;
     const keys = new Set(Object.entries(file.pieces).filter(([key, held]) => (asked === undefined || asked.has(key)) && newer(held, theirs[key])).map(([key]) => key));
@@ -737,7 +748,7 @@ export class SettingsSync {
   take(incoming: readonly SyncedPiece[], from = "another machine"): number {
     if (!this.on() || incoming.length === 0) return 0;
     // What changed here first gets its stamp, so it is weighed against what came as the change it is.
-    this.scan();
+    this.look();
     const file = this.read();
     const ports = this.options.ports;
     const wanted = incoming.filter((piece) => {

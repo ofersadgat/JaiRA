@@ -425,6 +425,20 @@ describe("permission sets and workflows that follow the person (amended 2026-11-
     expect(a.service.fleet.view().self.settings?.counts.files).toBe(3);
   });
 
+  it("offers what it stamped while taking another machine's offer, not only at the next pull", async () => {
+    const [a, b] = await paired();
+    put(b, "personal/prompts/tidy.md", "Tidy up.\n");
+    b.service.settingsSync.kick(0);
+    await expect.poll(() => at(a, "personal/prompts/tidy.md"), { timeout: 8000 }).toBe("Tidy up.\n");
+    // Past the pull each machine makes as the other comes online, which would carry anything.
+    await new Promise((r) => setTimeout(r, 1500));
+    // Removed by hand on B, and B first looks while taking what another machine offers: two machines
+    // kicked together, the other's offer arriving before B's own. Nothing here kicks B.
+    rmSync(join(b.base, "personal", "prompts", "tidy.md"));
+    b.service.settingsSync.take([{ key: 'later:["appearance","mode"]', at: Date.now(), by: "zz-newer", value: "dark" }], "a newer machine");
+    await expect.poll(() => existsSync(join(a.base, "personal", "prompts", "tidy.md")), { timeout: 4000 }).toBe(false);
+  });
+
   it("writes a project's files on a machine where it is not cloned, for when it is", async () => {
     const [a, b] = await paired();
     const atlasA = clone(a, "atlas-a", "https://github.com/me/atlas.git");

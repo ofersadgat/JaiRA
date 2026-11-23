@@ -354,7 +354,10 @@ function smoke(output) {
   // A CI Linux runner cannot give Chromium's sandbox helper the setuid root it needs.
   // And no GPU: under xvfb on GitHub's x64 machine Chromium's display compositor failed
   // (`UnknownVizError`) and nothing was captured (2026-10-04); the window draws the same in software.
-  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox", "--disable-gpu"] : [];
+  // GitHub's Intel Mac (macos-15-intel) is a VM with no GPU either: every mac-x64 nightly from
+  // 2026-11-21 failed the same way, its EGL display never initialising.
+  const ci = process.env.CI !== undefined && process.env.CI !== "";
+  const argv = !ci ? [] : process.platform === "linux" ? ["--no-sandbox", "--disable-gpu"] : process.platform === "darwin" ? ["--disable-gpu"] : [];
   const run = spawnSync(exe, argv, {
     env: { ...process.env, JAIRA_HOME: home, JAIRA_CAPTURE: shot, JAIRA_CAPTURE_DELAY_MS: "4000", ELECTRON_ENABLE_LOGGING: "1" },
     encoding: "utf8",
