@@ -407,9 +407,12 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
   covered.current = cover;
   // Where each chip lies along the row, from the widths drawn: a chip moved by one before it growing is not told.
   const spots = (): Spot[] => {
+    // On web, read off the row itself (the scroller's content box, a box per chip): see the chips below.
+    const drawn = isWeb ? (node.current?.firstElementChild?.children as HTMLCollectionOf<HTMLElement> | undefined) : undefined;
     let x = 0;
-    return chips.map((chip) => {
-      const w = widths.current.get(chip.key) ?? 0;
+    return chips.map((chip, i) => {
+      // The width as drawn, fractions kept (`offsetWidth` rounds, and a long row adds the roundings up).
+      const w = drawn !== undefined ? (drawn[i]?.getBoundingClientRect().width ?? 0) : (widths.current.get(chip.key) ?? 0);
       const spot = { x, w };
       x += w + CHIP_GAP;
       return spot;
@@ -473,6 +476,8 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
         }}
         onContentSizeChange={(w) => {
           view.current.content = w;
+          // A chip came, went or changed width: the row's content did too (web reads the widths here).
+          recount();
           toEnd();
         }}
         onScroll={(e) => {
@@ -484,10 +489,20 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
           <View
             key={chip.key}
             flexShrink={0}
-            onLayout={(e) => {
-              widths.current.set(chip.key, e.nativeEvent.layout.width);
-              recount();
-            }}
+            /*
+             * A phone is told each chip's width. Web is not: Tamagui's `onLayout` there is a poll — every
+             * tenth frame or so it measures every element that has one, for as long as it is mounted —
+             * and a long conversation's chips were most of them (about 500 in one with 29 mock-ups,
+             * 2026-11-22), the window busy while nothing moved. `spots` reads the widths off the row.
+             */
+            {...(isWeb
+              ? {}
+              : {
+                  onLayout: (e: LayoutChangeEvent) => {
+                    widths.current.set(chip.key, e.nativeEvent.layout.width);
+                    recount();
+                  },
+                })}
           >
             <Chip chip={chip} rowOf={rowOf} />
           </View>
