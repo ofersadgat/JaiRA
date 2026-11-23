@@ -8756,7 +8756,8 @@ export class AppService {
     return {
       ...(backend !== undefined ? { lister: () => backend.processes() } : {}),
       // The call's own permission set: `shell --run_in_background`, narrowed by each program left (ruling 5).
-      decide: (left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left),
+      // Under the block the gate decides the call under: a conversation's composer pick, not the set it opened with.
+      decide: (left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left, ctx?.scope),
     };
   }
 

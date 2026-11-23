@@ -38,7 +38,7 @@
  *     built-ins alone.
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
-import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
+import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
 import {
@@ -1906,16 +1906,31 @@ const LEFT_RUNNING_JUDGES = new WeakMap<object, (authored: PermissionsDecl | und
 
 /**
  * Whether the session may keep what a foreground `shell` call left running — what the engine wires as
- * `ToolOptions.leftRunning.decide`: `(left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left)`.
+ * `ToolOptions.leftRunning.decide`: `(left, ctx) => decideLeftRunning(ctx?.policy, ctx?.authored, left, ctx?.scope)`.
  *
  * `policy` is the call's compiled policy (`ExecServices.policy`): it knows the permission set a
  * conversation turn was compiled for, the run's remembered answers, the project's dialect and root.
  * `authored` is the operation's own lowered block (`ExecServices.authored`), the nearer statement where
  * there is one — a run's state, a turn's. A policy this module did not compile judges by the block
  * alone; nothing to judge by at all is `ask`.
+ *
+ * `scope` is the call's dispatch site (`ExecServices.scope`). With it, the block is the one the gate
+ * decides the call under: the host's word on the operation NOW (`ExecPolicy.permissionsOf`), else the
+ * state's. A conversation is one run, and `authored` is the block its root was entered with: the set the
+ * person picks in the composer afterwards reaches the gate only through `permissionsOf`. Read from
+ * `authored` alone, a chat that had moved to `full` judged a `Start-Process` dev server by the set it
+ * opened with, which had no `shell --run_in_background` line, so the server was stopped as `ask` where
+ * the same start through `run_in_background` was allowed.
  */
-export function decideLeftRunning(policy: ExecPolicy | undefined, authored: unknown, left: LeftRunning): LeftRunningVerdict {
-  const block = authored !== null && typeof authored === "object" ? (authored as PermissionsDecl) : undefined;
+export function decideLeftRunning(policy: ExecPolicy | undefined, authored: unknown, left: LeftRunning, scope?: { instanceId: string }): LeftRunningVerdict {
+  const stated = authored !== null && typeof authored === "object" ? (authored as PermissionsDecl) : undefined;
+  // The engine's own reading (`blockNow`). Its `sessionId` is the ledger's key, which a tool's services
+  // do not carry; JaiRA's `permissionsOf` reads the instance alone.
+  const now =
+    policy?.permissionsOf !== undefined && scope !== undefined
+      ? policy.permissionsOf({ sessionId: scope.instanceId, instanceId: scope.instanceId }, stated as AuthoredPermissions | undefined)
+      : stated;
+  const block = now !== null && typeof now === "object" ? (now as PermissionsDecl) : undefined;
   const judge = policy?.scopeOf !== undefined ? LEFT_RUNNING_JUDGES.get(policy.scopeOf) : undefined;
   if (judge !== undefined) return judge(block, left);
   return leftRunningVerdict(shellPermissionSetOfBlock(block)?.permissionSet, left);

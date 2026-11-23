@@ -199,4 +199,19 @@ describe("what a foreground call left running (ruling 5)", () => {
     expect(decideLeftRunning(undefined, block, { command: "node x.js", programs: ["node"] })).toBe("allow");
     expect(decideLeftRunning(undefined, undefined, { command: "node x.js", programs: ["node"] })).toBe("ask");
   });
+
+  it("is judged under the block the gate decides the call under: a conversation's later pick, not the set it opened with", () => {
+    // The topodiff chat: opened under a set with no background line, moved to one that allows it. The gate
+    // allowed `run_in_background`, and the `Start-Process` server was stopped as `ask`.
+    const opened = lowerPermissionSet(setOf({ shell: "allow" }), "inline").permissions;
+    const picked = lowerPermissionSet(setOf({ shell: "allow", "shell --run_in_background": "allow" }), "inline").permissions;
+    const root = "i-root";
+    const policy = { ...compilePolicy({}), permissionsOf: (call: { instanceId: string }, stated: unknown) => (call.instanceId === root ? picked : stated) } as never;
+    const left = { command: "Start-Process cmd -ArgumentList '/c','npx one dev --port 8146'", programs: ["cmd"] };
+    expect(decideLeftRunning(policy, opened, left, { instanceId: root })).toBe("allow");
+    // A state the pick does not govern keeps its own block.
+    expect(decideLeftRunning(policy, opened, left, { instanceId: "i-child" })).toBe("ask");
+    // Without the call's site there is nothing to ask the host about: the state's block, as before.
+    expect(decideLeftRunning(policy, opened, left)).toBe("ask");
+  });
 });

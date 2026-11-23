@@ -468,6 +468,11 @@ one is chosen.
     flags first and then strictest, and the gate gets the loosest.
   - `shell --run_in_background` is judged as a whole-line part of a backgrounded call. That covers
     Claude's native `Bash`. A missing line asks.
+  - What a foreground call left running is judged under the block the gate decides the call under
+    (`decideLeftRunning` with the call's `scope`, through `ExecPolicy.permissionsOf`), not the block the
+    state was entered with. A conversation is one run, so a set picked in the composer later reaches
+    only `permissionsOf`. Until 2026-11-22 the topodiff chat, moved to `full`, had a `Start-Process` dev
+    server stopped as `ask`, while the same start through `run_in_background` was allowed.
   - The escapes are refused by a built-in that `functions.shell.builtins` does not turn off. A line
     naming the program on `shell --run_in_background` lifts it.
   - The shipped sets' lines are as ruled.
