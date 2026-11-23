@@ -42,7 +42,7 @@ import { PhoneContext } from "./phone";
 import { PhoneFrame, RemoteLine } from "./PhoneFrame";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
-import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
+import { pageGround, useLayoutRest, usePageRules, useWindowTitle } from "./windowPage";
 
 /**
  * The shell (decision 0015): the app's one frame, drawn by the desktop's window and a browser through
@@ -168,6 +168,7 @@ function Frame(): JSX.Element {
   // keyboard's focus ring, the one scrollbar. Web only; a phone has neither.
   useWindowTitle(windowTitle(state.at, state.view, state.doc?.path ?? state.dir?.path ?? null));
   usePageRules(t);
+  useLayoutRest();
   const paned = state.view === "tasks" || state.view === "files" || state.view === "chat";
   return (
     // The window's ground (--bg) is the page's own canvas on web (`usePageRules` gives it to `body`); a

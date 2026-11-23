@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect } from "react";
+import { setOnLayoutStrategy } from "@tamagui/core";
 import type { Tokens } from "../tokens";
 
 /**
@@ -75,3 +76,56 @@ export function usePageRules(t: Tokens): void {
 /** Whether the page's own canvas carries the window's ground ({@link usePageRules}), so the shell paints none. */
 export const pageGround = (t: Tokens): boolean => t.replayed;
 const PAGE_RULES = "jaira-page";
+
+/** How long the page stays still before Tamagui's layout loop is put to rest. */
+const LAYOUT_REST_MS = 1000;
+
+/**
+ * Tamagui's `onLayout` on web, put to rest while nothing on the page moves (2026-11-22).
+ *
+ * Tamagui answers `onLayout` on web with a loop on `requestAnimationFrame` that runs for as long as ANY
+ * element on the page has one: every tenth frame or so it measures them all, and on every other frame it
+ * only asks for the next — which is enough to have the window draw a frame at the display's rate with
+ * nothing changed. Measured with a long conversation open: ~1,200 animation frames in 5 s, the window 9%
+ * busy at rest; 5% with no conversation open.
+ *
+ * So the loop runs while something could be moving and rests a second after the last of it: a change to
+ * the page (an element added, removed or restyled, text changed), the window resized, anything scrolled,
+ * a transition or animation running, a picture or a font arriving. Each one is what can move or size an
+ * element; each wakes the loop, which measures as it always has. A wake costs a flag and a timer.
+ *
+ * Every `onLayout` still fires once, synchronously, when its element mounts: Tamagui does that whatever
+ * the strategy (`emitLayoutSync`).
+ */
+export function useLayoutRest(): void {
+  useEffect(() => {
+    let resting = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const rest = (): void => {
+      resting = true;
+      setOnLayoutStrategy("off");
+    };
+    const wake = (): void => {
+      if (resting) {
+        resting = false;
+        setOnLayoutStrategy("async");
+      }
+      clearTimeout(timer);
+      timer = setTimeout(rest, LAYOUT_REST_MS);
+    };
+    const changes = new MutationObserver(wake);
+    changes.observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+    const events = ["resize", "scroll", "transitionrun", "transitionend", "animationstart", "animationend", "load"] as const;
+    // Captured: `scroll`, `load` and the transition events do not bubble up to the window.
+    for (const name of events) window.addEventListener(name, wake, { capture: true, passive: true });
+    document.fonts?.addEventListener?.("loadingdone", wake);
+    wake();
+    return () => {
+      changes.disconnect();
+      for (const name of events) window.removeEventListener(name, wake, { capture: true });
+      document.fonts?.removeEventListener?.("loadingdone", wake);
+      clearTimeout(timer);
+      setOnLayoutStrategy("async");
+    };
+  }, []);
+}

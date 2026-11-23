@@ -10,3 +10,6 @@ export function usePageRules(_t: Tokens): void {}
 
 /** A phone has no page under the shell: the shell paints the window's ground itself. */
 export const pageGround = (_t: Tokens): boolean => false;
+
+/** A phone's `onLayout` is the platform's own, told when something moves: nothing to rest (`windowPage.web.ts`). */
+export function useLayoutRest(): void {}

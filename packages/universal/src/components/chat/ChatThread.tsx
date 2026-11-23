@@ -330,6 +330,8 @@ export function ChatThread({
               scope={m.taskId}
               rails
               agentRail
+              // Opened at its end: what is far above waits until it is scrolled near (web).
+              deferFar
               {...narrated}
               {...doomed}
             />

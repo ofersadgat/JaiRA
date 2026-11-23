@@ -115,9 +115,9 @@ export function ScrollWindowProvider({ window, children }: { window: ScrollWindo
 /**
  * A piece of a long scroll a phone draws only near what shows. Drawn whole at first, and measured, so
  * the box it leaves is its own height and the scroll never jumps. Outside a scroll window it is simply
- * drawn.
+ * drawn. `lazy` and `stamp` are the browser's (`Virtual.web.tsx`): a phone draws every piece first.
  */
-export function Virtual({ children }: { children: ReactNode }): JSX.Element {
+export function Virtual({ children }: { children: ReactNode; lazy?: boolean; stamp?: Record<string, string | number> }): JSX.Element {
   const scroll = useContext(ScrollWindowContext);
   const ref = useRef<View>(null);
   const box = useRef<{ y: number; height: number } | null>(null);

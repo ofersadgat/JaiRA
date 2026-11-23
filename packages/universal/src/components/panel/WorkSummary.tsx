@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
@@ -35,6 +35,7 @@ import { Pulse } from "../chat/Pulse";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { Float } from "../floats/Float";
 import { HoverFloatLayer, Tap, useHoverFloat, type HoverFloat } from "../floats/hoverFloat";
+import { useDrawnWidth } from "../drawnWidth";
 import { Icon, type IconName } from "./Icon";
 import { ShellLine } from "./WorkRows";
 
@@ -360,7 +361,7 @@ function moveAlong(node: HTMLElement): () => void {
  * "+2": how many chips are hidden on that side of the row; a press brings them in. It lies over the
  * row's edge, on a ground of its own, so it never moves or narrows the row (`sidewaysRow.ts`).
  */
-function More({ n, before, onPress, onWidth }: { n: number; before: boolean; onPress: () => void; onWidth: (width: number) => void }): JSX.Element {
+function More({ n, before, onPress, onWidth }: { n: number; before: boolean; onPress: () => void; onWidth?: ((width: number) => void) | undefined }): JSX.Element {
   const t = useTokens();
   const which = n === 1 ? "the chip" : `the ${n} chips`;
   return (
@@ -376,7 +377,7 @@ function More({ n, before, onPress, onWidth }: { n: number; before: boolean; onP
       borderRadius={999}
       alignItems="center"
       justifyContent="center"
-      onLayout={(e: LayoutChangeEvent) => onWidth(e.nativeEvent.layout.width)}
+      {...(onWidth !== undefined ? { onLayout: (e: LayoutChangeEvent) => onWidth(e.nativeEvent.layout.width) } : {})}
       {...({ boxShadow: `inset 0px 0px 0px 1px ${String(t.v("line"))}` } as object)}
       box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : t.v("panel") })}
     >
@@ -435,6 +436,21 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
     setCover((was) => (Math.abs(was[side] - width) < 0.5 ? was : { ...was, [side]: width }));
   };
   useEffect(recount, [cover.left, cover.right]);
+  /*
+   * On web each side's count is measured here, once it is drawn and whenever its number changes, rather
+   * than by `onLayout`, which Tamagui answers there with a poll for as long as the count is up (see the
+   * chips below). Its width changes only with its number. A phone measures it with `onLayout` (`More`).
+   */
+  useLayoutEffect(() => {
+    if (!isWeb) return;
+    const row = node.current?.parentElement;
+    if (row === null || row === undefined) return;
+    for (const [side, end] of [["left", "before"], ["right", "after"]] as const) {
+      const count = row.querySelector<HTMLElement>(`:scope > [aria-label^="Show the"][aria-label$=" ${end}"]`);
+      if (count !== null) measured(side)(count.getBoundingClientRect().width);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hidden.before, hidden.after]);
   const empty = chips.length === 0;
   useEffect(() => {
     if (!isWeb || empty) return undefined;
@@ -508,8 +524,8 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
           </View>
         ))}
       </ScrollView>
-      {hidden.before > 0 ? <More n={hidden.before} before onPress={() => page(-1)} onWidth={measured("left")} /> : null}
-      {hidden.after > 0 ? <More n={hidden.after} before={false} onPress={() => page(1)} onWidth={measured("right")} /> : null}
+      {hidden.before > 0 ? <More n={hidden.before} before onPress={() => page(-1)} onWidth={isWeb ? undefined : measured("left")} /> : null}
+      {hidden.after > 0 ? <More n={hidden.after} before={false} onPress={() => page(1)} onWidth={isWeb ? undefined : measured("right")} /> : null}
     </View>
   );
 }
@@ -713,7 +729,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   // agent that asked is gone until the answer continues it.
   const askAt = ask !== undefined && (working || ask.pending.recovered === true) ? approvalCallIndex(entries, ask.pending.requestId) : -1;
   // How wide the summary is drawn: a side panel is too narrow for the prompt to stand at a row's text.
-  const [width, setWidth] = useState<number | undefined>(undefined);
+  const [width, widthProps] = useDrawnWidth();
   const narrow = width !== undefined && width < NARROW_SUMMARY;
   const prompt = (afterRow: boolean): ReactNode =>
     askAt >= 0 && ask !== undefined ? (
@@ -735,7 +751,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const wash = t.mix(t.v("panel-2"), 55, "transparent");
   const footRadius = open ? (bare ? { borderTopLeftRadius: 8, borderTopRightRadius: 8, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : { borderRadius: 0 }) : bare ? { borderRadius: 8 } : { borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 };
   return (
-    <View testID="work-summary" marginTop={6} marginHorizontal={-6} marginBottom={10} minWidth={0} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
+    <View testID="work-summary" marginTop={6} marginHorizontal={-6} marginBottom={10} minWidth={0} {...(widthProps as object)}>
       {bare ? null : (
         <View
           flexDirection="column"

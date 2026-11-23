@@ -83,6 +83,7 @@ export const Transcript = memo(function Transcript({
   agentRail = false,
   lane,
   laneLit = false,
+  deferFar = false,
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
@@ -120,6 +121,11 @@ export const Transcript = memo(function Transcript({
   lane?: string | undefined;
   /** That lane is lit under the pointer in the conversation this one is nested in. */
   laneLit?: boolean | undefined;
+  /**
+   * A conversation's own thread (`ChatThread.tsx`): what it holds when first drawn, but for its last
+   * blocks, is drawn as it comes near the view (`Virtual.web.tsx`'s `lazy`, web only).
+   */
+  deferFar?: boolean | undefined;
 }): JSX.Element {
   // With no pointer that hovers, the message whose rail a press opened (its block), and the message the
   // touch now landing is on: a touch anywhere else in the window puts the rail away. The shell's root
@@ -168,6 +174,11 @@ export const Transcript = memo(function Transcript({
   // A view opened from a publish's card goes on to a later publish in the same run, as the card does
   // (`publishSuccessorsOf`): told whenever a publish lands that replaces another.
   const successors = publishSuccessorsOf(shown);
+  // Whether this render is the first with anything in it: then the blocks far above the end may wait.
+  const opening = useRef(true);
+  useEffect(() => {
+    if (shown.length > 0) opening.current = false;
+  });
   const followed = [...successors].map(([call, ref]) => `${call}>${String(ref.version)}`).join(" ");
   useEffect(() => followPublishes(successors), [followed]); // eslint-disable-line react-hooks/exhaustive-deps
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
@@ -200,6 +211,8 @@ export const Transcript = memo(function Transcript({
         const marker = marks ? <View ref={frame.ctx.register(`block:${i}`, { at: startOfBlock(block) ?? 0 }) as never} height={0} /> : null;
         // When the block happened (web): what a step picked in the Steps index is found by (`stepBlockOf`).
         const span = isWeb ? spanOf(block) : {};
+        // Far above the end when the thread is first drawn: put off until it comes near the view (web).
+        const putOff = deferFar && opening.current && i < total - DRAWN_AT_ONCE;
         const before = (
           <>
             {marker}
@@ -211,7 +224,7 @@ export const Transcript = memo(function Transcript({
             <Fragment key={i}>
               {before}
               {cutLine}
-              <Virtual>
+              <Virtual lazy={putOff} stamp={span}>
                 <View minWidth={0} {...fade} {...span}>
                   <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, total)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={callsHere} />
                 </View>
@@ -246,7 +259,7 @@ export const Transcript = memo(function Transcript({
               {before}
               {cutLine}
               {dropped}
-              <Virtual>
+              <Virtual lazy={putOff} stamp={{ ...span, ...dayStampOf(block.at) }}>
                 <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})} {...span}>
                   <Message
                     entry={block}
@@ -318,6 +331,15 @@ export const Transcript = memo(function Transcript({
 });
 
 const NO_ENTRIES: TranscriptEntry[] = [];
+
+/** How many blocks at a thread's end are drawn at once when it opens: enough to fill the view (`deferFar`). */
+const DRAWN_AT_ONCE = 10;
+
+/** A message's day, as its `data-day` (`Message`), for the box that stands in for it until drawn. */
+const dayStampOf = (at: number | undefined): Record<string, string> => {
+  const day = isWeb ? dayLabelOf(at) : undefined;
+  return day !== undefined ? { "data-day": day } : {};
+};
 
 /** A block's first and last moments, stamped on its element (`data-from`, `data-to`); none for a block with no time. */
 function spanOf(block: Parameters<typeof startOfBlock>[0]): Record<string, number> {
