@@ -6,6 +6,7 @@ import { canPickUp, columnDropOf, connectDragOf, CONFIRM_YES, type ColumnDrop, t
 import { archivedSplitOf, drillTargetOf, LANE_LABEL, laneRunsOf, type LaneEntry } from "@jaira/ui/boardModel";
 import type { ConnectAsk, ConnectDrag } from "@jaira/ui/connectDrag";
 import { NO_DRAG_OFFERS, type DragOffers } from "@jaira/ui/taskDrag";
+import { unseenKindOf } from "@jaira/ui/taskListModel";
 import { shownOf, stackedParts, swipeColumn, type BoardShown, type StripColumn } from "@jaira/ui/phoneModel";
 import { usePhone } from "../app/phone";
 import { ContextMenu, type MenuAt } from "./Menu";
@@ -161,6 +162,8 @@ export interface BoardProps extends DragProps {
   board: BoardView;
   selected: string | null;
   selectedSet?: ReadonlySet<string> | undefined;
+  /** How far each task has been read (`JairaUiState.seen`): an unseen card wears a dot (`unseenKindOf`). Absent: none do. */
+  seen?: Readonly<Record<string, number>> | undefined;
   numbered?: boolean;
   trays?: boolean;
   onSelectTask: (taskId: string, e?: Mods) => void;
@@ -190,6 +193,7 @@ export function Board({
   board,
   selected,
   selectedSet,
+  seen,
   numbered = true,
   trays = true,
   onSelectTask,
@@ -305,6 +309,7 @@ export function Board({
         inTray={tray}
         inProcessLane={board.level === PROCESS_WORKFLOW}
         selected={isSelected(card)}
+        unseen={seen !== undefined ? unseenKindOf(card, seen) : null}
         onSelect={(e) => onSelectTask(card.taskId, modsOf(e))}
         {...(onTaskMenu !== undefined ? { onMenu: (e: unknown) => onTaskMenu(card, menuPointOf(e)) } : {})}
         onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, modsOf(e)))}

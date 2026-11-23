@@ -195,6 +195,29 @@ export function seenClockOf(row: { updatedAt: number; lastMessageAt?: number | u
   return Math.max(row.updatedAt, row.lastMessageAt ?? 0);
 }
 
+/** A row any list holds for a task: what {@link shownClockOf} reads a clock from. */
+export type ClockedRow = { taskId: string; updatedAt: number; lastMessageAt?: number | undefined };
+
+/**
+ * How far a task on screen has been seen: the newest clock ANY list the window holds says it has
+ * reached — its conversation row, its project's ended row, its board card. Opening a task marks it read
+ * up to this (`useSeenWhileShown`), so a task and its conversation are seen together (the unseen-tasks
+ * mockups, 2026-11-22: "seeing a task is synonymous with seeing the corresponding chat").
+ *
+ * The newest of them rather than any one, because each indicator compares against its OWN row: the
+ * Chat list against the conversation's, the project pills against the ended row's, the Tasks list and
+ * the board against the card's. Those can stand at different moments while an update is on its way,
+ * and a mark short of any of them would leave that one indicator lit on the task being read. `0` when
+ * no list holds the task yet: nothing to mark.
+ */
+export function shownClockOf(taskId: string, lists: Iterable<readonly ClockedRow[]>): number {
+  let clock = 0;
+  for (const rows of lists) {
+    for (const row of rows) if (row.taskId === taskId) clock = Math.max(clock, seenClockOf(row));
+  }
+  return clock;
+}
+
 /**
  * A named LIST of tasks as pills — what a view row counts, where a project row counts a summary.
  *

@@ -6,6 +6,7 @@ import type { MouseEvent as ReactMouseEvent } from "react";
 import type { BoardCard, BoardView, NextMove } from "@jaira/shared/browser";
 import { nestUnder } from "./connectDrag";
 import { cardRemoteWord } from "./remoteStrip";
+import { shownClockOf, type ClockedRow, type PillKind } from "./pillModel";
 
 /** What a card is drawn from. */
 export interface CardProps {
@@ -27,6 +28,11 @@ export interface CardProps {
    */
   onUndo?: (() => void) | undefined;
   selected: boolean;
+  /**
+   * Not looked at since it moved (`taskListModel.unseenKindOf`): the Chat ring's kind for it, which the
+   * card's dot is drawn in. `null` or absent: seen.
+   */
+  unseen?: PillKind | null;
   onSelect: (e: ReactMouseEvent) => void;
   onDrill?: () => void;
   onMenu?: (e: ReactMouseEvent) => void;
@@ -285,6 +291,24 @@ export function laneRunsOf(
 export function boardCardOrderOf(board: BoardView | null | undefined): BoardCard[] {
   if (board === undefined || board === null) return [];
   return [...board.columns.flatMap((c) => lanesOf(c.cards).flatMap((l) => l.cards)), ...lanesOf(board.atLevel).flatMap((l) => l.cards)];
+}
+
+/**
+ * How far a task has gone by every list the window holds it in — its row in the open project, its
+ * conversation row, its project's ended row, its card on any board: what opening it marks it read up to
+ * (`select`, `SeenWhileShown`). The newest of them, for `shownClockOf`'s reason. `0`: no list holds it.
+ */
+export function windowClockOf(
+  taskId: string,
+  lists: {
+    tasks: readonly ClockedRow[];
+    allConversations: readonly ClockedRow[];
+    projects: readonly { ended: readonly ClockedRow[] }[];
+    boards: Readonly<Record<string, BoardView | null>>;
+  },
+): number {
+  const cards = Object.values(lists.boards).flatMap((board) => boardCardOrderOf(board));
+  return shownClockOf(taskId, [lists.tasks, lists.allConversations, lists.projects.flatMap((p) => p.ended), cards]);
 }
 
 /**

@@ -4,7 +4,9 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BoardCard } from "@jaira/shared";
-import { arrangeTasks, cardWhenOf, standingOf, tasksOf, type TaskSection } from "../src/renderer/taskListModel";
+import { arrangeTasks, cardWhenOf, standingOf, tasksOf, unseenKindOf, type TaskSection } from "../src/renderer/taskListModel";
+import { shownClockOf } from "../src/renderer/pillModel";
+import { windowClockOf } from "../src/renderer/boardModel";
 
 const card = (taskId: string, title: string, status: BoardCard["status"], updatedAt: number, extra: Partial<BoardCard> = {}): BoardCard =>
   ({ taskId, title, status, workflow: "feature", activePath: [], hasSubBoard: false, updatedAt, ...extra }) as BoardCard;
@@ -68,5 +70,47 @@ describe("the column head", () => {
       ["JaiRA", ["t1", "t3", "t4"]],
       ["build-box", ["t2"]],
     ]);
+  });
+});
+
+describe("an unseen task's dot (the unseen-tasks mockups, design 1)", () => {
+  it("is lit until the task is read as far as its own clock, and comes back when it moves on", () => {
+    const done = card("t4", "Tool-error audit", "completed", 20);
+    expect(unseenKindOf(done, {})).toBe("success");
+    expect(unseenKindOf(done, { t4: 19 })).toBe("success");
+    expect(unseenKindOf(done, { t4: 20 })).toBeNull();
+    expect(unseenKindOf({ ...done, updatedAt: 25 }, { t4: 20 })).toBe("success");
+  });
+
+  it("is the Chat ring's colour for it — a paused or canceled task yellow, though its square is grey", () => {
+    expect(unseenKindOf(card("a", "x", "running", 1, { asking: "gate" }), {})).toBe("waiting");
+    expect(unseenKindOf(card("b", "x", "running", 1), {})).toBe("running");
+    expect(unseenKindOf(card("c", "x", "failed", 1), {})).toBe("error");
+    expect(unseenKindOf(card("d", "x", "interrupted", 1), {})).toBe("warning");
+    expect(unseenKindOf(card("e", "x", "canceled", 1), {})).toBe("warning");
+    expect(standingOf(card("d", "x", "interrupted", 1)).tone).toBe("dim");
+  });
+
+  it("is not worn by an archived task, a queued one, or a process", () => {
+    expect(unseenKindOf(card("a", "x", "archived", 1, { archived: { at: 1, from: "completed" } } as Partial<BoardCard>), {})).toBeNull();
+    expect(unseenKindOf(card("q", "x", "queued", 1), {})).toBeNull();
+    expect(unseenKindOf(card("p", "x", "running", 1, { type: "process" } as Partial<BoardCard>), {})).toBeNull();
+  });
+});
+
+describe("how far opening a task marks it read", () => {
+  it("is the newest clock any list holds for it, so no indicator stays lit on the task being read", () => {
+    const conversation = { taskId: "t1", updatedAt: 10, lastMessageAt: 40 };
+    const ended = { taskId: "t1", updatedAt: 30 };
+    expect(shownClockOf("t1", [[conversation], [ended], [{ taskId: "t2", updatedAt: 99 }]])).toBe(40);
+    expect(shownClockOf("t9", [[conversation]])).toBe(0);
+  });
+
+  it("reads the boards' cards too — the clock the Tasks list and the board compare against", () => {
+    const running = card("t2", "Nightly build", "running", 70);
+    const board = { level: "", breadcrumb: [], columns: [{ key: "build", label: "build", cards: [running] }], atLevel: [] } as never;
+    const lists = { tasks: [{ taskId: "t2", updatedAt: 50 }], allConversations: [], projects: [{ ended: [] }], boards: { "/a": board, "/b": null } };
+    expect(windowClockOf("t2", lists)).toBe(70);
+    expect(unseenKindOf(running, { t2: windowClockOf("t2", lists) })).toBeNull();
   });
 });

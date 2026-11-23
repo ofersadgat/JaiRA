@@ -656,6 +656,7 @@ function TasksDrawer(): JSX.Element {
         sections={sections}
         empty={cards.length === 0 && scope.machine !== undefined ? "No tasks here." : "No tasks yet."}
         selected={state.selected}
+        seen={ui.seen}
         head={{
           groups: groups.map((g) => ({ id: g, label: TASK_GROUP_LABELS[g] })),
           group: groupBy,

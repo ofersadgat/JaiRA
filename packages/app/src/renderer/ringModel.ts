@@ -121,7 +121,7 @@ export function elapsedText(ms: number): string {
 
 /**
  * What a project's ring holds: its live work and parked asks, and what stopped since the person looked
- * — a finish green until it is opened (opening marks it read: `select`, `useReadMark`).
+ * — a finish green until it is opened (opening marks it read: `select`, and `SeenWhileShown` while it is on screen).
  */
 export function projectRingItems(summary: Pick<ProjectSummary, "ended"> & { live?: readonly LiveTask[] }, seen: Readonly<Record<string, number>> = {}): RingItem[] {
   const live = summary.live ?? [];

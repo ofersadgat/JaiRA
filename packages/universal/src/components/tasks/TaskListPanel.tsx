@@ -3,15 +3,19 @@ import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { BoardCard } from "@jaira/shared/browser";
 import { agoOf } from "@jaira/ui/chatListModel";
-import { TASK_WHENS, TASK_WHEN_LABELS, cardWhenOf, standingOf, type TaskSection, type TaskWhen } from "@jaira/ui/taskListModel";
+import { TASK_WHENS, TASK_WHEN_LABELS, cardWhenOf, standingOf, unseenKindOf, type TaskSection, type TaskWhen } from "@jaira/ui/taskListModel";
 import { flatRows, nestProcessRows, originLabelOf, processBadgeOf, processWordOf, type NestedRow, type ProcessNest } from "@jaira/ui/processTaskModel";
 import { ProcessGlyph } from "../process/ProcessBits";
+import { RING_INK } from "../StatusRing";
 import { ProcessPlaces } from "../process/ProcessCardFace";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ListHead, type SortHead } from "../ListHead";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { pressWasDrag } from "../../app/placeDrag";
+
+/** No task read yet: what a list given no marks reads them from. */
+const NO_SEEN: Readonly<Record<string, number>> = {};
 
 /** The Tasks list's sorts: State most urgent first, Name A to Z, When newest first; When shows the last activity or the making. */
 export function taskSortHeads(head: Pick<TaskListHead, "when" | "onWhen">): SortHead[] {
@@ -47,6 +51,8 @@ export interface TaskListHead {
  * opens it too; a long press on a phone). Pressing a row opens the task. How it looks:
  *
  *   a row          26 tall, padding 0 8, radius 6, gap 6; hovered --panel-2, the open one --accent 14%
+ *   its dot        6 round, first, held open on every row; filled while the task is unseen
+ *                  (`unseenKindOf`) in the Chat ring's colour for it (`RING_INK`), the title 600 then
  *   its square     8, radius 2, in its standing's colour
  *   its word       app 11/12.5 in its standing's colour (Done in --dim)
  *   a group head   data 600 11/12.5 --dim (Asks you in --warn, Failed in --bad), its count at the right
@@ -55,6 +61,7 @@ export function TaskListPanel({
   sections,
   empty,
   selected,
+  seen = NO_SEEN,
   head,
   onOpen,
   onMenu,
@@ -65,6 +72,8 @@ export function TaskListPanel({
   sections: readonly TaskSection[];
   empty: string;
   selected: string | null;
+  /** How far each task has been read (`JairaUiState.seen`): what an unseen row's dot is read from. */
+  seen?: Readonly<Record<string, number>>;
   head: TaskListHead;
   onOpen: (card: BoardCard) => void;
   onMenu: (card: BoardCard, x: number, y: number) => void;
@@ -117,6 +126,7 @@ export function TaskListPanel({
                   depth={depth}
                   from={!nested && card.process?.parentTaskId !== undefined ? (titleOf(card.process.parentTaskId) ?? card.process.parentTaskId) : undefined}
                   when={head.when}
+                  seen={seen}
                   selected={card.taskId === selected}
                   onOpen={() => onOpen(card)}
                   onMenu={(x, y) => onMenu(card, x, y)}
@@ -163,6 +173,7 @@ function TaskRow({
   depth = 0,
   from,
   when,
+  seen,
   selected,
   onOpen,
   onMenu,
@@ -173,6 +184,8 @@ function TaskRow({
   /** Flat: the name of the task that started this process. */
   from?: string | undefined;
   when: TaskWhen;
+  /** How far each task has been read (`JairaUiState.seen`). */
+  seen: Readonly<Record<string, number>>;
   selected: boolean;
   onOpen: () => void;
   onMenu: (x: number, y: number) => void;
@@ -181,6 +194,8 @@ function TaskRow({
   const t = useTokens();
   const [hovered, hover] = useHover();
   const standing = standingOf(card);
+  // Not looked at since it moved: a dot in the Chat ring's colour for it (`unseenKindOf`).
+  const unseen = unseenKindOf(card, seen);
   // A process task (decision 0032, boards 6 and 9): its glyph for the square, its state for the word, and
   // under it where it came from — always when flat, and nested when the origin is worth saying.
   const facts = card.type === "process" ? card.process : undefined;
@@ -228,7 +243,7 @@ function TaskRow({
               },
             }
           : {}) as object)}
-        label={`${card.title}, ${word.toLowerCase()}`}
+        label={`${card.title}, ${word.toLowerCase()}${unseen !== null ? ", not seen yet" : ""}`}
         flexDirection="row"
         alignItems="center"
         gap={6}
@@ -239,9 +254,10 @@ function TaskRow({
         minWidth={0}
         box={({ hovered: on }) => ({ backgroundColor: ground(on) })}
       >
+        <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={(unseen !== null ? t.v(RING_INK[unseen]) : "transparent") as never} />
         {facts !== undefined ? <ProcessGlyph size={14} /> : <View width={8} height={8} borderRadius={2} flexShrink={0} backgroundColor={t.v(standing.tone === "dim" ? "line" : standing.tone) as never} />}
         <View flex={1} minWidth={0} flexDirection="column">
-          <Txt spec={{ voice: facts !== undefined ? "data" : "app", scale: facts !== undefined ? 11.5 / 12 : 1, color: "text" }} ellip>
+          <Txt spec={{ voice: facts !== undefined ? "data" : "app", scale: facts !== undefined ? 11.5 / 12 : 1, color: "text", ...(unseen !== null ? { weight: 600 } : {}) }} ellip>
             {card.title}
           </Txt>
           {under !== undefined ? (

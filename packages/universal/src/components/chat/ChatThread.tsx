@@ -38,6 +38,7 @@ import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 import { PictureSizesContext } from "../pictureSize";
 import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrolled, settled, type EdgeState } from "./liveEdge";
 import { useStepBookmarks } from "./stepBookmarks";
+import { SeenWhileShown } from "../../app/SeenWhileShown";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -251,6 +252,8 @@ export function ChatThread({
   return (
     <PictureSizesContext.Provider value={pictureSizes}>
     <View flex={1} minHeight={0} minWidth={0} flexDirection="column">
+      {/* On screen is read: the task this conversation is, in every list at once. */}
+      <SeenWhileShown taskId={surface.taskId} />
       {/* Walked into a run the conversation started: that run is the page, and nothing outside it. */}
       {runs.walkedIn !== null ? (
         <View flex={1} minHeight={0} flexDirection="column">

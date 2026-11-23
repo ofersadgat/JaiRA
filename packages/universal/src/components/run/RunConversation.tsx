@@ -17,6 +17,7 @@ import { usePhone } from "../../app/phone";
 import { isProgramConversation } from "@jaira/ui/childRunModel";
 import { ChatThread } from "../chat/ChatThread";
 import { usePaneChatSurface } from "../chat/surface";
+import { SeenWhileShown } from "../../app/SeenWhileShown";
 
 /**
  * One run's conversation — the transcript's scroller (`RunTranscript`), and under it the composer or
@@ -156,6 +157,8 @@ function RunConversationOf({
   );
   return (
     <View flex={1} minHeight={0} flexDirection="column" {...(onLayout !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onLayout(e.nativeEvent.layout.height) } : {})}>
+      {/* A task's run on screen is the task read — and its conversation with it (`SeenWhileShown`). */}
+      <SeenWhileShown taskId={detail.taskId} />
       {phone && detail.instances.length > 0 ? (
         <View flex={1} minHeight={0} flexDirection="column" paddingRight={RAIL_WIDTH} {...((isWeb ? { position: "relative" } : {}) as object)}>
           {transcript}

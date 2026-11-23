@@ -12,6 +12,7 @@ import { MachineChip } from "./MachineChip";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
 import { Svg } from "./panel/Svg";
+import { RING_INK } from "./StatusRing";
 import { CountChip, useProcessIndexHere } from "./process/ProcessBits";
 import { ProcessCardFace } from "./process/ProcessCardFace";
 
@@ -35,6 +36,8 @@ import { ProcessCardFace } from "./process/ProcessCardFace";
  *                                          is how it finished, the meta line when it was archived
  *   the machine chip                       where it runs, first on the meta line (`MachineChip`)
  *   the head, the title, the meta line     the rows; the title is the data voice, 600 when selected
+ *   an unseen card                         a 7 round dot before the title in the Chat ring's colour for
+ *                                          it (`RING_INK`, `unseenKindOf`), and the title 600
  *   the chips over the meta line           the chips' 1px below and the meta line's 2px above are 2 in
  *                                          all, not 3 (`NextChips`' `collapsesInto`)
  *   the meta line's far end                which kind of waiting, when it ended — or `UndoLink` (data
@@ -108,7 +111,8 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   const look = useLook();
   // A phone's double tap: when this card was last tapped.
   const lastTap = useRef(0);
-  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false, inProcessLane = false } = props;
+  const { card, selected, unseen = null, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false, inProcessLane = false } = props;
+  const strong = selected || unseen !== null;
   // A process task (decision 0032, "The view"): an ordinary card, drawn from its process; a parent's card
   // counts its processes, from the window's index.
   const processFacts = card.type === "process" ? card.process : undefined;
@@ -228,8 +232,10 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
       ) : (
       <>
       <View flexDirection="row" alignItems="center" gap={6}>
+        {/* Not looked at since it moved: the Chat ring's colour for it, and the title 600 (`unseenKindOf`). */}
+        {unseen !== null ? <View width={7} height={7} borderRadius={4} flexShrink={0} backgroundColor={t.v(RING_INK[unseen]) as never} {...((isWeb ? { title: "not seen since it moved" } : {}) as object)} /> : null}
         <Text
-          {...(line(0.96, selected ? 600 : 400) as object)}
+          {...(line(0.96, strong ? 600 : 400) as object)}
           {...(oneLine as object)}
           {...(clip as object)}
           {...((isWeb && note !== undefined ? { title: note } : {}) as object)}
@@ -238,7 +244,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
           flexBasis={0}
           minWidth={0}
           {...({ letterSpacing: isWeb ? "-0.01em" : Number(t.scaled("size-data", 0.96)) * -0.01 } as object)}
-          fontWeight={selected ? "600" : "400"}
+          fontWeight={strong ? "600" : "400"}
           color={(wash === "success" || pending ? t.v("dim") : t.v("text")) as never}
           {...((pending ? { fontStyle: "italic" } : {}) as object)}
           {...((fallback

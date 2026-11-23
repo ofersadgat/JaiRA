@@ -259,6 +259,7 @@ export function BoardColumn(): JSX.Element {
                   board={board}
                   selected={holds(state.selectedProject) ? state.selected : null}
                   selectedSet={picked !== null && holds(picked.project) ? pickedSet! : undefined}
+                  seen={ui.seen}
                   numbered={board.level !== ""}
                   onSelectTask={(taskId, e) => pickTask(owner(taskId), taskId, e)}
                   onOpenAt={(taskId, stateId) => {

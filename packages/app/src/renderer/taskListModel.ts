@@ -8,6 +8,7 @@
  * it runs in and whether it waits on the person (`mergeBoards`, `markAsking`).
  */
 import { isConversation, type BoardCard } from "@jaira/shared/browser";
+import { pillKindOf, seenClockOf, type PillKind } from "./pillModel";
 
 /** What the column head groups by: nothing, how the task stands, the workflow it runs, or where. */
 export const TASK_GROUPS = ["none", "status", "workflow", "workspace"] as const;
@@ -61,6 +62,28 @@ export function standingOf(card: Pick<BoardCard, "status" | "asking"> & { proces
     case "archived":
       return { word: "Archived", tone: "dim", rank: 6 };
   }
+}
+
+/**
+ * The dot an unseen task wears in the Tasks list and on its board card (the unseen-tasks mockups,
+ * design 1, 2026-11-22), or `null` once the person has looked at it as far as its own clock.
+ *
+ * Unseen is the Chat list's rule (`isUnread`): the task's read mark (`JairaUiState.seen`) is older than
+ * its clock, so it clears itself when the task is opened and comes back when the task moves on. The dot's
+ * colour is the Chat row's ring's (`StatusRing.RING_INK`, by `pillKindOf`), so a dot in Tasks and a ring
+ * in Chat say the same thing in the same colour: asks you or stopped yellow, failed red, done green,
+ * working blue. A paused or canceled task is therefore yellow though its square is grey (`standingOf`) —
+ * the person, 2026-11-22: "Yes, yellow". An archived task, a queued one and a process (decision 0032,
+ * which has its own glyph and is not read as a run) wear none.
+ */
+export function unseenKindOf(
+  card: Pick<BoardCard, "taskId" | "status" | "asking" | "updatedAt" | "archived" | "type">,
+  seen: Readonly<Record<string, number>>,
+): PillKind | null {
+  if (card.type === "process" || card.archived !== undefined) return null;
+  if ((seen[card.taskId] ?? 0) >= seenClockOf(card)) return null;
+  if (card.asking !== undefined) return "waiting";
+  return pillKindOf(card.status);
 }
 
 /** The project's tasks among a board's cards: every card once, conversations left to the Chat tab. */

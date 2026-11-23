@@ -385,6 +385,17 @@ never at `Date.now()`, for the reason a row's mark moves that way: a turn landin
 in the same millisecond as the click is news. Clicking the pills stays as the way
 to dismiss a row you are *not* going to open.
 
+**A task and its conversation are seen together** (2026-11-22). There is one
+mark per task (`seen[taskId]`), and every list reads it: the Chat row's ring,
+the Tasks row's dot, the board card's dot, the pills. A task's thread on screen —
+a conversation, a program read as its task, a run's transcript, in the Chat room,
+the side panel or a pane — keeps it marked while it moves (`SeenWhileShown`), to
+the newest clock any list holds for it (`windowClockOf`), so opening it from one
+list clears it in all of them. An unseen Tasks row or card wears a dot before its
+title in the Chat ring's colour for it (`unseenKindOf`): asks you or stopped
+yellow — a paused or canceled task too, though its square is grey — failed red,
+done green, working blue; its title is 600.
+
 ---
 
 ## 5. Surfaces

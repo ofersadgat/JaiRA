@@ -19,7 +19,6 @@ import { conversationAnswering, isProgramConversation, openingRunAnswering, stil
 import { askDrawnAtItsCall } from "./approvalCall";
 import { programCallsOf, weaveProgramCalls, type ProgramCall } from "./programCalls";
 import type { OperationRecordView, QueuedMessageView } from "@jaira/shared/browser";
-import { seenClockOf } from "./pillModel";
 import type { CutSide } from "./transcriptViewTypes";
 import { terminals } from "./terminalStore";
 import { yourCommandsNote } from "./terminalModel";
@@ -840,25 +839,6 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
 }
 
 export type ChatThreadModel = ReturnType<typeof useChatThread>;
-
-/**
- * Reading a conversation is what marks it read, and the Chat view is the only place that knows it is
- * being read: the list is in the sidebar and stays there whichever view is on screen, so a mark set
- * from the list would say "seen" about a thread nobody has looked at.
- *
- * It fires again every time the conversation moves — a new turn, a streamed answer settling — which
- * is the point rather than a cost: a thread you are watching should not go unread underneath you.
- * `markSeen` is monotonic and does nothing when the mark would not move, so the several calls a
- * second an answer produces cost one comparison each.
- */
-export function useReadMark(surface: Pick<ChatSurface, "taskId" | "conversations" | "onSeen">): void {
-  const { taskId, conversations, onSeen } = surface;
-  useEffect(() => {
-    if (taskId === null) return;
-    const row = conversations.find((task) => task.taskId === taskId);
-    if (row !== undefined) onSeen(row.taskId, seenClockOf(row));
-  }, [taskId, conversations, onSeen]);
-}
 
 /** What is said under a message that never reached its conversation. */
 export function unsentText(reason: string): string {

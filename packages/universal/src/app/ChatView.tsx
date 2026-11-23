@@ -1,5 +1,4 @@
 import type { JSX } from "react";
-import { useReadMark } from "@jaira/ui/chatThreadModel";
 import { View } from "@tamagui/core";
 import { ChatStart } from "../components/chat/ChatStart";
 import { ChatThread } from "../components/chat/ChatThread";
@@ -18,8 +17,7 @@ import { ROOM, taskPaneEntryOf } from "@jaira/ui/splitModel";
  */
 export function ChatView(): JSX.Element {
   const surface = useChatSurface();
-  // Reading a conversation is what marks it read (`useReadMark`).
-  useReadMark(surface);
+  // Reading a conversation is what marks it read: its thread does it (`SeenWhileShown`), wherever it is drawn.
   // On a phone the panel is a sheet over the room: the thread stops above its head.
   const inset = useSheetInset();
   const phone = usePhone();
