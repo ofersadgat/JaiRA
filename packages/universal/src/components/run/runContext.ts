@@ -40,7 +40,13 @@ export function useRunContext(): RunFields {
   // What the shell lends a changeset reviewer (`panelHost.ts`' `reviewerServicesOf`).
   const services = useMemo(() => reviewerServicesOf(state.drafts, actions), [state.drafts, actions]);
   const batches = useMemo(() => lookOf(state.config).conversation.sequentialBatches, [state.config]);
-  return {
+  /*
+   * Kept while nothing in it moves. It is an input of what a conversation hands its rows as contexts
+   * (`childRunHost.tsx`' hosts): a new object every render made those new too, and every row that reads
+   * one was drawn again on each keystroke and each streamed word. Every field read below is a dependency
+   * — read on every render here, which is also what keeps the shell reader subscribed to it.
+   */
+  return useMemo<RunFields>(() => ({
     conversation: state.conversation,
     sessions: state.sessions,
     onLoadSession: actions.loadSession,
@@ -85,5 +91,8 @@ export function useRunContext(): RunFields {
     onResume: (taskId: string) => void actions.resumeTask(taskId, project),
     onRewind: (taskId: string, seq: number) => void actions.rewindTask(taskId, seq, project),
     onFork: (taskId: string, seq: number) => void actions.forkTask(taskId, seq, project),
-  };
+  }), [
+    actions, state.conversation, state.sessions, ui, state.userEvents, state.sessionHistory, state.records, state.liveTurn, batches, focus, project, state.selectedProject, state.at,
+    gate, question, approval, services, state.pending, state.session, state.sessionInstance, state.selected, detail,
+  ]);
 }

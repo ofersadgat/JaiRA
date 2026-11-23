@@ -357,5 +357,17 @@ export function useChildRunHost(
       </OutcomeHostContext.Provider>
     );
 
-  return { outcomeHost, subagentHost, agentHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
+  /*
+   * The three hosts, kept while nothing they read moves. They reach the transcript as contexts, and a
+   * context that is a new function every render draws every row that reads it again: each keystroke in
+   * the box, which redraws the conversation that holds the draft, and each word streamed in. What they
+   * read is listed here — never `jump` or `lead`, which none of them touches.
+   */
+  const hosts = useMemo(
+    () => ({ outcomeHost, subagentHost, agentHost }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [surface, context, detail, runs, subagents, waits, open, now, threadSession, threadLive, split, panelOnTop],
+  );
+
+  return { ...hosts, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
 }

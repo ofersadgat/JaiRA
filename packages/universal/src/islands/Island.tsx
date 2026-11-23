@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
 import { readCanvasIndex } from "@jaira/ui/canvasIndex";
@@ -126,19 +126,21 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
       const style = p["style"] as CSSProperties | undefined;
       const strut = p["strut"] as CSSProperties | undefined;
       const frame = (
-        <Suspense fallback={null}>
-          {typeof p["url"] === "string" ? (
-            <InteractiveArtifact
-              url={p["url"]}
-              onPrompt={event("prompt")}
-              {...(p["downloads"] === true ? { onDownload: event("download") } : {})}
-              style={style}
-              published={p["published"] === true}
-            />
-          ) : (
-            <Html text={String(p["text"] ?? "")} style={style} />
-          )}
-        </Suspense>
+        <NearScreen box={style}>
+          <Suspense fallback={<FrameBox box={style} />}>
+            {typeof p["url"] === "string" ? (
+              <InteractiveArtifact
+                url={p["url"]}
+                onPrompt={event("prompt")}
+                {...(p["downloads"] === true ? { onDownload: event("download") } : {})}
+                style={style}
+                published={p["published"] === true}
+              />
+            ) : (
+              <Html text={String(p["text"] ?? "")} style={style} />
+            )}
+          </Suspense>
+        </NearScreen>
       );
       return strut === undefined ? frame : <div style={strut}>{frame}</div>;
     }
@@ -237,4 +239,65 @@ function DiffInline({ p, box, event, handle }: { p: Record<string, unknown>; box
       </Suspense>
     </div>
   );
+}
+
+/**
+ * How near the conversation's visible part a page's frame must come to be drawn, and how far it must go
+ * to be let go: a screen and a half, and four. Between the two it stays as it is, so a frame scrolled
+ * a little past the edge and back is the same frame, not loaded again.
+ */
+const NEAR = "150% 0px";
+const FAR = "400% 0px";
+
+/**
+ * A page's frame, drawn only while it is near what can be seen (2026-11-22).
+ *
+ * Every frame is a page of its own, and a published one a PROCESS of its own (its grant is an origin of
+ * its own, so Chromium isolates it): a conversation that showed 29 mock-ups held 28 renderer processes
+ * at about 100 MB each, beside the window's own 1.6 GB. Far from the screen the frame is let go and its
+ * box stands in its place — the same box, so nothing above or below it moves, and a frame let go and
+ * drawn again opens where it was put, not where it was scrolled to inside it.
+ *
+ * Watched against the nearest scrolling box (the conversation's scroller, a panel's body), not the
+ * window: the margin of an `IntersectionObserver` widens its root only, and a frame under a scroller's
+ * fold is clipped by the scroller before the window is asked. A frame in a pane put out of sight
+ * (`display: none`) is nowhere, and let go with the far ones.
+ */
+function NearScreen({ box, children }: { box: CSSProperties | undefined; children: ReactNode }): JSX.Element {
+  const at = useRef<HTMLDivElement>(null);
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = at.current;
+    if (el === null) return undefined;
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return undefined;
+    }
+    const root = scrollerOf(el);
+    const toward = new IntersectionObserver((entries) => entries.some((entry) => entry.isIntersecting) && setNear(true), { root, rootMargin: NEAR });
+    const away = new IntersectionObserver((entries) => entries.every((entry) => !entry.isIntersecting) && setNear(false), { root, rootMargin: FAR });
+    toward.observe(el);
+    away.observe(el);
+    return () => {
+      toward.disconnect();
+      away.disconnect();
+    };
+  }, []);
+  // A block round the frame, in the font of the block it stands in: the frame keeps its line.
+  return <div ref={at}>{near ? children : <FrameBox box={box} />}</div>;
+}
+
+/** The frame's box with nothing in it: where a frame stands while it is far, or while its code loads. */
+function FrameBox({ box }: { box: CSSProperties | undefined }): JSX.Element {
+  // Inline, on the baseline, as the iframe it stands in for is, unless the box says how it is shown.
+  return <div aria-hidden style={{ display: "inline-block", verticalAlign: "baseline", ...box }} />;
+}
+
+/** The nearest box that scrolls, or none (the window). */
+function scrollerOf(el: HTMLElement): Element | null {
+  for (let up = el.parentElement; up !== null; up = up.parentElement) {
+    const overflow = getComputedStyle(up).overflowY;
+    if (overflow === "auto" || overflow === "scroll" || overflow === "overlay") return up;
+  }
+  return null;
 }

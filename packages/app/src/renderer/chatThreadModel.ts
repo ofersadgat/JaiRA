@@ -774,6 +774,16 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       });
   };
 
+  /**
+   * Interrupt one call by its state, from its own row: ONE function for the life of the conversation,
+   * which calls this render's `interrupt`. It reaches every tool row through `CallInterruptContext`, so a
+   * new one per render drew every row again on every keystroke in the box and every word streamed in —
+   * 16,000 components a keystroke in a conversation of 29 mock-ups (2026-11-22).
+   */
+  const interruptLatest = useRef<(instanceId: string) => void>(() => undefined);
+  interruptLatest.current = (instanceId) => interrupt(runningCalls.find((call) => call.instanceId === instanceId) ?? ({ instanceId } as ProgramCall), false);
+  const interruptCall = useCallback((instanceId: string) => interruptLatest.current(instanceId), []);
+
   return {
     taskId,
     project,
@@ -807,8 +817,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     interrupt,
     interruptWithMessage,
     cancelChoosing: () => setChoosing(null),
-    /** Interrupt one call by its state, from its own row. */
-    interruptCall: (instanceId: string) => interrupt(runningCalls.find((call) => call.instanceId === instanceId) ?? ({ instanceId } as ProgramCall), false),
+    /** Interrupt one call by its state, from its own row (one function throughout: see above). */
+    interruptCall,
     answering,
     waitingHere,
     lastContext,
