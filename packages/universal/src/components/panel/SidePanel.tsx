@@ -3,7 +3,7 @@ import { steadyMemo, useSteadyHandlers } from "../../steady";
 import { View, isWeb } from "@tamagui/core";
 import { ScrollView, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
-import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setKey, setPlaceOf, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
 import { DRAG_REGION, PLAIN_SCROLLER, Press, Txt, WINDOW_GUTTER, edge, scrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -61,9 +61,17 @@ export interface PanelFace {
    * not one more view under those tabs.
    */
   full?: boolean;
+  /** A control of the entry's own in the head, after the titles and before the verbs: a shown set's stepper and its view menu. */
+  control?: ReactNode;
 }
 
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
+
+/** Whether a key went to a text box, a select or the editor, which has it (as `MenuLayer.web.tsx` asks). */
+const typedInBox = (target: EventTarget | null): boolean => {
+  const el = target as HTMLElement | null;
+  return el !== null && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable === true);
+};
 
 /**
  * The size a face's glyph is drawn at: 15px in the head; the folded rail sets none, so a badge there is
@@ -378,6 +386,28 @@ export function SidePanel({
     };
     // Attached again when the frame is drawn again (unfolded, or a stack that was empty).
   }, [framed]);
+  /**
+   * ← → Home End and Escape, while an item of a shown set is on top (`panelStack.ts`' `setKey`). Heard on
+   * the whole window, not the frame: the item was opened by a press in the conversation, which keeps the
+   * focus, and the person steps on from there. Not while a key goes to a text box or the editor, nor
+   * while a menu or a dialog is open (Escape is its), nor once something else took the key.
+   */
+  const shownNow = useRef(stack);
+  shownNow.current = stack;
+  const inSet = framed && setPlaceOf(stack) !== undefined;
+  useEffect(() => {
+    if (!isWeb || !inSet || typeof document === "undefined") return undefined;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || typedInBox(event.target)) return;
+      if (document.querySelector('[role="menu"], [role="dialog"]') !== null) return;
+      const step = setKey(event, shownNow.current);
+      if (step === undefined) return;
+      event.preventDefault();
+      live.current(step);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [inSet]);
   const offerName = stack.offer === null ? undefined : face(stack.offer).titleText;
   const top = topOf(stack);
   const root = stack.entries[0];
@@ -448,6 +478,11 @@ export function SidePanel({
             </View>
           </>
         )}
+        {topFace.control !== undefined ? (
+          <View flexDirection="row" alignItems="center" gap={4} flexShrink={0}>
+            {topFace.control}
+          </View>
+        ) : null}
         {verbs.length > 0 ? (
           <View flexDirection="row" alignItems="center" gap={1} flexShrink={0}>
             {verbs.map((verb) => (

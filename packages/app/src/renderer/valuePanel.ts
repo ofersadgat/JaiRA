@@ -24,6 +24,7 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { ServedArtifact, ViewHint } from "@jaira/shared/browser";
 import type { PublishedRef } from "./transcriptRows";
+import type { ShownSet } from "./panelStack";
 
 /**
  * A value, pinned — everything the panel needs to draw it exactly as the place it came from did.
@@ -79,6 +80,11 @@ export interface ValuePanel {
    * (and change) them.
    */
   openState?: ((stateId: string) => void) | undefined;
+  /**
+   * Open one of what a `show_artifact` call showed together, on the path conversation › the set › it
+   * (`panelStack.ts`' `openInSet`), so the panel steps on to its siblings without going back.
+   */
+  openInSet?: ((set: ShownSet, index: number) => void) | undefined;
 }
 
 export const ValuePanelContext = createContext<ValuePanel | null>(null);

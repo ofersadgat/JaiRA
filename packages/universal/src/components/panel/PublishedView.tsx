@@ -6,6 +6,7 @@ import { invoke } from "@jaira/ui/store";
 import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { PLACES, artifactEntryOf } from "@jaira/ui/splitModel";
+import type { ShownSet } from "@jaira/ui/panelStack";
 import { usePhone } from "../../app/phone";
 import { dragFrom } from "../../app/placeDrag";
 import { pressPlace, surfaceOf, usePlacesHere, useLitPlaces } from "../../app/places";
@@ -53,6 +54,7 @@ export function PublishedView({
   fill = false,
   onBack,
   follows,
+  within,
 }: {
   published: PublishedRef;
   artifacts?: ArtifactSurface | undefined;
@@ -65,6 +67,8 @@ export function PublishedView({
    * at a version stays there).
    */
   follows?: number | undefined;
+  /** The set one `show_artifact` call showed it in: the side panel opens it there, the others a step away. */
+  within?: { set: ShownSet; index: number } | undefined;
 }): JSX.Element {
   const t = useTokens();
   const phone = usePhone();
@@ -223,7 +227,7 @@ export function PublishedView({
   const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
   const places =
     newest === null || superseded ? null : (
-      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => pressPlace(place, lit, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone, following)} />
+      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => pressPlace(place, lit, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone, following, within)} />
     );
   // Its title bar dragged takes it to a place (decision 0025, board 08; `placeDrag.ts`): web, not a phone,
   // and not from a button on the bar, which keeps its press.

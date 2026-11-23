@@ -2,7 +2,7 @@ import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
 import { isProcessTaskId, isWritableLayer, type ArtifactSummary, type InstanceNode, type PendingInteraction, type StateView, type TaskDetail, type WritableLayer } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, terminalsTab, type PanelVerb } from "@jaira/ui/panelFaceModel";
-import { crumbOf, pop, push, selectStep, setTab, terminalEntryOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { crumbOf, pop, push, selectStep, setTab, stepInSet, terminalEntryOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { terminals } from "@jaira/ui/terminalStore";
 import { processes } from "@jaira/ui/processStore";
 import { ProcessGlyph } from "../process/ProcessBits";
@@ -30,6 +30,7 @@ import { ChangesPanel } from "./ChangesPanel";
 import { Icon } from "./Icon";
 import { HeldView, OutputsView, PanelEmpty, ProducedView } from "./PanelViews";
 import { PreviewCard } from "./PreviewCard";
+import { SetHeadControl, SetItemBody, ShownSetLevel } from "./ShownSetView";
 import { RerunForm, type RerunSurface } from "./RerunForm";
 import type { TranscriptSource } from "./RunTranscript";
 import { GlyphSizeContext, SpIcon, type PanelFace } from "./SidePanel";
@@ -534,13 +535,23 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
       };
     }
 
+    case "shown":
+      // A place on the path, as its items are: the tabs of the entry under it are not drawn over it.
+      return { title: entry.set.label, titleText: entry.set.label, body: <ShownSetLevel set={entry.set} />, full: true, scroll: true };
+
     case "preview": {
       const held = host.held.some((one) => one.title === entry.preview.title);
+      // One of a shown set: the others beside it, and ← → through them (`ShownSetView.tsx`).
+      const within = entry.within;
+      const at = within?.items.findIndex((item) => item.id === entry.preview.published?.ref.id) ?? -1;
+      const step = (index: number): void => host.onStack((was) => stepInSet(was, index));
       return {
         title: entry.preview.title,
         titleText: entry.preview.title,
         verbs: [{ icon: "pin", label: held ? "Held — let go of it" : "Hold it — keep it in Held", onClick: () => (held ? host.unhold(entry.preview) : host.hold(entry.preview)) }],
-        body: <PreviewCard item={entry.preview} />,
+        ...(within !== undefined && at >= 0
+          ? { control: <SetHeadControl set={within} />, body: <SetItemBody item={entry.preview} set={within} index={at} onStep={step} /> }
+          : { body: <PreviewCard item={entry.preview} /> }),
         // A published artifact fills the panel, edge to edge, with nothing of the entry under it.
         ...(entry.preview.published !== undefined ? { full: true, scroll: false } : {}),
       };

@@ -12,7 +12,7 @@ import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf 
 import { PANE, paneDefault, paneOf } from "@jaira/ui/uiState";
 import { MessageTypeContext, type MessageTypeStore } from "@jaira/ui/messageTypes";
 import { PANEL_FOLD, roomOf } from "@jaira/ui/panelHost";
-import { push } from "@jaira/ui/panelStack";
+import { openInSet, push, type ShownSet } from "@jaira/ui/panelStack";
 import { windowTitle } from "@jaira/ui/shellModel";
 import { isPhoneWidth, phoneTypography } from "@jaira/ui/phoneModel";
 import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/valuePanel";
@@ -101,6 +101,10 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
       openState: (stateId: string) => {
         const project = at.current.project;
         panelOnStack.get()?.((was) => push(was, { kind: "state", key: `state:${project ?? ""}:${stateId}`, stateId, project, tab: "configuration" }));
+        unfold();
+      },
+      openInSet: (set: ShownSet, index: number) => {
+        panelOnStack.get()?.((was) => openInSet(was, set, index));
         unfold();
       },
     };

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { close, pop, push, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { close, openInSet, pop, push, type PanelEntry, type PanelStack, type ShownSet } from "@jaira/ui/panelStack";
 import {
   artifactEntryOf,
   artifactPathOf,
@@ -88,6 +88,12 @@ export function openInPanel(entry: PanelEntry): void {
   panelUnfold.get()?.();
 }
 
+/** One of a shown set in the side panel, on the path conversation › the set › it, and the panel unfolded. */
+export function openSetInPanel(set: ShownSet, index: number): void {
+  panelOnStack.get()?.((was) => openInSet(was, set, index));
+  panelUnfold.get()?.();
+}
+
 /** Close the side panel (the person, 2026-11-14: its place button pressed again where it is lit). */
 export function closePanel(): void {
   panelOnStack.get()?.(close);
@@ -102,13 +108,16 @@ function openAt(place: "main" | "split", entry: PanelEntry): void {
  * An artifact to a place, MOVED there: closed wherever else it stood, any version of it
  * (`placeMoveOf`). In a split it stands on its own path (`artifactPathOf`). On a phone a split is the
  * main view, and the panel's sheet is lowered to its head so the artifact is seen. `follows`: the call
- * it was opened from, which it goes on from (`artifactEntryOf`).
+ * it was opened from, which it goes on from (`artifactEntryOf`). `within`: the set one `show_artifact` call
+ * showed it in, which the side panel opens it in (conversation › the set › it, `openInSet`) so the
+ * others are a step away.
  */
-export function placeArtifact(target: Place, ref: PublishedRef, artifacts: ArtifactSurface, phone: boolean, follows?: number): void {
+export function placeArtifact(target: Place, ref: PublishedRef, artifacts: ArtifactSurface, phone: boolean, follows?: number, within?: { set: ShownSet; index: number }): void {
   const { open, close: leaving } = placeMoveOf(shownPlacesOf(ref.id, placesNow()), target, phone);
   for (const place of leaving) leave(place, ref.id);
   const entry = artifactEntryOf(ref, artifacts.project, follows);
-  if (open === "panel") openInPanel(entry);
+  if (open === "panel" && within !== undefined) openSetInPanel(within.set, within.index);
+  else if (open === "panel") openInPanel(entry);
   else if (splitHere.get() && !phone) {
     // A split stands on the artifact's own path; the main view goes on from what it shows, which is
     // often the room's own view (the Tasks room's board) — ‹ goes back to it.
@@ -125,12 +134,12 @@ export function placeArtifact(target: Place, ref: PublishedRef, artifacts: Artif
  * 2026-11-14); the main view and a split already show it, and stay as they are. Unlit, it is put there
  * (`placeArtifact`), whatever version of it stood there before.
  */
-export function pressPlace(target: Place, lit: readonly Place[], ref: PublishedRef, artifacts: ArtifactSurface, phone: boolean, follows?: number): void {
+export function pressPlace(target: Place, lit: readonly Place[], ref: PublishedRef, artifacts: ArtifactSurface, phone: boolean, follows?: number, within?: { set: ShownSet; index: number }): void {
   if (lit.includes(target)) {
     if (target === "panel") closePanel();
     return;
   }
-  placeArtifact(target, ref, artifacts, phone, follows);
+  placeArtifact(target, ref, artifacts, phone, follows, within);
 }
 
 /**

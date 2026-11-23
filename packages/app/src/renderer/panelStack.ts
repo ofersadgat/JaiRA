@@ -18,6 +18,7 @@
  */
 import type { CommandDialect } from "@jaira/shared/browser";
 import type { PinnedValue } from "./valuePanel";
+import type { PublishedRef } from "./transcriptRows";
 import type { TrailStep } from "./trail";
 import { terminalTitleOf } from "./terminalModel";
 
@@ -50,7 +51,10 @@ export type PanelEntry =
   | { kind: "state"; key: string; stateId: string; project: string | null; tab: StateTab }
   | { kind: "newTask"; key: string }
   | { kind: "config"; key: string; stateId: string; taskId?: string; instanceId?: string; project?: string | null }
-  | { kind: "preview"; key: string; preview: PinnedValue }
+  /** `within`: the set it was opened from (`openInSet`), which ← and → step through. */
+  | { kind: "preview"; key: string; preview: PinnedValue; within?: ShownSet }
+  /** What one `show_artifact` call showed together: the level between a conversation and one of them. */
+  | { kind: "shown"; key: string; set: ShownSet }
   | { kind: "subagent"; key: string; taskId: string; project?: string; step: TrailStep }
   | { kind: "rerun"; key: string; taskId: string; project?: string }
   /** A shell command's terminal (decision 0028): `terminalEntryOf` makes it, keyed by task and call. */
@@ -249,12 +253,122 @@ export function crumbOf(entry: PanelEntry): string {
       return "new task";
     case "preview":
       return entry.preview.title;
+    case "shown":
+      return entry.set.label;
     case "subagent":
       return `⑂ ${entry.step.name ?? entry.step.sidechain ?? entry.step.stateId}`;
     case "terminal":
       return terminalTitleOf(entry.command, entry.dialect);
   }
 }
+
+/**
+ * What one `show_artifact` call showed together (the person, 2026-11-22: "When you click on an artifact
+ * that is in a set from show_artifact, the resulting window should be a show_artifact path which has the
+ * artifact you selected as focused … you should be able to see the next/previous artifact without going
+ * back to the main view"). The panel's path through it is conversation › the set › one of its items:
+ * the set is a level of its own, drawn as the call's gallery, and the item on top knows its siblings.
+ *
+ * `key` is the items' ids in order, so the same call opened twice is the same place; `label` is its crumb.
+ */
+export interface ShownSet {
+  key: string;
+  label: string;
+  caption?: string | undefined;
+  project?: string | undefined;
+  items: readonly PublishedRef[];
+}
+
+/**
+ * A call's items as a set, of any kind (the person, 2026-11-22: "it should work for any/all artifact /
+ * artifact types"). `noun` names what they all are, for the crumb (`4 pictures`, `3 pages`); a mixed
+ * set is `3 artifacts`.
+ */
+export function shownSetOf(items: readonly PublishedRef[], options: { caption?: string | undefined; project?: string | undefined; noun?: string | undefined } = {}): ShownSet {
+  const n = items.length;
+  return {
+    key: `shown:${items[0]?.taskId ?? ""}:${items.map((item) => item.id).join(",")}`,
+    label: `${n} ${options.noun ?? "artifacts"}`,
+    ...(options.caption !== undefined ? { caption: options.caption } : {}),
+    ...(options.project !== undefined ? { project: options.project } : {}),
+    items,
+  };
+}
+
+/** The set as a level of the path. */
+export function shownEntryOf(set: ShownSet): PanelEntry {
+  return { kind: "shown", key: set.key, set };
+}
+
+/**
+ * One of the set's items, as the entry on top of it. Keyed as any artifact is (`artifactEntryOf`,
+ * `artifact:<id>`), so its place buttons light where it stands.
+ */
+export function setItemEntryOf(set: ShownSet, index: number): PanelEntry {
+  const ref = set.items[Math.max(0, Math.min(set.items.length - 1, index))]!;
+  return {
+    kind: "preview",
+    key: `artifact:${ref.id}`,
+    preview: { title: ref.title ?? ref.entry, published: { ref, ...(set.project !== undefined ? { project: set.project } : {}) } },
+    within: set,
+  };
+}
+
+/**
+ * Open the set's `index`th item: the set goes on the stack, and the item on top of it. Another set the
+ * stack is in, and everything over it, goes first: a set is opened from the conversation, and a trail
+ * that read `3 pictures › 3 pages` would be two calls nested that never were.
+ */
+export function openInSet(stack: PanelStack, set: ShownSet, index: number): PanelStack {
+  const other = stack.entries.findIndex((entry) => entry.kind === "shown" && entry.key !== set.key);
+  const base = other > 0 ? { ...stack, entries: stack.entries.slice(0, other), ahead: [] } : stack;
+  return push(push(base, shownEntryOf(set)), setItemEntryOf(set, index));
+}
+
+/** Where the top of the stack stands in its set: the set and the item's index, or `undefined` off one. */
+export function setPlaceOf(stack: PanelStack): { set: ShownSet; index: number } | undefined {
+  const top = topOf(stack);
+  if (top?.kind !== "preview" || top.within === undefined) return undefined;
+  const id = top.preview.published?.ref.id;
+  const index = top.within.items.findIndex((item) => item.id === id);
+  return index < 0 ? undefined : { set: top.within, index };
+}
+
+/**
+ * To the set's `index`th item, in place of the one on top: a step sideways, not a level, so ‹ still goes
+ * up to the set, and the history ahead is dropped. The set does not wrap: past either end is no step.
+ */
+export function stepInSet(stack: PanelStack, index: number): PanelStack {
+  const at = setPlaceOf(stack);
+  if (at === undefined || index < 0 || index >= at.set.items.length || index === at.index) return stack;
+  return { ...stack, entries: [...stack.entries.slice(0, -1), setItemEntryOf(at.set, index)], ahead: [], closedOn: null, motion: "tab" };
+}
+
+/**
+ * The keys that move through a set while an item of one is on top: ← and → a step, Home and End to its
+ * ends, Escape up to the set. Alt+← and Alt+→ stay the panel's history (`historyKey`). `undefined` for
+ * any other key, a key with a modifier, or off a set.
+ */
+export function setKey(event: { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }, stack: PanelStack): ((stack: PanelStack) => PanelStack) | undefined {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return undefined;
+  const at = setPlaceOf(stack);
+  if (at === undefined) return undefined;
+  const last = at.set.items.length - 1;
+  const to = event.key === "ArrowLeft" ? at.index - 1 : event.key === "ArrowRight" ? at.index + 1 : event.key === "Home" ? 0 : event.key === "End" ? last : undefined;
+  if (to !== undefined) return to < 0 || to > last || to === at.index ? undefined : (was) => stepInSet(was, to);
+  if (event.key === "Escape") return pop;
+  return undefined;
+}
+
+/**
+ * How an item's set is drawn around it (the person, 2026-11-22: "I like 4 as the default, but having a
+ * view dropdown that lets you switch to 3 or 1"): its items as tabs, as thumbnails down the side with
+ * their names, or a stepper in the head.
+ */
+export const SET_VIEWS = ["tabs", "rail", "stepper"] as const;
+export type SetView = (typeof SET_VIEWS)[number];
+/** Where the chosen view is kept (`ui.modes`). */
+export const SET_VIEW_MODE = "panel.shownSet.view";
 
 /** A terminal as an entry a pane or the side panel can hold (decision 0028, ruling 3). */
 export function terminalEntryOf(terminal: { taskId: string; project?: string | undefined; callId: string; command: string; dialect: CommandDialect }): PanelEntry {
@@ -285,6 +399,8 @@ export function kindWordOf(entry: PanelEntry): string {
       return "as it ran";
     case "preview":
       return entry.preview.published !== undefined ? "an artifact" : "a value";
+    case "shown":
+      return "shown together";
     case "subagent":
       return "subagent";
     case "rerun":
@@ -305,6 +421,7 @@ export function widthKeyOf(kind: PanelKind): string {
     case "config":
       return "panel.config";
     case "preview":
+    case "shown":
       return "panel.preview";
     case "state":
       return "panel.state";

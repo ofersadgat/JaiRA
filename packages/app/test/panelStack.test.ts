@@ -13,10 +13,18 @@ import {
   selectStep,
   shownStack,
   setTab,
+  crumbOf,
+  openInSet,
+  setKey,
+  setPlaceOf,
+  shownSetOf,
+  stepInSet,
+  topOf,
   type PanelEntry,
   type PanelStack,
 } from "../src/renderer/panelStack";
 import { labelPlan } from "../src/renderer/panelTabs";
+import type { PublishedRef } from "../src/renderer/transcriptRows";
 
 const task = (taskId: string, tab: "conversation" | "steps" = "conversation"): PanelEntry => ({ kind: "task", key: `task:${taskId}`, taskId, tab });
 const state = (stateId: string): PanelEntry => ({ kind: "state", key: `state:${stateId}`, stateId, project: null, tab: "run" });
@@ -209,5 +217,54 @@ describe("forward (the person, 2026-09-26)", () => {
 
   it("does nothing with nowhere to go", () => {
     expect(forward(deep)).toBe(deep);
+  });
+});
+
+describe("a shown set in the panel (2026-11-22)", () => {
+  const ref = (id: string): PublishedRef => ({ taskId: "t1", id, url: `artifact://t1/@${id}`, version: 1, kind: "file", entry: `${id}.png` });
+  const set = shownSetOf([ref("a"), ref("b"), ref("c")], { caption: "Three screens", noun: "pictures" });
+  const key = (k: string, extra: Partial<KeyboardEvent> = {}) => ({ key: k, altKey: false, ctrlKey: false, metaKey: false, shiftKey: false, ...extra });
+  const opened = openInSet(on(EMPTY_STACK, task("t1")), set, 1);
+
+  it("opens an item on the path conversation › the set › it", () => {
+    expect(opened.entries.map((e) => e.key)).toEqual(["task:t1", set.key, "artifact:b"]);
+    expect(crumbOf(opened.entries[1]!)).toBe("3 pictures");
+    expect(setPlaceOf(opened)?.index).toBe(1);
+  });
+
+  it("steps sideways in place of the item, without wrapping", () => {
+    const next = stepInSet(opened, 2);
+    expect(next.entries.map((e) => e.key)).toEqual(["task:t1", set.key, "artifact:c"]);
+    expect(stepInSet(next, 3)).toBe(next);
+    expect(stepInSet(next, -1)).toBe(next);
+    // ‹ still goes up to the set, not back to the item stepped from.
+    expect(topOf(pop(next))?.key).toBe(set.key);
+  });
+
+  it("opening another item of the same set from the set's level does not stack the set twice", () => {
+    const up = pop(opened);
+    expect(openInSet(up, set, 0).entries.map((e) => e.key)).toEqual(["task:t1", set.key, "artifact:a"]);
+  });
+
+  it("names a set of mixed kinds artifacts", () => {
+    expect(shownSetOf([ref("a"), ref("b")]).label).toBe("2 artifacts");
+  });
+
+  it("an item of another call's set replaces the set the panel is in, rather than nesting under it", () => {
+    const other = shownSetOf([ref("x"), ref("y")], { noun: "pages" });
+    expect(openInSet(stepInSet(opened, 2), other, 1).entries.map((e) => e.key)).toEqual(["task:t1", other.key, "artifact:y"]);
+  });
+
+  it("takes ← → Home End and Escape only on an item of a set, and leaves Alt+← to the history", () => {
+    const right = setKey(key("ArrowRight"), opened);
+    expect(right === undefined ? undefined : topOf(right(opened))?.key).toBe("artifact:c");
+    const home = setKey(key("Home"), opened);
+    expect(home === undefined ? undefined : topOf(home(opened))?.key).toBe("artifact:a");
+    const end = setKey(key("End"), stepInSet(opened, 2));
+    expect(end).toBeUndefined();
+    const escape = setKey(key("Escape"), opened);
+    expect(escape === undefined ? undefined : topOf(escape(opened))?.key).toBe(set.key);
+    expect(setKey(key("ArrowLeft", { altKey: true }), opened)).toBeUndefined();
+    expect(setKey(key("ArrowRight"), pop(opened))).toBeUndefined();
   });
 });
