@@ -1,7 +1,8 @@
-import { Fragment, createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { Fragment, createContext, memo, useContext, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Linking, Platform, ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdownParse";
+import { StreamParse, streamingText } from "@jaira/ui/markdownStream";
 import { InkContext, Press, Txt, edge, type FontSpec } from "../primitives";
 import { useTokens } from "../tokens";
 import { LongText } from "./LongText";
@@ -60,17 +61,25 @@ export interface MarkdownProps {
    * newline as a line break, so a host that wants it collapsed (the Files viewer) says `space`.
    */
   softbreak?: "newline" | "space";
+  /**
+   * The text is still being written (a model's answer streaming in): its end is tidied so half-written
+   * marks do not show (`streamingText`), only what can still change is parsed again (`StreamParse`),
+   * and a fenced block still waiting for its closing fence is drawn as its source, not handed to a
+   * renderer half-written. See `markdownStream.ts`.
+   */
+  streaming?: boolean;
 }
 
 // --- the tree -------------------------------------------------------------------------------------
 
-type Node = { tag: string; attrs: Record<string, string>; children: Child[] } | { tag: "fence"; block: FenceBlock };
+/** A fence's `open`: its closing fence has not arrived yet (streaming only). */
+type Node = { tag: string; attrs: Record<string, string>; children: Child[] } | { tag: "fence"; block: FenceBlock; open?: boolean };
 type Child = Node | string;
 
 const TAGS = new Set(["p", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "ul", "ol", "li", "table", "thead", "tbody", "tr", "th", "td", "em", "strong", "s", "a", "code"]);
 
 /** markdown-it's flat stream as a tree, as `markdown.tsx`'s `fold` builds elements — same rules, no DOM. */
-function treeOf(tokens: readonly Token[], softbreak: "\n" | " " = "\n"): Child[] {
+function treeOf(tokens: readonly Token[], softbreak: "\n" | " " = "\n", open?: Token): Child[] {
   const root: Child[] = [];
   const stack: Extract<Node, { attrs: unknown }>[] = [];
   const into = (): Child[] => (stack.length > 0 ? stack[stack.length - 1]!.children : root);
@@ -107,7 +116,7 @@ function treeOf(tokens: readonly Token[], softbreak: "\n" | " " = "\n"): Child[]
       case "fence":
       case "code_block": {
         const info = token.info.trim();
-        out.push({ tag: "fence", block: { info, lang: info.split(/\s+/)[0]?.toLowerCase() ?? "", code: token.content } });
+        out.push({ tag: "fence", block: { info, lang: info.split(/\s+/)[0]?.toLowerCase() ?? "", code: token.content }, ...(token === open ? { open: true } : {}) });
         break;
       }
       case "code_inline":
@@ -148,6 +157,8 @@ type Ink = Pick<FontSpec, "scale" | "weight" | "italic" | "color" | "upper" | "l
 
 /** A block, with its margins carried out for the parent to collapse. */
 interface Block {
+  /** The node it was built from: a block whose node is the same object draws the same (`Drawn`). */
+  node?: Node;
   top: number;
   bottom: number;
   draw: (marginTop: number, marginBottom: number, key: number) => ReactNode;
@@ -162,31 +173,83 @@ interface Ctx {
 
 const HEADING: Record<string, number> = { h1: 18, h2: 15, h3: 13, h4: 13, h5: 13, h6: 13 };
 
-export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color, softbreak = "newline" }: MarkdownProps): JSX.Element {
+export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color, softbreak = "newline", streaming = false }: MarkdownProps): JSX.Element {
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
-  const tree = useMemo(() => treeOf(parseMarkdown(body), softbreak === "space" ? " " : "\n"), [body, softbreak]);
+  const soft = softbreak === "space" ? " " : "\n";
+  // One parse per growing text, kept while it streams; a finished text is parsed whole, once.
+  const stream = useRef<StreamParse | null>(null);
+  const tree = useMemo(() => {
+    if (!streaming) {
+      stream.current = null;
+      return treeOf(parseMarkdown(body), soft);
+    }
+    stream.current ??= new StreamParse();
+    const parsed = stream.current.parse(streamingText(body));
+    return [...parsed.settled.flatMap((segment) => settledTree(segment, soft)), ...treeOf(parsed.tail, soft, parsed.open)];
+  }, [body, soft, streaming]);
   const drawn = fence ?? DEFAULT_FENCE;
   // The document sets no colour of its own: its text is what the box round it gives (`InkContext`), else --text.
   const inherited = useContext(InkContext);
-  const ctx: Ctx = { ink: { scale, lineHeight, color: color ?? inherited ?? "text", weight: 400 }, fence: drawn, depth: 0 };
+  const ink = color ?? inherited ?? "text";
+  const ctx: Ctx = { ink: { scale, lineHeight, color: ink, weight: 400 }, fence: drawn, depth: 0 };
   const blocks = blocksOf(tree, ctx);
+  // What every block's drawing depends on besides its node and its margins.
+  const look = `${scale}|${lineHeight}|${ink}`;
+  const pin = { firstTop: 0, ...(trimEnd ? { lastBottom: 0 } : {}) };
   return (
     <View paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>
       {front !== undefined ? <FrontMatter text={front} fence={drawn} /> : null}
       {/* The first block has no margin on top, and in a transcript the last none under it. Each is
-          drawn on a phone only near the screen (`Virtual`): a long document is many blocks. */}
-      {stack(blocks, { firstTop: 0, ...(trimEnd ? { lastBottom: 0 } : {}) }).map((block, i) => (
-        <Virtual key={i}>{block}</Virtual>
-      ))}
+          drawn on a phone only near the screen (`Virtual`): a long document is many blocks. A block
+          drawn from the same node with the same margins is not drawn again (`Drawn`), so while an
+          answer streams only its last block is. */}
+      {blocks.map((block, i) => {
+        const [top, bottom] = marginsAt(blocks, i, pin);
+        return <Drawn key={i} block={block} top={top} bottom={bottom} index={i} look={look} fence={drawn} />;
+      })}
     </View>
   );
+}
+
+/** A settled segment's tree, built once: the segment is the same array for as long as it is settled. */
+const SETTLED = new WeakMap<readonly Token[], { soft: string; tree: Child[] }>();
+function settledTree(segment: readonly Token[], soft: "\n" | " "): Child[] {
+  const kept = SETTLED.get(segment);
+  if (kept !== undefined && kept.soft === soft) return kept.tree;
+  const tree = treeOf(segment, soft);
+  SETTLED.set(segment, { soft, tree });
+  return tree;
+}
+
+interface DrawnProps {
+  block: Block;
+  top: number;
+  bottom: number;
+  index: number;
+  look: string;
+  fence: FenceRenderer | undefined;
+}
+
+/** One top-level block, drawn again only when what it is drawn from changed. */
+const Drawn = memo(
+  function Drawn({ block, top, bottom, index }: DrawnProps): JSX.Element {
+    return <Virtual>{block.draw(top, bottom, index)}</Virtual>;
+  },
+  (a, b) => a.block.node !== undefined && a.block.node === b.block.node && a.top === b.top && a.bottom === b.bottom && a.index === b.index && a.look === b.look && a.fence === b.fence,
+);
+
+/** A block's margins among its siblings, collapsed pairwise. The first and last may be pinned by the container. */
+function marginsAt(blocks: readonly Block[], i: number, pin: { firstTop?: number; lastBottom?: number }): [number, number] {
+  const b = blocks[i]!;
+  const top = i === 0 ? (pin.firstTop ?? b.top) : Math.max(blocks[i - 1]!.bottom, b.top);
+  const bottom = i === blocks.length - 1 ? (pin.lastBottom ?? b.bottom) : 0;
+  return [top, bottom];
 }
 
 /** Siblings, their margins collapsed pairwise. The first and last may be pinned by the container. */
 function stack(blocks: readonly Block[], pin: { firstTop?: number; lastBottom?: number } = {}): ReactNode[] {
   return blocks.map((b, i) => {
-    const top = i === 0 ? (pin.firstTop ?? b.top) : Math.max(blocks[i - 1]!.bottom, b.top);
-    const bottom = i === blocks.length - 1 ? (pin.lastBottom ?? b.bottom) : 0;
+    const [top, bottom] = marginsAt(blocks, i, pin);
     return b.draw(top, bottom, i);
   });
 }
@@ -206,7 +269,7 @@ function blocksOf(children: readonly Child[], ctx: Ctx): Block[] {
   for (const c of children) {
     if (isBlock(c)) {
       flush();
-      out.push(blockOf(c as Node, ctx));
+      out.push({ ...blockOf(c as Node, ctx), node: c as Node });
     } else run.push(c);
   }
   flush();
@@ -227,7 +290,7 @@ function container(children: Block[], own: { top: number; bottom: number }, draw
 }
 
 function blockOf(node: Node, ctx: Ctx): Block {
-  if ("block" in node) return fenceBlock(node.block, ctx);
+  if ("block" in node) return node.open === true ? plainFence(node.block, ctx) : fenceBlock(node.block, ctx);
   const n = node as Extract<Node, { attrs: unknown }>;
   switch (n.tag) {
     case "p":
@@ -358,6 +421,11 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
  * not the body's 1.5 — its toggles are a pixel taller for it. Undefined outside a fence.
  */
 export const FenceLineContext = createContext<number | undefined>(undefined);
+
+/** A fence whose closing fence is still to come: its source, which half a document of any kind can be. */
+function plainFence(block: FenceBlock, ctx: Ctx): Block {
+  return { top: 0, bottom: 10, draw: (mt, mb, key) => <Pre key={key} code={block.code} ink={ctx.ink} marginTop={mt} marginBottom={mb} /> };
+}
 
 function fenceBlock(block: FenceBlock, ctx: Ctx): Block {
   const drawn = ctx.fence?.(block);

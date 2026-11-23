@@ -285,14 +285,19 @@ export const Transcript = memo(function Transcript({
         }
         return (
           <View key={i} minWidth={0} marginTop={10} marginBottom={14} {...fade}>
-            {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it. */}
-            <LongText text={block.text} spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)} />
-            {writing ? (
-              <View flexDirection="row" alignItems="center" gap={7} marginTop={6}>
-                <Pulse color="dim" />
-                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>writing…</Txt>
-              </View>
-            ) : null}
+            {/* Markdown as it arrives, drawn as the answer it becomes will be (`Message`): the same
+                document and the same room for the rail under it, so nothing moves when the turn ends.
+                `streaming` keeps half-written marks and half a fenced block from showing, and draws
+                again only the block still being written (`markdownStream.ts`). */}
+            <Markdown text={block.text} streaming scale={12.5 / 12.5} lineHeight={1.65} trimEnd padding={[2, 2, 12, 2]} />
+            <View flexDirection="row" alignItems="center" gap={7} marginTop={4} minHeight={22} paddingHorizontal={1}>
+              {writing ? (
+                <>
+                  <Pulse color="dim" />
+                  <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>writing…</Txt>
+                </>
+              ) : null}
+            </View>
           </View>
         );
     });
