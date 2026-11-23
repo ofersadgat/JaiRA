@@ -328,13 +328,13 @@ function Cell({ text, head, top, left, below, right, t }: { text: string | undef
 
 /**
  * `Media`: a picture the person can size (`SizedPicture`; at rest no wider than the column, no taller
- * than 420) — or, on web, a
+ * than 420; on its own, at Fit) — or, on web, a
  * clip or a track in the browser's own player. A phone has no player here yet: it says so, and the
  * source is under Source.
  */
-export function Media({ src, kind }: { src: string; kind: MediaKind }): JSX.Element {
+export function Media({ src, kind, alone = false }: { src: string; kind: MediaKind; /** On its own (a pinned value): a picture opens at Fit. */ alone?: boolean }): JSX.Element {
   const t = useTokens();
-  if (kind === "image") return <SizedPicture src={src} />;
+  if (kind === "image") return <SizedPicture src={src} alone={alone} />;
   if (isWeb) {
     const style = { display: "block", maxWidth: "100%", maxHeight: 420, borderRadius: 6, background: String(t.v("panel-2")), ...(kind === "audio" ? { width: "100%", maxWidth: 420, height: 36 } : {}) };
     return kind === "video" ? <video src={src} controls style={style} /> : <audio src={src} controls style={style} />;

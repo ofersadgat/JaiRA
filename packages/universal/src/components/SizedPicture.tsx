@@ -8,7 +8,8 @@ import { onTouchElsewhere } from "../touchElsewhere";
 import { useTokens } from "../tokens";
 import { Range } from "./form/Range";
 import { Img, naturalSizeOf } from "./Img";
-import { SCALE_MAX, SCALE_MIN, defaultScale, dragScale, fitScale, percentOf, stepScale, usePictureSize, type Natural } from "./pictureSize";
+import { SCALE_MAX, SCALE_MIN, choiceOf, dragScale, fitScale, openingScale, percentOf, stepScale, usePictureSize, type Natural } from "./pictureSize";
+import { useViewCarry } from "./viewCarry";
 
 /**
  * A picture the person can size (the person's pick, 2026-11-14: round 2's board 4). At rest it is the
@@ -24,8 +25,13 @@ import { SCALE_MAX, SCALE_MIN, defaultScale, dragScale, fitScale, percentOf, ste
  *
  * Wider than its column (above Fit) it scrolls sideways in its box. The size is kept while the
  * conversation is open and dropped when it is left (`pictureSize.ts`).
+ *
+ * `alone`: it stands on its own (the side panel, the main view, a split — its value view `pinned`), where
+ * it opens at Fit rather than at rest (2026-11-22). An item of a shown set opens at the size the person
+ * last chose on the set (`viewCarry.ts`), and a size chosen here is that choice from now on.
  */
-export function SizedPicture({ src, alt }: { src: string; alt?: string }): JSX.Element {
+export function SizedPicture({ src, alt, alone = false }: { src: string; alt?: string; alone?: boolean }): JSX.Element {
+  const carry = useViewCarry();
   const t = useTokens();
   const hovers = useCanHover();
   const panel = useValuePanel();
@@ -65,13 +71,18 @@ export function SizedPicture({ src, alt }: { src: string; alt?: string }): JSX.E
     [],
   );
 
-  const scale = natural === null || room === null ? 0 : (given ?? defaultScale(natural, room));
+  const scale = natural === null || room === null ? 0 : openingScale(natural, room, given, carry?.get().picture, alone);
+  /** A size the person gave: kept for this picture, and carried to the set's next one as what they chose. */
+  const give = (next: number): void => {
+    setGiven(next);
+    if (carry !== null && natural !== null && room !== null) carry.set({ picture: choiceOf(next, natural, room) });
+  };
   const width = natural === null ? 0 : natural.width * scale;
   const height = natural === null ? 0 : natural.height * scale;
 
   // The corner's drag, read through a ref: the responder is made once, and a drag outlives its render.
-  const live = useRef({ natural, room, width, setGiven });
-  live.current = { natural, room, width, setGiven };
+  const live = useRef({ natural, room, width, setGiven: give });
+  live.current = { natural, room, width, setGiven: give };
   const from = useRef(0);
   const corner = useMemo(
     () =>
@@ -116,7 +127,7 @@ export function SizedPicture({ src, alt }: { src: string; alt?: string }): JSX.E
     );
   const controls = hovers ? hovered || dragging : shown || dragging;
   const grip = hovers ? 14 : 24;
-  const set = (next: number): void => setGiven(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)));
+  const set = (next: number): void => give(Math.min(SCALE_MAX, Math.max(SCALE_MIN, next)));
 
   return (
     <View onLayout={(e: LayoutChangeEvent) => setRoom(e.nativeEvent.layout.width)} minWidth={0}>

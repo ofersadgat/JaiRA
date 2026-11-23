@@ -65,3 +65,30 @@ export function usePictureSize(src: string): [number | null, (scale: number | nu
     },
   ];
 }
+
+/**
+ * A size the person chose, as they chose it: Fit, 1:1, or a share of the natural size. Fit and 1:1 are
+ * kept as words, not numbers, so a choice carried to another picture (`viewCarry.ts`) fits THAT picture.
+ */
+export type PictureChoice = "fit" | "actual" | number;
+
+/** The choice a scale set by a control says: Fit and 1:1 by the button that set them, else the number. */
+export function choiceOf(scale: number, natural: Natural, room: number): PictureChoice {
+  if (Math.abs(scale - fitScale(natural, room)) < 1e-6) return "fit";
+  if (Math.abs(scale - 1) < 1e-6) return "actual";
+  return scale;
+}
+
+/**
+ * How big a picture opens: the size the person gave it here, else the choice carried to it, else Fit
+ * where it stands on its own (the side panel, the main view, a split — the person, 2026-11-22: "the
+ * image viewer should start by default at 'fit'"), else the conversation's rest size ({@link defaultScale}).
+ */
+export function openingScale(natural: Natural, room: number, given: number | null, carried: PictureChoice | undefined, alone: boolean): number {
+  if (given !== null) return given;
+  const choice = carried ?? (alone ? "fit" : undefined);
+  if (choice === "fit") return fitScale(natural, room);
+  if (choice === "actual") return 1;
+  if (typeof choice === "number") return clampScale(choice);
+  return defaultScale(natural, room);
+}

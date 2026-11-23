@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useMemo, useState, type JSX } from "react";
 import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { SET_VIEWS, SET_VIEW_MODE, type SetView, type ShownSet } from "@jaira/ui/panelStack";
@@ -11,6 +11,7 @@ import { surfaceOf } from "../../app/places";
 import { useShellOrNull } from "../../app/shell";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { anchorRectOf } from "../floats/anchor";
+import { ViewCarryContext, carryOf } from "../viewCarry";
 import { Picture } from "../Picture";
 import { Icon, type IconName } from "./Icon";
 import { PreviewCard } from "./PreviewCard";
@@ -42,7 +43,9 @@ import { SpIcon } from "./SidePanel";
  *                      1px --line box, radius 7, the count data 500 11.5, tabular (at either end its
  *                      arrow is dim: the set does not wrap), then the call's caption, app 12 --dim, ellipsed
  *
- * Whichever view, ← → Home End step and Escape goes up to the set (`SidePanel.tsx`).
+ * Whichever view, ← → Home End step and Escape goes up to the set (`SidePanel.tsx`). And whichever item,
+ * it opens as the person last looked at one of the set — its view (Preview, Source, JSON…), a picture's
+ * size — where it has that (`viewCarry.ts`).
  */
 
 /** Which view the person chose for sets, kept in `ui.modes`; tabs until they choose. */
@@ -133,7 +136,13 @@ export function SetHeadControl({ set }: { set: ShownSet }): JSX.Element {
 /** The item on top of its set, with the others beside it in the chosen view. */
 export function SetItemBody({ item, set, index, onStep }: { item: PinnedValue; set: ShownSet; index: number; onStep: (index: number) => void }): JSX.Element {
   const [view] = useSetView();
-  const card = <PreviewCard item={item} />;
+  // The item opens as the person last looked at the set, and a choice made on it carries on (`viewCarry.ts`).
+  const carry = useMemo(() => carryOf(set.key), [set.key]);
+  const card = (
+    <ViewCarryContext.Provider value={carry}>
+      <PreviewCard item={item} />
+    </ViewCarryContext.Provider>
+  );
   if (view === "tabs") {
     return (
       <View flex={1} minHeight={0} flexDirection="column">

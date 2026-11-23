@@ -35,6 +35,19 @@ const READ = `(() => {
   return { tabs, text: document.body.innerText };
 })()`;
 
+/** The picture in the side panel (the right of the window): its width, and the room from its left to the window's edge. */
+const PANEL_PICTURE = `(() => {
+  const img = [...document.querySelectorAll('img')].filter((i) => i.src.startsWith('data:image/')).find((i) => i.getBoundingClientRect().left > window.innerWidth * 0.6 && i.getBoundingClientRect().width > 120);
+  if (!img) return null;
+  const r = img.getBoundingClientRect();
+  return { w: Math.round(r.width), room: Math.round(window.innerWidth - r.left) };
+})()`;
+/** A view toggle's button in the side panel, by its name ("JSON", "Preview"): pressed, or whether it is on. */
+const panelButton = (name: string): string =>
+  `[...document.querySelectorAll('[aria-label="How to show this"] [aria-pressed]')].find((b) => (b.textContent ?? '').trim() === ${JSON.stringify(name)} && b.getBoundingClientRect().left > window.innerWidth * 0.6)`;
+const panelToggle = (name: string): string => `${panelButton(name)}?.click()`;
+const panelToggleOn = (name: string): string => `${panelButton(name)}?.getAttribute('aria-pressed') === 'true'`;
+
 /** The code card's "Open in the side panel": the place buttons of the card whose bar names scope.ts and no other item. */
 const OPEN_SCOPE_CARD = `(() => {
   const groups = [...document.querySelectorAll('[aria-label="Where to show it"]')];
@@ -95,11 +108,26 @@ async function main(): Promise<void> {
     check(now.tabs.filter((t) => /\.png$/.test(t.name)).length === 3, "the set's three pictures are tabs over it");
     check((await shownTab()) === "before.png", "the tab of the picture pressed is the one open");
     await app.shot("1-tabs", undefined, false);
+    // On its own, a picture opens at Fit: the panel's width, not the conversation's rest size.
+    const fit = await app.evaluate<{ w: number; room: number } | null>(PANEL_PICTURE);
+    console.log(`shown-set: the panel's picture ${JSON.stringify(fit)}`);
+    check(fit !== null && fit.w >= fit.room * 0.85, "the picture in the panel opens at Fit");
 
     // → steps to the next, from where the focus was left (the conversation).
     await app.press("ArrowRight", 39);
     check((await shownTab()) === "after.png", "→ steps to after.png");
     await app.shot("2-tabs-next", undefined, false);
+
+    // A view chosen on one item is the next one's: JSON here, and after.png → menu.png opens as JSON.
+    await app.evaluate(panelToggle("JSON"));
+    await settle(500);
+    await app.press("ArrowRight", 39);
+    check((await shownTab()) === "menu.png" && (await app.evaluate<boolean>(panelToggleOn("JSON"))), "JSON chosen on after.png is menu.png's view too");
+    await app.shot("2b-json-carried", undefined, false);
+    await app.evaluate(panelToggle("Preview"));
+    await settle(500);
+    await app.press("ArrowLeft", 37);
+    check((await shownTab()) === "after.png" && (await app.evaluate<boolean>(panelToggleOn("Preview"))), "Preview chosen again carries back");
     await app.press("End", 35);
     check((await shownTab()) === "menu.png", "End goes to the last");
     await app.press("ArrowRight", 39);

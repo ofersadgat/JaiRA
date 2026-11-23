@@ -1,4 +1,8 @@
-import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useViewCarry } from "../viewCarry";
+
+/** Inside a value view's body: a value view there is part of another, and takes no carried choice. */
+const InsideValueContext = createContext(false);
 import { ScrollView, TextInput, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import {
@@ -159,8 +163,23 @@ export function ValueView({
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
-  const [picked, setPicked] = useState<ViewId | null>(null);
-  const [leadOn, setLeadOn] = useState(lead !== undefined);
+  // An item of a shown set opens as the person last looked at the set (`viewCarry.ts`), and what they
+  // choose here is that from now on. A value inside another value is not the item, and is not steered.
+  const nested = useContext(InsideValueContext);
+  const carryHere = useViewCarry();
+  const carry = nested ? null : carryHere;
+  const carried = carry?.get() ?? {};
+  const [picked, setPickedHere] = useState<ViewId | null>(carried.view ?? null);
+  // The artifact's own view leads unless the person last chose one of the value's views, and this has it.
+  const [leadOn, setLeadOnHere] = useState(lead !== undefined && (carried.lead !== false || carried.view === undefined || !views.includes(carried.view)));
+  const setPicked = (id: ViewId): void => {
+    setPickedHere(id);
+    carry?.set({ view: id });
+  };
+  const setLeadOn = (on: boolean): void => {
+    setLeadOnHere(on);
+    carry?.set({ lead: on });
+  };
   const leading = lead !== undefined && leadOn;
   const view = controlled !== undefined && views.includes(controlled) ? controlled : picked !== null && views.includes(picked) ? picked : views[0]!;
   const artifact = artifactOf(value);
@@ -169,7 +188,13 @@ export function ValueView({
 
   // Which renderer draws each view that has two, behind this person's standing answer for the type
   // (Appearance's text renderer): the code view is choosing not to edit.
-  const [drawnBy, setDrawnBy] = useState<Partial<Record<ViewId, RendererId>>>({});
+  const [drawnBy, setDrawnByHere] = useState<Partial<Record<ViewId, RendererId>>>(carried.renderers ?? {});
+  const setDrawnBy = (next: (was: Partial<Record<ViewId, RendererId>>) => Partial<Record<ViewId, RendererId>>): void =>
+    setDrawnByHere((was) => {
+      const now = next(was);
+      carry?.set({ renderers: now });
+      return now;
+    });
   const [rendMenu, setRendMenu] = useState<MenuAt | null>(null);
   const editable = edit !== undefined;
   const preferred = textRendererFor(mime, useRenderChoice());
@@ -198,7 +223,7 @@ export function ValueView({
     if (view === "media") {
       const src = mediaSrcOf(showing, mime);
       const kind = mediaKindOf(mime);
-      if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} />;
+      if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} alone={pinned} />;
       return <Source value={showing} ceiling={ceiling} t={t} />;
     }
     if (view === "markdown") {
@@ -442,7 +467,7 @@ export function ValueView({
         </View>
       ) : null}
       <View minWidth={0} {...(pinned ? pinnedBody(leading || view === "html", t) : {})}>
-        {leading ? lead!.body : body}
+        <InsideValueContext.Provider value={true}>{leading ? lead!.body : body}</InsideValueContext.Provider>
       </View>
       {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
       {rendMenu !== null ? <ContextMenu anchor={rendMenu} onClose={() => setRendMenu(null)} /> : null}
