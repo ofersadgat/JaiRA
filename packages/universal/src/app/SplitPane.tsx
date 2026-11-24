@@ -96,14 +96,18 @@ function focusProps(pane: number): Record<string, unknown> {
 /**
  * The two panes as tabs, while the room cannot hold both (decision 0025, chosen: board 14). How it looks:
  * a row, a --line under, padding 0 8; a tab padding 7 10 6, 2px under it (--accent on the one shown),
- * --dim (--text shown); the hidden one's dot 6 round, --accent, after its name.
+ * --dim (--text shown); the hidden one's dot 6 round, --accent, after its name. The row is the window's
+ * top row then (the pane's head stands under it), so it is what the window is moved by: the whole of it
+ * but the tabs (`DragStrip`), at least the 34 the top row stands at, the window's buttons kept clear
+ * (`gutter`).
  */
-function SplitTabs({ shown }: { shown: number }): JSX.Element {
+function SplitTabs({ shown, gutter }: { shown: number; gutter: number | string }): JSX.Element {
   const t = useTokens();
   const split = splitView.use();
   const titles = paneTitles.use();
   return (
-    <View role="tablist" flexDirection="row" paddingHorizontal={8} flexShrink={0} {...(edge(t, { bottom: 1 }) as object)}>
+    <View role="tablist" flexDirection="row" paddingHorizontal={8} minHeight={34} flexShrink={0} {...(edge(t, { bottom: 1 }) as object)} style={DRAG_REGION as never}>
+      <DragStrip>
       {split.panes.map((_, pane) => {
         const on = shown === pane;
         const label = titles[pane] ?? "";
@@ -135,6 +139,9 @@ function SplitTabs({ shown }: { shown: number }): JSX.Element {
           </Press>
         );
       })}
+      <View flex={1} minWidth={8} alignSelf="stretch" style={DRAG_REGION as never} />
+      {gutter !== 0 ? <View width={gutter as never} alignSelf="stretch" flexShrink={0} style={DRAG_REGION as never} /> : null}
+      </DragStrip>
     </View>
   );
 }
@@ -367,8 +374,8 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
           overlap paints the pane's text in another layer, nor an inset shadow, which bled a hairline
           along the pane's foot. The panes on one path are the same picture but for this row. */}
       <View height={2} flexShrink={0} backgroundColor={(splitOn && !narrow && split.focus === pane ? t.v("accent") : "transparent") as never} />
-      {splitOn && narrow ? <SplitTabs shown={pane} /> : null}
-      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} lead={lead} gutter={gutter} strip={!(splitOn && narrow)} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
+      {splitOn && narrow ? <SplitTabs shown={pane} gutter={gutter} /> : null}
+      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} lead={lead} gutter={splitOn && narrow ? 0 : gutter} strip={!(splitOn && narrow)} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
       <View flex={1} minWidth={0} minHeight={0} position="relative" flexDirection="column">
         {room !== null ? (
           // The room, kept mounted under what is put on top of it: back finds it where it was.
@@ -434,7 +441,7 @@ export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: P
           ) : null}
           {/* The sidebar's toggle leads the pane at the window's left: the first, or, while the two
               are tabs (`narrow`), whichever is shown. */}
-          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} lead={pane === 0 || narrow} gutter={pane === split.panes.length - 1 ? gutter : 0} />
+          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} lead={pane === 0 || narrow} gutter={pane === split.panes.length - 1 || narrow ? gutter : 0} />
         </Fragment>
       ))}
       {/* No pane holds the room: kept mounted out of sight, until it is put on one again. */}
