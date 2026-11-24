@@ -402,10 +402,16 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
   const widths = useRef(new Map<string, number>());
   const view = useRef({ x: 0, width: 0, content: 0 });
   const [hidden, setHidden] = useState({ before: 0, after: 0 });
-  // How wide each side's count is drawn: what it covers of the row.
-  const [cover, setCover] = useState<Edges>({ left: COUNT_WIDTH, right: COUNT_WIDTH });
-  const covered = useRef(cover);
-  covered.current = cover;
+  // What the counts say, as last told: `recount` sets the state only when it differs from this.
+  const told = useRef(hidden);
+  /*
+   * How wide each side's count is drawn: what it covers of the row. Not state: measured once a count is
+   * drawn, it is recounted on the spot, and the state moves only when a count's number does — not a
+   * render for the width and another for its recount.
+   */
+  const covered = useRef<Edges>({ left: COUNT_WIDTH, right: COUNT_WIDTH });
+  // Whether each side's count has been measured since it came up (`measured`).
+  const risen = useRef({ left: false, right: false });
   // Where each chip lies along the row, from the widths drawn: a chip moved by one before it growing is not told.
   const spots = (): Spot[] => {
     // On web, read off the row itself (the scroller's content box, a box per chip): see the chips below.
@@ -421,7 +427,27 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
   };
   const recount = (): void => {
     const next = outOfView(spots(), view.current, covered.current);
-    setHidden((was) => (was.before === next.before && was.after === next.after ? was : next));
+    const was = told.current;
+    // Not `setHidden(was => …)`: an updater that hands back the same state is still a render queued.
+    if (was.before === next.before && was.after === next.after) return;
+    told.current = next;
+    setHidden(next);
+  };
+  // The fade, on the scrolling box itself (it stays put while the chips move under it): none under a
+  // side's count, then the chips coming in over CHIP_FADE.
+  const fade = (): void => {
+    const el = node.current;
+    if (el === null) return;
+    const left = told.current.before > 0;
+    const right = told.current.after > 0;
+    const l = left ? covered.current.left : 0;
+    const r = right ? covered.current.right : 0;
+    const image =
+      left || right
+        ? `linear-gradient(to right, transparent ${l}px, #000 ${left ? l + CHIP_FADE : 0}px, #000 calc(100% - ${right ? r + CHIP_FADE : 0}px), transparent calc(100% - ${r}px))`
+        : "";
+    el.style.setProperty("mask-image", image);
+    el.style.setProperty("-webkit-mask-image", image);
   };
   const toEnd = (): void => {
     if (follow) scroller.current?.scrollToEnd({ animated: false });
@@ -432,23 +458,38 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
     const inset = { left: covered.current.left + clear, right: covered.current.right + clear };
     const to = pageTo(spots(), { x: v.x, width: v.width, max: Math.max(0, v.content - v.width) }, dir, inset);    scroller.current?.scrollTo({ x: to, animated: true });
   };
-  const measured = (side: keyof Edges) => (width: number): void => {
-    setCover((was) => (Math.abs(was[side] - width) < 0.5 ? was : { ...was, [side]: width }));
+  /*
+   * A count's width, measured. While that side's count stays up, what it covers only grows: a count's
+   * width is not its number's size — "+7" was drawn 26.1 wide and "+6" 27.7 in a row 76 wide
+   * (2026-11-24) — so the narrower "+7" let a chip out, which made it "+6", which covered the chip
+   * again, without end, until React stopped drawing (its error #185). Never narrower, the count settles
+   * at the most it has needed; a chip under the slack is under the count's fade.
+   */
+  const measured = (side: keyof Edges) => (drawn: number): void => {
+    const width = risen.current[side] ? Math.max(covered.current[side], drawn) : drawn;
+    risen.current[side] = true;
+    if (Math.abs(covered.current[side] - width) < 0.5) return;
+    covered.current = { ...covered.current, [side]: width };
+    recount();
+    fade();
   };
-  useEffect(recount, [cover.left, cover.right]);
   /*
    * On web each side's count is measured here, once it is drawn and whenever its number changes, rather
    * than by `onLayout`, which Tamagui answers there with a poll for as long as the count is up (see the
    * chips below). Its width changes only with its number. A phone measures it with `onLayout` (`More`).
    */
   useLayoutEffect(() => {
-    if (!isWeb) return;
-    const row = node.current?.parentElement;
-    if (row === null || row === undefined) return;
-    for (const [side, end] of [["left", "before"], ["right", "after"]] as const) {
-      const count = row.querySelector<HTMLElement>(`:scope > [aria-label^="Show the"][aria-label$=" ${end}"]`);
-      if (count !== null) measured(side)(count.getBoundingClientRect().width);
+    // A side with no count forgets what its count covered: the next one is measured afresh.
+    if (hidden.before === 0) risen.current.left = false;
+    if (hidden.after === 0) risen.current.right = false;
+    const row = isWeb ? node.current?.parentElement : undefined;
+    if (row !== null && row !== undefined) {
+      for (const [side, end] of [["left", "before"], ["right", "after"]] as const) {
+        const count = row.querySelector<HTMLElement>(`:scope > [aria-label^="Show the"][aria-label$=" ${end}"]`);
+        if (count !== null) measured(side)(count.getBoundingClientRect().width);
+      }
     }
+    fade();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hidden.before, hidden.after]);
   const empty = chips.length === 0;
@@ -456,24 +497,10 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
     if (!isWeb || empty) return undefined;
     const found = (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.() ?? null;
     node.current = found;
+    fade();
     return found === null ? undefined : moveAlong(found);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [empty]);
-  // The fade, on the scrolling box itself (it stays put while the chips move under it): none under a
-  // side's count, then the chips coming in over CHIP_FADE.
-  const fadeLeft = hidden.before > 0;
-  const fadeRight = hidden.after > 0;
-  useEffect(() => {
-    const el = node.current;
-    if (el === null) return;
-    const l = fadeLeft ? cover.left : 0;
-    const r = fadeRight ? cover.right : 0;
-    const image =
-      fadeLeft || fadeRight
-        ? `linear-gradient(to right, transparent ${l}px, #000 ${fadeLeft ? l + CHIP_FADE : 0}px, #000 calc(100% - ${fadeRight ? r + CHIP_FADE : 0}px), transparent calc(100% - ${r}px))`
-        : "";
-    el.style.setProperty("mask-image", image);
-    el.style.setProperty("-webkit-mask-image", image);
-  }, [fadeLeft, fadeRight, cover.left, cover.right, empty]);
   useEffect(toEnd, [follow]);
   if (empty) return null;
   return (
