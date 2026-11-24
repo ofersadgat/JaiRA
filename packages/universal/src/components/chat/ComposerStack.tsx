@@ -571,6 +571,7 @@ export function StackPanel({
           onBy={board.onBy}
           maxHeight={Math.max(220, anchor.top - 7 - 16 - 150)}
           onWidth={setBoardWidth}
+          layers={board.layers}
           {...(nav.order !== "tools" ? { onLayers: () => update({ view: "whole", shown: undefined }) } : onToolList !== undefined ? { onList: onToolList } : {})}
         />
       ) : (

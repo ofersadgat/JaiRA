@@ -160,11 +160,74 @@ export interface BoardLayer {
    * Who a move into it writes: the conversation's own lines; a permission set's file (asked first:
    * other conversations use it); or nobody.
    */
-  writes: "conversation" | "set" | "none";
+  writes: "conversation" | "unsaved" | "set" | "none";
   /** The settings layer its file is in, for a set. */
   setLayer?: SetLayer;
   /** Why it cannot be written, for a read-only layer. */
   readOnly?: string;
+  /**
+   * Its place in the conversation's stack (`StackForm.layers`), for a layer the conversation names —
+   * the root, a named layer, an unsaved one. A file built of layers is several columns groups with one
+   * place. Absent for what the conversation does not order: a standing layer, this run, its own lines.
+   */
+  entry?: number;
+  /** An unsaved layer's key (`$unsaved/<key>`). */
+  unsaved?: string;
+}
+
+/**
+ * What a layer's head can do (2026-11-23): its name swaps it for another set, its swatch drags it, a +
+ * between heads adds an unsaved layer, and its ⋯ menu holds the rest.
+ */
+export interface LayerActs {
+  /** Swap it for a set (the name's menu); an unsaved layer with lines asks to replace or merge first. */
+  swap: boolean;
+  /** Drag it, or move it earlier or later. */
+  move: boolean;
+  remove: boolean;
+  /** A new unsaved layer can go just before it (the + on its left edge). */
+  addBefore: boolean;
+  /** Keep it as a set file. */
+  save: boolean;
+  /** Its own lines can be cleared (This conversation). */
+  clear: boolean;
+  /** Its answers can be forgotten (This run). */
+  forget: boolean;
+  /** Pinned in the project's settings: unpinned, not moved. */
+  unpin: boolean;
+}
+
+/** What each layer's head offers: the root, a named and an unsaved layer move, swap and go; the rest is pinned. */
+export function layerActsOf(layer: BoardLayer): LayerActs {
+  const ordered = layer.entry !== undefined;
+  return {
+    swap: ordered,
+    move: ordered,
+    remove: ordered,
+    addBefore: ordered || layer.role === "runtime" || layer.writes === "conversation",
+    save: layer.unsaved !== undefined || layer.writes === "conversation",
+    clear: layer.writes === "conversation",
+    forget: layer.role === "runtime",
+    unpin: layer.role === "standing",
+  };
+}
+
+/**
+ * An unsaved layer's lines with a set's merged in (2026-11-23: "copy the data from the new layer into
+ * the existing layer replacing only conflicting permissions"): every line of the set is written over the
+ * layer's at the places it names — a plain answer is its `**` — and the layer's other places stay.
+ */
+export function mergedLines(lines: Readonly<Record<string, unknown>>, from: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  const next: Record<string, unknown> = { ...lines };
+  for (const [subject, value] of Object.entries(from)) {
+    const key = Object.keys(next).find((each) => (each === OTHER_SUBJECT ? each : normalizeSubject(each)) === (subject === OTHER_SUBJECT ? subject : normalizeSubject(subject))) ?? subject;
+    const was = next[key];
+    const over = flatOf(value);
+    if (over === undefined) continue;
+    const mode = modeDeclOfFlat({ ...(flatOf(was) ?? {}), ...over });
+    next[key] = isObject(was) && "mode" in was ? { ...was, mode } : mode;
+  }
+  return next;
 }
 
 const SCOPE_NAMES: Readonly<Record<string, string>> = {
@@ -184,11 +247,22 @@ const LAYER_OF_SCOPE: Readonly<Record<string, SetLayer>> = Object.fromEntries(Ob
 
 /** The stack's layers as the board's column groups, oldest first. */
 export function boardLayersOf(view: Pick<PermissionStackView, "layers">): BoardLayer[] {
+  // The conversation's own order: the root and each named layer, a file built of layers counted once.
+  let entries = -1;
+  let lastVia: string | undefined;
   const layers = view.layers.map((layer, index): BoardLayer => {
     const key = `${index}:${layer.id}`;
-    const base = { key, id: layer.id, scope: layer.scope, role: layer.role, icon: layer.icon };
+    let entry: number | undefined;
+    if (layer.role === "bottom" || layer.role === "named") {
+      const via = layer.via ?? layer.reference ?? layer.id;
+      if (via !== lastVia || layer.unsaved !== undefined) entries += 1;
+      lastVia = via;
+      entry = entries;
+    }
+    const base = { key, id: layer.id, scope: layer.scope, role: layer.role, icon: layer.icon, ...(entry !== undefined ? { entry } : {}) };
     if (layer.role === "runtime") return { ...base, label: "This run", hint: "answered for this run", writes: "none", readOnly: "the run's answers are kept as they were given" };
     if (layer.id === TOOLS_LAYER && layer.role === "own") return { ...base, label: "This conversation", hint: "kept with the conversation", writes: "conversation" };
+    if (layer.unsaved !== undefined) return { ...base, label: layer.unsaved.name, hint: "unsaved · this conversation", writes: "unsaved", unsaved: layer.unsaved.key };
     const where = SCOPE_NAMES[layer.scope] ?? layer.scope;
     const label = layer.role === "bottom" ? `Root · ${layer.id}` : layer.id;
     const hint = layer.role === "standing" ? `standing · ${where}` : where;

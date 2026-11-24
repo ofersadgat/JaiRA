@@ -138,6 +138,8 @@ export interface PermissionStackViewLayer {
   lines: number;
   /** The layer's own lines, as written — what the permission board draws in the layer's columns (decision 0034). Not for runtime. */
   own?: Record<string, unknown>;
+  /** An unsaved layer of the conversation (`$unsaved/<key>`), and the name it is shown by. */
+  unsaved?: { key: string; name: string };
 }
 
 /** One line of the stack composed (§7.4 "Everything"), and who decided it. */
@@ -222,6 +224,7 @@ export function permissionStackViewOf(
     role: layer.role,
     lines: ownLineCount(layer.decl),
     own: ownLinesOf(layer.decl),
+    ...(layer.unsaved !== undefined ? { unsaved: layer.unsaved } : {}),
     ...describe(layer),
   }));
   // The runtime layer stands under the tools layer (§2.6 step 4), and over everything else.

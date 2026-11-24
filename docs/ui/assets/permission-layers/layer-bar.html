@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0034-the-permission-board">
+<meta name="state" content="the permission board's layer bar: adding, removing and swapping a layer · 8 versions">
+<meta name="captured" content="2026-11-23">
+<meta name="reflects" content="proposed">
+<title>The permission board · the layer bar · 8 versions</title>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --tok-hint: #949cad;
+  --p0: #737b8d; --p1: #3f76d4; --p2: #b57a1c; --p3: #7d5fc7; --ws-tool: #a8508a; --ws-run: #3d7a4c; --ws-read: #2f8a9e;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72; --fill-accent: #5a5fe0; --tok-hint: #5f6779;
+  --p0: #8b93a7; --p1: #6e9df0; --p2: #d7a145; --p3: #a98ee6; --ws-tool: #e08cc6; --ws-run: #7ccf8e; --ws-read: #6cc3d6;
+  --lift: 0 18px 50px rgba(0,0,0,.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+svg.i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -2px; }
+code { font: 500 11.5px var(--font-data); }
+h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 1000px; margin: 0 0 10px; }
+.lede b { color: var(--text); }
+.toc { display: grid; grid-template-columns: repeat(4, minmax(0, 260px)); gap: 4px 18px; margin: 16px 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 54px; }
+section.d header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+section.d header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 2px 7px; }
+section.d h2 { font-size: 16px; margin: 0; }
+.why { color: var(--dim); max-width: 1060px; margin: 0 0 12px; font-size: 12.5px; }
+.why b { color: var(--text); }
+.stage { position: relative; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px 22px 150px; overflow-x: auto; }
+.float { position: relative; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); overflow: visible; width: max-content; }
+.bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--panel-2); font-size: 12px; }
+.bar .t { font-weight: 600; font-size: 12.5px; } .hint { color: var(--tok-hint); font-size: 11px; }
+.btn { font: 500 11.5px var(--font-app); color: var(--accent); padding: 4px 9px; border-radius: 7px; white-space: nowrap; display: inline-flex; align-items: center; gap: 5px; }
+.btn.solid { background: var(--fill-accent); color: var(--on-accent); }
+.btn.line { border: 1px solid var(--line); color: var(--text); }
+.btn.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.grow { flex: 1; }
+
+/* the grid: label 220, groups of answer columns */
+.r { display: grid; grid-template-columns: var(--cols); }
+.r > div { border-left: 1px solid var(--panel-2); min-width: 0; }
+.r > .lab { border-left: 0; padding: 0 10px 0 12px; display: flex; align-items: center; gap: 8px; }
+.gh { position: relative; padding: 7px 8px 3px; display: flex; align-items: center; gap: 6px; border-top: 3px solid var(--h); border-left: 2px solid var(--h) !important; white-space: nowrap; min-width: 0; }
+.gh .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--h); flex: none; }
+.gh .nm { font: 650 12px var(--font-app); overflow: hidden; text-overflow: ellipsis; }
+.gh .wh { font: 400 10px var(--font-app); color: var(--tok-hint); overflow: hidden; text-overflow: ellipsis; }
+.gh .chev { width: 10px; height: 10px; color: var(--tok-hint); }
+.ah { padding: 3px 7px 5px; font: 600 10.5px var(--font-app); display: flex; align-items: center; gap: 5px; border-bottom: 1px solid var(--line); }
+.ah::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--a); }
+.ah.first { border-left: 2px solid var(--h) !important; }
+.a-allow { --a: var(--ok); color: var(--ok); } .a-smart { --a: var(--p3); color: var(--p3); } .a-ask { --a: var(--warn); color: var(--warn); } .a-deny { --a: var(--bad); color: var(--bad); } .a-off { --a: var(--dim); color: var(--dim); }
+.L-root { --h: var(--p0); } .L-standing { --h: var(--p2); } .L-named { --h: var(--p1); } .L-run { --h: var(--ws-run); } .L-own { --h: var(--accent); } .L-result { --h: var(--text); } .L-ghost { --h: var(--accent); }
+.row1 { background: color-mix(in srgb, var(--ws-read) 13%, var(--panel)); border-top: 2px solid color-mix(in srgb, var(--ws-read) 40%, var(--line)); }
+.row1 > div { min-height: 46px; display: flex; flex-wrap: wrap; align-items: center; padding: 3px 4px; }
+.row1 > .lab { box-shadow: inset 5px 0 0 var(--ws-read); padding-left: 16px; }
+.row2 > div { min-height: 38px; display: flex; flex-wrap: wrap; align-items: center; padding: 3px 4px; border-top: 1px solid var(--panel-2); }
+.row2 > .lab { padding-left: 46px; }
+.row1.prog { background: color-mix(in srgb, var(--ws-run) 13%, var(--panel)); border-top-color: color-mix(in srgb, var(--ws-run) 40%, var(--line)); }
+.row1.prog > .lab { box-shadow: inset 5px 0 0 var(--ws-run); }
+.tile { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; color: var(--panel); background: var(--ws-read); flex: none; }
+.row1.prog .tile { background: var(--ws-run); }
+.rn { font: 700 14px var(--font-app); } .rs { font: 400 10px var(--font-data); color: var(--tok-hint); display: block; }
+.vb { display: inline-flex; align-items: center; gap: 5px; font: 650 12px var(--font-app); color: var(--ws-read); background: color-mix(in srgb, var(--ws-read) 15%, var(--panel)); border: 1px solid color-mix(in srgb, var(--ws-read) 50%, transparent); border-radius: 7px; padding: 2px 8px; }
+.pl { --c: var(--dim); display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1 var(--font-data); background: color-mix(in srgb, var(--c) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: 6px; padding: 3px 5px; margin: 2px; white-space: nowrap; max-width: calc(100% - 4px); overflow: hidden; text-overflow: ellipsis; }
+.pl svg.i { width: 11px; height: 11px; color: var(--c); }
+.pl.set { --c: var(--accent); font: 600 11px var(--font-app); }
+.pl.any { --c: var(--tok-hint); border-style: dashed; }
+.pl.from { border-left: 3px solid var(--h); }
+.pl.ghostchip { opacity: .55; border-style: dashed; }
+.col-ghost { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--accent) 7%, transparent) 6px 8px); }
+
+/* controls */
+.ib { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; color: var(--dim); flex: none; }
+.ib.hov { background: var(--panel-3); color: var(--text); }
+.ib.bad { color: var(--bad); }
+.ib.acc { color: var(--accent); }
+.ib svg.i { width: 12px; height: 12px; }
+.caret { display: inline-flex; align-items: center; gap: 3px; border-radius: 6px; padding: 1px 4px; }
+.caret.on { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 45%, transparent); }
+.menu { position: absolute; z-index: 10; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift); font-size: 12px; overflow: hidden; }
+.menu .mh { padding: 8px 12px 4px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .06em; color: var(--tok-hint); }
+.menu .mi { display: flex; align-items: center; gap: 8px; padding: 6px 12px; white-space: nowrap; }
+.menu .mi.hi { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.menu .mi.cur { font-weight: 600; }
+.menu .mi .k { margin-left: auto; font: 400 10px var(--font-app); color: var(--tok-hint); }
+.menu .sep { border-top: 1px solid var(--panel-2); margin: 3px 0; }
+.menu .mi.bad { color: var(--bad); }
+.menu .sr { display: flex; align-items: center; gap: 7px; margin: 8px 10px 4px; padding: 5px 8px; border: 1px solid var(--accent); border-radius: 7px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); font: 500 11.5px var(--font-data); }
+.tag { font: 600 9px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.gut { position: absolute; top: 4px; bottom: 4px; width: 0; z-index: 4; }
+.gut .plus { position: absolute; left: -10px; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border-radius: 50%; background: var(--fill-accent); color: var(--on-accent); display: grid; place-items: center; box-shadow: 0 0 0 3px var(--panel); }
+.gut .line { position: absolute; left: -1px; top: -6px; bottom: -200px; width: 2px; background: var(--accent); opacity: .6; }
+.gut.quiet .plus { background: var(--panel); color: var(--accent); border: 1px dashed var(--accent); }
+.strip { display: flex; align-items: center; gap: 0; padding: 6px 12px; border-bottom: 1px solid var(--panel-2); }
+.seg { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid var(--line); border-right: 0; font: 500 11.5px var(--font-app); background: var(--panel); white-space: nowrap; }
+.seg:first-of-type { border-radius: 8px 0 0 8px; } .seg.end { border-right: 1px solid var(--line); border-radius: 0 8px 8px 0; }
+.seg .sw { width: 8px; height: 8px; border-radius: 2px; background: var(--h); }
+.seg.add { color: var(--accent); border-style: dashed; padding: 4px 6px; }
+.note { position: absolute; z-index: 9; font: 500 11px var(--font-app); color: var(--accent); }
+.note::before { content: "↳ "; }
+.callout { margin-top: 10px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--dim); }
+.callout span b { color: var(--text); }
+.drawer { position: absolute; left: -250px; top: 0; bottom: 0; width: 236px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); padding: 10px; font-size: 12px; }
+.drawer .di { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 7px; border: 1px solid var(--line); margin: 5px 0; background: var(--panel); cursor: grab; }
+.drawer .di.drag { box-shadow: var(--lift); transform: rotate(-2deg) translateX(120px); border-color: var(--accent); }
+.editbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 6px 8px 7px; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.ebtn { display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px var(--font-app); color: var(--text); border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 6px; white-space: nowrap; }
+.ebtn.bad { color: var(--bad); }
+.ebtn.acc { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.ghostgh { border-top-style: dashed !important; border-left-style: dashed !important; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.lock { color: var(--tok-hint); font: 500 10px var(--font-app); display: inline-flex; gap: 3px; align-items: center; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M7 4 3 8l4 4"/><path d="M3 8h14"/><path d="m17 20 4-4-4-4"/><path d="M21 16H7"/></symbol>
+<symbol id="i-dots" viewBox="0 0 24 24"><path d="M5 12h.01"/><path d="M12 12h.01"/><path d="M19 12h.01"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5Z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M9 4h6l-1 6 4 3H6l4-3Z"/><path d="M12 13v7"/></symbol>
+<symbol id="i-any" viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M5 8l14 8"/><path d="M19 8 5 16"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-grip" viewBox="0 0 24 24"><path d="M9 6h.01"/><path d="M9 12h.01"/><path d="M9 18h.01"/><path d="M15 6h.01"/><path d="M15 12h.01"/><path d="M15 18h.01"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-read" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+</defs></svg>
+
+<h1>The permission board · the layer bar · 8 versions</h1>
+<p class="lede">The shield's board, its column groups the conversation's stack, oldest first: <b>Root · ask-first</b>, a standing layer <b>project-safe</b> (pinned to this project in settings), a named layer <b>app/build</b>, <b>This run</b>, <b>This conversation</b>, then the <b>Result</b>. Each version gives the layer heads three acts: <b>add a set to the left</b> of a layer, <b>remove</b> one, and <b>swap</b> one for another set.</p>
+<p class="lede">What the acts change is <b>this conversation's stack</b>, not any set's file, so none of them asks "for every conversation". What each layer allows: the root and a named layer can be swapped, removed and added before; a <b>standing</b> layer is the project's (unpin it in settings, or from here); <b>This run</b> can only be forgotten; <b>This conversation</b> can be cleared. A layer added after this conversation's own lines is impossible — they are always newest — so "add to the left" of This conversation is how a set goes on top.</p>
+<nav class="toc" id="toc"></nav>
+<div id="out"></div>
+
+<script>
+const I = (n, cls = "i") => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
+const LAYERS = [
+  { id: "root", name: "Root · ask-first", wh: "built in", cls: "L-root", cols: ["allow", "ask", "deny"], kind: "root" },
+  { id: "standing", name: "project-safe", wh: "standing · project", cls: "L-standing", cols: ["allow"], kind: "standing" },
+  { id: "named", name: "app/build", wh: "project", cls: "L-named", cols: ["allow", "deny"], kind: "named" },
+  { id: "run", name: "This run", wh: "answered for this run", cls: "L-run", cols: ["allow"], kind: "run" },
+  { id: "own", name: "This conversation", wh: "kept with it", cls: "L-own", cols: ["allow", "smart", "ask", "deny", "off"], kind: "own" },
+];
+const RESULT = { id: "result", name: "Result", wh: "what the conversation has", cls: "L-result", cols: ["allow", "ask", "deny"] };
+const LW = 200, CW = 96, LONE = 140;
+const widthOf = (g) => (g.cols.length === 1 ? [LONE] : g.cols.map(() => CW));
+const WORD = { allow: "Allow", smart: "Smart", ask: "Ask", deny: "Deny", off: "Off" };
+const CHIPS = {
+  root: { ask: ['<span class="pl set">' + I("layers") + 'credentials 8</span>', '<span class="pl any">' + I("any") + '**</span>'], deny: ['<span class="pl set">' + I("layers") + 'machine key</span>'] },
+  standing: { allow: ['<span class="pl set">' + I("layers") + 'project files</span>'] },
+  named: { allow: ['<span class="pl" style="--c: var(--ws-read)">' + I("folder") + 'src/**</span>'], deny: ['<span class="pl" style="--c: var(--ws-read)">' + I("folder") + 'dist/**</span>'] },
+  run: {}, own: {},
+  result: { allow: ['<span class="pl set from L-standing">' + I("layers") + 'project files</span>', '<span class="pl from L-named" style="--c: var(--ws-read)">' + I("folder") + 'src/**</span>'], ask: ['<span class="pl set from L-root">' + I("layers") + 'credentials 8</span>'], deny: ['<span class="pl set from L-root">' + I("layers") + 'machine key</span>', '<span class="pl from L-named" style="--c: var(--ws-read)">' + I("folder") + 'dist/**</span>'] },
+};
+const PCHIPS = { root: { ask: ['<span class="pl any">' + I("any") + 'any program</span>'] }, named: { allow: ['<span class="pl" style="--c: var(--ws-run)">' + I("term") + 'node</span>'] }, run: { allow: ['<span class="pl" style="--c: var(--ws-run)">' + I("term") + 'python</span>'] }, own: {}, standing: {}, result: { allow: ['<span class="pl from L-named" style="--c: var(--ws-run)">' + I("term") + 'node</span>', '<span class="pl from L-run" style="--c: var(--ws-run)">' + I("term") + 'python</span>'], ask: ['<span class="pl from L-root any">' + I("any") + 'any program</span>'] } };
+
+/**
+ * A board: `head(layer)` draws each layer's group head (the version's controls), `extra` adds overlays.
+ * `ghost` puts a not-yet-added layer group after the given layer id.
+ */
+function board({ head, extra = "", strip = "", ghost, editbar, layers = LAYERS, bar = "" }) {
+  const groups = [...layers.map((l) => ({ ...l })), RESULT];
+  if (ghost) groups.splice(groups.findIndex((g) => g.id === ghost.before), 0, { ...ghost, cls: "L-ghost", cols: ghost.cols ?? ["allow"], ghost: true });
+  const cols = [LW, ...groups.flatMap(widthOf)];
+  const style = `--cols: ${cols.map((w) => w + "px").join(" ")}`;
+  let h = `<div class="bar">${I("shield")}<span class="t">Permissions</span><span class="hint">the root set, each layer on top of it, then what the conversation has</span><span class="grow"></span>${bar}<span class="btn">Layers and sets…</span></div>${strip}`;
+  h += `<div class="r" style="${style}"><div class="lab"></div>${groups.map((g) => `<div class="gh ${g.cls}${g.ghost ? " ghostgh" : ""}" style="grid-column: span ${g.cols.length}">${g.id === "result" ? `<span class="sw"></span><span class="nm">Result</span><span class="wh">${g.wh}</span>` : head(g)}</div>`).join("")}</div>`;
+  if (editbar) h += `<div class="r" style="${style}"><div class="lab" style="font: 600 10px var(--font-app); color: var(--tok-hint); text-transform: uppercase; letter-spacing: .05em">editing the stack</div>${groups.map((g) => `<div class="editbar ${g.cls}" style="grid-column: span ${g.cols.length}">${g.id === "result" ? "" : editbar(g)}</div>`).join("")}</div>`;
+  h += `<div class="r" style="${style}"><div class="lab" style="font: 600 10.5px var(--font-app); border-bottom: 1px solid var(--line)">Resource</div>${groups.flatMap((g) => g.cols.map((c, i) => `<div class="ah a-${c} ${g.cls}${i === 0 ? " first" : ""}">${WORD[c]}</div>`)).join("")}</div>`;
+  const cell = (g, c, set) => `<div class="${i0(g, c)} ${g.ghost ? "col-ghost" : ""} ${g.cls}">${((set[g.id] ?? {})[c] ?? (g.ghost ? (ghost.chips?.[c] ?? []) : [])).join("")}</div>`;
+  const i0 = (g, c) => (g.cols[0] === c ? "first-cell" : "");
+  const rowOf = (cls, label, set) => `<div class="r ${cls}" style="${style}">${label}${groups.flatMap((g) => g.cols.map((c) => cell(g, c, set))).join("")}</div>`;
+  h += rowOf("row1", `<div class="lab">${I("chev", "i")}<span class="tile">${I("folder")}</span><span><span class="rn">Files</span><span class="rs">5 accesses · 7 tools</span></span></div>`, CHIPS);
+  h += rowOf("row2", `<div class="lab"><span class="vb">${I("read")}Read</span><span class="rs">read_file</span></div>`, { result: {} });
+  h += rowOf("row1 prog", `<div class="lab">${I("chev", "i")}<span class="tile">${I("term")}</span><span><span class="rn">Programs</span><span class="rs">see · run · open · control</span></span></div>`, PCHIPS);
+  return `<div class="float">${h}${extra}</div>`;
+}
+const css = document.createElement("style");
+css.textContent = `.first-cell { border-left: 2px solid var(--h) !important; }`;
+document.head.append(css);
+
+const plain = (l) => `<span class="sw"></span><span class="nm">${l.name}</span><span class="wh">${l.wh}</span>`;
+const where = (l) => LAYERS.findIndex((x) => x.id === l.id);
+const xOf = (id) => LW + LAYERS.slice(0, LAYERS.findIndex((l) => l.id === id)).reduce((s, l) => s + widthOf(l).reduce((a, b) => a + b, 0), 0);
+
+const V = [];
+
+// 1 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "Icons on the head, on hover",
+  why: "The quietest. Each head shows its name as now; hovering it brings three small buttons to its right end: <b>+</b> (add a set to the left), <b>⇄</b> (swap — opens the set list) and <b>×</b> (remove). A standing layer shows a pin instead, and pressing it says how to unpin; This run offers only <b>Forget</b>, This conversation only <b>Clear</b>. Drawn: hovering <b>app/build</b>, and its swap list open.",
+  html: board({
+    head: (l) => {
+      const hover = l.id === "named";
+      const tools = l.kind === "standing" ? `<span class="lock">${I("pin")}pinned</span>` : l.kind === "run" ? `<span class="btn" style="padding: 0 4px">Forget</span>` : l.kind === "own" ? `<span class="btn" style="padding: 0 4px">Clear</span>` : hover ? `<span class="ib hov acc" title="add a set to the left">${I("plus")}</span><span class="ib hov" title="swap">${I("swap")}</span><span class="ib hov bad" title="remove">${I("x")}</span>` : "";
+      return `${plain(l)}<span class="grow"></span>${tools}`;
+    },
+    extra: `<div class="menu" style="left: ${xOf("named") + 60}px; top: 74px; width: 250px">
+      <div class="mh">Swap app/build for</div>
+      <div class="mi cur">${I("layers")}app/build<span class="k">current</span></div>
+      <div class="mi hi">${I("layers")}app/test<span class="k">project</span></div>
+      <div class="mi">${I("layers")}build-safe<span class="k">Shared</span></div>
+      <div class="mi">${I("layers")}read-only<span class="k">built in</span></div>
+      <div class="sep"></div><div class="mi">${I("search")}More sets…</div></div>`,
+  }),
+});
+
+// 2 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "The name is a menu",
+  why: "Every layer's name is a dropdown (<b>app/build ▾</b>). Its menu holds all three acts, worded: the sets to swap it for at the top, then <b>Add a set before it…</b> and <b>Remove from this conversation</b>. One target per layer, nothing appearing on hover, the same on a phone. A standing layer's menu says it is pinned and offers <b>Unpin from this project</b>. Drawn: the menu of app/build.",
+  html: board({
+    head: (l) => `<span class="sw"></span><span class="caret${l.id === "named" ? " on" : ""}"><span class="nm">${l.name}</span>${l.kind === "run" || l.kind === "own" ? "" : I("chev", "i chev")}</span><span class="wh">${l.wh}</span>`,
+    extra: `<div class="menu" style="left: ${xOf("named") + 2}px; top: 72px; width: 270px">
+      <div class="mh">Swap for</div>
+      <div class="mi hi">${I("layers")}app/test<span class="k">project</span></div>
+      <div class="mi">${I("layers")}build-safe<span class="k">Shared</span></div>
+      <div class="mi">${I("layers")}read-only<span class="k">built in</span></div>
+      <div class="mi">${I("search")}More sets…</div>
+      <div class="sep"></div>
+      <div class="mi">${I("plus")}Add a set before it…</div>
+      <div class="mi bad">${I("x")}Remove from this conversation</div></div>`,
+  }),
+});
+
+// 3 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "Gaps between layers you add into",
+  why: "Adding is about WHERE, so it lives between layers: hovering the edge between two heads lights a <b>+</b> on it and a line down the grid where the new columns would go. The name keeps a small <b>▾</b> for swapping, and <b>×</b> sits at the head's end on hover. Every gap before This conversation can take a set — the last one is \"on top\". Drawn: the gap between project-safe and app/build, armed.",
+  html: board({
+    head: (l) => `${plain(l)}<span class="grow"></span>${l.kind === "root" || l.kind === "named" ? `<span class="ib">${I("chev")}</span>` : ""}${l.id === "named" ? `<span class="ib bad">${I("x")}</span>` : ""}`,
+    extra: `<div class="gut" style="left: ${xOf("named")}px; top: 52px; height: 40px"><span class="line"></span><span class="plus">${I("plus")}</span></div>
+      <div class="gut quiet" style="left: ${xOf("standing")}px; top: 52px; height: 40px"><span class="plus">${I("plus")}</span></div>
+      <div class="gut quiet" style="left: ${xOf("own")}px; top: 52px; height: 40px"><span class="plus">${I("plus")}</span></div>
+      <div class="note" style="left: ${xOf("named") + 14}px; top: 28px">add a set here, between project-safe and app/build</div>`,
+  }),
+});
+
+// 4 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "A stack strip over the heads",
+  why: "The composer's own permission bar, drawn again above the grid, each segment over its layer's columns: <b>+</b> between segments adds, each segment's <b>▾</b> swaps and <b>×</b> removes. The heads below stay plain. It is the same control the person already knows from the composer, and it reads as \"the stack\" at a glance — at the cost of a row of height.",
+  html: board({
+    head: plain,
+    strip: `<div class="strip" style="padding-left: ${LW + 12}px; gap: 0">
+      ${LAYERS.map((l, i) => `<span class="seg ${l.cls}${i === LAYERS.length - 1 ? " end" : ""}" style="width: ${widthOf(l).reduce((a, b) => a + b, 0) - (i === 0 ? 0 : 22)}px"><span class="sw"></span>${l.name.replace("Root · ", "")}${l.kind === "root" || l.kind === "named" ? `<span class="grow"></span>${I("chev", "i chev")}${I("x")}` : l.kind === "standing" ? `<span class="grow"></span>${I("pin")}` : ""}</span>${i < LAYERS.length - 1 ? `<span class="seg add" style="width: 22px">${I("plus")}</span>` : ""}`).join("")}</div>`,
+  }),
+});
+
+// 5 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "Swap in place, with a preview",
+  why: "Pressing a layer's name turns its head into a search box, and the list drops under it. As the person moves through the list, the layer's columns show the <b>picked set's</b> chips, hatched — what the board would be — and the Result follows; Enter swaps, Escape puts it back. Add works the same way on an empty ghost group (see 8). Drawn: app/build being swapped, app/test highlighted and previewed.",
+  html: board({
+    head: (l) => l.id === "named" ? `<span class="sw"></span><span style="flex: 1; display: flex; align-items: center; gap: 6px; border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent)">${I("search")}<span style="font: 500 11px var(--font-data)">app/</span></span>` : plain(l),
+    extra: `<div class="menu" style="left: ${xOf("named")}px; top: 74px; width: 260px">
+      <div class="mi">${I("layers")}app/build<span class="k">current</span></div>
+      <div class="mi hi">${I("layers")}app/test<span class="k">previewing</span></div>
+      <div class="mi">${I("layers")}app/release<span class="k">project</span></div>
+      <div class="sep"></div><div class="mi" style="color: var(--tok-hint)">↵ swap · esc keep app/build</div></div>`,
+  }).replace('<span class="pl" style="--c: var(--ws-read)"><svg class="i"><use href="#i-folder"/></svg>src/**</span>', '<span class="pl ghostchip" style="--c: var(--ws-read)"><svg class="i"><use href="#i-folder"/></svg>test/**</span>'),
+});
+
+// 6 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "A ⋯ menu per layer, and one Add",
+  why: "Each head ends in <b>⋯</b>: <b>Swap for…</b>, <b>Add a set before it…</b>, <b>Remove</b>, and <b>Open in Settings</b>. The bar above the grid has one <b>+ Add a set</b>, which lays the set on top (just before This conversation) — the common case — and the ⋯ menu is for putting one lower. Least clutter on the heads; the acts are a press away rather than in sight.",
+  html: board({
+    head: (l) => `${plain(l)}<span class="grow"></span>${l.kind === "root" || l.kind === "named" || l.kind === "standing" ? `<span class="ib${l.id === "named" ? " hov" : ""}">${I("dots")}</span>` : ""}`,
+    bar: `<span class="btn line">${I("plus")}Add a set</span>`,
+    extra: `<div class="menu" style="left: ${xOf("named") + CW * 2 - 210}px; top: 74px; width: 220px">
+      <div class="mi">${I("swap")}Swap for…</div>
+      <div class="mi hi">${I("plus")}Add a set before it…</div>
+      <div class="mi">${I("layers")}Open in Settings</div>
+      <div class="sep"></div><div class="mi bad">${I("x")}Remove</div></div>`,
+  }),
+});
+
+// 7 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "A drawer of sets to drag in",
+  why: "<b>Sets</b> opens a drawer beside the board listing every set, by where it lives. Drag one between two heads to add it there (the gap opens); drag a head off the board to remove it; drop a set ON a head to swap. Direct and spatial, and good for building a stack from scratch — but a drag is the only way in, so it needs 2's menu beside it for keys and phones. Drawn: build-safe being dragged into the gap before app/build.",
+  html: `<div style="position: relative; margin-left: 260px">${board({
+    head: (l) => `${l.kind === "root" || l.kind === "named" ? `<span class="ib" style="width: 12px">${I("grip")}</span>` : ""}${plain(l)}`,
+    bar: `<span class="btn on">${I("layers")}Sets</span>`,
+    extra: `<div class="gut" style="left: ${xOf("named")}px; top: 52px; height: 40px"><span class="line"></span><span class="plus">${I("plus")}</span></div>
+      <div class="drawer"><div style="font: 600 10px var(--font-app); text-transform: uppercase; letter-spacing: .06em; color: var(--tok-hint); padding: 2px 4px 4px">Sets · drag one onto the board</div>
+      <div class="di">${I("layers")}app/test<span class="grow"></span><span class="tag">project</span></div>
+      <div class="di drag">${I("layers")}build-safe<span class="grow"></span><span class="tag">Shared</span></div>
+      <div class="di">${I("layers")}read-only<span class="grow"></span><span class="tag">built in</span></div>
+      <div class="di">${I("layers")}auto<span class="grow"></span><span class="tag">built in</span></div>
+      <div class="di">${I("layers")}full<span class="grow"></span><span class="tag">built in</span></div></div>`,
+  })}</div>`,
+});
+
+// 8 -----------------------------------------------------------------------------------------------
+V.push({
+  title: "An Edit stack mode",
+  why: "The heads stay clean until <b>Edit stack</b> is pressed: then a strip under them gives each layer labelled buttons — <b>+ Before</b>, <b>Swap ▾</b>, <b>Remove</b> — and a new layer arrives as a <b>ghost group</b> (dashed, hatched columns) whose head is the set picker; its columns preview the set's chips until it is placed. Explicit and hard to hit by accident; one press more than the rest. Drawn: editing, with a set being added before app/build.",
+  html: board({
+    head: plain,
+    bar: `<span class="btn solid">Done editing</span>`,
+    ghost: { id: "new", before: "named", name: "", wh: "", cols: ["allow", "ask"], chips: { allow: ['<span class="pl ghostchip" style="--c: var(--ws-read)">' + I("folder") + 'build/**</span>'], ask: ['<span class="pl ghostchip any">' + I("any") + '**</span>'] } },
+    editbar: (l) => l.id === "new"
+      ? `<span style="display: flex; align-items: center; gap: 5px; border: 1px solid var(--accent); border-radius: 6px; padding: 1px 6px; background: var(--panel); font: 500 11px var(--font-data); width: 100%">${I("search")}build-safe ${I("chev", "i chev")}</span>`
+      : l.kind === "root" || l.kind === "named" ? `<span class="ebtn acc">${I("plus")}Before</span><span class="ebtn">Swap ${I("chev", "i chev")}</span>${l.kind === "named" ? `<span class="ebtn bad">${I("x")}Remove</span>` : ""}`
+      : l.kind === "standing" ? `<span class="lock">${I("pin")}pinned · <u>Unpin</u></span>`
+      : l.kind === "run" ? `<span class="ebtn">Forget</span>` : `<span class="ebtn acc">${I("plus")}Before</span><span class="ebtn">Clear</span>`,
+  }).replace('<div class="gh L-ghost ghostgh" style="grid-column: span 2">undefined</div>', ""),
+});
+
+const out = document.getElementById("out");
+const toc = document.getElementById("toc");
+V.forEach((v, i) => {
+  toc.insertAdjacentHTML("beforeend", `<a href="#v${i + 1}"><b>${i + 1}</b>${v.title}</a>`);
+  out.insertAdjacentHTML("beforeend", `<section class="d" id="v${i + 1}"><header><span class="n">${i + 1}</span><h2>${v.title}</h2></header><p class="why">${v.why}</p><div class="stage">${v.html}</div></section>`);
+});
+</script>
+</body>
+</html>

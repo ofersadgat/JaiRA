@@ -24,6 +24,10 @@ import {
   PERMISSION_SET_REF_KEY,
   permissionSetRank,
   TOOLS_LAYER,
+  UNSAVED_LAYERS_KEY,
+  UNSAVED_LAYER_PREFIX,
+  UNSAVED_NAME_KEY,
+  unsavedKeyOf,
   toolsLayerOf,
   type ChatSettings,
   type PermissionSet,
@@ -39,6 +43,7 @@ import {
   type WritableSetLayer,
 } from "@jaira/shared/browser";
 import type { ChipStep, ChipWidths } from "./composerModel";
+import { mergedLines } from "./permissionBoard";
 
 // --- the form a conversation keeps ---------------------------------------------------------------
 
@@ -51,7 +56,15 @@ export interface StackForm {
    * the state's, and what it comes to IS the map the state's declaration arrives as.
    */
   tools: Record<string, unknown> | undefined;
+  /** The unsaved layers' lines, by key (decision 0034): the layers named `$unsaved/<key>` in `layers`. */
+  unsaved?: Record<string, Record<string, unknown>>;
 }
+
+const unsavedOf = (node: Record<string, unknown>): Record<string, Record<string, unknown>> | undefined => {
+  const held = node[UNSAVED_LAYERS_KEY];
+  if (!isPlainObject(held)) return undefined;
+  return Object.fromEntries(Object.entries(held).filter(([, lines]) => isPlainObject(lines)).map(([key, lines]) => [key, { ...(lines as Record<string, unknown>) }]));
+};
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -69,7 +82,8 @@ export function stackFormOf(settings: ChatSettings): StackForm {
     const listed = node[PERMISSION_SET_LAYERS_KEY];
     const reference = node[PERMISSION_SET_REF_KEY];
     const layers = Array.isArray(listed) ? listed.filter((each): each is string => typeof each === "string") : [];
-    return { layers: typeof reference === "string" ? [reference, ...layers] : layers, tools: ownLinesOf(node) };
+    const unsaved = unsavedOf(node);
+    return { layers: typeof reference === "string" ? [reference, ...layers] : layers, tools: ownLinesOf(node), ...(unsaved !== undefined ? { unsaved } : {}) };
   }
   const block = settings.permissions;
   const source = block?.source;
@@ -79,12 +93,12 @@ export function stackFormOf(settings: ChatSettings): StackForm {
 
 /** The settings a form is kept as — `ChatSettings.permissionSet`'s stack shape. */
 export function stackSettingsOf(form: StackForm): Record<string, unknown> {
-  return chatStackSettingsOf(form.layers, form.tools ?? {});
+  return chatStackSettingsOf(form.layers, form.tools ?? {}, form.unsaved);
 }
 
 /** What the layers UNDER the tools layer are asked as: the form's layers, and no lines. */
 export function belowRequestOf(form: StackForm): Record<string, unknown> {
-  return chatStackSettingsOf(form.layers, {});
+  return chatStackSettingsOf(form.layers, {}, form.unsaved);
 }
 
 /** The merged map a stack view comes to, as an author would write it — `unavailable` lines and all. */
@@ -121,13 +135,13 @@ export function belowSetOf(below: Record<string, unknown> | undefined): Permissi
  */
 export function ownedFormOf(form: StackForm, below: PermissionSet | undefined, inherited: PermissionSet): StackForm {
   if (form.tools !== undefined) return form;
-  return { layers: [...form.layers], tools: below !== undefined ? toolsLayerOf(below, inherited) : {} };
+  return { ...form, layers: [...form.layers], tools: below !== undefined ? toolsLayerOf(below, inherited) : {} };
 }
 
 /** What the Tools card writes (§2.6 step 5, ruling 8): the stack's layers as they are, and the lines that make them come to `next`. */
 export function toolsWriteOf(form: StackForm, below: PermissionSet, next: PermissionSet): StackForm {
   // A line is written only where it differs from below — so over nothing, the whole map is the layer.
-  return { layers: [...form.layers], tools: toolsLayerOf(below, next) };
+  return { ...form, layers: [...form.layers], tools: toolsLayerOf(below, next) };
 }
 
 // --- a layer's edits ----------------------------------------------------------------------------
@@ -155,7 +169,59 @@ export function withLayerMoved(form: StackForm, index: number, by: -1 | 1): Stac
 /** Take the layer at `index` out of the stack. */
 export function withLayerRemoved(form: StackForm, index: number): StackForm {
   if (index < 0 || index >= form.layers.length) return form;
-  return { ...form, layers: form.layers.filter((_, i) => i !== index) };
+  return withoutUnsavedOf({ ...form, layers: form.layers.filter((_, i) => i !== index) }, form.layers[index]!);
+}
+
+// --- unsaved layers (decision 0034, 2026-11-23) --------------------------------------------------
+
+/** A form with an unsaved layer's lines let go of, once no entry names it. */
+function withoutUnsavedOf(form: StackForm, entry: string): StackForm {
+  const key = unsavedKeyOf(entry);
+  if (key === undefined || form.layers.includes(entry) || form.unsaved?.[key] === undefined) return form;
+  const { [key]: _gone, ...rest } = form.unsaved;
+  return { ...form, unsaved: rest };
+}
+
+/** The next unsaved layer's key: the smallest whole number no entry or line holds. */
+export function nextUnsavedKey(form: StackForm): string {
+  const taken = new Set([...form.layers.map(unsavedKeyOf).filter((key): key is string => key !== undefined), ...Object.keys(form.unsaved ?? {})]);
+  let n = 1;
+  while (taken.has(String(n))) n += 1;
+  return String(n);
+}
+
+/** The `+` (2026-11-23): a new, empty unsaved layer at `at` of the conversation's layers (0 makes it the root). */
+export function withUnsavedAdded(form: StackForm, at: number): StackForm {
+  const key = nextUnsavedKey(form);
+  const layers = [...form.layers];
+  layers.splice(Math.max(0, Math.min(at, layers.length)), 0, `${UNSAVED_LAYER_PREFIX}${key}`);
+  return { ...form, layers, unsaved: { ...(form.unsaved ?? {}), [key]: {} } };
+}
+
+/** A layer dragged: the one at `from` put at `to`, counted in the list it was taken out of. */
+export function withLayerMovedTo(form: StackForm, from: number, to: number): StackForm {
+  if (from < 0 || from >= form.layers.length) return form;
+  const layers = [...form.layers];
+  const [moved] = layers.splice(from, 1);
+  layers.splice(Math.max(0, Math.min(to, layers.length)), 0, moved!);
+  return { ...form, layers };
+}
+
+/** Swap the layer at `index` for a set — an unsaved layer's lines going with it ("Replace"). */
+export function withLayerReplaced(form: StackForm, index: number, reference: string): StackForm {
+  if (index < 0 || index >= form.layers.length) return form;
+  return withoutUnsavedOf({ ...form, layers: form.layers.map((each, i) => (i === index ? reference : each)) }, form.layers[index]!);
+}
+
+/** An unsaved layer's lines, edited. */
+export function withUnsavedLines(form: StackForm, key: string, edit: (lines: Record<string, unknown>) => Record<string, unknown>): StackForm {
+  const { [UNSAVED_NAME_KEY]: name, ...lines } = form.unsaved?.[key] ?? {};
+  return { ...form, unsaved: { ...(form.unsaved ?? {}), [key]: { ...(name !== undefined ? { [UNSAVED_NAME_KEY]: name } : {}), ...edit(lines) } } };
+}
+
+/** "Merge" (2026-11-23): a set's lines copied into an unsaved layer, the set's answer where both say one. */
+export function withUnsavedMerged(form: StackForm, key: string, set: Readonly<Record<string, unknown>>): StackForm {
+  return withUnsavedLines(form, key, (lines) => mergedLines(lines, ownLinesOf(set)));
 }
 
 // --- the segments --------------------------------------------------------------------------------
@@ -202,7 +268,7 @@ export function layerSegmentsOf(view: (Pick<PermissionStackView, "layers"> & Par
       return {
         kind: "layer",
         key: `layer:${index}:${reference}`,
-        id: layerIdOf(reference),
+        id: unsavedKeyOf(reference) !== undefined ? `Layer ${unsavedKeyOf(reference)}` : layerIdOf(reference),
         reference,
         scope: scopeOfReference(reference),
         role: index === 0 ? "bottom" : "named",
@@ -240,7 +306,7 @@ export function layerSegmentsOf(view: (Pick<PermissionStackView, "layers"> & Par
         next = found + 1;
       }
     }
-    return { kind: "layer", key: `layer:${at}:${reference ?? file.id}`, id: file.id, reference, scope: file.scope, role: file.role, icon: file.icon, lines: file.lines, index };
+    return { kind: "layer", key: `layer:${at}:${reference ?? file.id}`, id: file.unsaved?.name ?? file.id, reference, scope: file.scope, role: file.role, icon: file.icon, lines: file.lines, index };
   });
 }
 

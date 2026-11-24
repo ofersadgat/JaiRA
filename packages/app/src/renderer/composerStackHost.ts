@@ -57,6 +57,8 @@ export interface ComposerStack {
   writeOwn: (edit: (lines: Record<string, unknown>) => Record<string, unknown>) => void;
   /** Read the stack again — after a set it is made of was written. */
   refresh: () => void;
+  /** The conversation's stack, owned and edited (the permission board's layer heads, decision 0034). */
+  editForm: (edit: (owned: StackForm) => StackForm) => void;
   /** Let go of the run's answers these keys name, or every one. */
   forget: (keys?: readonly string[]) => Promise<void>;
   /** Pin a layer to this project's standing layers of the stack's bucket, or take it off. */
@@ -116,9 +118,10 @@ export function useComposerStack({
     writeTools: (next) => write(toolsWriteOf(ownedFormOf(form, belowKnown, inherited), below, next)),
     writeOwn: (edit) => {
       const owned = ownedFormOf(form, belowKnown, inherited);
-      write({ layers: [...owned.layers], tools: edit({ ...(owned.tools ?? {}) }) });
+      write({ ...owned, layers: [...owned.layers], tools: edit({ ...(owned.tools ?? {}) }) });
     },
     refresh,
+    editForm: (edit) => write(edit(ownedFormOf(form, belowKnown, inherited))),
     forget: async (keys) => {
       if (host?.taskId === undefined) return;
       await invoke("permissionSets:forgetRuntime", { taskId: host.taskId, ...(host.project !== undefined ? { project: host.project } : {}), ...(keys !== undefined ? { keys: [...keys] } : {}) });

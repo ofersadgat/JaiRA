@@ -79,6 +79,25 @@ async function main(): Promise<void> {
     await app.evaluate(`(() => { const box = ${scroller}; if (box) { box.scrollTop = 0; box.scrollLeft = 0; } return true; })()`);
     await settle(300);
 
+    // 2c. An open section's row stays under the heads while the section scrolls past, then is pushed away.
+    const stuck = await app.evaluate<{ inside: number; past: number; head: number }>(`(() => {
+      const box = ${scroller};
+      const row = box?.querySelector('[data-stuck="files"]');
+      const section = row?.parentElement;
+      if (!box || !row || !section) return { inside: -1, past: -1, head: -1 };
+      const head = [...box.querySelectorAll("*")].find((e) => (e.innerText || "").trim() === "Resource").getBoundingClientRect().bottom - box.getBoundingClientRect().top;
+      box.scrollTop = Math.min(section.offsetHeight / 2, section.offsetHeight - row.offsetHeight - 10);
+      const inside = row.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      box.scrollTop = section.offsetTop + section.offsetHeight + 40;
+      const past = row.getBoundingClientRect().bottom - box.getBoundingClientRect().top;
+      box.scrollTop = 0;
+      return { inside: Math.round(inside), past: Math.round(past), head: Math.round(head) };
+    })()`);
+    console.log(`sticky: ${JSON.stringify(stuck)}`);
+    check(stuck.inside >= stuck.head - 4 && stuck.inside <= stuck.head + 12, "2c. an open section's row stays under the heads while its rows scroll past");
+    check(stuck.past <= stuck.head + 2, "2c. and is pushed away once the section has gone");
+    await settle(300);
+
     // 3. What every row under an open row says alike is drawn once, on that row, and a place set as one
     //    chip: the machine key's deny is every Files tool's, so it is on the Files row alone.
     const keyRows = await app.evaluate<string[]>(`[...document.querySelectorAll('[data-cell^="files"][data-cell*="|result|"] [data-chip]')].filter((e) => (e.innerText || "").includes("machine key")).map((e) => e.closest("[data-cell]").getAttribute("data-cell"))`);
@@ -102,6 +121,68 @@ async function main(): Promise<void> {
     const landed = await app.evaluate<string[]>(`[...document.querySelectorAll('[data-cell^="files"][data-cell$="|deny"]')].filter((e) => (e.innerText || "").includes("project files")).map((e) => e.getAttribute("data-cell"))`);
     console.log(`project files in Deny: ${JSON.stringify(landed)}`);
     check(landed.some((cell) => cell.includes("|result|")) && landed.some((cell) => cell.includes(":tools|")), "4. the move is in the Result and in This conversation");
+
+    // 4c. The layer heads. Hovering This conversation's head shows its +: a new, empty layer before it.
+    const heads = (): Promise<string[]> => app.evaluate<string[]>(`[...document.querySelectorAll("[data-layer-head]")].map((e) => e.getAttribute("data-layer-head"))`);
+    console.log(`heads: ${JSON.stringify(await heads())}`);
+    const conversationHead = `document.querySelector('[data-layer-head="This conversation"]')`;
+    const at4 = await app.evaluate<{ x: number; y: number } | null>(`(() => { const e = ${conversationHead}; if (!e) return null; e.scrollIntoView({ block: "nearest", inline: "nearest" }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+    if (at4 !== null) await app.pointer(at4.x, at4.y);
+    await settle(400);
+    await click(`document.querySelector('[aria-label="Add a layer before This conversation"]')`, "the + before This conversation", 800);
+    // The stack is written and read again before the head is drawn.
+    for (let tries = 0; tries < 20 && !(await heads()).includes("Layer 1"); tries += 1) await settle(250);
+    await app.shot("4c-added", undefined, false);
+    check((await heads()).includes("Layer 1"), `4c. the + adds an unsaved layer, Layer 1, before This conversation (${JSON.stringify(await heads())})`);
+
+    // A chip moved into it from the inspector: Layer 1 now holds a line.
+    await click(`[...document.querySelectorAll('[data-cell*="|result|"] [data-chip]')][0]`, "a Result chip", 800);
+    await click(`[...document.querySelectorAll('[data-inspector] [role="button"], [data-inspector] *')].find((e) => (e.getAttribute("aria-label") || "") === "to Layer 1")`, "keep it in Layer 1", 2500);
+    const layerChips = await app.evaluate<number>(`[...document.querySelectorAll('[data-cell*=":unsaved:1|"] [data-chip]')].length`);
+    check(layerChips > 0, `4c. a chip kept in Layer 1 is drawn in its columns (${layerChips})`);
+
+    // Its name swaps it: for ask-all, which asks Replace or Merge — it has lines. Merge.
+    await click(`document.querySelector('[aria-label="Swap Layer 1"]')`, "Layer 1's name", 900);
+    await app.shot("4d-swap-menu", undefined, false);
+    check(/deny-all/.test(await app.evaluate<string>("document.body.innerText")) && /ask-all/.test(await app.evaluate<string>("document.body.innerText")), "4d. the swap menu lists the sets, deny-all and ask-all among them");
+    await click(`document.querySelector('[aria-label^="base/ask-all,"]')`, "ask-all", 1200);
+    await app.shot("4e-replace-or-merge", undefined, false);
+    check((await floatText()).includes("Replace them with base/ask-all, or merge base/ask-all"), "4e. swapping a layer with lines asks Replace or Merge");
+    await click(`document.querySelector('[data-layer-ask="swap"] [aria-label="Merge"]')`, "Merge", 2500);
+    const afterMerge = await heads();
+    check(afterMerge.includes("Layer 1") && (await app.evaluate<number>(`[...document.querySelectorAll('[data-cell*=":unsaved:1|"] [data-chip]')].length`)) > layerChips, "4e. Merge keeps Layer 1, base/ask-all's lines copied in");
+
+    // Its ⋯: Save as a set… — named, in this project — and it is that set from then on.
+    await click(`document.querySelector('[aria-label="More for Layer 1"]')`, "Layer 1's ⋯", 900);
+    await click(`document.querySelector('[aria-label="Save as a set…"]')`, "Save as a set…", 900);
+    await app.shot("4f-save", undefined, false);
+    await app.evaluate(`(() => { const input = document.querySelector('[data-layer-ask="save"] input'); const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set; set.call(input, "rig-kept"); input.dispatchEvent(new Event("input", { bubbles: true })); return true; })()`);
+    await settle(300);
+    await click(`document.querySelector('[data-layer-ask="save"] [aria-label="Save"]')`, "Save", 3500);
+    await app.shot("4g-saved", undefined, false);
+    check((await heads()).includes("rig-kept"), `4g. Save as a set makes Layer 1 the set rig-kept (${JSON.stringify(await heads())})`);
+
+    // The root's swatch dragged onto rig-kept's head: the root moves after it.
+    // A drag is picked up, then (the heads drawn again as drop targets) dropped.
+    const started = await app.evaluate<boolean>(`(() => {
+      const handle = document.querySelector('[data-layer-handle^="Root"]');
+      if (!handle) return false;
+      window.__dt = new DataTransfer();
+      handle.dispatchEvent(new DragEvent("dragstart", { bubbles: true, dataTransfer: window.__dt }));
+      return true;
+    })()`);
+    await settle(300);
+    await app.evaluate(`(() => {
+      const target = document.querySelector('[data-layer-head="This conversation"]');
+      target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: window.__dt }));
+      target.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: window.__dt }));
+      return true;
+    })()`);
+    for (let tries = 0; tries < 20 && !/rig-kept/.test((await heads())[0] ?? ""); tries += 1) await settle(250);
+    const order = await heads();
+    console.log(`heads after the drag: ${JSON.stringify(order)}`);
+    check(started && /^Root · rig-kept/.test(order[0] ?? "") && order.some((each) => each === "ask-first"), "4h. the root dragged onto This conversation's head goes last of the conversation's layers; rig-kept is the root now");
+    await app.shot("4h-dragged", undefined, false);
 
     // 5. The tools segment: the board from the Result, the sources a press away, the list another.
     await app.press("Escape", 27);

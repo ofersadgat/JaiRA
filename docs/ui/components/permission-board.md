@@ -44,6 +44,7 @@ A grid of place chips: a row per resource, access and tool, a column per answer,
 | a chip inspected | the chip ringed in the accent; the inspector beside the grid: where it is, who answered (or each tool's answer, for MIXED), the five answers, a set's places, the layers to keep or move it in, the tools it sets | — |
 | asking | a warn strip: what the move does, "This changes <set> for every conversation that uses it", Cancel, Change it | — |
 | refused | the foot says why (a read-only layer, Off for a place) | — |
+| a layer act waiting | a strip under the bar: Replace or Merge; removing a layer's lines; a set's name and where to keep it | [layer-bar](../assets/permission-layers/layer-bar.html) |
 
 ## Interactions
 
@@ -55,6 +56,10 @@ A grid of place chips: a row per resource, access and tool, a column per answer,
 | press a chip | opens it in the inspector; pressed again, closes it |
 | an answer in the inspector | moves the chip there, as a drag would |
 | a set's place in the inspector | looks at that place alone, to answer it apart from the set |
+| a layer's name | its swap menu: every set, findable by name; an unsaved layer with lines asks Replace or Merge |
+| a layer's swatch, dragged onto another head (web) | moves the layer to just before it (onto This conversation: last) |
+| the + on a head's left edge (hover) | a new, empty unsaved layer just before it |
+| a layer's ⋯ | Add a layer before it, Move earlier/later, Save as a set…, Clear its lines, Forget this run's answers, Unpin, Remove |
 
 ## Copy
 

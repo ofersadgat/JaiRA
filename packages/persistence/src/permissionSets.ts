@@ -890,6 +890,7 @@ export function readOwnPermissionSet(paths: JairaPaths, reference: string): OwnP
 export function stackLayerInfo(paths: JairaPaths): (layer: PermissionStackLayer) => { scope: PermissionSetScope; icon: string } {
   const layers = permissionSetLayers(paths);
   return (layer) => {
+    if (layer.unsaved !== undefined) return { scope: "this conversation", icon: GENERIC_PERMISSION_SET_ICON };
     if (layer.reference === undefined) return { scope: layer.id === TOOLS_LAYER ? "this conversation" : "this state", icon: layer.id === TOOLS_LAYER ? "tools" : GENERIC_PERMISSION_SET_ICON };
     const id = permissionSetIdOf(layer.reference);
     if (id === undefined) return { scope: "this state", icon: GENERIC_PERMISSION_SET_ICON };

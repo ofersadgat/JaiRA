@@ -105,7 +105,29 @@ beside the answer itself.
    (copied out of a read-only one). A set's layer is written to its file in the settings layer it is in,
    after "This changes <set> for every conversation that uses it". Built in, the run's answers and lines
    written on a state are read-only. Off is the whole line's: only a tool's everywhere answer goes there.
-   A chip is dragged (web), or answered from the inspector (everywhere).
+   A chip is dragged (web), or answered from the inspector (everywhere). An open section's row stays
+   under the heads while its rows scroll past, until the next section's pushes it away.
+9. **The layer heads compose the stack** (2026-11-23). The person: "the purpose of all of this is to
+   create the right boundaries to be able to properly compose layers / change them. e.g. what if i want
+   the default behavior to be deny? then i set the left most layer to be deny all and a later layer has
+   to override it. I can then easily toggle it to ask by switching deny all to ask all and it will only
+   ask for things it wasnt given explicit permission to."
+   - A layer's **name** swaps it for another set; its **swatch** drags it along the stack (web); a **+**
+     on the left edge of a head, on hover, adds a new layer just before it; its **⋯** holds Add a layer
+     before it, Move earlier or later, Save as a set…, Clear its lines (This conversation), Forget this
+     run's answers, Unpin from this project (a standing layer), and Remove from this conversation.
+   - Only **This run** and **This conversation** stay where they are (This conversation is always last);
+     a standing layer is the project's, unpinned rather than moved. The root and every named layer move,
+     swap and go. None of this changes a set's file: it is the conversation's stack.
+   - **+ makes an unsaved layer**, empty, kept only with the conversation: `$unsaved/<key>` in the stack's
+     `layers`, its lines under `$unsaved.<key>` (`UNSAVED_LAYERS_KEY`; `permissionStackOf` reads it as a
+     layer of its own). This conversation is the same kind of layer, pinned last. **Save as a set…** writes
+     its lines to a set file (named, in this project, Shared or Just you) and puts the set in its place.
+   - Swapping an unsaved layer that has lines asks **Replace** (the set takes its place, its lines go) or
+     **Merge** (it stays, the set's lines copied in, the set's answer winning only where both say one at
+     the same place — `mergedLines`); one with no lines is replaced. Removing one with lines asks first.
+   - The built-in bases **base/deny-all**, **base/ask-all**, **base/smart-all** and **base/allow-all** (in `base/`, so the top level stays the conversation presets) give every tool that answer
+     everywhere, and `other` too: a base to lay exceptions over, or to merge into a new layer and adjust.
 
 ## Consequences
 

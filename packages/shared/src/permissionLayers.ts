@@ -41,6 +41,9 @@ import {
   PERMISSION_SET_LAYERS_KEY,
   PERMISSION_SET_REF_KEY,
   permissionSetLayersOf,
+  UNSAVED_LAYERS_KEY,
+  UNSAVED_NAME_KEY,
+  unsavedKeyOf,
   type LineProvenance,
   type PermissionSet,
   type PermissionSetIssue,
@@ -194,6 +197,8 @@ export interface PermissionStackLayer extends PermissionSetLayerDecl {
    */
   via?: string;
   role: PermissionStackRole;
+  /** An unsaved layer's key (`$unsaved/<key>` in the stack), and the name it is shown by. */
+  unsaved?: { key: string; name: string };
 }
 
 export interface PermissionStackOptions {
@@ -237,7 +242,15 @@ export function permissionStackOf(
   options: PermissionStackOptions = {},
 ): PermissionStackLayer[] | undefined {
   const ownId = options.ownId ?? INLINE_LAYER;
+  const store = isPlainObject(node) && isPlainObject(node[UNSAVED_LAYERS_KEY]) ? (node[UNSAVED_LAYERS_KEY] as Record<string, unknown>) : {};
   const follow = (reference: string, role: PermissionStackRole, into: PermissionSetIssue[]): PermissionStackLayer[] | undefined => {
+    // An unsaved layer: its lines are the node's own, kept under `$unsaved` (none yet is an empty layer).
+    const key = unsavedKeyOf(reference);
+    if (key !== undefined) {
+      const held = isPlainObject(store[key]) ? (store[key] as Record<string, unknown>) : {};
+      const { [UNSAVED_NAME_KEY]: name, ...lines } = held;
+      return [{ id: `unsaved:${key}`, decl: lines, via: reference, role, unsaved: { key, name: typeof name === "string" && name.trim() !== "" ? name.trim() : `Layer ${key}` } }];
+    }
     const layers = permissionSetLayersOf(reference, read, from, into, reference);
     return layers?.map((layer) => ({ id: layerIdOf(layer.id), decl: layer.decl, ...(layer.id !== INLINE_LAYER ? { reference: layer.id } : {}), via: reference, role }));
   };
@@ -260,7 +273,7 @@ export function permissionStackOf(
     const list = (listed as string[] | undefined) ?? [];
     bottomReference = reference ?? list[0];
     named = reference !== undefined ? list : list.slice(1);
-    const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, [PERMISSION_SET_DESCRIPTION_KEY]: _description, ...lines } = node;
+    const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, [PERMISSION_SET_DESCRIPTION_KEY]: _description, [UNSAVED_LAYERS_KEY]: _unsaved, ...lines } = node;
     own = lines;
   } else {
     issues.push({ path: "", message: "a permission set is a map from a subject to a mode, or a reference to one", severity: "error" });
@@ -272,7 +285,7 @@ export function permissionStackOf(
     if (followed === undefined) return undefined;
     bottom = followed;
   }
-  const bottomId = bottomReference !== undefined ? permissionSetIdOf(bottomReference) : undefined;
+  const bottomId = bottomReference !== undefined && unsavedKeyOf(bottomReference) === undefined ? permissionSetIdOf(bottomReference) : undefined;
   const bucket = bottomId !== undefined ? bucketOfSetId(bottomId) : options.bucket;
   const standing: PermissionStackLayer[] = [];
   for (const reference of bucket !== undefined ? (options.standing?.[bucket] ?? []) : []) {
@@ -439,6 +452,8 @@ const UNAVAILABLE_WORD = "unavailable";
  * and the tools layer's own lines beside them. What `ChatSettings.permissionSet` holds once the
  * composer writes a stack rather than the whole map.
  */
-export function chatStackSettingsOf(layers: readonly string[], tools: Readonly<Record<string, unknown>>): Record<string, unknown> {
-  return { ...(layers.length > 0 ? { [PERMISSION_SET_LAYERS_KEY]: [...layers] } : {}), ...tools };
+export function chatStackSettingsOf(layers: readonly string[], tools: Readonly<Record<string, unknown>>, unsaved: Readonly<Record<string, Record<string, unknown>>> = {}): Record<string, unknown> {
+  // Only the unsaved layers the stack names are kept: one taken off the stack goes with it.
+  const named = Object.fromEntries(layers.map(unsavedKeyOf).filter((key): key is string => key !== undefined && Object.hasOwn(unsaved, key)).map((key) => [key, unsaved[key]!]));
+  return { ...(layers.length > 0 ? { [PERMISSION_SET_LAYERS_KEY]: [...layers] } : {}), ...(Object.keys(named).length > 0 ? { [UNSAVED_LAYERS_KEY]: named } : {}), ...tools };
 }

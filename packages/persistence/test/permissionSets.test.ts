@@ -388,11 +388,15 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     project = openProject(dir, { baseDir: testHome() });
   });
 
-  it("are listed from the built-in layer: the presets at the top level, and the sandbox a simulation's pass stands under in improve/", () => {
+  it("are listed from the built-in layer: the presets at the top level, the bases a stack is laid over in base/ (decision 0034), and the sandbox a simulation's pass stands under in improve/", () => {
     const listed = listPermissionSets(project.paths.roots);
     expect(listed.map((t) => t.id)).toEqual([
       "ask-first",
       "auto",
+      "base/allow-all",
+      "base/ask-all",
+      "base/deny-all",
+      "base/smart-all",
       "full",
       "improve/simulation",
       "read-only",
@@ -515,6 +519,10 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     expect(read.map((t) => [t.id, t.layer])).toEqual([
       ["ask-first", "system"],
       ["auto", "system"],
+      ["base/allow-all", "system"],
+      ["base/ask-all", "system"],
+      ["base/deny-all", "system"],
+      ["base/smart-all", "system"],
       ["feature/implementation/writes-asking", "base"],
       ["full", "system"],
       ["improve/simulation", "system"],

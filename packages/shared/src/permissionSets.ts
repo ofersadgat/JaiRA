@@ -162,8 +162,21 @@ export const PERMISSION_SET_DESCRIPTION_KEY = "description";
 
 /** Is this key of a set file one of its instructions — `$ref`, `layers`, `icon`, `description` — rather than a line? */
 export function isPermissionSetInstructionKey(key: string): boolean {
-  return key === PERMISSION_SET_REF_KEY || key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY || key === PERMISSION_SET_DESCRIPTION_KEY;
+  return key === PERMISSION_SET_REF_KEY || key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY || key === PERMISSION_SET_DESCRIPTION_KEY || key === UNSAVED_LAYERS_KEY;
 }
+
+/**
+ * A conversation's UNSAVED layers (decision 0034, 2026-11-23): a layer of its stack kept only with the
+ * conversation, written in its `layers` as `$unsaved/<key>` — so it moves, swaps and goes as any layer
+ * does — its lines under this key, by `<key>`, with an optional `$name`. Saving one makes it a set file.
+ */
+export const UNSAVED_LAYERS_KEY = "$unsaved";
+/** How an unsaved layer is named in a stack's `layers`. */
+export const UNSAVED_LAYER_PREFIX = "$unsaved/";
+/** The key of an unsaved layer a `layers` entry names, or undefined for a reference to a set. */
+export const unsavedKeyOf = (entry: string): string | undefined => (entry.startsWith(UNSAVED_LAYER_PREFIX) ? entry.slice(UNSAVED_LAYER_PREFIX.length) : undefined);
+/** The name an unsaved layer is shown by, when it says none. */
+export const UNSAVED_NAME_KEY = "$name";
 
 /** The longest description a set file may say, in characters: one line in the set list. */
 export const PERMISSION_SET_DESCRIPTION_MAX = 120;

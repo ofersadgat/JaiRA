@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
-import { ScrollView } from "react-native";
+import { ScrollView, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import {
   BOARD_ANSWERS,
@@ -13,6 +13,12 @@ import {
   type BoardRowRef,
   type LineEdit,
 } from "@jaira/ui/permissionBoard";
+import { layerActsOf } from "@jaira/ui/permissionBoard";
+import type { LayerHost, SetChoice } from "@jaira/ui/permissionBoardHost";
+import type { WritableSetLayer } from "@jaira/shared/browser";
+import { TextInput } from "react-native";
+import { font } from "../../primitives";
+import { SubMenu, useAnchorRect } from "./ComposerCards";
 import { Press, Txt } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Icon, type IconName } from "../panel/Icon";
@@ -103,13 +109,21 @@ export interface PermissionBoardProps {
   maxHeight?: number;
   /** How wide the board needs to be, told whenever it changes: the panel is no wider. */
   onWidth?: (width: number) => void;
+  /** What the layer heads do to the conversation's stack; without it the heads only fold. */
+  layers?: LayerHost;
 }
+
+/** A layer act waiting on the person: Replace or Merge, taking an unsaved layer's lines away, a set's name. */
+type LayerAsk =
+  | { kind: "swap"; layer: BoardLayer; set: SetChoice }
+  | { kind: "remove"; layer: BoardLayer }
+  | { kind: "save"; layer: BoardLayer; name: string; where: WritableSetLayer | undefined };
 
 /** A chip being looked at or dragged, and where it is. */
 type Held = { row: string; rowLabel: string; column: string; chip: BoardChip };
 type Pending = { says: string; ask: string; edits: LineEdit[] };
 
-export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, onList, by = "resources", onBy, maxHeight, onWidth }: PermissionBoardProps): JSX.Element {
+export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, onList, by = "resources", onBy, maxHeight, onWidth, layers }: PermissionBoardProps): JSX.Element {
   const t = useTokens();
   const labelW = by === "tools" ? TOOL_LABEL_W : LABEL_W;
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set(order === "tools" ? board.layers.filter((layer) => layer.role === "bottom").map((layer) => layer.key) : []));
@@ -120,6 +134,19 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
   const [pending, setPending] = useState<Pending | undefined>(undefined);
   const [notice, setNotice] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const [draggedLayer, setDraggedLayer] = useState<BoardLayer | undefined>(undefined);
+  const [layerAsk, setLayerAsk] = useState<LayerAsk | undefined>(undefined);
+  /** A layer act run: what it did said, or why nothing was. */
+  const runLayer = (act: () => void | Promise<void>, says: string): void => {
+    setLayerAsk(undefined);
+    setInspected(undefined);
+    Promise.resolve()
+      .then(act)
+      .then(() => setNotice(says))
+      .catch((error: unknown) => setNotice(`Nothing was changed: ${error instanceof Error ? error.message : String(error)}`));
+  };
+  const [headHeight, setHeadHeight] = useState(56);
+  const [sectionHeights, setSectionHeights] = useState<Readonly<Record<string, number>>>({});
 
   // The answers each column group has a chip in, over every row.
   const usedOf = useMemo(() => {
@@ -129,11 +156,11 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
   }, [board]);
 
   const columns = useMemo((): Column[] => {
-    // A column no chip is in is not drawn; This conversation's always are — a move lands there.
+    // A column no chip is in is not drawn; This conversation's and an unsaved layer's always are — a move lands there.
     const answersOf = (group: string, always: boolean): BoardAnswer[] => (always ? [...BOARD_ANSWERS] : BOARD_ANSWERS.filter((answer) => usedOf.get(group)?.has(answer)));
     const layerGroup = (layer: BoardLayer): Column[] => {
       if (folded.has(layer.key)) return [{ group: layer.key, answer: "*", width: FOLDED_W, first: true, last: true, result: false }];
-      const list = answersOf(layer.key, layer.writes === "conversation");
+      const list = answersOf(layer.key, layer.writes === "conversation" || layer.writes === "unsaved");
       return list.map((answer, at) => ({ group: layer.key, answer, width: list.length === 1 ? LONE_W : LAYER_W, first: at === 0, last: at === list.length - 1, result: false }));
     };
     const resultAnswers = answersOf(RESULT, false);
@@ -194,7 +221,7 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
   };
 
   const head = (
-    <View flexDirection="column" {...(isWeb ? { style: { position: "sticky", top: 0, zIndex: 6 } } : {})}>
+    <View flexDirection="column" onLayout={(e: { nativeEvent: { layout: { height: number } } }) => setHeadHeight(Math.round(e.nativeEvent.layout.height))} {...(isWeb ? { style: { position: "sticky", top: 0, zIndex: 6 } } : {})}>
       {alone ? null : (
       <View flexDirection="row">
         <View width={labelW} flexShrink={0} backgroundColor={t.v("panel") as never} {...(sticky("label") as object)} />
@@ -204,6 +231,39 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
           const hue = result ? "text" : layerHue(layer);
           const isFolded = !result && folded.has(group.group);
           const stick = result ? (order === "shield" ? { side: "right" as const, at: 0 } : { side: "left" as const, at: labelW }) : undefined;
+          if (!result && layer !== undefined && layers !== undefined)
+            return (
+              <LayerHead
+                key={group.group}
+                t={t}
+                layer={layer}
+                width={group.width}
+                wide={group.span > 1}
+                hue={hue}
+                folded={isFolded}
+                host={layers}
+                dragged={draggedLayer}
+                onFold={() => setFolded((was) => toggled(was, group.group))}
+                onDrag={setDraggedLayer}
+                onDropOn={(target) => {
+                  if (draggedLayer !== undefined && draggedLayer.key !== target.key) layers.moveBefore(draggedLayer, target);
+                  setDraggedLayer(undefined);
+                }}
+                onSwap={(set) => {
+                  if (layers.holdsLines(layer)) setLayerAsk({ kind: "swap", layer, set });
+                  else runLayer(() => layers.swap(layer, set, "replace"), `${layer.label} → ${set.id}.`);
+                }}
+                onAct={(act) => {
+                  if (act === "add") return runLayer(() => layers.addBefore(layer), `A new layer before ${layer.label}, kept with this conversation.`);
+                  if (act === "earlier" || act === "later") return runLayer(() => layers.moveBy(layer, act === "earlier" ? -1 : 1), `${layer.label} moved ${act}.`);
+                  if (act === "remove") return layers.holdsLines(layer) ? setLayerAsk({ kind: "remove", layer }) : runLayer(() => layers.remove(layer), `${layer.label} taken off this conversation.`);
+                  if (act === "save") return setLayerAsk({ kind: "save", layer, name: "", where: layers.saveTo.find((each) => each.layer === "project")?.layer ?? layers.saveTo[0]?.layer });
+                  if (act === "clear") return runLayer(() => layers.clear(), "This conversation's own lines cleared.");
+                  if (act === "forget") return runLayer(() => layers.forget(), "This run's answers forgotten.");
+                  if (act === "unpin") return runLayer(() => layers.unpin(layer), `${layer.label} unpinned from this project.`);
+                }}
+              />
+            );
           return (
             <Press
               key={group.group}
@@ -282,11 +342,16 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
     </View>
   );
 
-  const rows = board.rows.map((row) => (
+  // An open section's row stays under the heads while its rows scroll past, until the next section's
+  // pushes it away (2026-11-23): each open section is a block of its own, its row sticky inside it — an
+  // access's under its resource's.
+  const rowOf = (row: Board["rows"][number], stickTop?: number, onHeight?: (height: number) => void): JSX.Element => (
     <Row
       key={row.key}
       t={t}
       row={row}
+      {...(stickTop !== undefined ? { stickTop } : {})}
+      {...(onHeight !== undefined ? { onHeight } : {})}
       columns={columns}
       alone={alone}
       board={board}
@@ -301,11 +366,46 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
       onOver={setOver}
       onDrop={tryMove}
     />
-  ));
+  );
+  const rows: JSX.Element[] = [];
+  for (let at = 0; at < board.rows.length; ) {
+    const top = board.rows[at]!;
+    let end = at + 1;
+    while (end < board.rows.length && board.rows[end]!.level > top.level) end += 1;
+    const under = board.rows.slice(at + 1, end);
+    at = end;
+    if (!top.open || under.length === 0) {
+      rows.push(rowOf(top), ...under.map((each) => rowOf(each)));
+      continue;
+    }
+    const topHeight = sectionHeights[top.key] ?? 52;
+    const parts: JSX.Element[] = [rowOf(top, headHeight, (height) => setSectionHeights((was) => (was[top.key] === height ? was : { ...was, [top.key]: height })))];
+    for (let i = 0; i < under.length; ) {
+      const sub = under[i]!;
+      let stop = i + 1;
+      while (stop < under.length && under[stop]!.level > sub.level) stop += 1;
+      const tools = under.slice(i + 1, stop);
+      i = stop;
+      if (sub.open && tools.length > 0)
+        parts.push(
+          <View key={`section:${sub.key}`} flexDirection="column">
+            {rowOf(sub, headHeight + topHeight)}
+            {tools.map((each) => rowOf(each))}
+          </View>,
+        );
+      else parts.push(rowOf(sub), ...tools.map((each) => rowOf(each)));
+    }
+    rows.push(
+      <View key={`section:${top.key}`} flexDirection="column">
+        {parts}
+      </View>,
+    );
+  }
 
   return (
     <View flexDirection="column" minWidth={0}>
       {bar}
+      {layerAsk !== undefined && layers !== undefined ? <LayerAskStrip t={t} ask={layerAsk} host={layers} onAsk={setLayerAsk} run={runLayer} /> : null}
       {pending !== undefined ? (
         <View flexDirection="row" alignItems="center" gap={10} paddingVertical={8} paddingHorizontal={12} backgroundColor={t.mix(t.v("warn"), 9, t.v("panel")) as never}>
           <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }} flexShrink={1}>
@@ -384,6 +484,8 @@ function Row({
   onInspect,
   onOver,
   onDrop,
+  stickTop,
+  onHeight,
 }: {
   t: Tokens;
   row: Board["rows"][number];
@@ -400,6 +502,9 @@ function Row({
   onInspect: (held: Held) => void;
   onOver: (key: string | undefined) => void;
   onDrop: (from: Held, to: { group: string; answer: BoardAnswer | "*" }) => void;
+  /** Open, its section's row stays this far from the top while the section scrolls past (web). */
+  stickTop?: number;
+  onHeight?: (height: number) => void;
 }): JSX.Element {
   const hue = String(t.v(RESOURCE_HUE[row.resource] ?? "dim"));
   const ground = rowGround(t, row);
@@ -473,7 +578,13 @@ function Row({
   );
 
   return (
-    <View flexDirection="row" backgroundColor={ground as never} {...(row.level === 1 ? { borderTopWidth: 2, borderTopColor: t.mix(hue, 40, t.v("line")) as never } : row.level === 3 ? { borderTopWidth: 1, borderTopColor: t.v("panel-3") as never } : { borderTopWidth: 1, borderTopColor: t.v("panel-2") as never })}>
+    <View
+      flexDirection="row"
+      backgroundColor={ground as never}
+      {...(row.level === 1 ? { borderTopWidth: 2, borderTopColor: t.mix(hue, 40, t.v("line")) as never } : row.level === 3 ? { borderTopWidth: 1, borderTopColor: t.v("panel-3") as never } : { borderTopWidth: 1, borderTopColor: t.v("panel-2") as never })}
+      {...(onHeight !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onHeight(Math.round(e.nativeEvent.layout.height)) } : {})}
+      {...(isWeb && stickTop !== undefined ? { style: { position: "sticky", top: stickTop, zIndex: row.level === 1 ? 5 : 4 }, "data-stuck": row.key } : {})}
+    >
       {label}
       {columns.map((column) => {
         const chips = (row.cells[column.group] ?? []).filter((chip) => column.answer === "*" || chip.answer === column.answer);
@@ -735,5 +846,265 @@ function Inspector({ t, board, held, onClose, onMove, onInspect }: { t: Tokens; 
         </View>,
       )}
     </View>
+  );
+}
+
+// --- the layer heads (2026-11-23) ----------------------------------------------------------------
+
+type LayerAct = "add" | "earlier" | "later" | "remove" | "save" | "clear" | "forget" | "unpin";
+
+/**
+ * A layer's head, where the conversation's stack is changed: its NAME swaps it for another set (a menu
+ * of every set), its SWATCH drags it along the stack (web), a + on its left edge — on hover — adds a new
+ * unsaved layer just before it, and its ⋯ holds the rest: add before, move earlier or later, save as a
+ * set, clear, forget, unpin, remove. The chevron folds its columns. This run and This conversation stay
+ * where they are.
+ *
+ *   the +          18 round, --fill-accent, --on-accent glyph, on the head's left edge, over the line
+ *   the swatch     10 square, radius 3, in the layer's hue; a grab cursor where it can be dragged
+ *   the name       app 12/650, a 9 chevron after it where it swaps; hovered --panel-2 behind it
+ *   ⋯              20 square, radius 5, --dim; hovered --panel-3
+ *   a drop target  the head at 12% accent, while another layer is dragged over it
+ */
+function LayerHead({
+  t,
+  layer,
+  width,
+  wide,
+  hue,
+  folded,
+  host,
+  dragged,
+  onFold,
+  onDrag,
+  onDropOn,
+  onSwap,
+  onAct,
+}: {
+  t: Tokens;
+  layer: BoardLayer;
+  width: number;
+  wide: boolean;
+  hue: string;
+  folded: boolean;
+  host: LayerHost;
+  dragged: BoardLayer | undefined;
+  onFold: () => void;
+  onDrag: (layer: BoardLayer | undefined) => void;
+  onDropOn: (target: BoardLayer) => void;
+  onSwap: (set: SetChoice) => void;
+  onAct: (act: LayerAct) => void;
+}): JSX.Element {
+  const acts = layerActsOf(layer);
+  const [hovered, setHovered] = useState(false);
+  const [menu, setMenu] = useState<{ which: "swap" | "more"; at: { left: number; top: number; right: number; bottom: number } } | undefined>(undefined);
+  const [query, setQuery] = useState("");
+  const [swapRef, measureSwap] = useAnchorRect();
+  const [moreRef, measureMore] = useAnchorRect();
+  const target = dragged !== undefined && dragged.key !== layer.key && (acts.move || layer.role === "runtime" || layer.writes === "conversation");
+  const web = isWeb
+    ? {
+        onMouseEnter: () => setHovered(true),
+        onMouseLeave: () => setHovered(false),
+        ...(target
+          ? {
+              onDragOver: (e: ReactDragEvent) => e.preventDefault(),
+              onDrop: (e: ReactDragEvent) => {
+                e.preventDefault();
+                onDropOn(layer);
+              },
+            }
+          : {}),
+        "data-layer-head": layer.label,
+      }
+    : {};
+  const shown = host.sets.filter((set) => query.trim() === "" || set.id.toLowerCase().includes(query.trim().toLowerCase()));
+  const items: Array<{ act: LayerAct; words: string; bad?: boolean }> = [
+    ...(acts.addBefore ? [{ act: "add" as const, words: "Add a layer before it" }] : []),
+    ...(acts.move ? [{ act: "earlier" as const, words: "Move earlier" }, { act: "later" as const, words: "Move later" }] : []),
+    ...(acts.save && host.saveTo.length > 0 ? [{ act: "save" as const, words: "Save as a set…" }] : []),
+    ...(acts.clear ? [{ act: "clear" as const, words: "Clear its lines" }] : []),
+    ...(acts.forget ? [{ act: "forget" as const, words: "Forget this run's answers" }] : []),
+    ...(acts.unpin ? [{ act: "unpin" as const, words: "Unpin from this project" }] : []),
+    ...(acts.remove ? [{ act: "remove" as const, words: "Remove from this conversation", bad: true }] : []),
+  ];
+  return (
+    <View
+      width={width}
+      flexShrink={0}
+      position="relative"
+      flexDirection="row"
+      alignItems="center"
+      gap={5}
+      paddingTop={7}
+      paddingBottom={3}
+      paddingLeft={8}
+      paddingRight={4}
+      backgroundColor={(target ? t.mix(t.v("accent"), 12, t.v("panel")) : t.v("panel")) as never}
+      borderTopWidth={3}
+      borderTopColor={t.v(hue) as never}
+      borderLeftWidth={2}
+      borderLeftColor={t.v(hue) as never}
+      {...(web as object)}
+    >
+      {acts.addBefore && (hovered || !isWeb) ? (
+        <Press onPress={() => onAct("add")} label={`Add a layer before ${layer.label}`} title="Add a new layer here, kept with this conversation" grow={false} position="absolute" left={-10} top={6} zIndex={3} box={() => ({ width: 18, height: 18, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: t.v("fill-accent"), borderWidth: 2, borderColor: t.v("panel") })}>
+          <Icon name="plus" size={10} color={String(t.v("on-accent"))} />
+        </Press>
+      ) : null}
+      <Press onPress={onFold} label={folded ? `Unfold ${layer.label}` : `Fold ${layer.label}`} title="Fold or unfold its columns" grow={false} box={() => ({ width: 12, alignItems: "center" })}>
+        <Icon name="chevron" size={10} color={String(t.v("tok-hint"))} box={folded ? { transform: [{ rotate: "-90deg" }] } : undefined} />
+      </Press>
+      <View
+        width={10}
+        height={10}
+        borderRadius={3}
+        flexShrink={0}
+        backgroundColor={t.v(hue) as never}
+        {...((isWeb && acts.move
+          ? {
+              draggable: true,
+              title: "Drag to move this layer",
+              cursor: "grab",
+              "data-layer-handle": layer.label,
+              onDragStart: (e: ReactDragEvent) => {
+                e.dataTransfer?.setData("text/plain", layer.key);
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                onDrag(layer);
+              },
+              onDragEnd: () => onDrag(undefined),
+            }
+          : {}) as object)}
+      />
+      <RNView ref={swapRef} collapsable={false} style={{ flexShrink: 1, minWidth: 0 }}>
+        {acts.swap ? (
+          <Press
+            onPress={() => measureSwap((at) => setMenu({ which: "swap", at }))}
+            label={`Swap ${layer.label}`}
+            title="Swap it for another set"
+            grow={false}
+            box={({ hovered: on }) => ({ flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 3, borderRadius: 5, backgroundColor: on || menu?.which === "swap" ? t.v("panel-2") : "transparent", minWidth: 0 })}
+          >
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 650 }} ellip flexShrink={1}>
+              {layer.label}
+            </Txt>
+            <Icon name="chevron" size={9} color={String(t.v("tok-hint"))} />
+          </Press>
+        ) : (
+          <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 650 }} ellip flexShrink={1} paddingHorizontal={3}>
+            {layer.label}
+          </Txt>
+        )}
+      </RNView>
+      {wide ? (
+        <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "tok-hint" }} ellip flexShrink={1}>
+          {layer.hint}
+        </Txt>
+      ) : null}
+      <View flex={1} />
+      {items.length > 0 ? (
+        <RNView ref={moreRef} collapsable={false}>
+          <Press onPress={() => measureMore((at) => setMenu({ which: "more", at }))} label={`More for ${layer.label}`} title="More" grow={false} box={({ hovered: on }) => ({ width: 20, height: 20, alignItems: "center", justifyContent: "center", borderRadius: 5, backgroundColor: on || menu?.which === "more" ? t.v("panel-3") : "transparent" })}>
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 700, color: "dim", lineHeight: 1 }}>⋯</Txt>
+          </Press>
+        </RNView>
+      ) : null}
+      {menu?.which === "swap" ? (
+        <SubMenu anchor={menu.at} align="start" minWidth={280} onClose={() => setMenu(undefined)}>
+          <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 600, upper: true, ls: 0.06, color: "tok-hint" }} paddingTop={4} paddingHorizontal={8}>
+            {layer.unsaved !== undefined ? "Start from, or swap for" : `Swap ${layer.label} for`}
+          </Txt>
+          <TextInput value={query} onChangeText={setQuery} placeholder="Find a set" autoFocus style={{ ...(font(t, { voice: "data", scale: 11 / 12 }) as object), margin: 4, paddingVertical: 4, paddingHorizontal: 8, borderWidth: 1, borderColor: String(t.v("line")), borderRadius: 7 }} />
+          {shown.slice(0, 12).map((set) => {
+            const current = set.id === layer.id;
+            return (
+              <Press
+                key={set.id}
+                onPress={() => {
+                  setMenu(undefined);
+                  if (!current) onSwap(set);
+                }}
+                label={`${set.id}, ${set.where}`}
+                grow={false}
+                box={({ hovered: on }) => ({ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 5, paddingHorizontal: 8, borderRadius: 6, backgroundColor: on ? t.tint("accent", 9) : "transparent" })}
+              >
+                <Icon name="layers" size={12} color={String(t.v(current ? "accent" : "dim"))} />
+                <Txt spec={{ voice: "data", scale: 11 / 12, weight: current ? 700 : 500 }} flexShrink={1} ellip>
+                  {set.id}
+                </Txt>
+                <View flex={1} />
+                <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "tok-hint" }}>{current ? "current" : set.where}</Txt>
+              </Press>
+            );
+          })}
+          {shown.length === 0 ? (
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} padding={8}>
+              No set is named so.
+            </Txt>
+          ) : null}
+        </SubMenu>
+      ) : null}
+      {menu?.which === "more" ? (
+        <SubMenu anchor={menu.at} align="end" minWidth={220} onClose={() => setMenu(undefined)}>
+          {items.map((item) => (
+            <Press
+              key={item.act}
+              onPress={() => {
+                setMenu(undefined);
+                onAct(item.act);
+              }}
+              label={item.words}
+              grow={false}
+              box={({ hovered: on }) => ({ paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, backgroundColor: on ? t.tint(item.bad === true ? "bad" : "accent", 9) : "transparent" })}
+            >
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: item.bad === true ? "bad" : "text" }}>{item.words}</Txt>
+            </Press>
+          ))}
+        </SubMenu>
+      ) : null}
+    </View>
+  );
+}
+
+/** What a layer act waits on: Replace or Merge, losing an unsaved layer's lines, a set's name and place. */
+function LayerAskStrip({ t, ask, host, onAsk, run }: { t: Tokens; ask: LayerAsk; host: LayerHost; onAsk: (ask: LayerAsk | undefined) => void; run: (act: () => void | Promise<void>, says: string) => void }): JSX.Element {
+  const strip = (words: ReactNode, buttons: ReactNode): JSX.Element => (
+    <View flexDirection="row" alignItems="center" gap={10} flexWrap="wrap" paddingVertical={8} paddingHorizontal={12} backgroundColor={t.mix(t.v("accent"), 7, t.v("panel")) as never} {...((isWeb ? { "data-layer-ask": ask.kind } : {}) as object)}>
+      <View flexDirection="row" alignItems="center" gap={8} flexShrink={1} flexWrap="wrap">
+        {words}
+      </View>
+      <View flex={1} />
+      <BarButton t={t} words="Cancel" onPress={() => onAsk(undefined)} />
+      {buttons}
+    </View>
+  );
+  const say = (words: string): JSX.Element => <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }}>{words}</Txt>;
+  if (ask.kind === "swap")
+    return strip(
+      say(`${ask.layer.label} has lines of its own. Replace them with ${ask.set.id}, or merge ${ask.set.id} into them — its answers win where both say one?`),
+      <>
+        <BarButton t={t} words="Merge" onPress={() => run(() => host.swap(ask.layer, ask.set, "merge"), `${ask.set.id} merged into ${ask.layer.label}.`)} />
+        <BarButton t={t} words="Replace" strong onPress={() => run(() => host.swap(ask.layer, ask.set, "replace"), `${ask.layer.label} → ${ask.set.id}.`)} />
+      </>,
+    );
+  if (ask.kind === "remove")
+    return strip(say(`${ask.layer.label} has lines kept only with this conversation. Removing it loses them.`), <BarButton t={t} words="Remove" strong onPress={() => run(() => host.remove(ask.layer), `${ask.layer.label} taken off this conversation.`)} />);
+  const name = ask.name.trim();
+  const problem = name === "" ? "a set needs a name" : !/^[a-z0-9][a-z0-9._-]*(\/[a-z0-9][a-z0-9._-]*)*$/.test(name) ? "lower case, digits, - and _, folders with /" : host.sets.some((set) => set.id === name) ? `there is a set named ${name} already` : undefined;
+  return strip(
+    <>
+      {say(`Save ${ask.layer.label} as a set named`)}
+      <TextInput value={ask.name} onChangeText={(text) => onAsk({ ...ask, name: text })} placeholder="my-set" autoFocus style={{ ...(font(t, { voice: "data", scale: 11 / 12 }) as object), width: 180, paddingVertical: 3, paddingHorizontal: 7, borderWidth: 1, borderColor: String(t.v(problem !== undefined && name !== "" ? "warn" : "line")), borderRadius: 6, backgroundColor: String(t.v("panel")) }} />
+      {say("in")}
+      <View flexDirection="row" borderRadius={7} borderWidth={1} borderColor={t.v("line") as never} overflow="hidden">
+        {host.saveTo.map((each) => (
+          <Press key={each.layer} onPress={() => onAsk({ ...ask, where: each.layer })} label={each.label} role="radio" aria-checked={ask.where === each.layer} grow={false} box={({ hovered }) => ({ paddingVertical: 3, paddingHorizontal: 8, backgroundColor: ask.where === each.layer ? t.tint("accent", 12) : hovered ? t.v("panel-2") : "transparent" })}>
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: ask.where === each.layer ? 600 : 500 }}>{each.label}</Txt>
+          </Press>
+        ))}
+      </View>
+      {problem !== undefined && name !== "" ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }}>{problem}</Txt> : null}
+    </>,
+    <BarButton t={t} words="Save" strong onPress={() => (problem === undefined && ask.where !== undefined ? run(() => host.save(ask.layer, name, ask.where!), `${ask.layer.label} saved as ${name}.`) : undefined)} />,
   );
 }
