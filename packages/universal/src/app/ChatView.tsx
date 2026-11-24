@@ -26,6 +26,8 @@ export function ChatView(): JSX.Element {
       <Panes
         here={phone || surface.taskId === null ? ROOM : taskPaneEntryOf(surface.taskId, surface.project ?? undefined)}
         roomBox={{ paddingBottom: inset }}
+        // The focused pane's conversation is the open one (or, on the start page, none).
+        onFollow={(entry) => (entry.kind === "task" ? surface.onOpen(entry.taskId, entry.project) : entry.kind === "room" ? surface.onOpen(null) : undefined)}
         room={
           // On a computer the room's own view is the start page alone: a conversation is a path, drawn
           // as any pane draws it (`PaneBody`). A phone has no panes, and draws its thread here.

@@ -4,12 +4,17 @@
  * panels", and "both panels should be fully self contained. I.e. their ui should be identical. You
  * should be able to close either of them.").
  *
- * A PANE is a main view with a PATH of its own, walked by its own ‹ and › and shown as crumbs in its own
- * head. There are one or two, and they are the same thing: nothing here is about a left or a right pane
- * but the order they stand in. A path is a panel stack's shape (`panelStack.ts`: `entries`, what › goes
- * forward to in `ahead`), its entries the side panel's kinds — a task or a conversation, an artifact, a
- * state — and one more, the ROOM: the Tasks room's board, the Files room's file, the Chat room's start
- * page, which only the room draws. What the room stands on is `here`: that room entry, or — the Chat
+ * A PANE is a main view with a HISTORY of its own, walked by its own ‹ and ›. There are one or two, and
+ * they are the same thing: nothing here is about a left or a right pane but the order they stand in. A
+ * history (`PanePath`) is where the pane has been, oldest first, what it shows on top, and what › goes
+ * forward to in `ahead`; its entries are the side panel's kinds — a task or a conversation, an artifact,
+ * a state — and one more, the ROOM: the Tasks room's board, the Files room's file, the Chat room's start
+ * page, which only the room draws.
+ *
+ * The crumbs in a pane's head are not its history but WHERE what it shows stands (`trailOf`, the
+ * person, 2026-11-24: "the breadcrumb is meant to be a resource path / hierarchy, not history"): an
+ * artifact under its conversation, a run's subagent under its task. Pressing one goes there — a step in
+ * the history like any other. What the room stands on is `here`: that room entry, or — the Chat
  * room on a conversation — the conversation's own entry, the same path any pane opens it by, so it is
  * drawn the same wherever it stands (the person, 2026-11-13: "if you opened the same path, the two
  * panels should look pixel identical"). `here` is on whichever pane holds it; the window opens on one
@@ -34,7 +39,7 @@ export const ROOM: RoomEntry = { kind: "room", key: "room" };
 
 export type PaneEntry = PanelEntry | RoomEntry;
 
-/** One pane's path: root first; what › goes forward to, nearest first. */
+/** One pane's history: where it has been, oldest first, what it shows last; what › goes forward to, nearest first. */
 export interface PanePath {
   entries: readonly PaneEntry[];
   ahead: readonly PaneEntry[];
@@ -76,9 +81,19 @@ export function isRoom(entry: PaneEntry | undefined | null): entry is RoomEntry 
   return entry?.kind === "room";
 }
 
-/** The pane holding what the room stands on (`here`), and how deep in its path; null when no pane holds it. */
+/** The focused pane, as an index of a pane there is. */
+export function focusedPaneOf(split: SplitState): number {
+  return Math.min(split.focus, split.panes.length - 1);
+}
+
+/**
+ * The pane holding what the room stands on (`here`), and how deep in its path; null when no pane holds
+ * it. The focused pane first: two panes on one conversation, the room is the one the person is in.
+ */
 export function roomPaneOf(split: SplitState): { pane: number; at: number } | null {
-  for (let pane = 0; pane < split.panes.length; pane++) {
+  const focused = focusedPaneOf(split);
+  const order = [focused, ...split.panes.map((_, i) => i).filter((i) => i !== focused)];
+  for (const pane of order) {
     const at = split.panes[pane]!.entries.findIndex((entry) => entry.key === split.here.key);
     if (at >= 0) return { pane, at };
   }
@@ -86,20 +101,37 @@ export function roomPaneOf(split: SplitState): { pane: number; at: number } | nu
 }
 
 /**
- * Something on a path. Pushing what is on top is nothing; what is lower down is going back to it; what
- * › would go forward to is going forward; anything else starts a new way ahead.
+ * What the room goes on to because the focused pane shows it (the person, 2026-11-24: "whatever panel is
+ * focused should be treated as the active/main panel as far as the rest of the app is concerned") — the
+ * sidebar's selected row, the side panel, the address are the focused pane's. A conversation on top (a
+ * task as a pane opens it), or the room's own view; null when the room already stands there, or the
+ * pane stands on something the room cannot (an artifact, a state, a run's subagent).
+ *
+ * `where`: in a room whose own view is not a conversation (Tasks: the board), the task it has selected —
+ * the room follows by selecting it, its own view staying where it is.
+ */
+export function followOf(split: SplitState, where?: string | null): PaneEntry | null {
+  const top = topOfPath(split.panes[focusedPaneOf(split)]);
+  if (top === undefined || top.key === split.here.key) return null;
+  if (isRoom(top)) return top;
+  if (top.kind !== "task") return null;
+  return where !== undefined && top.taskId === where ? null : top;
+}
+
+/**
+ * A step in a pane's history: it goes to `entry`. Going to what it shows is nothing (another version of
+ * the artifact on top is the same place, at that version); going to what › would go forward to is going
+ * forward; anything else is a new step, and what was ahead is dropped. Somewhere it has been before is
+ * a new step too — the history is where it went, in order, not a trail to walk back up.
  */
 export function pushPath(path: PanePath, entry: PaneEntry): PanePath {
   const top = topOfPath(path);
-  // Another version of the artifact on top is the same place on the path, at the version pushed.
   if (top?.key === entry.key) return sameVersion(top, entry) ? path : { entries: [...path.entries.slice(0, -1), entry], ahead: path.ahead };
-  const at = path.entries.findIndex((one) => one.key === entry.key);
-  if (at >= 0) return crumbTo(path, at);
   const ahead = path.ahead[0]?.key === entry.key ? path.ahead.slice(1) : [];
   return { entries: [...path.entries, entry], ahead };
 }
 
-/** ‹ — one level back. A path's root stays: ✕ is how a pane goes. */
+/** ‹ — one step back. The first stays: ✕ is how a pane goes. */
 export function paneBack(path: PanePath): PanePath {
   return path.entries.length <= 1 ? path : crumbTo(path, path.entries.length - 2);
 }
@@ -110,7 +142,7 @@ export function paneForward(path: PanePath): PanePath {
   return next === undefined ? path : { entries: [...path.entries, next], ahead: path.ahead.slice(1) };
 }
 
-/** A crumb pressed: back to that level, what it passes kept ahead. */
+/** Back to step `index` of the history at once (its menu), what it passes kept ahead. */
 export function crumbTo(path: PanePath, index: number): PanePath {
   if (index < 0 || index >= path.entries.length - 1) return path;
   return { entries: path.entries.slice(0, index + 1), ahead: [...path.entries.slice(index + 1), ...path.ahead] };
@@ -153,19 +185,6 @@ export function openInPane(split: SplitState, pane: number, entry: PaneEntry): S
   return { ...split, panes: panes.filter((path) => path.entries.length > 0), focus: pane, tab: pane, changed: split.changed === pane ? null : split.changed };
 }
 
-/**
- * A whole path put on a pane, the pane focused and shown — an artifact opened by its place button, on
- * its own path (`artifactPathOf`). Pane 1 with the column not split splits it.
- */
-export function openPathInPane(split: SplitState, pane: number, path: PanePath): SplitState {
-  if (pane >= split.panes.length) {
-    const panes = split.panes.filter((one) => one.entries.length > 0);
-    return { panes: [...panes, path], focus: panes.length, tab: panes.length, changed: null, here: split.here };
-  }
-  const panes = split.panes.map((one, i) => (i === pane ? path : one));
-  return { ...split, panes, focus: pane, tab: pane, changed: split.changed === pane ? null : split.changed };
-}
-
 /** Open something in a split: on the second pane's path, splitting the column if it was not. */
 export function openInSplit(split: SplitState, entry: PaneEntry): SplitState {
   return openInPane(split, 1, entry);
@@ -195,13 +214,44 @@ export function swapPanes(split: SplitState): SplitState {
 
 /**
  * The room moved (another task, conversation or file; another room): it stands on `here` now, and is
- * shown. The pane that held where it stood goes on to it there, what was on top dropped; no pane
- * holding it, it goes on the focused pane's path.
+ * shown. The pane that held where it stood goes on to it there; no pane holding it, it goes on the
+ * focused pane's path.
+ *
+ * `step`: the room moved WITHIN itself (another conversation opened from the sidebar, a new one
+ * started) — it goes on that pane's path as anything else does (`pushPath`), so the pane's ‹ comes back
+ * (the person, 2026-11-24: "each pane should have its own history that the arrows should navigate
+ * through"). Not a step (the window come to this room, or opened on it), or a step off the room's own
+ * view (the start page, which what is opened from it takes the place of), what was on top is dropped.
+ * The room's own view moved under the same key (Tasks: another task selected on the board) is shown
+ * by dropping what was put over it, step or not.
+ *
+ * Unless it went to what the focused pane already shows (`followOf`: the room follows the focused
+ * pane) — then nothing on any path moves: a conversation on top of the focused pane is what the room
+ * stands on now; in a room whose own view is not a conversation, the task `where` it selected is.
  */
-export function roomMoved(split: SplitState, here: PaneEntry): SplitState {
+export function roomMoved(split: SplitState, here: PaneEntry, where?: string | null, step = false): SplitState {
+  const focused = focusedPaneOf(split);
+  const top = topOfPath(split.panes[focused]);
+  if (top !== undefined && top.key === here.key && (!isRoom(here) || split.here.key !== here.key)) {
+    if (split.here === here && top === here) return split;
+    const path = split.panes[focused]!;
+    const panes = split.panes.map((one, i) => (i === focused ? { ...path, entries: [...path.entries.slice(0, -1), here] } : one));
+    return { ...split, panes, here };
+  }
+  if (isRoom(here) && where !== undefined && where !== null && top?.kind === "task" && top.taskId === where && split.here.key === here.key) return split;
+  if (step && split.here.key !== here.key && top !== undefined) {
+    // A step within the room is a step in the focused pane's history. Off the start page (a form) to
+    // a conversation, what is opened from it takes its place.
+    const path = split.panes[focused]!;
+    const offStart = isRoom(top) && isRoom(split.here) && !isRoom(here);
+    const panes = withoutRoomElsewhere(split.panes, focused, here);
+    panes[focused] = offStart ? { entries: [...path.entries.slice(0, -1), here], ahead: path.ahead } : pushPath(path, here);
+    const kept = panes.filter((one) => one.entries.length > 0);
+    return { ...split, panes: kept, here, focus: Math.min(focused, kept.length - 1), tab: Math.min(split.tab, kept.length - 1) };
+  }
   const held = roomPaneOf(split);
   const moved = { ...split, here };
-  if (held === null) return openInPane(moved, Math.min(split.focus, split.panes.length - 1), here);
+  if (held === null) return openInPane(moved, focused, here);
   const path = split.panes[held.pane]!;
   if (split.here.key === here.key && held.at === path.entries.length - 1 && path.ahead.length === 0) {
     if (split.here === here) return split;
@@ -226,20 +276,6 @@ export function leavePane(split: SplitState, pane: number): SplitState {
   if (path === undefined) return split;
   if (path.entries.length <= 1) return closePane(split, pane, true);
   return setPath(split, pane, paneBack(path));
-}
-
-/**
- * An artifact moved out of a pane (the person, 2026-11-14: where it was, it closes). A pane standing on
- * the artifact's own path and nothing more (`artifactPathOf`: its conversation › it) was opened for it,
- * and closes with it — left on the conversation, it would take the side panel's rule from where the
- * artifact was moved to. Any other path goes back a level (`leavePane`).
- */
-export function leaveArtifactPane(split: SplitState, pane: number): SplitState {
-  const path = split.panes[pane];
-  const held = publishedOfEntry(topOfPath(path));
-  if (path === undefined || held === undefined) return split;
-  const own = path.entries.length === 2 && path.entries[0]!.key === taskPaneEntryOf(held.ref.taskId).key && path.ahead.length === 0;
-  return own ? closePane(split, pane, true) : leavePane(split, pane);
 }
 
 /** A press in a pane focuses it. */
@@ -267,20 +303,20 @@ export function routeOpen(split: SplitState, entry: PanelEntry, phone = false): 
   return openInPane(split, pane, entry);
 }
 
-/** One line of a pane's path menu: what it is, and how far from where the pane stands (negative behind, 0 here, positive ahead). */
+/** One line of a pane's history menu: what it is, and how far from where the pane stands (negative behind, 0 here, positive ahead). */
 export interface PathLine {
   entry: PaneEntry;
   offset: number;
 }
 
-/** The pane's path, as its menu lists it (board 07, "This pane's path"): newest first, what › goes to above where it stands. */
+/** The pane's history, as its menu lists it (‹ held, or its last crumb pressed): newest first, what › goes to above where it stands. */
 export function historyOf(path: PanePath): PathLine[] {
   const ahead = path.ahead.map((entry, i) => ({ entry, offset: i + 1 })).reverse();
   const here = path.entries.map((entry, i) => ({ entry, offset: i - (path.entries.length - 1) })).reverse();
   return [...ahead, ...here];
 }
 
-/** A line of the path menu chosen: back to that level, or forward to it. */
+/** A line of the history menu chosen: back to that step, or forward to it. */
 export function walkTo(path: PanePath, offset: number): PanePath {
   if (offset < 0) return crumbTo(path, path.entries.length - 1 + offset);
   let at = path;
@@ -314,6 +350,30 @@ export function taskPaneEntryOf(taskId: string, project?: string): PanelEntry {
 }
 
 /**
+ * What an entry stands under, as a pane would open it: an artifact under its conversation; a run's
+ * subagent, a rerun, a command's terminal, a step of a task's run under its task. A conversation, a
+ * task, a state, the room's own view stand alone.
+ */
+export function parentOf(entry: PaneEntry): PaneEntry | undefined {
+  const published = publishedOfEntry(entry);
+  if (published !== undefined) return taskPaneEntryOf(published.ref.taskId, published.project);
+  if (entry.kind === "subagent" || entry.kind === "rerun" || entry.kind === "terminal") return taskPaneEntryOf(entry.taskId, entry.project);
+  if (entry.kind === "convo" && entry.step !== undefined) return taskPaneEntryOf(entry.taskId, entry.project);
+  return undefined;
+}
+
+/**
+ * Where an entry stands, outermost first and itself last: the crumbs of a pane's head (the person,
+ * 2026-11-24: "the breadcrumb is meant to be a resource path / hierarchy, not history"). The same
+ * whatever way the pane came to it.
+ */
+export function trailOf(entry: PaneEntry): PaneEntry[] {
+  const out: PaneEntry[] = [entry];
+  for (let up = parentOf(entry); up !== undefined && out.length < 8; up = parentOf(up)) out.unshift(up);
+  return out;
+}
+
+/**
  * An artifact as an entry: what the side panel and a pane hold for one. Keyed by the artifact's id, so
  * two artifacts of one title are two entries and two versions of one are the same place on a path.
  *
@@ -343,14 +403,6 @@ function sameVersion(a: PaneEntry, b: PaneEntry): boolean {
   return one === undefined || two === undefined || (one.ref.version === two.ref.version && one.follows === two.follows);
 }
 
-/**
- * An artifact's own path, as a pane opens it from its place button (the person, 2026-11-14): the task
- * it belongs to — its conversation — and the artifact on it, as if it had been walked to from there.
- * ‹ goes to its conversation.
- */
-export function artifactPathOf(ref: PublishedRef, project?: string, follows?: number): PanePath {
-  return { entries: [taskPaneEntryOf(ref.taskId, project), artifactEntryOf(ref, project, follows)], ahead: [] };
-}
 
 /** What stands on top of each place. */
 export interface PlacesAt {

@@ -4,15 +4,12 @@ import {
   NO_SPLIT,
   ROOM,
   artifactEntryOf,
-  artifactPathOf,
   followedSplit,
-  leaveArtifactPane,
   litPlacesOf,
-  openPathInPane,
   closePane,
-  crumbTo,
   dropZonesOf,
   focusOn,
+  followOf,
   focusRuleOf,
   historyOf,
   isSplit,
@@ -24,6 +21,7 @@ import {
   openInSplit,
   paneBack,
   paneForward,
+  parentOf,
   placeMoveOf,
   placesOffered,
   pushPath,
@@ -37,6 +35,7 @@ import {
   splitFits,
   swapPanes,
   taskPaneEntryOf,
+  trailOf,
   walkTo,
   zoneAt,
   type PaneEntry,
@@ -76,9 +75,9 @@ describe("the panes", () => {
     expect(paths(openInPane(split, 1, ROOM))).toEqual([["task:b"], ["task:a", "room"]]);
   });
 
-  it("walks a path: ‹ to the root and no further, › again, a crumb, the path menu", () => {
+  it("walks a history: ‹ to the first and no further, › again, the history menu", () => {
     let p = pushPath(pushPath(pushPath(path(task("a")), task("b")), task("c")), task("d"));
-    p = crumbTo(p, 1);
+    p = walkTo(p, -2);
     expect(keys(p.entries)).toEqual(["task:a", "task:b"]);
     expect(keys(p.ahead)).toEqual(["task:c", "task:d"]);
     expect(historyOf(p).map((l) => [l.entry.key, l.offset])).toEqual([
@@ -92,7 +91,20 @@ describe("the panes", () => {
     const root = paneBack(paneBack(p));
     expect(keys(root.entries)).toEqual(["task:a"]);
     expect(paneBack(root)).toBe(root);
-    expect(pushPath(p, task("a")).entries.length).toBe(1);
+    // Somewhere it has been is a new step, not a walk back: what was ahead goes.
+    expect(keys(pushPath(p, task("a")).entries)).toEqual(["task:a", "task:b", "task:a"]);
+    expect(keys(pushPath(p, task("a")).ahead)).toEqual([]);
+    // What › would go to is going forward.
+    expect(keys(pushPath(p, task("c")).ahead)).toEqual(["task:d"]);
+  });
+
+  it("says where an entry stands as its crumbs, whatever way the pane came to it", () => {
+    expect(keys(trailOf(task("a")))).toEqual(["task:a"]);
+    expect(keys(trailOf(artifactEntryOf(ref("x"), "p")))).toEqual(["task:t-1", "artifact:x"]);
+    expect(trailOf(artifactEntryOf(ref("x"), "p"))[0]).toEqual(taskPaneEntryOf("t-1", "p"));
+    expect(keys(trailOf({ kind: "rerun", key: "rerun:a", taskId: "a" }))).toEqual(["task:a", "rerun:a"]);
+    expect(keys(trailOf(ROOM))).toEqual(["room"]);
+    expect(parentOf({ kind: "state", key: "state:p:wf/a", stateId: "wf/a", project: "p", tab: "run" })).toBeUndefined();
   });
 });
 
@@ -150,8 +162,9 @@ describe("the room", () => {
     expect(paths(onChat)).toEqual([["task:c"]]);
     const both = openInSplit(onChat, task("c"));
     expect(paths(both)).toEqual([["task:c"], ["task:c"]]);
-    // Another conversation: the pane that held the room's goes on to it; the other keeps its own.
-    expect(paths(roomMoved(both, task("d")))).toEqual([["task:d"], ["task:c"]]);
+    // Another conversation: the focused pane, which holds the room's too, goes on to it; the other keeps its own.
+    expect(paths(roomMoved(both, task("d")))).toEqual([["task:c"], ["task:d"]]);
+    expect(paths(roomMoved(focusOn(both, 0), task("d")))).toEqual([["task:d"], ["task:c"]]);
     // Back to the room's own view (another room).
     expect(paths(roomMoved(onChat, ROOM))).toEqual([["room"]]);
   });
@@ -169,6 +182,72 @@ describe("the room", () => {
     expect(routeOpen(split, task("b"), true)).toBeNull();
     expect(routeOpen(NO_SPLIT, task("b"))).toBeNull();
     expect(routeOpen(roomMoved(NO_SPLIT, task("c")), task("b"))).toBeNull();
+  });
+
+  it("follows the focused pane's conversation: the room goes there, and no path moves", () => {
+    const onChat = roomMoved(NO_SPLIT, task("a"));
+    const split = openInSplit(onChat, task("b"));
+    expect(followOf(split)?.key).toBe("task:b");
+    const followed = roomMoved(split, task("b"));
+    expect(paths(followed)).toEqual([["task:a"], ["task:b"]]);
+    expect(followed.here.key).toBe("task:b");
+    expect(followOf(followed)).toBeNull();
+    // Back in the first pane: the room goes back to its conversation.
+    const back = focusOn(followed, 0);
+    expect(followOf(back)?.key).toBe("task:a");
+    expect(paths(roomMoved(back, task("a")))).toEqual([["task:a"], ["task:b"]]);
+    // A sidebar press then lands in the focused pane, which is the room's now.
+    expect(routeOpen(followed, task("c"))).toBeNull();
+    expect(paths(roomMoved(followed, task("c")))).toEqual([["task:a"], ["task:c"]]);
+    // On the start page, the room goes to it; on an artifact, it stays where it is.
+    const start = openInPane(onChat, 1, ROOM);
+    expect(followOf(start)).toBe(ROOM);
+    expect(paths(roomMoved(start, ROOM))).toEqual([["task:a"], ["room"]]);
+    expect(followOf(openInSplit(onChat, artifactEntryOf(ref("x"))))).toBeNull();
+  });
+
+  it("moving within the room goes on the pane's path, so each pane's ‹ and › walk its own history", () => {
+    const onChat = roomMoved(NO_SPLIT, task("a"));
+    // Come to the room: what was on top is dropped. Moved within it: a step on the pane's path.
+    expect(paths(roomMoved(onChat, task("b")))).toEqual([["task:b"]]);
+    const split = roomMoved(openInSplit(onChat, task("b")), task("b"));
+    const stepped = roomMoved(split, task("c"), undefined, true);
+    expect(paths(stepped)).toEqual([["task:a"], ["task:b", "task:c"]]);
+    // ‹ in the second pane: back to b, c ahead; the room follows it there, the path kept.
+    const back = onPane(stepped, 1, paneBack);
+    expect(followOf(back)?.key).toBe("task:b");
+    const followed = roomMoved(back, task("b"), undefined, true);
+    expect(paths(followed)).toEqual([["task:a"], ["task:b"]]);
+    expect(keys(followed.panes[1]!.ahead)).toEqual(["task:c"]);
+    // The first pane's history is its own: a step there leaves the second's alone.
+    const inFirst = roomMoved(focusOn(followed, 0), task("a"), undefined, true);
+    expect(paths(inFirst)).toEqual(paths(followed));
+    const first = roomMoved(inFirst, task("d"), undefined, true);
+    expect(paths(first)).toEqual([["task:a", "task:d"], ["task:b"]]);
+    expect(keys(first.panes[1]!.ahead)).toEqual(["task:c"]);
+    // The start page is a step too; what is opened from it takes its place. The board's own move
+    // under one key still shows the board.
+    const start = roomMoved(onChat, ROOM, undefined, true);
+    expect(paths(start)).toEqual([["task:a", "room"]]);
+    expect(paths(roomMoved(start, task("e"), undefined, true))).toEqual([["task:a", "task:e"]]);
+    expect(paths(roomMoved(roomMoved(NO_SPLIT, ROOM), task("e"), undefined, true))).toEqual([["task:e"]]);
+    const board = openInPane(NO_SPLIT, 0, task("x"));
+    expect(paths(roomMoved(board, ROOM, "y", true))).toEqual([["room"]]);
+  });
+
+  it("follows the focused pane's task by selecting it, the board staying where it is", () => {
+    const split = openInSplit(NO_SPLIT, task("a"));
+    expect(followOf(split, null)?.key).toBe("task:a");
+    expect(followOf(split, "a")).toBeNull();
+    expect(roomMoved(split, ROOM, "a")).toBe(split);
+    // The first pane, the board under a task on its path: the same, its path kept.
+    const mainOn = openInPane(split, 0, task("b"));
+    expect(followOf(mainOn, "a")?.key).toBe("task:b");
+    expect(roomMoved(mainOn, ROOM, "b")).toBe(mainOn);
+    // On the board, nothing to follow; another task selected there moves the board as it did.
+    const board = focusOn(openInSplit(NO_SPLIT, task("a")), 0);
+    expect(followOf(board, "z")).toBeNull();
+    expect(paths(roomMoved(board, ROOM, "z"))).toEqual([["room"], ["task:a"]]);
   });
 
   it("names what the room stands on, for the side panel", () => {
@@ -246,32 +325,33 @@ describe("the place buttons", () => {
     expect(pushPath(p, artifactEntryOf(ref("a", 2)))).toBe(p);
   });
 
-  it("opens an artifact in a pane on its own path: its conversation, then it", () => {
+  it("opens an artifact in a pane as a step in its history; its crumbs say it stands under its conversation", () => {
     const split = openInSplit(NO_SPLIT, task("b"));
-    const opened = openPathInPane(split, 1, artifactPathOf(ref("x", 3), "p"));
-    expect(paths(opened)).toEqual([["room"], ["task:t-1", "artifact:x"]]);
+    const opened = openInPane(split, 1, artifactEntryOf(ref("x", 3), "p"));
+    expect(paths(opened)).toEqual([["room"], ["task:b", "artifact:x"]]);
     expect(opened.focus).toBe(1);
-    expect(paths(openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x"))))).toEqual([["room"], ["task:t-1", "artifact:x"]]);
+    expect(paths(openInSplit(NO_SPLIT, artifactEntryOf(ref("x"))))).toEqual([["room"], ["artifact:x"]]);
+    expect(keys(trailOf(artifactEntryOf(ref("x", 3), "p")))).toEqual(["task:t-1", "artifact:x"]);
   });
 
-  it("moved away, closes a pane opened for it alone; any other path goes back a level", () => {
-    const own = openPathInPane(openInSplit(NO_SPLIT, task("b")), 1, artifactPathOf(ref("x")));
-    expect(paths(leaveArtifactPane(own, 1))).toEqual([["room"]]);
+  it("moved away, closes a pane opened for it alone; any other goes back a step", () => {
+    const own = openInSplit(NO_SPLIT, artifactEntryOf(ref("x")));
+    expect(paths(leavePane(own, 1))).toEqual([["room"]]);
     const walked = openInPane(openInSplit(NO_SPLIT, task("b")), 1, artifactEntryOf(ref("x")));
-    expect(paths(leaveArtifactPane(walked, 1))).toEqual([["room"], ["task:b"]]);
+    expect(paths(leavePane(walked, 1))).toEqual([["room"], ["task:b"]]);
   });
 
   it("goes on to a later publish in the run from the call it was opened from, and only then", () => {
     const later = ref("x", 5);
     const successors = new Map([["artifact://t-1/@x@2", later]]);
-    const followed = openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x", 2), undefined, 2));
+    const followed = openInPane(openInSplit(NO_SPLIT, task("t-1")), 1, artifactEntryOf(ref("x", 2), undefined, 2));
     const moved = followedSplit(followed, successors);
     expect(paths(moved)).toEqual([["room"], ["task:t-1", "artifact:x"]]);
     expect(publishedOfTop(moved.panes[1]!)?.version).toBe(5);
     // Now it follows v5's call, which nothing replaced.
     expect(followedSplit(moved, successors)).toBe(moved);
     // Opened at a version picked on purpose: it stays.
-    const pinned = openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x", 2)));
+    const pinned = openInSplit(NO_SPLIT, artifactEntryOf(ref("x", 2)));
     expect(followedSplit(pinned, successors)).toBe(pinned);
   });
 

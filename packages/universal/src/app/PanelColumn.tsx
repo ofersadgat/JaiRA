@@ -8,7 +8,7 @@ import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
-import { focusRuleOf, isRoom, setPath, type PaneEntry } from "@jaira/ui/splitModel";
+import { focusRuleOf, isRoom, leavePane, parentOf, pushPath, setPath, topOfPath, type PaneEntry } from "@jaira/ui/splitModel";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { useViews } from "@jaira/ui/useView";
@@ -69,7 +69,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   // With the right pane focused on a task, the panel is that task's context (board 10); else the room's rule.
   // So with the left pane's own path on a task (something dropped on it, or swapped in).
   const focusRule = splits ? focusRuleOf(split) : null;
-  // A link inside a pane's face goes on that pane's path: the face's stack is the path, as a panel stack.
+  // A link inside a pane's face is a step in that pane's history. The face steps a panel stack (whose
+  // push goes back to what is lower down, a trail); here what it lands on is all that is taken: the same
+  // place changed (a tab, a step, a version) is changed where it stands; somewhere else is a step there;
+  // the stack walked back (a fork, a form done) goes up to where what it showed stands, or back a step.
   const onPaneStack = useCallback(
     (pane: number) =>
       (step: (stack: PanelStack) => PanelStack): void => {
@@ -78,7 +81,14 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         if (path === undefined) return;
         const was: PanelStack = { ...EMPTY_STACK, entries: path.entries as readonly PanelEntry[], ahead: path.ahead as readonly PanelEntry[] };
         const next = step(was);
-        if (next !== was) splitView.set(setPath(now, pane, { entries: next.entries as readonly PaneEntry[], ahead: next.ahead as readonly PaneEntry[] }));
+        if (next === was) return;
+        const from = topOfPath(path);
+        const to = next.entries[next.entries.length - 1] as PaneEntry | undefined;
+        if (to === undefined || from === undefined) return splitView.set(leavePane(now, pane));
+        if (to.key === from.key) return splitView.set(setPath(now, pane, { entries: [...path.entries.slice(0, -1), to], ahead: path.ahead }));
+        const walkedBack = next.entries.length < path.entries.length && next.entries.every((entry, i) => entry.key === path.entries[i]?.key);
+        const up = walkedBack ? parentOf(from) : to;
+        splitView.set(up === undefined ? leavePane(now, pane) : setPath(now, pane, pushPath(path, up)));
       },
     [],
   );

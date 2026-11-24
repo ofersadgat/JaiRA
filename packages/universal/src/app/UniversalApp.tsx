@@ -219,6 +219,8 @@ function Frame(): JSX.Element {
             <>
               <Panes
                 at={state.selected}
+                // The focused pane's task is the selected one: the board stays where it is.
+                onFollow={(entry) => (entry.kind === "task" ? actions.select(entry.taskId, entry.project) : undefined)}
                 room={
                   <>
                     <BoardColumn />

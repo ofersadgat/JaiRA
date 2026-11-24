@@ -248,21 +248,24 @@ async function main(): Promise<void> {
     await settle(2000);
     check((await count("[data-pane]")) === 2, "the card's Split moved it out of the panel into a split");
 
-    // Focus on the second pane: a sidebar press goes on its path. The split stands on the page's own
-    // path, its conversation › it (the person, 2026-11-14): the conversation pressed is that path's
-    // first step, so the pane walks back to it, the page ahead.
-    check(JSON.stringify(await crumbs(HEAD(1))) === JSON.stringify([TITLE, PAGE]), `the split stands on the page's own path (${(await crumbs(HEAD(1))).join(" › ")})`);
+    // The split's crumbs say where the page stands, its conversation › it (the person, 2026-11-24:
+    // "the breadcrumb is meant to be a resource path / hierarchy, not history"). Focus on the second
+    // pane: a sidebar press is a step in its history.
+    check(JSON.stringify(await crumbs(HEAD(1))) === JSON.stringify([TITLE, PAGE]), `the split's crumbs: the page under its conversation (${(await crumbs(HEAD(1))).join(" › ")})`);
     await press(`[data-drag-task="${made.taskId}"] button`);
     await settle(3500);
-    check((await crumbs(HEAD(1))).join(" › ") === TITLE, `the sidebar row walked the focused pane back to the conversation (${(await crumbs(HEAD(1))).join(" › ")})`);
+    check((await crumbs(HEAD(1))).join(" › ") === TITLE, `the sidebar row took the focused pane to the conversation (${(await crumbs(HEAD(1))).join(" › ")})`);
     check((await count(`${PANE(1)} textarea`)) === 1, "the pane draws the conversation with its composer");
 
-    // The pane's path: ›, a crumb, the path menu.
+    // The pane's history: ‹, ›, a crumb, the history menu.
+    await press(`${HEAD(1)} [aria-label="Back"]`);
+    check((await paneName(1)) === PAGE, "‹ went back to the page");
     await press(`${HEAD(1)} [aria-label="Forward"]`);
-    check((await paneName(1)) === PAGE, "› came forward to the page");
-    await press(`${HEAD(1)} [aria-label="Back to ${TITLE}"]`);
-    check((await paneName(1)) === TITLE, `the crumb "${TITLE}" walked the pane back to it`);
-    await press(`${HEAD(1)} [aria-label="Forward"]`);
+    check((await paneName(1)) === TITLE, "› came forward to the conversation");
+    await press(`${HEAD(1)} [aria-label="Back"]`);
+    await press(`${HEAD(1)} [aria-label="Go to ${TITLE}"]`);
+    check((await paneName(1)) === TITLE, `the crumb "${TITLE}" went to it`);
+    await press(`${HEAD(1)} [aria-label="Back"]`);
     const back = await centre(`${HEAD(1)} [aria-label="Back"]`);
     if (back !== null) {
       await app.mouse("mousePressed", back);
@@ -272,7 +275,7 @@ async function main(): Promise<void> {
     }
     const pathItems = await app.evaluate<string[]>(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((e) => e.textContent)`);
     await app.shot("path-menu", undefined, false);
-    check(pathItems.length === 2 && pathItems[0]!.includes(PAGE) && pathItems[0]!.includes("here") && pathItems[1]!.includes(TITLE), `holding ‹ lists "This pane's path" (${pathItems.join(" | ")})`);
+    check(pathItems.length === 2 && pathItems[0]!.includes(TITLE) && pathItems[1]!.includes(PAGE) && pathItems[1]!.includes("here"), `holding ‹ lists "This pane's history", what › goes to above where it stands (${pathItems.join(" | ")})`);
     await app.press("Escape", 27);
     await settle(500);
     const verbsOf = async (i: number): Promise<string[]> => {

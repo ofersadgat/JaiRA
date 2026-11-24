@@ -5,8 +5,8 @@ import type { PanelEntry } from "@jaira/ui/panelStack";
 import {
   SPLIT_PANE_MIN,
   closePane,
-  crumbTo,
   focusOn,
+  followOf,
   historyOf,
   isRoom,
   isSplit,
@@ -16,6 +16,7 @@ import {
   openInPane,
   paneBack,
   paneForward,
+  pushPath,
   publishedOfEntry,
   rightWidthOf,
   ROOM,
@@ -26,6 +27,7 @@ import {
   splitFits,
   swapPanes,
   topOfPath,
+  trailOf,
   walkTo,
   type PaneEntry,
   type PanePath,
@@ -58,14 +60,14 @@ import { usePhone } from "./phone";
  *
  *   a pane's head    row, centred, gap 4, at least 40 tall, padding 0 6, a --line under (`PaneHead`):
  *                    on the pane at the window's left the sidebar's toggle (`|◂` / `▸|`, 26 square),
- *                    ‹ and › (26 square; --dim, at 0.4 where there is nowhere to go), the path as crumbs,
+ *                    ‹ and › (26 square; --dim, at 0.4 where there is nowhere to go) walking its history, where it stands as crumbs,
  *                    what stands on top's own controls, ⋯, and ✕ while split. Drawn while split, or while
  *                    the pane's path is more than the room; else the window's title bar says the room's
  *                    place, as it always did
  *   the crumbs       row, centred, gap 5, padding-left 4, app 12/12.5, --dim, one line, clipped; each
- *                    but the last a link back to it (--accent underlined hovered); the last 600 --text;
+ *                    but the last a link to it (its conversation, its task) (--accent underlined hovered); the last 600 --text;
  *                    an artifact's crumb led by its 16 glyph box (--panel-3, --accent). Pressing the
- *                    last, or holding ‹, lists "This pane's path" (newest first, here marked). The room on
+ *                    last, or holding ‹, lists "This pane's history" (newest first, here marked). The room on
  *                    top is its own address (`RoomAddress`: the Tasks room's crumbs, its run reading
  *                    toggle and New task; the conversation's name; the file's)
  *   on top's own     an artifact: its three place buttons (`PlaceButtons`), lit where it is — its body
@@ -185,7 +187,7 @@ interface Crumb {
 }
 
 /**
- * A pane's head (boards 07 and 09): ‹ › and the pane's path as crumbs, what is on top's own controls,
+ * A pane's head (boards 07 and 09): ‹ › walking the pane's history, where it stands as crumbs (`trailOf`), what is on top's own controls,
  * then ⋯ and (split) ✕. The same for every pane.
  */
 function PaneHead({ pane, path, crumbs, closable, lead, gutter, strip, onStep, onPath, onMenu, onClose }: {
@@ -215,7 +217,7 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, strip, onStep, o
       {lead ? <ShellSidebarToggle /> : null}
       <SpIcon icon="back" label="Back" disabled={path.entries.length <= 1} onPress={() => onStep(paneBack)} onLongPress={onPath} />
       <SpIcon icon="back" flip label="Forward" disabled={path.ahead.length === 0} onPress={() => onStep(paneForward)} />
-      <View role="navigation" aria-label="This pane's path" flexDirection="row" alignItems="center" gap={5} paddingLeft={4} minWidth={0} flexShrink={1} flexGrow={crumbs.at(-1)?.address === true ? 1 : 0} overflow="hidden">
+      <View role="navigation" aria-label="Where this pane is" flexDirection="row" alignItems="center" gap={5} paddingLeft={4} minWidth={0} flexShrink={1} flexGrow={crumbs.at(-1)?.address === true ? 1 : 0} overflow="hidden">
         {crumbs.map((crumb, i) => {
           const last = i === crumbs.length - 1;
           return (
@@ -233,13 +235,13 @@ function PaneHead({ pane, path, crumbs, closable, lead, gutter, strip, onStep, o
                   <RoomAddress />
                 </View>
               ) : last ? (
-                <Press onPress={onPath} label={`${crumb.label}: this pane's path`} title="This pane's path" {...({ "aria-haspopup": "menu" } as object)} minWidth={0} flexShrink={1}>
+                <Press onPress={onPath} label={`${crumb.label}: this pane's history`} title="This pane's history" {...({ "aria-haspopup": "menu" } as object)} minWidth={0} flexShrink={1}>
                   <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "text" }} ellip>
                     {crumb.label}
                   </Txt>
                 </Press>
               ) : crumb.to !== undefined ? (
-                <Press onPress={crumb.to} label={`Back to ${crumb.label}`} title={`Back to ${crumb.label}`} maxWidth={160}>
+                <Press onPress={crumb.to} label={`Go to ${crumb.label}`} title={`Go to ${crumb.label}`} maxWidth={160}>
                   {({ hovered }) => (
                     <Txt spec={{ voice: "app", scale: 12 / 12.5, color: hovered ? "accent" : "dim" }} ellip {...(hovered ? { textDecorationLine: "underline" } : {})}>
                       {crumb.label}
@@ -295,14 +297,19 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
   if (path === undefined || top === undefined) return null;
   const splitOn = isSplit(split);
   const onStep = (step: (path: PanePath) => PanePath): void => splitView.set(onPane(splitView.get(), pane, step));
-  const crumbs: Crumb[] = path.entries.flatMap((entry, i): Crumb[] => {
-    const to = (): void => onStep((was) => crumbTo(was, i));
-    if (isRoom(entry)) {
-      if (i === path.entries.length - 1) return [{ key: "room", label: roomCrumbs.join(" › "), address: true }];
-      return roomCrumbs.map((label, j) => ({ key: `room:${String(j)}`, label, ...(j === roomCrumbs.length - 1 ? { to } : {}) }));
-    }
-    return [{ key: entry.key, label: titleOf(entry), glyph: crumbGlyphOf(entry), to }];
-  });
+  // The crumbs say where what the pane shows stands (`trailOf`: an artifact under its conversation),
+  // not where the pane has been — that is ‹ and ›, and the history menu. One pressed goes there, a step.
+  const crumbs: Crumb[] = isRoom(top)
+    ? [{ key: "room", label: roomCrumbs.join(" › "), address: true }]
+    : trailOf(top).map((entry, i, all) => ({
+        key: entry.key,
+        label: titleOf(entry),
+        glyph: crumbGlyphOf(entry),
+        ...(i < all.length - 1 ? { to: () => onStep((was) => pushPath(was, entry)) } : {}),
+      }));
+  // A step in the history menu: the room's own view by its name when it is not what the pane shows (the
+  // room's crumbs say where it stands NOW, which the start page in the history is not).
+  const stepTitleOf = (entry: PaneEntry, here: boolean): string => (isRoom(entry) && !here ? (state.view === "chat" ? "New conversation" : (roomCrumbs[0] ?? "")) : titleOf(entry));
   const roomEntry = (): PanelEntry | null =>
     roomEntryOf(state.view, {
       chatTaskId: state.chat.taskId,
@@ -316,9 +323,9 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
   const onPath = (e: GestureResponderEvent): void =>
     setMenu({
       ...menuPointOf(e),
-      title: "This pane's path",
+      title: "This pane's history",
       items: historyOf(path).map((line) => ({
-        label: titleOf(line.entry),
+        label: stepTitleOf(line.entry, line.offset === 0),
         note: `${isRoom(line.entry) ? "the room" : line.entry.kind === "preview" ? "an artifact" : line.entry.kind === "state" ? "a state" : "the task"}${line.offset === 0 ? " · here" : ""}`,
         checked: line.offset === 0,
         onSelect: () => onStep((was) => walkTo(was, line.offset)),
@@ -339,7 +346,7 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
           onSelect: () => {
             if (carried === null) return;
             // The room stays where it is, the side panel opening on what it stands on; an artifact moves
-            // by its own move; anything else leaves this pane's path.
+            // by its own move; anything else is a step back in this pane's history.
             if (isRoom(top)) openInPanel(carried);
             else if (publishedOfEntry(carried) !== undefined) placeEntry("panel", carried, phone);
             else {
@@ -399,7 +406,18 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
  * where in the room it stands; when either moves, the room is shown (`roomMoved`). A phone has no
  * panes: the room alone.
  */
-export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: PaneEntry; at?: string | null | undefined; room: ReactNode; roomBox?: Record<string, unknown> }): JSX.Element {
+export function Panes({ here = ROOM, at: where, room, roomBox = {}, onFollow }: {
+  here?: PaneEntry;
+  at?: string | null | undefined;
+  room: ReactNode;
+  roomBox?: Record<string, unknown>;
+  /**
+   * The room goes on to what the focused pane shows (`followOf`): the focused pane is the main view as
+   * far as the rest of the app is concerned — the sidebar's selected row, the side panel, the address.
+   * A conversation (as a pane opens it), or the room's own view. None: the room stays where it is.
+   */
+  onFollow?: (entry: PaneEntry) => void;
+}): JSX.Element {
   const { state, actions } = useShell();
   const split = splitView.use();
   const phone = usePhone();
@@ -408,11 +426,28 @@ export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: P
   // What the room stands on, as a path's entry: by key, so the same place drawn again moves nothing.
   const at = useRef(here);
   at.current = here;
+  const whereNow = useRef(where);
+  whereNow.current = where;
   // And by where it is: a conversation moved to another workspace keeps its key, and is drawn there now.
   const whose = (here as { project?: string }).project;
+  // The first move is the window coming to this room (or opening on it): what was on top is dropped.
+  // Every later one is a step within the room, kept on the pane's path for its ‹ and ›.
+  const arrived = useRef(false);
   useEffect(() => {
-    if (!phone) splitView.set(roomMoved(splitView.get(), at.current));
+    if (phone) return;
+    splitView.set(roomMoved(splitView.get(), at.current, whereNow.current, arrived.current));
+    arrived.current = true;
   }, [here.key, whose, where, phone]);
+  // The focused pane on something else the room could stand on: the room follows it. After the room's
+  // own move above (an effect before this one), so a room just come to is not taken for the pane's.
+  const follow = useRef(onFollow);
+  follow.current = onFollow;
+  const following = phone || onFollow === undefined ? null : (followOf(split, where)?.key ?? null);
+  useEffect(() => {
+    if (following === null) return;
+    const entry = followOf(splitView.get(), whereNow.current);
+    if (entry !== null) follow.current?.(entry);
+  }, [following]);
   // The window's buttons are drawn over the top row's right end: the side panel's head keeps them clear
   // while it stands open; else the last pane's head does (less the folded panel's rail under them).
   const fit = useColumnsFit();

@@ -2,14 +2,11 @@ import { useMemo } from "react";
 import { close, openInSet, pop, push, type PanelEntry, type PanelStack, type ShownSet } from "@jaira/ui/panelStack";
 import {
   artifactEntryOf,
-  artifactPathOf,
   followedEntry,
   followedSplit,
-  leaveArtifactPane,
   leavePane,
   litPlacesOf,
   openInPane,
-  openPathInPane,
   paneOfPlace,
   placeMoveOf,
   publishedOfEntry,
@@ -29,8 +26,8 @@ import { artifactInMain, sheetAsk, splitHere, splitView } from "./viewState";
  * here, so a thing is put somewhere one way, and an artifact is never in two places after a move.
  *
  * In a room with panes (Tasks, Files, Chat on a computer), the main view is the first pane and a split
- * the second: an artifact put in a split stands on its own path, its conversation › it (the person,
- * 2026-11-14), ‹ going to its conversation; put in the main view it goes on that pane's path. Where there are no panes (a phone, the Debug room) the main
+ * the second: an artifact put in either is a step in that pane's history, its head's crumbs saying where
+ * it stands (its conversation › it), ‹ going back to what the pane showed. Where there are no panes (a phone, the Debug room) the main
  * view is an artifact drawn over the room (`artifactInMain`). The places are stores of their own
  * (`artifactInMain`, `splitView`, the panel's stack through `panelBridge.ts`), each drawn by its own
  * region; this is the one module that moves between them.
@@ -79,7 +76,8 @@ function leave(place: Place, id: string): void {
   if (place === "main" && artifactInMain.get()?.published.id === id) artifactInMain.set(null);
   const pane = paneOfPlace(place);
   const split = splitView.get();
-  if (publishedOfEntry(topOfPath(split.panes[pane]))?.ref.id === id) splitView.set(leaveArtifactPane(split, pane));
+  // The pane goes back a step; one that held nothing before it (opened for it) closes.
+  if (publishedOfEntry(topOfPath(split.panes[pane]))?.ref.id === id) splitView.set(leavePane(split, pane));
 }
 
 /** Put an entry in the side panel, on top of what it holds, and unfold it. */
@@ -99,14 +97,14 @@ export function closePanel(): void {
   panelOnStack.get()?.(close);
 }
 
-/** Put an entry on a pane's path: the first is the main view, the second a split (made if it was not). */
+/** Put an entry in a pane, a step in its history: the first is the main view, the second a split (made if it was not). */
 function openAt(place: "main" | "split", entry: PanelEntry): void {
   splitView.set(openInPane(splitView.get(), paneOfPlace(place), entry));
 }
 
 /**
  * An artifact to a place, MOVED there: closed wherever else it stood, any version of it
- * (`placeMoveOf`). In a split it stands on its own path (`artifactPathOf`). On a phone a split is the
+ * (`placeMoveOf`). In a pane it is a step in that pane's history. On a phone a split is the
  * main view, and the panel's sheet is lowered to its head so the artifact is seen. `follows`: the call
  * it was opened from, which it goes on from (`artifactEntryOf`). `within`: the set one `show_artifact` call
  * showed it in, which the side panel opens it in (conversation › the set › it, `openInSet`) so the
@@ -119,10 +117,9 @@ export function placeArtifact(target: Place, ref: PublishedRef, artifacts: Artif
   if (open === "panel" && within !== undefined) openSetInPanel(within.set, within.index);
   else if (open === "panel") openInPanel(entry);
   else if (splitHere.get() && !phone) {
-    // A split stands on the artifact's own path; the main view goes on from what it shows, which is
-    // often the room's own view (the Tasks room's board) — ‹ goes back to it.
-    if (open === "split") splitView.set(openPathInPane(splitView.get(), paneOfPlace(open), artifactPathOf(ref, artifacts.project, follows)));
-    else openAt(open, entry);
+    // A step in that pane's history: ‹ goes back to what it showed (a split made for it has nothing
+    // before it). Its head's crumbs say where it stands: its conversation › it.
+    openAt(open, entry);
   } else {
     artifactInMain.set({ published: ref, artifacts });
     if (phone) sheetAsk.set({ detent: "peek", at: Date.now() });

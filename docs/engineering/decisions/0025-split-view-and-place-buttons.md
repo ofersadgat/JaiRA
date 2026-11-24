@@ -35,15 +35,25 @@ column was always one thing: the room's own.
    is one pane, or two side by side (two at most) with a divider between them whose width is
    remembered like any pane (`PANE.splitRight`). Each goes the whole way top to bottom, its head at
    the window's top. The panes are IDENTICAL but for their paths: one component, the same head — ‹ Back,
-   › Forward, the pane's path as crumbs (every crumb but the last walks the pane back to it), ⋯, ✕ —
-   and the same view for the same path, to the pixel. Holding ‹, or pressing the last crumb, lists "This
-   pane's path", newest first, the current one marked. One pane is the unsplit main view.
+   › Forward walking the pane's history, crumbs saying where what it shows stands (as amended
+   2026-11-24: not its history), ⋯, ✕ — and the same view for the same place, to the pixel. Holding ‹,
+   or pressing the last crumb, lists "This pane's history", newest first, the current one marked. One
+   pane is the unsplit main view.
 4. **Anything can go in a pane (06), as the real view:** a conversation is the Chat room's thread with
    its composer, a task's run its run, an artifact the artifact — not a side panel's face. The room's
    own view is an entry like these, on whichever pane holds it.
 5. **Focus.** The pane last pressed in is focused: a 2px --accent line along its top (never a coloured
    left edge). A row pressed in the sidebar's Chat or Tasks list lands in the focused
-   pane.
+   pane. The focused pane is the main view as far as the rest of the app is concerned (the person,
+   2026-11-24: "whatever panel is focused should be treated as the active/main panel"): the room
+   follows it (`followOf`) — in Chat the focused pane's conversation is the open one (its start page,
+   none), in Tasks its task is the selected one, the board staying where it is — so the sidebar's
+   selected row, the side panel and the address are the focused pane's. Following moves no path
+   (`roomMoved`); a pane on an artifact, a state or a run's subagent leaves the room where it was.
+   Each pane keeps its own history (the person, 2026-11-24: "each pane should have its own history
+   that the arrows should navigate through"): the room moving within itself — a sidebar row, a new
+   conversation — is a step on the focused pane's path, which its ‹ and › walk; only the window coming
+   to a room drops what was on top, and the start page is taken the place of by what is opened from it.
 6. **The side panel follows the focused pane (10).** With the focused pane on a task of its own path,
    the panel is that task's context; on the room, the room's rule as before.
 7. **The pane's ⋯ menu (12)**, the same on either pane: Swap the panes, Only this pane, Move to the
@@ -128,12 +138,37 @@ panes, each pane photographed while the other is focused (neither focused in its
 panes equally wide at an even width; and the unsplit main view of the conversation at the pane's width
 against the pane's content. The numbers are in the build's commit.
 
+## Amended 2026-11-24: crumbs are where a pane stands, ‹ › where it has been
+
+The person: "why did you make the header a breadcrumb of the history? the breadcrumb is meant to be a
+resource path / hierarchy, not history", then "Yes, build it". Until then a pane's one list was both:
+its entries were its crumbs and what ‹ walked back along, so every step a pane took became a crumb
+("A › B › C" for three conversations opened in turn), and pressing a crumb lower down cut the list
+there. They are two things now:
+
+- **A pane's path is its history** (`PanePath`: where it has been, oldest first, what it shows last;
+  what › goes forward to in `ahead`). Every opening is a step on the pane it lands in — a sidebar row,
+  a link inside it, a place button, a crumb — and somewhere it has been before is a new step, not a
+  walk back (`pushPath`). ‹ and › walk it, and holding ‹ (or pressing the last crumb) lists "This
+  pane's history". The Chat start page is the one step that what is opened from it takes the place of.
+- **The crumbs say where what it shows stands** (`trailOf`, `parentOf`), whatever way the pane came to
+  it: an artifact under its conversation; a run's subagent, a rerun, a command's terminal, a step of a
+  run under its task; a conversation, a task, a state, the room's own view alone. Each crumb but the
+  last goes there ("Go to …"), a step.
+- **An artifact is opened in a pane as a step** like anything else (`artifactPathOf` and
+  `openPathInPane`, which put the conversation › artifact trail in as history, are gone): its crumbs
+  say it stands under its conversation; ‹ goes back to what the pane showed. Moved to another place,
+  its pane goes back a step, or closes if it held nothing before it (`leavePane`).
+- **A link inside a pane's face** (a face steps a panel stack, whose push walks back to what is lower
+  down) is taken by where it lands (`PanelColumn`'s `onPaneStack`): the same place changed is changed
+  where it stands; somewhere else is a step; the stack walked back goes up to the shown entry's parent.
+
 ## The model
 
-A pane's path is a panel stack's shape (`entries`, what › goes forward to in `ahead`) of the side
-panel's entry kinds and the room. `splitModel.ts` is pure: the panes, which is focused, which tab shows
-when narrow; ‹ › and crumbs (`paneBack`, `paneForward`, `crumbTo`, `pushPath`); the path's menu
-(`historyOf`, `walkTo`); opening on a pane's path (`openInPane`, `openInSplit`); closing, Only this pane
+A pane's path is its history, in a panel stack's shape (`entries`, what › goes forward to in `ahead`)
+of the side panel's entry kinds and the room. `splitModel.ts` is pure: the panes, which is focused, which
+tab shows when narrow; ‹ › (`paneBack`, `paneForward`, `pushPath`); the crumbs (`trailOf`, `parentOf`);
+the history's menu (`historyOf`, `walkTo`); opening on a pane's path (`openInPane`, `openInSplit`); closing, Only this pane
 and Swap (`closePane`, `onlyPane`, `swapPanes`); the room moving to stand on `here` (`roomMoved`);
 where a press from the sidebar lands (`routeOpen`: the room goes there itself while the focused pane
 stands on `here`, else the pane goes on); the panel's rule (`focusRuleOf`); a place button's move (`placeMoveOf`,
