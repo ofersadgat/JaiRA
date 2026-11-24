@@ -250,12 +250,12 @@ describe("the tools that always ask (decision 0019 §6)", () => {
     return { tools, asked };
   };
 
-  it("asks before `power` and `install_software` even where the set allows them", async () => {
-    const { tools, asked } = gated({ power: "allow", install_software: "allow", list_processes: "allow", other: "deny" });
+  it("asks before `power` and `install_program` even where the set allows them", async () => {
+    const { tools, asked } = gated({ power: "allow", install_program: "allow", list_processes: "allow", other: "deny" });
     await Promise.resolve(tools["power"]!.run({ action: "lock" } as never, {} as never)).catch(() => undefined);
-    await Promise.resolve(tools["install_software"]!.run({ action: "install", id: "jqlang.jq" } as never, {} as never)).catch(() => undefined);
+    await Promise.resolve(tools["install_program"]!.run({ action: "install", id: "jqlang.jq" } as never, {} as never)).catch(() => undefined);
     await tools["list_processes"]!.run({} as never, {} as never);
-    expect(asked).toEqual(["power", "install_software"]);
+    expect(asked).toEqual(["power", "install_program"]);
   });
 
   it("does not, with the built-ins switched off", async () => {

@@ -420,7 +420,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
       // tools of decision 0010 follow the web tools, then the CI tools of decision 0016, then `wait_for_event`
       // with the tasks and workflows. The System tools of decision 0019 sit between the shell and the web.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "read_process", "wait_process", "list_services", "control_service", "list_software", "install_software", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "list_skills", "load_skill", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "read_process", "wait_process", "list_services", "control_service", "list_programs", "install_program", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "list_skills", "load_skill", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -456,8 +456,8 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           wait_process: "allow",
           list_services: "allow",
           control_service: "deny",
-          list_software: "allow",
-          install_software: "deny",
+          list_programs: "allow",
+          install_program: "deny",
           read_settings: "allow",
           write_settings: "deny",
           read_clipboard: "allow",

@@ -13,12 +13,15 @@ import { functionRulesOverlay } from "@jaira/ui/modelsPageModel";
 import { FunctionsSections } from "./FunctionsSections";
 import { goToPart } from "./parts";
 import { PermissionSetsSection } from "./permissions/PermissionSets";
+import { ToolMappingSection } from "./ToolMappingSection";
+import { PlaceSetsSection } from "./PlaceSetsSection";
+import { useView } from "@jaira/ui/useView";
 import { standingLayersOf } from "@jaira/ui/permissionSetsHost";
 import { useSettingsWhere } from "./layers";
 
 /**
- * Settings → Tools: the permission sets, the functions a run can call, the events and the automations
- * — `PermissionSetsSection`, `FunctionsSections`, `EventsSection` and `AutomationsSection`, wired to
+ * Settings → Tools: the permission sets, the tool mapping, the functions a run can call, the events and
+ * the automations — `PermissionSetsSection`, `ToolMappingSection`, `FunctionsSections`, `EventsSection` and `AutomationsSection`, wired to
  * the shell here. The channels and the MCP servers' state are `settingsShell.ts`'s and `mcpData.ts`'s.
  */
 export function ToolsPage(): JSX.Element {
@@ -36,11 +39,32 @@ export function ToolsPage(): JSX.Element {
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>(undefined);
   const editable = config !== null;
   const eventsProject = eventsProjectOf(state.configLayer, at);
+  // The machine's projects folder: the place sets' `root folder`.
+  const machines = useView("machines:view", machine !== undefined ? { machine } : {}).value;
   // A paired machine the path names: its watcher's word, asked there (the engine forwards a request naming it).
   const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject, ...(machine !== undefined ? { machine } : {}) }), `${machine ?? ""}:${eventsProject}`);
   return (
     <>
       <PermissionSetsSection key={`${machine ?? ""}:${at ?? "shared"}`} channel={channel} layer={state.configLayer} busy={state.busy} focus={focus} onData={setData} mcp={mcp.report?.servers} standing={standing} />
+      <ToolMappingSection
+        effective={config?.effective}
+        layerDoc={config?.[state.configLayer] ?? null}
+        locked={state.busy || !editable}
+        onWrite={(writes) => {
+          if (config === null) return;
+          void actions.saveConfig(state.configLayer, withPaths(config[state.configLayer], writes), writes.map(([path]) => path));
+        }}
+      />
+      <PlaceSetsSection
+        effective={config?.effective}
+        layerDoc={config?.[state.configLayer] ?? null}
+        projectsFolder={machines?.self.projectsFolder}
+        locked={state.busy || !editable}
+        onWrite={(writes) => {
+          if (config === null) return;
+          void actions.saveConfig(state.configLayer, withPaths(config[state.configLayer], writes), writes.map(([path]) => path));
+        }}
+      />
       <FunctionsSections
         data={data}
         layer={state.configLayer}

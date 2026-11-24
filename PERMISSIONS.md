@@ -184,7 +184,7 @@ desktop, not on a place in the workspace: a process, a service, a setting, the c
 screen. No scope table narrows them; their line's mode answers alone, and the shell's commands that do the
 same (`kill`, `Stop-Process`, `taskkill`) answer to the same line. What protects the machine is in the tools
 themselves — JaiRA's own processes and windows are refused — and in the two that always ask, `power` and
-`install_software`.
+`install_program`.
 
 ---
 

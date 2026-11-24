@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0023-overlays-and-scopes">
+<meta name="state" content="the permission editor · layers as sets of answer columns, interactive">
+<meta name="captured" content="2026-11-23">
+<meta name="reflects" content="proposed">
+<title>The permission board · layers as columns</title>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff;
+  --tok-hint: #949cad; --p0: #737b8d; --p1: #3f76d4; --p2: #b57a1c; --p3: #7d5fc7; --ws-tool: #a8508a; --ws-run: #3d7a4c; --ws-read: #2f8a9e;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --a-allow: var(--ok); --a-smart: var(--p3); --a-ask: var(--warn); --a-deny: var(--bad); --a-off: var(--dim);
+  --solid-ink: #fff;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72;
+  --fill-accent: #5a5fe0;
+  --tok-hint: #5f6779; --p0: #8b93a7; --p1: #6e9df0; --p2: #d7a145; --p3: #a98ee6; --ws-tool: #e08cc6; --ws-run: #7ccf8e; --ws-read: #6cc3d6;
+  --lift: 0 18px 50px rgba(0,0,0,.5);
+  --solid-ink: #0f1017;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 24px 28px 80px; }
+svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+code { font: 500 11.5px var(--font-data); }
+h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 980px; margin: 0 0 14px; }
+
+/* controls */
+.bar { position: sticky; top: 0; z-index: 8; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 0 12px; background: var(--bg); }
+.tg2 { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--font-app); color: var(--dim); cursor: pointer; user-select: none; }
+.tg2 input { accent-color: var(--accent); }
+.lyr { display: inline-flex; align-items: center; gap: 6px; font: 500 11.5px var(--font-app); color: var(--dim); border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 3px 10px 3px 7px; cursor: pointer; user-select: none; }
+.lyr .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--lc); }
+.lyr.off { opacity: .45; } .lyr.off .sw { background: none; border: 1.5px solid var(--lc); }
+.btn { font: 500 12px var(--font-app); color: var(--accent); background: none; border: 1px solid transparent; border-radius: 7px; padding: 5px 8px; cursor: pointer; }
+.btn:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.sep { width: 1px; height: 18px; background: var(--line); }
+.log { font: 400 12px var(--font-app); color: var(--dim); margin: 10px 0 0; min-height: 20px; }
+.log b { color: var(--text); }
+.notes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; max-width: 1320px; margin: 18px 0 0; font-size: 12px; color: var(--dim); }
+.notes div { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.notes b { color: var(--text); }
+
+/* the board */
+.float { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); overflow: hidden; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.fhead .t { font-weight: 600; font-size: 12.5px; }
+.hint { color: var(--tok-hint); font-size: 11px; }
+.scroller { overflow-x: auto; }
+.r { display: grid; grid-template-columns: var(--cols); width: max-content; min-width: 100%; --rowbg: var(--panel); }
+.r > div { background: var(--tint, transparent), var(--rowbg); background: linear-gradient(var(--tint, transparent), var(--tint, transparent)), var(--rowbg); }
+.r > .c { padding: 3px 4px; display: flex; flex-wrap: wrap; align-items: center; align-content: center; border-left: 1px solid var(--panel-2); min-width: 0; }
+.r > .lab { padding: 0 10px 0 12px; display: flex; align-items: center; gap: 8px; min-width: 0; position: sticky; left: 0; z-index: 3; }
+.r > .res { position: sticky; z-index: 2; }
+.r > .res.lastres { box-shadow: 6px 0 8px -6px rgba(0,0,0,.2); }
+.r > .res.firstres { box-shadow: -6px 0 8px -6px rgba(0,0,0,.25); border-left: 2px solid var(--text) !important; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--panel); }
+.seg button { font: 500 12px var(--font-app); color: var(--dim); background: none; border: 0; border-right: 1px solid var(--line); padding: 6px 12px; cursor: pointer; }
+.seg button:last-child { border-right: 0; }
+.seg button.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); font-weight: 600; }
+.gh .on { font: 700 11px var(--font-data); color: var(--lc); margin-right: -2px; }
+.r > .gstart { border-left: 2px solid var(--lc) !important; }
+.c.allow { --tint: color-mix(in srgb, var(--a-allow) 4%, transparent); } .c.smart { --tint: color-mix(in srgb, var(--a-smart) 4%, transparent); }
+.c.ask { --tint: color-mix(in srgb, var(--a-ask) 4%, transparent); } .c.deny { --tint: color-mix(in srgb, var(--a-deny) 4%, transparent); }
+.c.off { --tint: color-mix(in srgb, var(--rule) 10%, transparent); }
+.c.lay.coll { --tint: color-mix(in srgb, var(--lc) 4%, transparent); }
+.c.over { --tint: color-mix(in srgb, var(--accent) 16%, transparent) !important; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
+.c.no { --tint: color-mix(in srgb, var(--bad) 8%, transparent) !important; }
+
+/* headers */
+.r.h1 > div { padding: 8px 8px 4px; border-bottom: 0; }
+.r.h1 .gh { display: flex; align-items: center; gap: 6px; font: 650 12px var(--font-app); color: var(--text); cursor: pointer; min-width: 0; white-space: nowrap; overflow: hidden; }
+.r.h1 .gh .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--lc); flex: none; }
+.r.h1 .gh .wh { font: 400 10px var(--font-app); color: var(--tok-hint); overflow: hidden; text-overflow: ellipsis; }
+.r.h1 .gh .chev { width: 10px; height: 10px; color: var(--tok-hint); }
+.r.h1 .gcoll .chev { transform: rotate(-90deg); }
+.r.h1 > .gstart { box-shadow: inset 0 3px 0 var(--lc); }
+.r.h1 > .res { box-shadow: inset 0 3px 0 var(--text); }
+.r.h2 > div { padding: 3px 6px 6px; font: 600 10.5px var(--font-app); border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+.ah { display: inline-flex; align-items: center; gap: 5px; color: var(--a); }
+.ah::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--a); }
+.ah.allow { --a: var(--a-allow); } .ah.smart { --a: var(--a-smart); } .ah.ask { --a: var(--a-ask); } .ah.deny { --a: var(--a-deny); } .ah.off { --a: var(--a-off); }
+.ah.any { --a: var(--lc); }
+
+/* levels: A, bands and threads */
+.lv1, .lv2 { cursor: pointer; }
+.lab .chev { width: 10px; height: 10px; color: var(--tok-hint); transition: transform .12s; }
+.closed > .lab .chev { transform: rotate(-90deg); }
+.lab .nm { font-weight: 700; }
+.lab .sub { display: block; font: 400 10px var(--font-data); color: var(--tok-hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lab .txt { min-width: 0; display: flex; flex-direction: column; }
+.tile { display: inline-grid; place-items: center; flex: none; }
+.vb { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex: none; }
+.also { display: inline-flex; font: 500 9.5px var(--font-app); color: var(--accent); border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 99px; padding: 0 6px; white-space: nowrap; }
+[data-kind=path] { --k: var(--ws-read); } [data-kind=site] { --k: var(--p1); } [data-kind=br] { --k: var(--p3); }
+[data-kind=prog] { --k: var(--ws-run); } [data-kind=mach] { --k: var(--p0); } [data-kind=tool] { --k: var(--ws-tool); }
+.lv1 { --rowbg: color-mix(in srgb, var(--k) 13%, var(--panel)); }
+.lv1 > div { border-top: 2px solid color-mix(in srgb, var(--k) 40%, var(--line)); min-height: 52px; }
+.lv1 > .c { border-left-color: color-mix(in srgb, var(--k) 14%, transparent); --tint: transparent !important; }
+.lv1 > .lab { box-shadow: inset 5px 0 0 var(--k); padding-left: 16px; }
+.lv1 .nm { font-size: 14.5px; }
+.lv1 .tile { width: 28px; height: 28px; border-radius: 8px; background: var(--k); color: var(--panel); }
+.lv1 .tile svg.i { width: 15px; height: 15px; stroke-width: 2.1; }
+.lv1.openres > .lab { grid-column: 1 / span var(--span); }
+.lv2 > div { border-top: 1px solid var(--panel-2); min-height: 40px; }
+.lv2 > .lab { padding-left: 46px; }
+.lv2 > .lab::before { content: ""; position: absolute; left: 28px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.lv2 > .lab::after { content: ""; position: absolute; left: 28px; top: calc(50% - 1px); width: 12px; height: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.lv2.last.closed > .lab::before, .lv2.last.noTools > .lab::before { bottom: 50%; }
+.lv2 .vb { font: 650 12px var(--font-app); color: var(--k); background: color-mix(in srgb, var(--k) 15%, var(--panel)); border: 1px solid color-mix(in srgb, var(--k) 50%, transparent); border-radius: 7px; padding: 3px 9px; }
+.lv2 .vb svg.i { width: 12px; height: 12px; }
+.lv3 { --rowbg: color-mix(in srgb, var(--panel-3) 75%, var(--panel)); }
+.lv3 > div { border-top: 1px dashed color-mix(in srgb, var(--rule) 55%, transparent); min-height: 28px; }
+.lv3 > .c { --tint: transparent !important; }
+.lv3 > .lab { padding-left: 74px; font: 500 10.5px var(--font-data); color: var(--dim); }
+.lv3 > .lab::before { content: ""; position: absolute; left: 28px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.lv3.lastacc > .lab::before { display: none; }
+.lv3 > .lab::after { content: ""; position: absolute; left: 54px; top: 0; bottom: 0; width: 12px; border-left: 1.5px solid color-mix(in srgb, var(--k) 45%, transparent); }
+.lv3.lasttool > .lab::after { bottom: 50%; border-bottom: 1.5px solid color-mix(in srgb, var(--k) 45%, transparent); border-bottom-left-radius: 4px; }
+.lv3:not(.lasttool) > .lab { background: linear-gradient(color-mix(in srgb, var(--k) 45%, transparent), color-mix(in srgb, var(--k) 45%, transparent)) 54px 50% / 10px 1.5px no-repeat, var(--rowbg); }
+.lv3 .pl { font-size: 10px; padding: 2px 4px; }
+
+/* chips */
+.pl { --c: var(--dim); display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1 var(--font-data); color: var(--text); background: color-mix(in srgb, var(--c) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: 6px; padding: 3px 5px; margin: 2px; white-space: nowrap; cursor: grab; box-shadow: 0 1px 1px rgba(0,0,0,.05); max-width: calc(100% - 4px); }
+.pl > .nm2 { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.pl svg.i { width: 11px; height: 11px; color: var(--c); stroke-width: 2.1; }
+.pl[data-k=dir] { --c: var(--ws-read); } .pl[data-k=cred] { --c: var(--warn); } .pl[data-k=jaira], .pl[data-k=key] { --c: var(--bad); }
+.pl[data-k=site] { --c: var(--p1); } .pl[data-k=br] { --c: var(--p3); } .pl[data-k=prog] { --c: var(--ws-run); }
+.pl[data-k=own] { --c: var(--ws-tool); } .pl[data-k=act] { --c: var(--p3); } .pl[data-k=area] { --c: var(--p2); } .pl[data-k=mach] { --c: var(--p0); }
+.pl[data-k=any] { --c: var(--tok-hint); border-style: dashed; }
+.pl[data-k=tool] { --c: var(--ws-tool); }
+.pl.from { border-left: 3px solid var(--lc); }
+.pl.dragging { opacity: .35; }
+.pl.shadow { opacity: .42; text-decoration: line-through; text-decoration-color: var(--tok-hint); box-shadow: none; }
+.pl .tg { display: inline-flex; gap: 1px; margin-left: 1px; flex: none; }
+.pl .tg i { font-style: normal; padding: 2px; border-radius: 3px; background: var(--panel-3); display: inline-grid; place-items: center; }
+.pl .tg i svg.i { width: 9px; height: 9px; color: var(--dim); stroke-width: 2.2; }
+.pl .ad { width: 7px; height: 7px; border-radius: 50%; background: var(--a); flex: none; }
+.pl .sb { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; background: var(--fill-accent); flex: none; }
+.pl .sb svg.i { width: 9px; height: 9px; color: var(--on-accent); }
+.pl.new { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent); }
+.pl.mix { background: repeating-linear-gradient(135deg, var(--panel) 0 5px, color-mix(in srgb, var(--warn) 14%, var(--panel)) 5px 7px); }
+.pl .mx { font: 700 8.5px/1 var(--font-app); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: 3px; padding: 1px 3px; flex: none; }
+.L-session { --lc: var(--accent); } .L-you { --lc: var(--ws-tool); } .L-project { --lc: var(--p2); } .L-shared { --lc: var(--p1); } .L-built { --lc: var(--p0); } .L-result { --lc: var(--text); }
+.noicons .vb svg.i, .noicons .pl .tg { display: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10"/><path d="M18 10c0 4-6 3-12 7"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+<symbol id="i-any" viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M5 8l14 8"/><path d="M19 8 5 16"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m17 6 3 3"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h2"/><path d="M10 17h10"/><circle cx="8" cy="17" r="2"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13h6l-1 8 8-10h-6Z"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m6 11 6 6 6-6"/><path d="M5 20h14"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V8"/><path d="m6 13 6-6 6 6"/><path d="M5 4h14"/></symbol>
+<symbol id="i-merge" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 4 5 5 10 5"/></symbol>
+<symbol id="i-hand" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6Z"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 7a8 8 0 1 0 11.4 0"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M9 4h6v3H9Z"/><path d="M9 5.5H6v15h12v-15h-3"/></symbol>
+</defs></svg>
+
+<h1>The permission board · layers as columns</h1>
+<p class="lede">Each <b>layer</b> is a set of answer columns, and a chip sits in the layer that sets it, in the column of its answer there. The same board opens two ways. <b>From the shield</b> it builds up: the <b>root set</b> the state names first, then each layer on top of it, oldest to newest, then the <b>Result</b>, frozen on the right. <b>From the Tools view</b> it starts from the Result alone; <b>Show the source permission sets</b> lays the layers out beside it, newest first. In both, a Result chip has an edge in the colour of the layer it came from, and a chip a newer layer overrules at the same place is <span style="text-decoration: line-through; opacity: .6">struck through</span>.</p>
+
+<div class="bar">
+ <div class="seg" id="mode"><button data-m="shield" class="on">From the shield · root first</button><button data-m="tools">From the Tools view · result first</button></div>
+ <span class="sep"></span>
+ <span class="hint">Layers</span><span id="lyrs" style="display: contents"></span>
+ <span class="sep"></span>
+ <label class="tg2"><input type="checkbox" id="used" checked>Only the answers a layer uses</label>
+ <label class="tg2"><input type="checkbox" id="icons" checked>Access icons</label>
+ <label class="tg2"><input type="checkbox" id="dark">Dark</label>
+ <span class="sep"></span>
+ <button class="btn" id="openall">Open all</button><button class="btn" id="closeall">Close all</button><button class="btn" id="reset">Reset</button>
+</div>
+
+<div class="float">
+ <div class="fhead" id="fhead"></div>
+ <div class="scroller" id="scroller"><div id="board"></div></div>
+</div>
+<div class="log" id="log"></div>
+
+<div class="notes">
+ <div><b>Moving within a layer</b> changes that layer's answer. Drag a chip from one column to another in its own row, inside one layer's columns. The Result follows.</div>
+ <div><b>Moving between layers</b> moves the place to the other layer, with the answer of the column you drop it in. Drop it on a <b>collapsed</b> layer to keep its answer. <b>Built in</b> can't be changed: a chip dragged out of it is copied.</div>
+ <div><b>Moving in the Result</b> answers for this session, like "allow for this session" in a request. Dragging a Result chip onto a layer <b>keeps</b> that answer there.</div>
+</div>
+
+<script>
+const ANS = ["allow", "smart", "ask", "deny", "off"];
+const STRICT = { allow: 0, smart: 1, ask: 2, deny: 3, off: 4 };
+const KICON = { dir: "folder", cred: "lock", key: "key", jaira: "jaira", site: "globe", br: "branch", prog: "term", own: "user", act: "act", area: "sliders", mach: "monitor", any: "any", tool: "tool" };
+const RICON = { path: "folder", site: "globe", br: "branch", prog: "term", mach: "monitor", tool: "tool" };
+const LAYERS = [
+  { id: "session", name: "This session", where: "this conversation, until it ends" },
+  { id: "you", name: "Just you", where: "your settings, on every machine" },
+  { id: "project", name: "Project", where: "JaiRA/.jaira" },
+  { id: "shared", name: "Shared", where: "settings shared with the team" },
+  { id: "built", name: "Root set · auto", where: "the set the state names: built in chat/auto, read only", ro: true },
+];
+const LNAME = Object.fromEntries(LAYERS.map((l) => [l.id, l.name]));
+const STRUCT = [
+  { id: "files", name: "Files", kind: "path", accs: [
+    { id: "read", name: "Read", icon: "eye", tools: ["read_file", "glob", "grep", "write_clipboard"] },
+    { id: "write", name: "Write", icon: "pen", tools: ["edit", "write_file"] },
+    { id: "run", name: "Run", icon: "play", tools: ["shell", "script", "runner:*"] },
+    { id: "open", name: "Open", icon: "ext", tools: ["open_app"] } ] },
+  { id: "sites", name: "Sites", kind: "site", accs: [
+    { id: "fetch", name: "Fetch", icon: "down", tools: ["web_fetch"] },
+    { id: "open", name: "Open", icon: "ext", tools: ["open_app"] } ] },
+  { id: "branches", name: "Branches", kind: "br", accs: [
+    { id: "push", name: "Push", icon: "up", tools: ["git_push"] },
+    { id: "merge", name: "Merge", icon: "merge", tools: ["git_merge"] } ] },
+  { id: "programs", name: "Programs", kind: "prog", accs: [
+    { id: "see", name: "See", icon: "eye", tools: ["list_processes", "read_process", "wait_process"] },
+    { id: "control", name: "Control", icon: "hand", tools: ["stop_process", "open_app", "control_input"] },
+    { id: "screen", name: "Screen", icon: "camera", tools: ["screenshot", "list_windows"] } ] },
+  { id: "machine", name: "Machine", kind: "mach", accs: [
+    { id: "read", name: "Read", icon: "eye", tools: ["read_system", "read_settings"] },
+    { id: "change", name: "Change", icon: "pen", tools: ["write_settings"] },
+    { id: "power", name: "Power", icon: "power", tools: ["power"] },
+    { id: "clipboard", name: "Clipboard", icon: "clip", tools: ["read_clipboard", "write_clipboard"] } ] },
+  { id: "other", name: "Other tools", kind: "tool", other: true, accs: ["list_tasks", "load_skill", "wait_for_event", "web_search", "hold_task", "github·search_code"].map((n) => ({ id: n, name: n, icon: "tool", tools: [] })) },
+];
+const EV = "tool:everywhere";
+function seed() {
+  return {
+    built: {
+      "files/read": { "any:**": "ask", "cred:credentials 8": "ask", "key:machine key": "deny" },
+      "files/write": { "any:**": "ask", "cred:credentials 8": "ask", "jaira:.jaira": "deny", "key:machine key": "deny" },
+      "files/run": { "any:**": "ask", "jaira:.jaira": "deny", "key:machine key": "deny" },
+      "files/open": { "any:**": "ask" },
+      "sites/fetch": { "any:any site": "ask" }, "sites/open": { "any:any site": "ask" },
+      "branches/push": { "any:any branch": "ask", "br:protected 3": "ask" }, "branches/merge": { "any:any branch": "ask", "br:protected 3": "ask" },
+      "programs/see": { "any:any program": "ask", "own:session": "allow", "own:system": "deny" },
+      "programs/control": { "any:any program": "ask", "own:system": "deny", "act:force": "deny" },
+      "programs/screen": { "any:any program": "ask" },
+      "machine/read": { "any:any area": "ask" }, "machine/change": { "own:user": "ask", "own:system": "deny" },
+      "machine/power": { "act:lock": "ask", "act:restart": "deny", "act:shut down": "deny" }, "machine/clipboard": { "mach:this machine": "ask" },
+      "other/list_tasks": { [EV]: "allow" }, "other/load_skill": { [EV]: "allow" }, "other/wait_for_event": { [EV]: "allow" }, "other/web_search": { [EV]: "ask" }, "other/hold_task": { [EV]: "ask" },
+    },
+    shared: {
+      "files/read": { "dir:project 3": "smart" }, "files/write": { "any:**": "smart" }, "files/run": { "any:**": "smart" },
+      "sites/fetch": { "site:3 docs sites": "allow", "any:any site": "smart" }, "sites/open": { "site:3 docs sites": "allow" },
+      "branches/push": { "any:any branch": "smart" }, "branches/merge": { "any:any branch": "smart" },
+      "machine/read": { "area:system info": "allow", "any:any area": "smart" },
+      "other/web_search": { [EV]: "smart" }, "other/hold_task": { [EV]: "smart" },
+    },
+    project: {
+      "files/read": { "dir:apps/site": "allow" }, "files/write": { "dir:apps/site": "allow" }, "files/run": { "dir:apps/site": "allow", "dir:packages/app": "allow" },
+      "files/open": { "dir:project 3": "allow", "cred:credentials 8": "deny" },
+      "sites/fetch": { "site:localhost": "allow" }, "sites/open": { "site:localhost": "allow" },
+      "branches/push": { "br:claude/**": "allow", "br:web/**": "allow" }, "branches/merge": { "br:claude/**": "allow" },
+      "programs/see": { "prog:node": "allow" }, "programs/control": { "prog:node": "allow", "own:session": "allow", "act:stop": "allow" },
+    },
+    you: {
+      "files/read": { "cred:credentials 8": "deny" }, "files/write": { "cred:credentials 8": "deny" },
+      "branches/push": { "br:protected 3": "deny" },
+      "programs/screen": { "own:session": "allow" },
+      "other/github·search_code": { [EV]: "ask" },
+    },
+    session: {
+      "sites/fetch": { "site:docs.rs": "allow" }, "programs/see": { "prog:python": "allow" },
+      "files/read@grep": { "any:**": "allow" },
+    },
+  };
+}
+// a layer's line for an access is DATA[l][ak]; a tool's own line there is DATA[l][ak@tool]
+let DATA, openR, openA, fresh;
+const st = { mode: "shield", src: false, hide: new Set(), coll: new Set(), used: true, icons: true };
+function init() { DATA = seed(); openR = new Set(["files", "sites"]); openA = new Set(["files/read"]); fresh = new Set(["session|sites/fetch|site:docs.rs"]); }
+const ico = (n, cls = "i") => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
+const kindOf = (p) => p.slice(0, p.indexOf(":")), nameOf = (p) => p.slice(p.indexOf(":") + 1);
+const acc = (ak) => { const [r, a] = ak.split("/"); const res = STRUCT.find((x) => x.id === r); return [res, res.accs.find((x) => x.id === a)]; };
+const line = (l, k) => DATA[l][k] || {};
+function placesOf(ak, tools) {
+  const s = new Set();
+  for (const L of LAYERS) { Object.keys(line(L.id, ak)).forEach((p) => s.add(p)); for (const t of tools) Object.keys(line(L.id, `${ak}@${t}`)).forEach((p) => s.add(p)); }
+  return [...s];
+}
+// a tool at a place: the newest layer that names it there, its own line first
+function toolAt(ak, t, p) {
+  for (const L of LAYERS) { const own = line(L.id, `${ak}@${t}`)[p]; if (own) return { ans: own, from: L.id }; const a = line(L.id, ak)[p]; if (a) return { ans: a, from: L.id }; }
+  return null;
+}
+function accAt(ak, p) {
+  const [, A] = acc(ak);
+  if (!A.tools.length) { for (const L of LAYERS) { const a = line(L.id, ak)[p]; if (a) return { ans: a, from: L.id, mixed: false }; } return null; }
+  const all = A.tools.map((t) => toolAt(ak, t, p)).filter(Boolean);
+  if (!all.length) return null;
+  const answers = new Set(all.map((x) => x.ans)), froms = new Set(all.map((x) => x.from));
+  if (answers.size === 1) return { ans: all[0].ans, from: froms.size === 1 ? all[0].from : null, mixed: false };
+  return { ans: [...answers].sort((a, b) => STRICT[b] - STRICT[a])[0], from: null, mixed: true };
+}
+// overruled: a newer layer names the same place on the same line
+function overruledBy(l, k, p) {
+  for (const L of LAYERS) { if (L.id === l) return null; if (line(L.id, k)[p]) return L.id; const base = k.split("@")[0]; if (k.includes("@") && line(L.id, base)[p]) return L.id; }
+  return null;
+}
+function usedAns(l) {
+  if (!st.used) return ANS;
+  const s = new Set(); for (const k of Object.keys(DATA[l])) Object.values(DATA[l][k]).forEach((a) => s.add(a));
+  const u = ANS.filter((a) => s.has(a)); return u.length ? u : ["allow"];
+}
+const LW = 240, RW = 116;
+// the shield builds up from the root set; the Tools view starts from the result
+const shield = () => st.mode === "shield";
+function shownLayers() {
+  if (!shield() && !st.src) return [];
+  const ls = LAYERS.filter((L) => !st.hide.has(L.id));
+  return shield() ? [...ls].reverse() : ls;
+}
+function groups() {
+  const res = { layer: "result", cols: st.coll.has("result") ? [{ w: 170, ans: "*" }] : ANS.map((a) => ({ w: RW, ans: a })) };
+  const lay = shownLayers().map((L) => {
+    if (st.coll.has(L.id)) return { layer: L.id, cols: [{ w: 150, ans: "*" }] };
+    const u = usedAns(L.id); return { layer: L.id, cols: u.map((a) => ({ w: u.length === 1 ? 132 : 112, ans: a })) };
+  });
+  return shield() ? [...lay, res] : [res, ...lay];
+}
+function columns() {
+  const cols = [{ w: LW, lab: true }];
+  for (const g of groups()) g.cols.forEach((c, i) => {
+    const res = g.layer === "result", n = g.cols.length;
+    const stick = !res ? "" : shield() ? "right: " + g.cols.slice(i + 1).reduce((a, x) => a + x.w, 0) + "px" : "left: " + (LW + g.cols.slice(0, i).reduce((a, x) => a + x.w, 0)) + "px";
+    cols.push({ ...c, layer: g.layer, res, first: i === 0, last: i === n - 1, stick });
+  });
+  return cols;
+}
+const edgeCls = (c) => c.res ? (shield() ? (c.first ? " firstres" : "") : (c.last ? " lastres" : "")) : "";
+function chip({ p, label, ans, tags, key, row, layer, mixed, from, shadow, coll }) {
+  const k = kindOf(p);
+  const isNew = fresh.has(`${layer === "result" ? from : layer}|${key.split("|")[0]}|${p}`);
+  const tg = tags && tags.length ? `<span class="tg">${tags.map((a) => `<i title="${a.name}">${ico(a.icon)}</i>`).join("")}</span>` : "";
+  const fromCls = layer === "result" && from ? ` from L-${from}` : "";
+  const title = shadow ? `overruled by ${LNAME[shadow]}` : layer === "result" ? (mixed ? "its tools disagree here" : from ? `from ${LNAME[from]}` : "from several layers") : "";
+  return `<span class="pl${mixed ? " mix" : ""}${shadow ? " shadow" : ""}${isNew ? " new" : ""}${fromCls}" draggable="true" title="${title}" data-k="${k}" data-row="${row}" data-layer="${layer}" data-key="${key}" data-p="${p}" data-ans="${ans}">${coll ? `<span class="ad" style="--a: var(--a-${ans})"></span>` : ""}${ico(KICON[k])}<span class="nm2">${label ?? nameOf(p)}</span>${tg}${mixed ? '<span class="mx">MIXED</span>' : ""}${layer === "result" && from === "session" ? `<span class="sb">${ico("bolt")}</span>` : ""}</span>`;
+}
+// the chips one row shows in one layer: [{ans, html}]
+function chipsOf(row, layer) {
+  const out = [];
+  const [kind, rest] = [row[0], row.slice(2)];
+  if (kind === "a" || kind === "t") {
+    const [ak, t] = rest.split("@"); const [, A] = acc(ak);
+    const k = t ? `${ak}@${t}` : ak;
+    if (layer === "result") {
+      for (const p of placesOf(ak, A.tools)) { const r = t ? toolAt(ak, t, p) : accAt(ak, p); if (r) out.push({ ans: r.ans, html: chip({ p, ans: r.ans, key: `${k}|`, row, layer, mixed: r.mixed, from: r.from, coll: st.coll.has("result") }) }); }
+    } else for (const [p, a] of Object.entries(line(layer, k))) out.push({ ans: a, html: chip({ p, ans: a, key: `${k}|`, row, layer, shadow: overruledBy(layer, k, p), coll: st.coll.has(layer) }) });
+  } else {
+    const res = STRUCT.find((x) => x.id === rest); const groups = new Map();
+    for (const A of res.accs) {
+      const ak = `${res.id}/${A.id}`;
+      const entries = layer === "result" ? placesOf(ak, A.tools).map((p) => { const r = accAt(ak, p); return r && [p, r.ans, r.mixed, r.from, null]; }).filter(Boolean)
+        : Object.entries(line(layer, ak)).map(([p, a]) => [p, a, false, null, overruledBy(layer, ak, p)]);
+      for (const [p, a, mixed, from, shadow] of entries) {
+        const gk = res.other ? A.id : `${p}|${a}|${mixed}|${from}|${shadow}`;
+        if (!groups.has(gk)) groups.set(gk, { p, a, mixed, from, shadow, accs: [], label: res.other ? A.name : undefined });
+        groups.get(gk).accs.push(A);
+      }
+    }
+    for (const g of groups.values()) out.push({ ans: g.a, html: chip({ p: g.p, label: g.label, ans: g.a, tags: res.other ? null : g.accs, key: `${g.accs.map((a) => `${res.id}/${a.id}`).join(",")}|`, row, layer, mixed: g.mixed, from: g.from, shadow: g.shadow, coll: st.coll.has(layer) }) });
+  }
+  return out;
+}
+function cellsOf(row, cols) {
+  const cache = {};
+  let left = 250;
+  return cols.slice(1).map((c, i) => {
+    const list = (cache[c.layer] ||= chipsOf(row, c.layer));
+    const inner = list.filter((x) => c.ans === "*" || x.ans === c.ans).map((x) => x.html).join("");
+    const style = c.res ? ` style="${c.stick}"` : "";
+    const cls = `c ${c.ans === "*" ? "lay coll" : c.ans}${c.res ? " res" : " lay"}${edgeCls(c)}${c.first ? " gstart" : ""} L-${c.layer}`;
+    return `<div class="${cls}"${style} data-row="${row}" data-layer="${c.layer}" data-ans="${c.ans}">${inner}</div>`;
+  }).join("");
+}
+function render() {
+  const cols = columns();
+  const board = document.getElementById("board");
+  board.className = st.icons ? "" : "noicons";
+  const alone = !cols.some((c) => !c.lab && !c.res);
+  board.style.setProperty("--cols", cols.map((c) => (alone && c.res ? `minmax(${c.w}px, 1fr)` : c.w + "px")).join(" "));
+  // two header rows
+  let h = '<div class="r h1"><div class="lab"></div>';
+  const cs = cols.slice(1);
+  for (const g of groups()) {
+    const n = g.cols.length, coll = st.coll.has(g.layer);
+    if (g.layer === "result") h += '<div class="res L-result' + (shield() ? " firstres" : " lastres") + '" style="' + (shield() ? "right: 0" : "left: " + LW + "px") + "; grid-column: span " + n + '"><div class="gh' + (coll ? " gcoll" : "") + '" data-coll="result">' + ico("chev", "i chev") + '<span class="sw"></span>Result<span class="wh">' + (shield() ? "what the conversation has" : "every layer, merged") + "</span></div></div>";
+    else { const L = LAYERS.find((x) => x.id === g.layer); h += '<div class="gstart L-' + L.id + '" style="grid-column: span ' + n + '"><div class="gh' + (coll ? " gcoll" : "") + '" data-coll="' + L.id + '" title="' + L.where + '">' + ico("chev", "i chev") + '<span class="sw"></span>' + (shield() && L.id !== "built" ? '<span class="on">+</span>' : "") + L.name + (n > 1 ? '<span class="wh">' + L.where + "</span>" : "") + "</div></div>"; }
+  }
+  h += '</div><div class="r h2"><div class="lab">Resource</div>';
+  for (const c of cs) h += '<div class="' + (c.res ? "res" : "") + (c.first ? " gstart" : "") + edgeCls(c) + " L-" + c.layer + '"' + (c.res ? ' style="' + c.stick + '"' : "") + ">" + (c.ans === "*" ? '<span class="ah any">every answer</span>' : '<span class="ah ' + c.ans + '">' + c.ans[0].toUpperCase() + c.ans.slice(1) + "</span>") + "</div>";
+  h += `</div>`;
+  for (const res of STRUCT) {
+    const open = openR.has(res.id), tile = `<span class="tile">${ico(RICON[res.kind])}</span>`;
+    if (open) {
+      const tools = new Set(res.accs.flatMap((a) => a.tools)).size;
+      h += `<div class="r lv1" data-kind="${res.id === "other" ? "tool" : res.kind}" data-res="${res.id}"><div class="lab">${ico("chev", "i chev")}${tile}<span class="txt"><span class="nm">${res.name}</span><span class="sub">${res.other ? res.accs.length + " tools" : res.accs.length + " accesses · " + tools + " tools"}</span></span></div><div style="grid-column: 2 / -1"></div></div>`;
+      res.accs.forEach((A, ai) => {
+        const ak = `${res.id}/${A.id}`, aopen = openA.has(ak) && A.tools.length, last = ai === res.accs.length - 1;
+        const label = res.other ? `<span class="vb" style="font-family: var(--font-data)">${ico("tool")}${A.name}</span>` : `<span class="vb">${ico(A.icon)}${A.name}</span>`;
+        const sub = res.other ? "" : aopen ? `${A.tools.length} tool${A.tools.length > 1 ? "s" : ""}` : A.tools.join(" · ");
+        h += `<div class="r lv2${aopen ? " open" : A.tools.length ? " closed" : " noTools"}${last ? " last" : ""}" data-kind="${res.kind}" data-acc="${ak}"><div class="lab">${A.tools.length ? ico("chev", "i chev") : '<span style="width:10px"></span>'}${label}<span class="sub">${sub}</span></div>${cellsOf(`a:${ak}`, cols)}</div>`;
+        if (aopen) A.tools.forEach((t, ti) => {
+          const others = STRUCT.filter((r) => r !== res && r.accs.some((a) => a.tools.includes(t))).map((r) => r.name);
+          h += `<div class="r lv3${ti === A.tools.length - 1 ? " lasttool" : ""}${last ? " lastacc" : ""}" data-kind="${res.kind}"><div class="lab">${ico("tool")}${t}${others.length ? `<span class="also">+ ${others.join(", ")}</span>` : ""}</div>${cellsOf(`t:${ak}@${t}`, cols)}</div>`;
+        });
+      });
+    } else {
+      const words = res.other ? "touch no resource · one answer each" : res.accs.map((a) => a.name.toLowerCase()).join(" · ");
+      h += `<div class="r lv1 closed" data-kind="${res.kind}" data-res="${res.id}"><div class="lab">${ico("chev", "i chev")}${tile}<span class="txt"><span class="nm">${res.name}</span><span class="sub">${words}</span></span></div>${cellsOf(`r:${res.id}`, cols)}</div>`;
+    }
+  }
+  board.innerHTML = h;
+  document.getElementById("fhead").innerHTML = shield()
+    ? '<svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">opened from the shield · the root set, each layer on top of it, then what the conversation has</span><span style="flex:1"></span><span class="hint">the result stays on the right</span>'
+    : '<svg class="i"><use href="#i-tool"/></svg><span class="t">Tools</span><span class="hint">what this conversation may do</span><span style="flex:1"></span><button class="btn" id="src">' + (st.src ? "Hide the source permission sets" : "Show the source permission sets") + "</button>";
+  document.querySelectorAll("#mode button").forEach((b) => b.classList.toggle("on", b.dataset.m === st.mode));
+  document.getElementById("lyrs").innerHTML = LAYERS.map((L) => `<span class="lyr L-${L.id}${st.hide.has(L.id) ? " off" : ""}" data-lyr="${L.id}" title="${L.where}"><span class="sw"></span>${L.name}</span>`).join("");
+}
+const say = (h) => (document.getElementById("log").innerHTML = h);
+// the lines a chip stands for: [lineKey, place]
+function linesOf(row, key, p) {
+  const ks = key.split("|")[0];
+  if (row[0] === "r") return ks.split(",").map((ak) => [ak, p]);
+  return [[ks, p]];
+}
+function setL(l, k, p, a) {
+  (DATA[l][k] ||= {})[p] = a;
+  if (!k.includes("@")) for (const kk of Object.keys(DATA[l])) if (kk.startsWith(k + "@")) delete DATA[l][kk][p];
+  fresh.add(`${l}|${k}|${p}`);
+}
+function delL(l, k, p) { if (DATA[l][k]) delete DATA[l][k][p]; }
+const nameK = (k) => { const [ak, t] = k.split("@"); const [res, A] = acc(ak); return `${res.name} · ${A.name}${t ? ` · ${t}` : ""}`; };
+function drop(src, dst) {
+  const lines = linesOf(src.row, src.key, src.p);
+  const ans = dst.ans === "*" ? src.ans : dst.ans;
+  const what = `<b>${[...new Set(lines.map(([k]) => nameK(k)))].join(", ")}</b> at <code>${nameOf(src.p)}</code>`;
+  if (dst.layer === "result") { lines.forEach(([k, p]) => setL("session", k, p, ans)); return say(`${what} → ${ans} for this session.`); }
+  const L = LAYERS.find((x) => x.id === dst.layer);
+  if (L.ro) return say(`<b>Built in</b> can't be changed. Put the answer in a layer of your own.`);
+  if (src.layer === "result") { lines.forEach(([k, p]) => setL(dst.layer, k, p, ans)); return say(`${what} → ${ans}, kept in <b>${L.name}</b>.`); }
+  if (src.layer === dst.layer) { lines.forEach(([k, p]) => setL(dst.layer, k, p, ans)); return say(`${what} → ${ans} in <b>${L.name}</b>.`); }
+  const from = LAYERS.find((x) => x.id === src.layer);
+  lines.forEach(([k, p]) => { setL(dst.layer, k, p, ans); if (!from.ro) delL(src.layer, k, p); });
+  say(`${what} → ${ans}, ${from.ro ? "copied from" : "moved from"} <b>${from.name}</b> to <b>${L.name}</b>.`);
+}
+// interactions
+document.addEventListener("click", (e) => {
+  const ly = e.target.closest(".lyr"); if (ly) { const id = ly.dataset.lyr; st.hide.has(id) ? st.hide.delete(id) : st.hide.add(id); return render(); }
+  const gh = e.target.closest("[data-coll]"); if (gh) { const id = gh.dataset.coll; st.coll.has(id) ? st.coll.delete(id) : st.coll.add(id); return render(); }
+  if (e.target.closest(".pl") || !e.target.closest("#board")) return;
+  if (!e.target.closest(".lab")) return;
+  const r1 = e.target.closest(".lv1"), r2 = e.target.closest(".lv2");
+  if (r1) { const id = r1.dataset.res; openR.has(id) ? openR.delete(id) : openR.add(id); render(); }
+  else if (r2 && !r2.classList.contains("noTools")) { const id = r2.dataset.acc; openA.has(id) ? openA.delete(id) : openA.add(id); render(); }
+});
+let drag = null;
+document.addEventListener("dragstart", (e) => {
+  const pl = e.target.closest?.(".pl"); if (!pl) return;
+  drag = { ...pl.dataset }; pl.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", pl.dataset.key);
+});
+document.addEventListener("dragend", () => { drag = null; document.querySelectorAll(".dragging,.c.over,.c.no").forEach((x) => x.classList.remove("dragging", "over", "no")); });
+document.addEventListener("dragover", (e) => {
+  const c = e.target.closest?.(".c"); document.querySelectorAll(".c.over,.c.no").forEach((x) => x !== c && x.classList.remove("over", "no"));
+  if (!c || !drag || c.dataset.row !== drag.row) return;
+  if (c.dataset.layer === "built") { c.classList.add("no"); return; }
+  e.preventDefault(); c.classList.add("over");
+});
+document.addEventListener("drop", (e) => {
+  const c = e.target.closest?.(".c"); if (!c || !drag || c.dataset.row !== drag.row || c.dataset.layer === "built") return;
+  e.preventDefault(); drop(drag, c.dataset); drag = null; render();
+});
+document.getElementById("mode").onclick = (e) => { const b = e.target.closest("button"); if (!b) return; st.mode = b.dataset.m; st.coll = new Set(st.mode === "tools" ? ["built"] : []); document.getElementById("scroller").scrollLeft = 0; render(); };
+document.getElementById("fhead").onclick = (e) => { if (e.target.closest("#src")) { st.src = !st.src; render(); } };
+document.getElementById("used").onchange = (e) => { st.used = e.target.checked; render(); };
+document.getElementById("icons").onchange = (e) => { st.icons = e.target.checked; render(); };
+document.getElementById("dark").onchange = (e) => { document.documentElement.dataset.theme = e.target.checked ? "dark" : ""; };
+document.getElementById("openall").onclick = () => { STRUCT.forEach((r) => { openR.add(r.id); r.accs.forEach((a) => a.tools.length && openA.add(`${r.id}/${a.id}`)); }); render(); };
+document.getElementById("closeall").onclick = () => { openR.clear(); openA.clear(); render(); };
+document.getElementById("reset").onclick = () => { init(); say(""); render(); };
+init(); render();
+</script>
+</body>
+</html>

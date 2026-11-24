@@ -55,16 +55,16 @@ describe("a direct call, by every kind of place its resource has", () => {
     expect(judge(read, "read_settings", { area: "environment" })).toBe("deny");
   });
 
-  it("control_service and install_software: the service or package, and what is done to it", () => {
+  it("control_service and install_program: the service or package, and what is done to it", () => {
     const services = { control_service: { spooler: "allow", action: { stop: "ask", "**": "allow" }, "**": "deny" } };
     expect(judge(services, "control_service", { name: "spooler", action: "restart" })).toBe("allow");
     expect(judge(services, "control_service", { name: "spooler", action: "stop" })).toBe("ask");
     expect(judge(services, "control_service", { name: "wuauserv", action: "restart" })).toBe("deny");
-    const software = { install_software: { "Git.Git": "allow", action: { uninstall: "deny", "**": "allow" }, manager: { winget: "allow", "**": "ask" }, "**": "ask" } };
-    expect(judge(software, "install_software", { action: "install", id: "Git.Git", manager: "winget" })).toBe("allow");
-    expect(judge(software, "install_software", { action: "uninstall", id: "Git.Git", manager: "winget" })).toBe("deny");
+    const software = { install_program: { "Git.Git": "allow", action: { uninstall: "deny", "**": "allow" }, manager: { winget: "allow", "**": "ask" }, "**": "ask" } };
+    expect(judge(software, "install_program", { action: "install", id: "Git.Git", manager: "winget" })).toBe("allow");
+    expect(judge(software, "install_program", { action: "uninstall", id: "Git.Git", manager: "winget" })).toBe("deny");
     // The manager left out is the default one, which nobody names: the strictest of the managers answers.
-    expect(judge(software, "install_software", { action: "install", id: "Git.Git" })).toBe("ask");
+    expect(judge(software, "install_program", { action: "install", id: "Git.Git" })).toBe("ask");
   });
 
   it("power: what it does, on which machine", () => {
@@ -123,7 +123,7 @@ describe("a shell command that is a System tool, read for the same places", () =
   });
 
   it("software: the package, what is done, the manager", () => {
-    const decl = { install_software: { "Git.Git": "allow", jq: "allow", action: { uninstall: "deny", "**": "allow" }, manager: { winget: "allow", brew: "allow", "**": "ask" }, "**": "ask" }, shell: "allow" };
+    const decl = { install_program: { "Git.Git": "allow", jq: "allow", action: { uninstall: "deny", "**": "allow" }, manager: { winget: "allow", brew: "allow", "**": "ask" }, "**": "ask" }, shell: "allow" };
     expect(decide(decl, "winget install --id Git.Git -e", "powershell").action).toBe("allow");
     expect(decide(decl, "winget uninstall Git.Git", "powershell").action).toBe("deny");
     expect(decide(decl, "brew install jq").action).toBe("allow");

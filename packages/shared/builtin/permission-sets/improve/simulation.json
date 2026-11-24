@@ -54,7 +54,7 @@
   "hold_task": "deny",
   "release_task": "deny",
   "answer_question": "deny",
-  "install_software": "deny",
+  "install_program": "deny",
   "control_service": "deny",
   "stop_process": "deny",
   "power": "deny",

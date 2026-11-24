@@ -53,6 +53,8 @@ import { Icon, type IconName } from "../panel/Icon";
 import { PermissionSetCard } from "../settings/permissions/PermissionSetCard";
 import { SubMenu, useAnchorRect } from "./ComposerCards";
 import { arriveMotion, columnMotion, morphMotion, turnMotion } from "./stackMotion";
+import { PermissionBoard } from "./PermissionBoard";
+import type { PermissionBoardHost } from "@jaira/ui/permissionBoardHost";
 
 /**
  * The composer's permission STACK (decision 0023 §4.1, design 6 of round 8): the Permissions chip as one
@@ -260,7 +262,7 @@ function MorphFloat({ anchor, width, onClose, children }: { anchor: FloatRect; w
 }
 
 /** What opened the panel: a layer's segment, `+`, `⋯ n` (or the stack collapsed), or the shield. */
-export type StackDoor = { kind: "layer"; layer: LayerSegment } | { kind: "add" } | { kind: "rows" } | { kind: "whole" };
+export type StackDoor = { kind: "layer"; layer: LayerSegment } | { kind: "add" } | { kind: "rows" } | { kind: "whole" } | { kind: "board"; order: "shield" | "tools" };
 
 /** A layer as the panel keeps hold of it: by what it names, so it is found again as the stack moves. */
 interface LayerHold {
@@ -282,6 +284,8 @@ interface PanelNav {
   /** The door it was opened by: another door pressed starts again. */
   door: string;
   view: PanelView;
+  /** The board's order (decision 0034): built up from the root set (the shield), or from the Result (the Tools card). */
+  order?: "shield" | "tools";
   /** The layer a list swaps. Absent: `+`'s list. */
   layer?: LayerHold;
   /** Reached from the rows: `‹` goes back to them. */
@@ -303,7 +307,10 @@ function navOf(door: StackDoor, key: string, actionsOf: (layer: LayerSegment) =>
     case "rows":
       return { door: key, view: "rows", fromRows: false, query: "" };
     case "whole":
-      return { door: key, view: "whole", fromRows: false, query: "" };
+      // The shield opens the board, built up from the root set; its "Layers and sets…" is the picture.
+      return { door: key, view: "board", order: "shield", fromRows: false, query: "" };
+    case "board":
+      return { door: key, view: "board", order: door.order, fromRows: false, query: "" };
   }
 }
 
@@ -339,6 +346,8 @@ export function StackPanel({
   tools,
   runtime,
   toolsBody,
+  board,
+  onToolList,
   onClose,
 }: {
   anchor: FloatRect;
@@ -356,6 +365,10 @@ export function StackPanel({
   runtime: number;
   /** The Tools card's body, drawn when the whole picture's `tools` is picked. */
   toolsBody: ReactNode;
+  /** The permission board (decision 0034): what it draws and writes. */
+  board: PermissionBoardHost;
+  /** The Tools card's list, from the board's "Tool list…". */
+  onToolList?: () => void;
   onClose: () => void;
 }): JSX.Element {
   const t = useTokens();
@@ -395,7 +408,10 @@ export function StackPanel({
 
   const unfolded = shown !== undefined;
   const room = Math.max(280, win.width - 32);
-  const cols = panelColumnsOf(nav.view, unfolded, room, phone);
+  const panelCols = panelColumnsOf(nav.view, unfolded, room, phone);
+  // The board is as wide as it needs to be (it says), never wider than the window lets it.
+  const [boardWidth, setBoardWidth] = useState<number | undefined>(undefined);
+  const cols = nav.view === "board" && boardWidth !== undefined ? { ...panelCols, left: Math.min(boardWidth, room) } : panelCols;
   const unfoldedHeight = Math.max(UNFOLDED_HEIGHT.min, Math.min(UNFOLDED_HEIGHT.max, anchor.top - 7 - 16));
   // The rows a list shows before it scrolls: as many as the room over the bar leaves for them.
   const listHeight = Math.max(160, Math.min(380, anchor.top - 7 - 16 - 170));
@@ -543,6 +559,25 @@ export function StackPanel({
         onClose={close}
       />
     );
+  } else if (nav.view === "board") {
+    left =
+      board.board !== undefined ? (
+        <PermissionBoard
+          board={board.board}
+          order={nav.order ?? "shield"}
+          onToggle={board.onToggle}
+          onCommit={board.onCommit}
+          by={board.by}
+          onBy={board.onBy}
+          maxHeight={Math.max(220, anchor.top - 7 - 16 - 150)}
+          onWidth={setBoardWidth}
+          {...(nav.order !== "tools" ? { onLayers: () => update({ view: "whole", shown: undefined }) } : onToolList !== undefined ? { onList: onToolList } : {})}
+        />
+      ) : (
+        <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }} padding={14}>
+          Reading the stack…
+        </Txt>
+      );
   } else {
     left = (
       <WholePicture

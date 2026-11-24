@@ -24,11 +24,11 @@ describe("a System command is the System tool", () => {
     ["posix", "uname -a", ["tool:read_system"]],
     ["posix", "df -h", ["tool:read_system"]],
     ["posix", "shutdown -h now", ["tool:power"]],
-    ["posix", "apt list --installed", ["tool:list_software"]],
-    ["posix", "apt install jq", ["tool:install_software"]],
-    ["posix", "pacman -Ss foo", ["tool:list_software"]],
-    ["posix", "pacman -Syu", ["tool:install_software"]],
-    ["posix", "dpkg -l", ["tool:list_software"]],
+    ["posix", "apt list --installed", ["tool:list_programs"]],
+    ["posix", "apt install jq", ["tool:install_program"]],
+    ["posix", "pacman -Ss foo", ["tool:list_programs"]],
+    ["posix", "pacman -Syu", ["tool:install_program"]],
+    ["posix", "dpkg -l", ["tool:list_programs"]],
     ["posix", "defaults read com.apple.dock", ["tool:read_settings"]],
     ["posix", "defaults write com.apple.dock autohide 1", ["tool:write_settings"]],
     ["posix", "pbpaste", ["tool:read_clipboard"]],
@@ -42,7 +42,7 @@ describe("a System command is the System tool", () => {
     ["powershell", "Restart-Service spooler", ["tool:control_service"]],
     ["powershell", "Restart-Computer", ["tool:power"]],
     ["powershell", "Get-Clipboard", ["tool:read_clipboard"]],
-    ["powershell", "winget install jq", ["tool:install_software"]],
+    ["powershell", "winget install jq", ["tool:install_program"]],
     ["powershell", "taskkill /PID 12 /F", ["tool:stop_process"]],
     ["powershell", "sc.exe query", ["tool:list_services"]],
     ["cmd", "tasklist", ["tool:list_processes"]],
@@ -60,7 +60,7 @@ describe("a System command is the System tool", () => {
     expect(partsOf("systemctl reboot", "posix")).toEqual(["tool:power"]);
     expect(partsOf("systemctl", "posix")).toEqual(["tool:list_services"]);
     expect(partsOf("brew services start redis", "posix")).toEqual(["tool:control_service"]);
-    expect(partsOf("brew list", "posix")).toEqual(["tool:list_software"]);
+    expect(partsOf("brew list", "posix")).toEqual(["tool:list_programs"]);
     expect(partsOf("pmset -g", "posix")).toEqual(["tool:read_settings"]);
     expect(partsOf("pmset sleepnow", "posix")).toEqual(["tool:power"]);
     expect(partsOf("pmset displaysleep 10", "posix")).toEqual(["tool:write_settings"]);
@@ -89,7 +89,7 @@ describe("a System command is the System tool", () => {
     expect(partsOf("start notepad", "cmd")).toEqual(["command:start notepad"]);
     // The project's own install is the command it is; a global one is software.
     expect(partsOf("npm install", "posix")).toEqual(["command:npm install"]);
-    expect(partsOf("npm install -g tsx", "posix")).toEqual(["tool:install_software"]);
+    expect(partsOf("npm install -g tsx", "posix")).toEqual(["tool:install_program"]);
   });
 
   it("is `open_app` when it opens a file, a folder, a link or an app — and `script` when what it opens would run", () => {

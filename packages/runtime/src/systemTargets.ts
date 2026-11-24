@@ -116,7 +116,7 @@ function serviceResource(tool: string, command: ParsedCommand, dialect: CommandD
 
 // --- software -----------------------------------------------------------------------------------------
 
-/** What a package manager's verb does, as `install_software`'s ACTION. */
+/** What a package manager's verb does, as `install_program`'s ACTION. */
 const INSTALL_VERBS: Readonly<Record<string, string>> = {
   install: "install",
   add: "install",
@@ -159,7 +159,7 @@ const MODULE_CMDLETS: Readonly<Record<string, string>> = {
 const MANAGER_VALUED = ["-v", "--version", "-s", "--source", "--scope", "--location", "--architecture", "-l", "--log", "--override", "--custom", "--accept-source-agreements", "-r", "--repo", "--channel", "-t", "--target-release", "--prefix", "-C", "--dir", "--cask-dir"];
 
 function softwareResource(tool: string, command: ParsedCommand, dialect: CommandDialect): ResourcePlaces {
-  const install = tool === "install_software";
+  const install = tool === "install_program";
   const program = command.program;
   if (dialect === "powershell" && Object.hasOwn(MODULE_CMDLETS, program)) {
     const walked = walkPowershell(command, ["-name", "-requiredversion", "-minimumversion", "-maximumversion", "-repository", "-scope", "-force", "-allowclobber", "-acceptlicense", "-inputobject"], ["-name", "-requiredversion", "-minimumversion", "-maximumversion", "-repository", "-scope", "-inputobject"]);
@@ -295,8 +295,8 @@ export function systemResourceOf(tool: string, command: ParsedCommand, dialect: 
     case "list_services":
     case "control_service":
       return serviceResource(tool, command, dialect);
-    case "list_software":
-    case "install_software":
+    case "list_programs":
+    case "install_program":
       return softwareResource(tool, command, dialect);
     case "read_settings":
     case "write_settings":

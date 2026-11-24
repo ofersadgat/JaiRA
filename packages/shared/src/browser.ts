@@ -59,6 +59,8 @@ export * from "./workflowTools";
 export * from "./fastForward";
 export * from "./hostRows";
 export * from "./toolVocabulary";
+export * from "./resourceVocabulary";
+export * from "./placeSets";
 export * from "./toolFlags";
 export * from "./toolDisplay";
 export * from "./agentTools";

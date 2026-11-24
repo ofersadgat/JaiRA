@@ -29,7 +29,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
   | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause"
-  | "eyeOff" | "layers" | "placeMain" | "placeSplit" | "placePanel" | "flip", string[]> = {
+  | "eyeOff" | "layers" | "placeMain" | "placeSplit" | "placePanel" | "flip"
+  | "download" | "upload" | "merge" | "pointer" | "camera" | "gear" | "package" | "power" | "clipboard" | "repo" | "user" | "sliders" | "any" | "plus", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -190,6 +191,21 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // Leaves the app: a box with an arrow out of its corner — a merge request, an issue, in the browser.
   external: ["M14 4h6v6", "M20 4 11 13", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
   info: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 16v-4", "M12 8h.01"],
+  // The permission board (decision 0034): a resource permission's access, and a place's kind.
+  download: ["M12 4v12", "m6 11 6 6 6-6", "M5 20h14"],
+  upload: ["M12 20V8", "m6 13 6-6 6 6", "M5 4h14"],
+  merge: ["M6 3v18", "M18 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z", "M6 7c0 5 6 8 12 8"],
+  pointer: ["M5 3l14 7-6 2-2 6Z"],
+  camera: ["M4 8h3l2-3h6l2 3h3v11H4Z", "M12 16.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"],
+  gear: ["M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M12 2.5v3", "M12 18.5v3", "M2.5 12h3", "M18.5 12h3", "m5.3 5.3 2.1 2.1", "m16.6 16.6 2.1 2.1", "m5.3 18.7 2.1-2.1", "m16.6 7.4 2.1-2.1"],
+  package: ["M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5Z", "M3.5 7.5 12 12l8.5-4.5", "M12 12v9"],
+  power: ["M12 3v8", "M6.3 7a8 8 0 1 0 11.4 0"],
+  clipboard: ["M9 4h6v3H9Z", "M9 5.5H6v15h12v-15h-3"],
+  repo: ["M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3Z", "M5 17a3 3 0 0 1 3-3h11"],
+  user: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z", "M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"],
+  sliders: ["M4 7h10", "M18 7h2", "M16 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z", "M4 17h2", "M10 17h10", "M8 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4Z"],
+  any: ["M12 4v16", "M5 8l14 8", "M19 8 5 16"],
+  plus: ["M12 5v14", "M5 12h14"],
 };
 
 /**

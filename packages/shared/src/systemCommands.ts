@@ -45,8 +45,8 @@ const LIST_PROCESSES: SystemCommandSpec = { tool: "list_processes" };
 const STOP_PROCESS: SystemCommandSpec = { tool: "stop_process" };
 const LIST_SERVICES: SystemCommandSpec = { tool: "list_services" };
 const CONTROL_SERVICE: SystemCommandSpec = { tool: "control_service" };
-const LIST_SOFTWARE: SystemCommandSpec = { tool: "list_software" };
-const INSTALL_SOFTWARE: SystemCommandSpec = { tool: "install_software" };
+const LIST_SOFTWARE: SystemCommandSpec = { tool: "list_programs" };
+const INSTALL_SOFTWARE: SystemCommandSpec = { tool: "install_program" };
 const WRITE_SETTINGS: SystemCommandSpec = { tool: "write_settings" };
 const READ_CLIPBOARD: SystemCommandSpec = { tool: "read_clipboard" };
 const WRITE_CLIPBOARD: SystemCommandSpec = { tool: "write_clipboard" };
@@ -56,7 +56,7 @@ const CONTROL_INPUT: SystemCommandSpec = { tool: "control_input" };
 const each = (tool: string, names: string): Record<string, string> => Object.fromEntries(names.trim().split(/\s+/).map((name) => [name, tool]));
 
 /** A package manager: what it lists, then what installs, removes or updates. */
-const manager = (lists: string, installs: string): SystemCommandSpec => ({ subcommands: { ...each("list_software", lists), ...each("install_software", installs) } });
+const manager = (lists: string, installs: string): SystemCommandSpec => ({ subcommands: { ...each("list_programs", lists), ...each("install_program", installs) } });
 
 /** A settings tool: what it reads, then what it changes. */
 const settings = (reads: string, writes: string, tool?: string): SystemCommandSpec => ({
@@ -67,7 +67,7 @@ const settings = (reads: string, writes: string, tool?: string): SystemCommandSp
 /** `npm install -g`: the project's own install stays the command it is; a global one is software. */
 const GLOBAL_FLAG = "^(-g|--global|--location=global)$";
 const globalInstalls = (names: string): SystemCommandSpec => ({
-  subcommands: Object.fromEntries(names.trim().split(/\s+/).map((name) => [name, { when: [{ flag: GLOBAL_FLAG, tool: "install_software" }] }])),
+  subcommands: Object.fromEntries(names.trim().split(/\s+/).map((name) => [name, { when: [{ flag: GLOBAL_FLAG, tool: "install_program" }] }])),
 });
 
 /** systemctl's verbs: looking at units, changing them, and the machine's own power. */
@@ -146,15 +146,15 @@ export const POSIX_SYSTEM_COMMANDS: Readonly<Record<string, SystemCommandSpec>> 
   // Software
   dpkg: {
     when: [
-      { flag: "^(-l|--list|-s|--status|-L|--listfiles|-S|--search|-p|--print-avail|--get-selections|--print-architecture|--print-foreign-architectures|--audit|-C|--compare-versions|--verify|-V)$", tool: "list_software" },
-      { flag: "^(-i|--install|-r|--remove|-P|--purge|--configure|--unpack|-a|--pending|--set-selections|--clear-selections|--add-architecture|--remove-architecture|--update-avail|--merge-avail|--clear-avail|--forget-old-unavail)$", tool: "install_software" },
+      { flag: "^(-l|--list|-s|--status|-L|--listfiles|-S|--search|-p|--print-avail|--get-selections|--print-architecture|--print-foreign-architectures|--audit|-C|--compare-versions|--verify|-V)$", tool: "list_programs" },
+      { flag: "^(-i|--install|-r|--remove|-P|--purge|--configure|--unpack|-a|--pending|--set-selections|--clear-selections|--add-architecture|--remove-architecture|--update-avail|--merge-avail|--clear-avail|--forget-old-unavail)$", tool: "install_program" },
     ],
   },
   "dpkg-query": LIST_SOFTWARE,
   rpm: {
     when: [
-      { flag: "^(-q[a-zA-Z]*|--query|--querytags|-V[a-zA-Z]*|--verify)$", tool: "list_software" },
-      { flag: "^(-[iUFe][a-zA-Z]*|--install|--upgrade|--freshen|--erase|--import|--rebuilddb|--initdb)$", tool: "install_software" },
+      { flag: "^(-q[a-zA-Z]*|--query|--querytags|-V[a-zA-Z]*|--verify)$", tool: "list_programs" },
+      { flag: "^(-[iUFe][a-zA-Z]*|--install|--upgrade|--freshen|--erase|--import|--rebuilddb|--initdb)$", tool: "install_program" },
     ],
   },
   apt: manager("list show search policy depends rdepends showsrc changelog", "install reinstall remove purge autoremove autopurge upgrade full-upgrade dist-upgrade update satisfy build-dep edit-sources"),
@@ -166,11 +166,11 @@ export const POSIX_SYSTEM_COMMANDS: Readonly<Record<string, SystemCommandSpec>> 
   zypper: manager("search se info if list-updates lu packages pa patterns pt products pd repos lr", "install in remove rm update up dist-upgrade dup patch refresh ref addrepo ar removerepo rr"),
   pacman: {
     when: [
-      { flag: "^-Q", tool: "list_software" },
-      { flag: "^--query$", tool: "list_software" },
-      { flag: "^-S[a-zA-Z]*[sigl]", tool: "list_software" },
-      { flag: "^-[SRUD]", tool: "install_software" },
-      { flag: "^--(sync|remove|upgrade|database)$", tool: "install_software" },
+      { flag: "^-Q", tool: "list_programs" },
+      { flag: "^--query$", tool: "list_programs" },
+      { flag: "^-S[a-zA-Z]*[sigl]", tool: "list_programs" },
+      { flag: "^-[SRUD]", tool: "install_program" },
+      { flag: "^--(sync|remove|upgrade|database)$", tool: "install_program" },
     ],
   },
   apk: manager("info list search policy dot stats", "add del fix update upgrade cache"),
@@ -178,8 +178,8 @@ export const POSIX_SYSTEM_COMMANDS: Readonly<Record<string, SystemCommandSpec>> 
   flatpak: manager("list info search remotes remote-ls history", "install uninstall update repair remote-add remote-delete remote-modify mask pin"),
   brew: {
     subcommands: {
-      ...each("list_software", "list ls info abv outdated deps uses leaves desc config doctor search tap-info"),
-      ...each("install_software", "install reinstall uninstall remove rm upgrade update tap untap link unlink pin unpin cleanup autoremove"),
+      ...each("list_programs", "list ls info abv outdated deps uses leaves desc config doctor search tap-info"),
+      ...each("install_program", "install reinstall uninstall remove rm upgrade update tap untap link unlink pin unpin cleanup autoremove"),
       services: { subcommands: { ...each("list_services", "list info"), ...each("control_service", "start stop restart run kill cleanup") } },
     },
   },
@@ -187,7 +187,7 @@ export const POSIX_SYSTEM_COMMANDS: Readonly<Record<string, SystemCommandSpec>> 
   mas: manager("list info search outdated", "install uninstall upgrade purchase lucky"),
   npm: globalInstalls("install i add uninstall remove rm un update up upgrade link ln"),
   pnpm: globalInstalls("add install i remove rm uninstall update up upgrade link ln"),
-  yarn: { subcommands: { global: { subcommands: { ...each("install_software", "add remove upgrade"), ...each("list_software", "list bin dir") } } } },
+  yarn: { subcommands: { global: { subcommands: { ...each("install_program", "add remove upgrade"), ...each("list_programs", "list bin dir") } } } },
   // Settings
   defaults: settings("read read-type domains find export help", "write delete import rename"),
   gsettings: settings("get list-schemas list-relocatable-schemas list-keys list-children list-recursively range describe writable monitor help", "set reset reset-recursively"),

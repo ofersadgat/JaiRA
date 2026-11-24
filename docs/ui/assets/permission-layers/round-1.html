@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0023-overlays-and-scopes">
+<meta name="state" content="the shield's whole picture, round 1 · every layer with its scope, and adding a layer before one">
+<meta name="captured" content="2026-11-22">
+<meta name="reflects" content="proposed">
+<title>The shield · every layer and its scope · 12 designs</title>
+<style>
+/* Proposals for the shield's whole picture (decision 0023 §4.1, amended 2026-11-03 ruling 13), drawn in
+   today's client: the `ink` palette as processes.css copies it, light and dark (#dark). Self-contained.
+   "Scope" here is 0023's: WHERE a set lives (built in, Shared, the project, this machine, the project on
+   this machine, Just you, you in the project, this run, this conversation). "Place" stays a line's. */
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --fill-ghost-hover: rgba(18,21,38,.05); --fill-ghost-selected: rgba(18,21,38,.09);
+  --tok-hint: #949cad; --p0: #737b8d; --p1: #3f76d4; --p2: #b57a1c; --p3: #7d5fc7; --ws-tool: #a8508a; --ws-run: #3d7a4c; --ws-read: #2f8a9e;
+  --lift: 0 12px 32px rgba(24,30,42,.18); --compose-foot: #fafafe;
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* a scope's hue */
+  --s-built: var(--p0); --s-shared: var(--p1); --s-proj: var(--p2); --s-mach: var(--p3); --s-you: var(--ws-tool); --s-run: var(--accent); --s-conv: var(--ws-run);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #141620; --panel-3: #1e2130; --line: #242838; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72;
+  --fill-accent: #5a5fe0; --fill-ghost-hover: rgba(255,255,255,.05); --fill-ghost-selected: rgba(255,255,255,.09);
+  --tok-hint: #5a6274; --p0: #8b93a7; --p1: #6e9df0; --p2: #d7a145; --p3: #a98ee6; --ws-tool: #e08cc6; --ws-run: #7ccf8e; --ws-read: #6cc3d6;
+  --lift: 0 18px 50px rgba(0,0,0,.5); --compose-foot: #141620;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -2px; }
+svg.i.sm { width: 12px; height: 12px; } svg.i.xs { width: 10px; height: 10px; } svg.i.lg { width: 16px; height: 16px; }
+.data { font-family: var(--font-data); font-size: 12px; font-weight: 500; }
+.hint { color: var(--tok-hint); font-size: 11px; }
+.dim { color: var(--dim); }
+.acc { color: var(--accent); }
+.grow { flex: 1; }
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; }
+
+/* page */
+.top { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+.top h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.top a { font: 500 11px var(--font-data); color: var(--accent); }
+.lede { max-width: 900px; color: var(--dim); margin: 0 0 8px; }
+.legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 26px; align-items: center; }
+.toc { display: grid; grid-template-columns: repeat(4, minmax(0, 220px)); gap: 4px 18px; margin: 0 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc a:hover { color: var(--accent); }
+.toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 54px; }
+section.d > header { display: flex; gap: 14px; align-items: baseline; margin-bottom: 4px; }
+section.d > header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 1px 7px; }
+section.d > header h2 { margin: 0; font-size: 16px; font-weight: 650; }
+section.d > p.why { margin: 0 0 12px 0; max-width: 940px; color: var(--dim); }
+section.d > p.why b { color: var(--text); font-weight: 600; }
+.stage { position: relative; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px; overflow: hidden; }
+.stage.split { display: flex; gap: 22px; align-items: flex-end; }
+
+/* the float the shield opens */
+.float { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); overflow: hidden; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--panel-2); }
+.fhead .t { font-weight: 600; font-size: 12.5px; }
+.ffoot { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--panel-2); font-size: 11px; color: var(--accent); flex-wrap: wrap; }
+.ffoot .bad { color: var(--bad); margin-left: auto; }
+
+/* scope badge */
+.sc { --c: var(--s-built); display: inline-flex; align-items: center; gap: 4px; font: 600 10px/1 var(--font-app); letter-spacing: .01em; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); border: 1px solid color-mix(in srgb, var(--c) 22%, transparent); border-radius: 99px; padding: 3px 7px 3px 5px; white-space: nowrap; }
+.sc svg.i { width: 10px; height: 10px; stroke-width: 2.2; }
+.sc.built { --c: var(--s-built); } .sc.shared { --c: var(--s-shared); } .sc.proj { --c: var(--s-proj); } .sc.mach { --c: var(--s-mach); } .sc.you { --c: var(--s-you); } .sc.run { --c: var(--s-run); } .sc.conv { --c: var(--s-conv); }
+.sc.solid { color: #fff; background: var(--c); border-color: transparent; }
+.dot { --c: var(--s-built); width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.dot.built { --c: var(--s-built); } .dot.shared { --c: var(--s-shared); } .dot.proj { --c: var(--s-proj); } .dot.mach { --c: var(--s-mach); } .dot.you { --c: var(--s-you); } .dot.run { --c: var(--s-run); } .dot.conv { --c: var(--s-conv); }
+
+/* decisions */
+.m { display: inline-block; font: 600 10.5px/1 var(--font-data); padding: 3px 6px; border-radius: 5px; white-space: nowrap; }
+.m.allow { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.m.ask { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.m.deny { color: var(--bad); background: color-mix(in srgb, var(--bad) 11%, transparent); }
+.m.un { color: var(--dim); background: var(--panel-3); }
+.m.fn { color: var(--p3); background: color-mix(in srgb, var(--p3) 12%, transparent); }
+.m.places { color: var(--dim); background: var(--panel-3); font-weight: 500; }
+.m.over { opacity: .38; text-decoration: line-through; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--font-app); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; white-space: nowrap; }
+.btn.acc { color: var(--on-accent); background: var(--fill-accent); border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent); }
+.btn.dashed { border-style: dashed; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.kbd { font: 500 10px var(--font-data); color: var(--tok-hint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.glyph { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--panel-2); color: var(--dim); flex: none; }
+.glyph.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+
+/* the composer, under a float */
+.composer { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; }
+.composer .text { padding: 10px 14px 8px; color: var(--tok-hint); }
+.composer .foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--compose-foot); border-top: 1px solid var(--panel-2); border-radius: 0 0 12px 12px; }
+.seg { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font: 500 11.5px var(--font-app); background: var(--panel-2); color: var(--dim); }
+.seg:first-child { border-radius: 99px 0 0 99px; } .seg:last-child { border-radius: 0 99px 99px 0; }
+.seg.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.segs { display: inline-flex; gap: 1px; }
+.chip { font: 500 11.5px var(--font-app); color: var(--dim); padding: 3px 9px; border-radius: 99px; }
+.send { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: var(--fill-accent); color: #fff; display: grid; place-items: center; }
+
+/* a seam between two layers, where one is laid in */
+.seam { position: relative; height: 10px; }
+.seam::before { content: ""; position: absolute; left: 34px; right: 8px; top: 50%; border-top: 1px dashed transparent; }
+.seam .plus { position: absolute; left: 12px; top: -4px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--tok-hint); opacity: 0; }
+.seam.hover { height: 22px; }
+.seam.hover::before { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.seam.hover .plus { opacity: 1; color: var(--on-accent); background: var(--fill-accent); }
+.seam.hover .say { position: absolute; left: 40px; top: -6px; font-size: 10.5px; color: var(--accent); background: var(--panel); padding: 0 6px; }
+
+/* a list row */
+.lrow { display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 7px; }
+.lrow.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lrow .nm { font: 500 12px var(--font-data); }
+.lrow.on .nm { color: var(--accent); }
+.lrow .sub { font-size: 10.5px; color: var(--tok-hint); line-height: 1.3; }
+.num { font: 600 10px var(--font-data); color: var(--tok-hint); width: 14px; text-align: right; flex: none; }
+
+/* contents lines */
+.lines { padding: 4px 0; }
+.line { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font: 500 11.5px var(--font-data); }
+.line .w { color: var(--tok-hint); font: 400 10.5px var(--font-app); margin-left: auto; }
+.line.place { padding-left: 30px; color: var(--dim); }
+.line.place::before { content: ""; width: 8px; border-top: 1px solid var(--rule); margin-left: -14px; }
+.where { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--panel-2); background: color-mix(in srgb, var(--c, var(--s-shared)) 5%, transparent); }
+.where .path { font: 500 11px var(--font-data); color: var(--dim); }
+.crumbs { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+.crumbs span { padding: 2px 5px; border-radius: 5px; } .crumbs span:hover { background: var(--fill-ghost-hover); }
+.crumbs .last { font: 500 12px var(--font-data); }
+.crumbs svg { color: var(--tok-hint); }
+
+/* a set picker popover (add before) */
+.pick { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift); width: 280px; overflow: hidden; }
+.pick .find { display: flex; align-items: center; gap: 7px; margin: 8px 8px 4px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--tok-hint); font-size: 12px; }
+.pick .grp { font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 8px 12px 3px; display: flex; align-items: center; gap: 6px; }
+.pick .it { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font: 500 11.5px var(--font-data); }
+.pick .it.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.pick .it .hint { font-family: var(--font-app); margin-left: auto; }
+.pick .lbl { padding: 8px 12px 2px; font-size: 11px; color: var(--dim); }
+.pick .lbl b { font-family: var(--font-data); font-weight: 500; color: var(--text); }
+
+.note { position: absolute; font-size: 10.5px; color: var(--accent); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.ghost { border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent) !important; background: color-mix(in srgb, var(--accent) 5%, var(--panel)) !important; }
+.newtag { font: 700 9px var(--font-app); letter-spacing: .05em; text-transform: uppercase; color: var(--on-accent); background: var(--fill-accent); border-radius: 4px; padding: 2px 5px; }
+.callout { font-size: 11px; color: var(--dim); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 7px 10px; }
+.callout b { color: var(--text); font-weight: 600; }
+.callout code, .why code, .lede code { font: 500 11px var(--font-data); }
+</style>
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m6 11 6-6 6 6"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="m13 6 6 6-6 6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5"/><path d="M8 3h8l-1 6 3 3H6l3-3Z"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8Z"/><path d="M14 3v5h5"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M2.5 19.5c1.2-3 3.6-4.5 6.5-4.5s5.3 1.5 6.5 4.5"/><path d="M16 4.3a3.5 3.5 0 0 1 0 6.4"/><path d="M18 15.3c1.6.7 2.8 2.1 3.5 4.2"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13h6l-1 8 8-10h-6Z"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5Z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.2" fill="currentColor"/><circle cx="15" cy="6" r="1.2" fill="currentColor"/><circle cx="9" cy="12" r="1.2" fill="currentColor"/><circle cx="15" cy="12" r="1.2" fill="currentColor"/><circle cx="9" cy="18" r="1.2" fill="currentColor"/><circle cx="15" cy="18" r="1.2" fill="currentColor"/></symbol>
+<symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="M20 4l-7 7"/><path d="M4 20l7-7"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+<symbol id="i-insert" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 17h16"/><path d="M12 9.5v5"/><path d="M9.5 12h5"/></symbol>
+</defs></svg>
+
+<div class="top"><h1>The shield: every layer, its scope, and a layer laid in before one</h1><a href="#dark" onclick="setTimeout(()=>location.reload())">dark</a></div>
+<p class="lede">Round 1 · 12 designs. The same stack in all twelve, oldest first: <code>chat/ask-first</code> (built in) · <code>chat/build-safe</code> (the project's standing layer) · <code>web/docs-sites</code> (Shared) · <code>me/quiet-git</code> (Just you) · this run's 3 answers · <code>tools</code> (this conversation). The <b>current</b> layer is <code>web/docs-sites</code>, and the layer being laid in before it is <code>web/no-fetch</code> (this machine: <code>web_fetch: deny</code>). Laid in before, it is <em>under</em> docs-sites, so the doc sites stay allowed and every other fetch is refused — the case adding after cannot express without rewriting docs-sites.</p>
+<div class="legend"><span class="hint">Scopes, where a set lives:</span>
+<span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span>
+<span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span>
+<span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span>
+<span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span>
+<span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span>
+<span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span>
+<span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>This conversation</span>
+</div>
+<nav class="toc">
+<a href="#d1"><b>1</b>Ladder with seams</a><a href="#d2">  <b>2</b>Compact, newest on top</a><a href="#d3"><b>3</b>A deck of sheets</a><a href="#d4"><b>4</b>Pipeline, left to right</a>
+<a href="#d5"><b>5</b>Scope lanes</a><a href="#d6"><b>6</b>The stack as a table</a><a href="#d7"><b>7</b>Tool × layer matrix</a><a href="#d8"><b>8</b>Nested by scope</a>
+<a href="#d9"><b>9</b>Cards over the bar</a><a href="#d10"><b>10</b>Lay in, with what changes</a><a href="#d11"><b>11</b>Bands by who put it there</a><a href="#d12"><b>12</b>Who decides what</a>
+</nav>
+
+<!-- ============================================================ 1 -->
+<section class="d" id="d1">
+<header><span class="n">1</span><h2>Ladder with seams</h2></header>
+<p class="why">Today's 900-wide shield, with the stack as a ladder, oldest at the top. <b>Every row carries its scope badge</b> and the file it reads. <b>Between any two rows is a seam</b>: under the pointer it becomes <code>+ lay a layer in here</code>. The layer picked gets <b>Add before</b> / <b>Add after</b> in its own head, so the "current layer" has the verb right beside it.</p>
+<div class="stage">
+<div class="float" style="width: 900px;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">6 layers · newer wins, line by line</span><span class="grow"></span><span class="btn ghost">Save this stack as a set</span><svg class="i sm dim"><use href="#i-x"/></svg></div>
+  <div style="display:flex; height: 372px;">
+    <div style="width: 330px; border-right: 1px solid var(--panel-2); padding: 6px;">
+      <div class="hint" style="padding: 2px 8px 6px; display:flex; gap:6px; align-items:center;"><svg class="i xs"><use href="#i-down"/></svg>oldest first — each overrides the ones above it</div>
+      <div class="lrow"><span class="num">1</span><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><div class="col grow"><span class="nm">chat/ask-first</span><span class="sub">the base · 14 lines</span></div><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span></div>
+      <div class="seam"><span class="plus"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+      <div class="lrow"><span class="num">2</span><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><div class="col grow"><span class="nm">chat/build-safe</span><span class="sub">standing, from settings · 3 lines</span></div><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span></div>
+      <div class="seam hover"><span class="plus"><svg class="i xs"><use href="#i-plus"/></svg></span><span class="say">lay a layer in here</span></div>
+      <div class="lrow on"><span class="num">3</span><span class="glyph on"><svg class="i sm"><use href="#i-globe"/></svg></span><div class="col grow"><span class="nm">web/docs-sites</span><span class="sub">this conversation's · 1 line, 3 places</span></div><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span></div>
+      <div class="seam"><span class="plus"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+      <div class="lrow"><span class="num">4</span><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><div class="col grow"><span class="nm">me/quiet-git</span><span class="sub">this conversation's · 4 lines</span></div><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span></div>
+      <div class="seam"><span class="plus"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+      <div class="lrow"><span class="num">5</span><span class="glyph"><svg class="i sm"><use href="#i-bolt"/></svg></span><div class="col grow"><span class="nm">this run</span><span class="sub">3 answers · gone when the run ends</span></div><span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span></div>
+      <div class="seam"><span class="plus"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+      <div class="lrow"><span class="num">6</span><span class="glyph"><svg class="i sm"><use href="#i-tool"/></svg></span><div class="col grow"><span class="nm">tools</span><span class="sub">ticked here · 9 lines</span></div><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>This conversation</span></div>
+      <div style="height:1px; background: var(--panel-2); margin: 10px 8px;"></div>
+      <div class="lrow hint"><svg class="i sm"><use href="#i-layers"/></svg>Everything — what the stack comes to</div>
+    </div>
+    <div class="grow col">
+      <div class="fhead"><span class="glyph on"><svg class="i sm"><use href="#i-globe"/></svg></span><span class="crumbs"><span>Shared</span><svg class="i xs"><use href="#i-right"/></svg><span>web</span><svg class="i xs"><use href="#i-right"/></svg><span class="last">docs-sites.json</span><svg class="i xs"><use href="#i-chev"/></svg></span><span class="grow"></span><span class="btn dashed"><svg class="i sm"><use href="#i-insert"/></svg>Add before</span><span class="btn">Add after</span></div>
+      <div class="where" style="--c: var(--s-shared)"><span class="sc shared solid"><svg class="i"><use href="#i-users"/></svg>Shared</span><div class="col"><span class="path">~/.jaira/permission-sets/web/docs-sites.json</span><span class="hint">Read by every project on this machine. Changing it changes it for all of them.</span></div></div>
+      <div class="lines">
+        <div class="line"><svg class="i sm dim"><use href="#i-globe"/></svg>web_fetch<span class="m places">3 places</span><span class="w">elsewhere: as the layers under it</span></div>
+        <div class="line place">developer.mozilla.org<span class="m allow">allow</span></div>
+        <div class="line place">docs.python.org<span class="m allow">allow</span></div>
+        <div class="line place">*.readthedocs.io<span class="m allow">allow</span></div>
+      </div>
+      <div class="grow"></div>
+      <div class="ffoot"><span>↑ Earlier</span><span>↓ Later</span><span>Pin to this project</span><span>Edit a copy</span><span class="bad">Remove</span></div>
+    </div>
+  </div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="d" id="d2">
+<header><span class="n">2</span><h2>Compact, newest on top</h2></header>
+<p class="why">For the composer at any width: the shield opens a <b>340-wide list</b>, drawn as a stack is — <b>newest on top</b>, the base at the bottom. Each row is the id and its scope. Pressing a row unfolds it in place with its file and actions; the first action is <b>＋ before</b>, which opens the set list right under it, labelled <code>Lay in under docs-sites</code>. <code>⤢</code> grows into design 1.</p>
+<div class="stage split">
+<div class="col" style="width: 340px;">
+<div class="float" style="width: 340px;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">newest wins</span><span class="grow"></span><svg class="i sm dim"><use href="#i-expand"/></svg></div>
+  <div style="padding: 5px;">
+    <div class="lrow"><span class="glyph"><svg class="i sm"><use href="#i-tool"/></svg></span><span class="nm grow">tools <span class="hint">· 9</span></span><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span></div>
+    <div class="lrow"><span class="glyph"><svg class="i sm"><use href="#i-bolt"/></svg></span><span class="nm grow">this run <span class="hint">· 3</span></span><span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span></div>
+    <div class="lrow"><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><span class="nm grow">me/quiet-git</span><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span></div>
+    <div style="border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); border-radius: 9px; margin: 2px 0;">
+      <div class="lrow on" style="border-radius: 8px 8px 0 0;"><span class="glyph on"><svg class="i sm"><use href="#i-globe"/></svg></span><span class="nm grow">web/docs-sites</span><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span></div>
+      <div style="padding: 4px 10px 8px 39px;" class="col"><span class="data" style="font-size: 10.5px; color: var(--dim);">~/.jaira/permission-sets/web/docs-sites.json</span><span class="hint">web_fetch at 3 places · laid on by you, this conversation</span>
+        <div class="row" style="gap: 6px; margin-top: 6px; flex-wrap: wrap;"><span class="btn acc"><svg class="i sm"><use href="#i-plus"/></svg>before</span><span class="btn"><svg class="i sm"><use href="#i-plus"/></svg>after</span><span class="btn">swap</span><span class="btn">↑↓</span><span class="btn" style="color: var(--bad)">×</span></div>
+      </div>
+    </div>
+    <div class="lrow"><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><span class="nm grow">chat/build-safe</span><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span></div>
+    <div class="lrow"><span class="glyph"><svg class="i sm"><use href="#i-file"/></svg></span><span class="nm grow">chat/ask-first <span class="hint">· base</span></span><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span></div>
+  </div>
+</div>
+<div class="composer"><div class="foot"><span class="segs"><span class="seg on"><svg class="i sm"><use href="#i-shield"/></svg></span><span class="seg">ask-first <svg class="i xs"><use href="#i-chev"/></svg></span><span class="seg">+4</span></span><span class="chip">Opus 5.5</span><span class="send"><svg class="i sm"><use href="#i-send"/></svg></span></div></div>
+</div>
+<div class="col" style="gap: 10px;">
+  <div class="hint">＋ before pressed: the list opens under the row it lays in under</div>
+  <div class="pick">
+    <div class="lbl">Lay in under <b>web/docs-sites</b></div>
+    <div class="find"><svg class="i sm"><use href="#i-search"/></svg>Find a set</div>
+    <div class="grp"><span class="dot mach"></span>This machine</div>
+    <div class="it on"><svg class="i sm"><use href="#i-file"/></svg>web/no-fetch<span class="hint">no web</span></div>
+    <div class="it"><svg class="i sm"><use href="#i-file"/></svg>net/proxy-only</div>
+    <div class="grp"><span class="dot proj"></span>Project</div>
+    <div class="it"><svg class="i sm"><use href="#i-file"/></svg>app/build</div>
+    <div class="grp"><span class="dot shared"></span>Shared</div>
+    <div class="it"><svg class="i sm"><use href="#i-file"/></svg>web/github</div>
+    <div class="grp"><span class="dot built"></span>Built in</div>
+    <div class="it"><svg class="i sm"><use href="#i-file"/></svg>chat/read-only</div>
+    <div class="it"><svg class="i sm"><use href="#i-file"/></svg>chat/auto</div>
+    <div style="height:6px"></div>
+  </div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="d" id="d3">
+<header><span class="n">3</span><h2>A deck of sheets</h2></header>
+<p class="why">The stack drawn as what it is: <b>sheets laid one over another</b>, each sheet's tab in its scope's colour. The picked sheet lifts out to the right with its contents. <b>Add before</b> draws a dashed sheet <b>sliding in under it</b>, so "before" reads as "underneath" without words.</p>
+<div class="stage" style="display:flex; flex-wrap: wrap; gap: 30px; align-items: flex-start;">
+  <div style="position: relative; width: 560px; height: 340px; flex: none;">
+    <!-- sheets: oldest at the back -->
+    <div class="float" style="position:absolute; left: 0; top: 0; width: 330px; height: 118px; border-left: 4px solid var(--s-built);"><div class="fhead"><span class="data">chat/ask-first</span><span class="grow"></span><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span></div></div>
+    <div class="float" style="position:absolute; left: 22px; top: 42px; width: 330px; height: 118px; border-left: 4px solid var(--s-proj);"><div class="fhead"><span class="data">chat/build-safe</span><span class="grow"></span><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span></div></div>
+    <div class="float ghost" style="position:absolute; left: 44px; top: 84px; width: 330px; height: 118px; box-shadow:none;"><div class="fhead" style="border:0"><span class="newtag">new</span><span class="data acc">web/no-fetch</span><span class="grow"></span><span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span></div></div>
+    <div class="float" style="position:absolute; left: 66px; top: 126px; width: 330px; height: 118px; border-left: 4px solid var(--s-shared); outline: 2px solid var(--accent); transform: translateX(14px);"><div class="fhead"><span class="data acc">web/docs-sites</span><span class="grow"></span><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span></div></div>
+    <div class="float" style="position:absolute; left: 88px; top: 168px; width: 330px; height: 118px; border-left: 4px solid var(--s-you);"><div class="fhead"><span class="data">me/quiet-git</span><span class="grow"></span><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span></div></div>
+    <div class="float" style="position:absolute; left: 110px; top: 210px; width: 330px; height: 118px; border-left: 4px solid var(--s-conv);"><div class="fhead"><span class="data">tools</span><span class="hint">· 9 · <span class="acc">3 this run</span></span><span class="grow"></span><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span></div></div>
+    <div class="note" style="left: 384px; top: 92px;"><svg class="i" style="transform: scaleX(-1)"><use href="#i-arrow"/></svg>slides in under docs-sites</div>
+  </div>
+  <div class="float" style="width: 360px;">
+    <div class="fhead"><span class="glyph on"><svg class="i sm"><use href="#i-globe"/></svg></span><span class="data">web/docs-sites</span><span class="grow"></span><span class="sc shared solid"><svg class="i"><use href="#i-users"/></svg>Shared</span></div>
+    <div class="lines"><div class="line">web_fetch<span class="m places">3 places</span></div><div class="line place">developer.mozilla.org<span class="m allow">allow</span></div><div class="line place">docs.python.org<span class="m allow">allow</span></div><div class="line place">*.readthedocs.io<span class="m allow">allow</span></div></div>
+    <div style="padding: 8px 12px; border-top: 1px solid var(--panel-2);" class="col"><span class="hint">Slide in under it</span><div class="row" style="margin-top: 4px;"><span class="btn" style="flex:1; justify-content: space-between;"><span class="row" style="gap:6px"><span class="dot mach"></span><span class="data">web/no-fetch</span></span><svg class="i xs"><use href="#i-chev"/></svg></span><span class="btn acc">Lay in</span></div></div>
+    <div class="ffoot"><span>Bring forward</span><span>Send back</span><span>Swap</span><span class="bad">Remove</span></div>
+  </div>
+</div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="d" id="d4">
+<header><span class="n">4</span><h2>Pipeline, left to right</h2></header>
+<p class="why">The stack as a <b>chain read left to right</b>, as a call is judged through it: each node is a layer, its scope written under it in a coloured band, and an arrow saying <b>overrides</b>. A <b>＋ sits in every gap</b>; the gap before the picked node is open, with its picker hanging from it. The picked node's contents are drawn full width below.</p>
+<div class="stage">
+<div class="float" style="width: 100%;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">a call is judged left to right; the rightmost line that names it wins</span></div>
+  <div style="display: flex; align-items: center; padding: 22px 16px 14px; gap: 0; overflow: hidden;">
+    <div class="col" style="width: 130px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data">chat/ask-first</span><span class="hint">14 lines</span></div><div style="background: color-mix(in srgb, var(--s-built) 14%, transparent); color: var(--s-built); font: 600 10px var(--font-app); padding: 3px 10px;">Built in</div></div>
+    <div class="col" style="align-items:center; width: 44px;"><svg class="i hint"><use href="#i-arrow"/></svg><span style="width:18px;height:18px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;color:var(--tok-hint);margin-top:2px;"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+    <div class="col" style="width: 130px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data">chat/build-safe</span><span class="hint">3 lines</span></div><div style="background: color-mix(in srgb, var(--s-proj) 14%, transparent); color: var(--s-proj); font: 600 10px var(--font-app); padding: 3px 10px;">Project · standing</div></div>
+    <div class="col" style="align-items:center; width: 120px; position: relative;"><svg class="i acc"><use href="#i-arrow"/></svg><div class="ghost col" style="border-radius: 9px; width: 104px; padding: 6px 8px; margin-top: 4px;"><span class="newtag" style="align-self:flex-start">new</span><span class="data acc" style="font-size: 11px;">web/no-fetch</span><span style="color: var(--s-mach); font: 600 10px var(--font-app);">This machine</span></div></div>
+    <div class="col" style="width: 130px; border: 2px solid var(--accent); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data acc">web/docs-sites</span><span class="hint">1 line · 3 places</span></div><div style="background: color-mix(in srgb, var(--s-shared) 14%, transparent); color: var(--s-shared); font: 600 10px var(--font-app); padding: 3px 10px;">Shared</div></div>
+    <div class="col" style="align-items:center; width: 44px;"><svg class="i hint"><use href="#i-arrow"/></svg><span style="width:18px;height:18px;border-radius:50%;border:1px solid var(--line);display:grid;place-items:center;color:var(--tok-hint);margin-top:2px;"><svg class="i xs"><use href="#i-plus"/></svg></span></div>
+    <div class="col" style="width: 120px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data">me/quiet-git</span><span class="hint">4 lines</span></div><div style="background: color-mix(in srgb, var(--s-you) 14%, transparent); color: var(--s-you); font: 600 10px var(--font-app); padding: 3px 10px;">Just you</div></div>
+    <div class="col" style="align-items:center; width: 44px;"><svg class="i hint"><use href="#i-arrow"/></svg></div>
+    <div class="col" style="width: 96px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data">this run</span><span class="hint">3 answers</span></div><div style="background: color-mix(in srgb, var(--s-run) 14%, transparent); color: var(--s-run); font: 600 10px var(--font-app); padding: 3px 10px;">This run</div></div>
+    <div class="col" style="align-items:center; width: 44px;"><svg class="i hint"><use href="#i-arrow"/></svg></div>
+    <div class="col" style="width: 96px; border: 1px solid var(--line); border-radius: 9px; overflow: hidden;"><div style="padding: 8px 10px;" class="col"><span class="data">tools</span><span class="hint">9 lines</span></div><div style="background: color-mix(in srgb, var(--s-conv) 14%, transparent); color: var(--s-conv); font: 600 10px var(--font-app); padding: 3px 10px;">Conversation</div></div>
+  </div>
+  <div style="display:flex; border-top: 1px solid var(--panel-2);">
+    <div class="grow">
+      <div class="where" style="--c: var(--s-shared)"><span class="sc shared solid"><svg class="i"><use href="#i-users"/></svg>Shared</span><div class="col"><span class="path">~/.jaira/permission-sets/web/docs-sites.json</span><span class="hint">laid on in this conversation · read by every project</span></div></div>
+      <div class="lines"><div class="line">web_fetch<span class="m places">3 places</span></div><div class="line place">developer.mozilla.org<span class="m allow">allow</span></div><div class="line place">docs.python.org<span class="m allow">allow</span></div><div class="line place">*.readthedocs.io<span class="m allow">allow</span></div></div>
+    </div>
+    <div style="width: 300px; border-left: 1px solid var(--panel-2); padding: 10px 12px;" class="col">
+      <span class="hint">Laying in before web/docs-sites</span>
+      <div class="row" style="margin: 6px 0;"><span class="dot mach"></span><span class="data">web/no-fetch</span><span class="grow"></span><span class="btn">change</span></div>
+      <div class="callout">web_fetch: <span class="m deny">deny</span> under it — the 3 doc sites stay <span class="m allow">allow</span>, <b>everything else</b> goes from <span class="m ask">ask</span> to <span class="m deny">deny</span>.</div>
+      <div class="row" style="margin-top: 10px; justify-content: flex-end;"><span class="btn">Cancel</span><span class="btn acc">Lay in</span></div>
+    </div>
+  </div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="d" id="d5">
+<header><span class="n">5</span><h2>Scope lanes</h2></header>
+<p class="why">A grid whose <b>rows are the scopes</b> (where a set can live) and whose <b>columns are the stack's order</b>. Each layer sits in its scope's lane at its place in the order — so "this stack reads from four places on disk" is visible at once. Adding before the picked layer <b>opens a column in front of it</b>, and every lane offers what it holds there.</p>
+<div class="stage">
+<div class="float" style="width: 100%;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">where each layer lives, in the order they are laid</span></div>
+  <div style="display:grid; grid-template-columns: 150px repeat(7, 1fr); font-size: 11px; position: relative;">
+    <div></div><div class="hint" style="padding:6px">1</div><div class="hint" style="padding:6px">2</div><div class="hint acc" style="padding:6px; background: color-mix(in srgb, var(--accent) 6%, transparent)">new</div><div class="hint" style="padding:6px">3</div><div class="hint" style="padding:6px">4</div><div class="hint" style="padding:6px">5</div><div class="hint" style="padding:6px">6</div>
+    <!-- lanes -->
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot built"></span>Built in</div>
+    <div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc built" style="font-family: var(--font-data)">ask-first</span></div><div style="border-top:1px solid var(--panel-2)"></div><div class="col" style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 5px;"><span class="hint" style="font-family: var(--font-data)">read-only · auto</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot shared"></span>Shared <span class="hint">~/.jaira</span></div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 5px;"><span class="hint" style="font-family: var(--font-data)">web/github</span></div><div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc shared solid" style="font-family: var(--font-data)">docs-sites</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot proj"></span>Project <span class="hint">.jaira</span></div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc proj" style="font-family: var(--font-data)">build-safe</span></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 5px;"><span class="hint" style="font-family: var(--font-data)">app/build</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot mach"></span>This machine</div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 5px;"><span class="sc mach ghost" style="font-family: var(--font-data); border-radius: 99px;">no-fetch ✓</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot you"></span>Just you</div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent); padding: 5px;"><span class="hint" style="font-family: var(--font-data)">—</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc you" style="font-family: var(--font-data)">quiet-git</span></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot run"></span>This run</div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent);"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc run" style="font-family: var(--font-data)">3 answers</span></div><div style="border-top:1px solid var(--panel-2)"></div>
+    <div class="row" style="padding: 9px 12px; border-top:1px solid var(--panel-2)"><span class="dot conv"></span>This conversation</div>
+    <div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 6%, transparent);"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2)"></div><div style="border-top:1px solid var(--panel-2); padding: 5px;"><span class="sc conv" style="font-family: var(--font-data)">tools · 9</span></div>
+  </div>
+  <div class="ffoot"><span class="dim" style="color: var(--dim)">The column in front of <span class="data">docs-sites</span> lists what each scope holds; pressing one lays it in there.</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn acc">Lay in web/no-fetch</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="d" id="d6">
+<header><span class="n">6</span><h2>The stack as a table</h2></header>
+<p class="why">Dense and plain: <b>one row per layer</b>, with columns for its <b>scope</b>, <b>the file it is</b>, <b>who put it there</b> (the base, settings, you, an answer), how many lines it writes, and <b>how many it still decides</b> once the newer ones are laid over it. A row's <code>⋯</code> has <b>Insert before</b>; it opens a ghost row right there with a find box in it.</p>
+<div class="stage" style="padding-bottom: 90px;">
+<div class="float" style="width: 100%; overflow: visible;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="grow"></span><span class="btn"><svg class="i sm"><use href="#i-plus"/></svg>Lay on top</span></div>
+  <table style="width:100%; border-collapse: collapse; font-size: 12px;">
+    <thead><tr style="text-align:left; color: var(--tok-hint); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;"><th style="padding: 7px 12px; width: 30px">#</th><th>Layer</th><th>Scope</th><th>File</th><th>Laid by</th><th style="text-align:right">Writes</th><th style="text-align:right">Decides</th><th style="width: 40px"></th></tr></thead>
+    <tbody>
+      <tr style="border-top: 1px solid var(--panel-2)"><td style="padding: 7px 12px" class="hint">1</td><td class="data">chat/ask-first</td><td><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span></td><td class="data dim" style="font-size:11px">$SYSTEM/…/chat/ask-first.json</td><td class="dim">the base</td><td style="text-align:right">14</td><td style="text-align:right">9</td><td class="hint">⋯</td></tr>
+      <tr style="border-top: 1px solid var(--panel-2)"><td style="padding: 7px 12px" class="hint">2</td><td class="data">chat/build-safe</td><td><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span></td><td class="data dim" style="font-size:11px">.jaira/…/chat/build-safe.json</td><td class="dim">project settings</td><td style="text-align:right">3</td><td style="text-align:right">3</td><td class="hint">⋯</td></tr>
+      <tr class="ghost" style="outline: none;"><td style="padding: 7px 12px"><span class="newtag">new</span></td><td colspan="2"><span class="row" style="gap:7px; border: 1px solid var(--line); border-radius: 7px; padding: 3px 8px; background: var(--panel); width: 230px;"><svg class="i sm hint"><use href="#i-search"/></svg><span class="data">no-fe</span><span class="hint">|</span></span></td><td colspan="2"><span class="row" style="gap: 8px"><span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span><span class="data">web/no-fetch</span><span class="hint">↵</span></span></td><td style="text-align:right">1</td><td style="text-align:right" class="acc">1</td><td><svg class="i sm hint"><use href="#i-x"/></svg></td></tr>
+      <tr style="border-top: 1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 8%, transparent);"><td style="padding: 7px 12px" class="hint">3</td><td class="data acc">web/docs-sites</td><td><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span></td><td class="data dim" style="font-size:11px">~/.jaira/…/web/docs-sites.json</td><td class="dim">you, here</td><td style="text-align:right">1</td><td style="text-align:right">1 <span class="hint">· 3 places</span></td><td style="position: relative;"><span class="acc">⋯</span>
+        <div class="pick" style="position:absolute; right: 8px; top: 24px; width: 190px; z-index: 2; padding: 4px 0;"><div class="it on"><svg class="i sm"><use href="#i-insert"/></svg>Insert before</div><div class="it"><svg class="i sm"><use href="#i-insert"/></svg>Insert after</div><div class="it">Swap…</div><div class="it">Move earlier</div><div class="it">Move later</div><div class="it">Pin to this project</div><div class="it" style="color: var(--bad)">Remove</div></div></td></tr>
+      <tr style="border-top: 1px solid var(--panel-2)"><td style="padding: 7px 12px" class="hint">4</td><td class="data">me/quiet-git</td><td><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span></td><td class="data dim" style="font-size:11px">~/.jaira/personal/…/quiet-git.json</td><td class="dim">you, here</td><td style="text-align:right">4</td><td style="text-align:right">4</td><td class="hint">⋯</td></tr>
+      <tr style="border-top: 1px solid var(--panel-2)"><td style="padding: 7px 12px" class="hint">5</td><td class="data">this run</td><td><span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span></td><td class="hint">in memory</td><td class="dim">your answers</td><td style="text-align:right">3</td><td style="text-align:right">2</td><td class="hint">⋯</td></tr>
+      <tr style="border-top: 1px solid var(--panel-2)"><td style="padding: 7px 12px" class="hint">6</td><td class="data">tools</td><td><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span></td><td class="hint">kept on the task</td><td class="dim">the Tools card</td><td style="text-align:right">9</td><td style="text-align:right">9</td><td class="hint">⋯</td></tr>
+    </tbody>
+  </table>
+  <div class="ffoot" style="color: var(--dim)">Decides: lines where this layer's answer is the one that stands.<span class="grow"></span><span class="acc">Everything ›</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section class="d" id="d7">
+<header><span class="n">7</span><h2>Tool × layer matrix</h2></header>
+<p class="why">The <b>full picture as a grid</b>: a column per layer (headed by its scope), a row per line, and a last column for <b>what it comes to</b>. The answer that stands is outlined; ones a newer layer overrides are struck. Hovering between two column heads offers <b>＋</b>; here the gap before <code>docs-sites</code> is open, previewing <code>web/no-fetch</code>'s column and how the result would change (<b>bold</b>).</p>
+<div class="stage">
+<div class="float" style="width: 100%;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">every line, every layer</span></div>
+  <table style="width:100%; border-collapse: collapse; font-size: 11.5px;">
+    <thead><tr><th></th>
+      <th style="padding: 8px 6px; text-align:left;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span><span class="data" style="font-size: 11px">ask-first</span></div></th>
+      <th style="padding: 8px 6px; text-align:left;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span><span class="data" style="font-size: 11px">build-safe</span></div></th>
+      <th class="ghost" style="padding: 8px 6px; text-align:left; border-radius: 8px 8px 0 0;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span><span class="data acc" style="font-size: 11px">no-fetch <span class="newtag">new</span></span></div></th>
+      <th style="padding: 8px 6px; text-align:left; background: color-mix(in srgb, var(--accent) 7%, transparent)"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span><span class="data acc" style="font-size: 11px">docs-sites</span></div></th>
+      <th style="padding: 8px 6px; text-align:left;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span><span class="data" style="font-size: 11px">quiet-git</span></div></th>
+      <th style="padding: 8px 6px; text-align:left;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span><span class="data" style="font-size: 11px">answers</span></div></th>
+      <th style="padding: 8px 6px; text-align:left;"><div class="col" style="gap:3px; align-items:flex-start"><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span><span class="data" style="font-size: 11px">tools</span></div></th>
+      <th style="padding: 8px 10px; text-align:left; border-left: 1px solid var(--line)"><span class="hint">comes to</span></th></tr></thead>
+    <tbody class="data" style="font-size: 11px;">
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">read_file</td><td><span class="m places" style="outline: 1.5px solid var(--text)">$PROJECT allow · ** ask</span></td><td></td><td class="ghost" style="border-top:0;border-bottom:0"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td></td><td></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m places">2 places</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">edit</td><td><span class="m ask over">ask</span></td><td></td><td class="ghost" style="border-top:0;border-bottom:0"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td></td><td><span class="m allow" style="outline: 1.5px solid var(--text)">src/ allow</span></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m allow">src/</span> <span class="m ask">else</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">npm run build</td><td><span class="m ask over">ask</span></td><td><span class="m allow" style="outline: 1.5px solid var(--text)">packages/app</span></td><td class="ghost" style="border-top:0;border-bottom:0"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td></td><td></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m allow">allow</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">git push</td><td><span class="m ask over">ask</span></td><td></td><td class="ghost" style="border-top:0;border-bottom:0"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td><span class="m places" style="outline: 1.5px solid var(--text)">claude/** allow · main deny</span></td><td></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m places">2 places</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2); background: color-mix(in srgb, var(--accent) 4%, transparent)"><td style="padding: 6px 12px; font-weight: 700">web_fetch</td><td><span class="m ask over">ask</span></td><td></td><td class="ghost" style="border-top:0;border-bottom:0"><span class="m deny" style="outline: 1.5px solid var(--accent)">deny</span></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"><span class="m allow" style="outline: 1.5px solid var(--text)">3 sites allow</span></td><td></td><td></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m allow">3 sites</span> <b><span class="m deny">else deny</span></b> <span class="hint" style="text-decoration: line-through">else ask</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">web_search</td><td><span class="m allow" style="outline: 1.5px solid var(--text)">allow</span></td><td></td><td class="ghost" style="border-top:0;border-bottom:0"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td></td><td></td><td></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m allow">allow</span></td></tr>
+      <tr style="border-top:1px solid var(--panel-2)"><td style="padding: 6px 12px">screenshot</td><td><span class="m ask over">ask</span></td><td></td><td class="ghost" style="border-top:0;"></td><td style="background: color-mix(in srgb, var(--accent) 7%, transparent)"></td><td></td><td></td><td><span class="m un" style="outline: 1.5px solid var(--text)">unavailable</span></td><td style="border-left:1px solid var(--line); padding-left: 10px"><span class="m un">unavailable</span></td></tr>
+    </tbody>
+  </table>
+  <div class="ffoot" style="color: var(--dim)"><span class="row" style="gap:5px"><span class="m allow" style="outline: 1.5px solid var(--text)">x</span> stands</span><span class="row" style="gap:5px"><span class="m ask over">x</span> overridden</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn acc">Lay in web/no-fetch</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 8 -->
+<section class="d" id="d8">
+<header><span class="n">8</span><h2>Nested by scope</h2></header>
+<p class="why">Each layer is <b>a frame inside the one under it</b>, its edge and label in its scope's colour, so the newest is the innermost and the base is the frame around everything. Hovering a frame's edge offers <b>Wrap here</b>; adding before <code>docs-sites</code> draws a dashed frame <b>around it</b> — the new layer holds it, and docs-sites still has the last word inside.</p>
+<div class="stage">
+<div class="float" style="width: 100%; padding: 14px;">
+  <div class="row" style="margin-bottom: 10px;"><svg class="i"><use href="#i-shield"/></svg><span style="font-weight: 600; font-size: 12.5px;">Permissions</span><span class="hint">each frame is laid over the one around it</span></div>
+  <div style="border: 2px solid var(--s-built); border-radius: 12px; padding: 22px 12px 12px; position: relative;">
+    <div style="position:absolute; top: -1px; left: 12px; transform: translateY(-50%);" class="row"><span class="sc built solid"><svg class="i"><use href="#i-jaira"/></svg>Built in</span><span class="data" style="background: var(--panel); padding: 0 4px;">chat/ask-first</span></div>
+    <div style="position:absolute; top: 6px; right: 12px;" class="hint">14 lines · read_file, edit, shell, web_fetch, …</div>
+    <div style="border: 2px solid var(--s-proj); border-radius: 11px; padding: 22px 12px 12px; position: relative; margin-top: 8px;">
+      <div style="position:absolute; top: -1px; left: 12px; transform: translateY(-50%);" class="row"><span class="sc proj solid"><svg class="i"><use href="#i-folder"/></svg>Project</span><span class="data" style="background: var(--panel); padding: 0 4px;">chat/build-safe</span></div>
+      <div style="position:absolute; top: 6px; right: 12px;" class="hint">npm run build · npm test · tsc</div>
+      <div class="ghost" style="border-radius: 10px; padding: 22px 12px 12px; position: relative; margin-top: 8px;">
+        <div style="position:absolute; top: -1px; left: 12px; transform: translateY(-50%);" class="row"><span class="newtag">new</span><span class="sc mach solid"><svg class="i"><use href="#i-monitor"/></svg>This machine</span><span class="data acc" style="background: var(--panel); padding: 0 4px;">web/no-fetch</span><span class="btn" style="padding: 0 6px; font-size: 10.5px">change ⌄</span></div>
+        <div style="position:absolute; top: 6px; right: 12px;" class="hint acc">web_fetch: deny</div>
+        <div style="border: 2px solid var(--s-shared); border-radius: 9px; padding: 22px 12px 12px; position: relative; margin-top: 8px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 15%, transparent);">
+          <div style="position:absolute; top: -1px; left: 12px; transform: translateY(-50%);" class="row"><span class="sc shared solid"><svg class="i"><use href="#i-users"/></svg>Shared</span><span class="data acc" style="background: var(--panel); padding: 0 4px;">web/docs-sites</span></div>
+          <div style="position:absolute; top: 6px; right: 12px;" class="hint">web_fetch at 3 sites</div>
+          <div style="border: 2px solid var(--s-you); border-radius: 8px; padding: 22px 12px 12px; position: relative; margin-top: 8px;">
+            <div style="position:absolute; top: -1px; left: 12px; transform: translateY(-50%);" class="row"><span class="sc you solid"><svg class="i"><use href="#i-user"/></svg>Just you</span><span class="data" style="background: var(--panel); padding: 0 4px;">me/quiet-git</span></div>
+            <div style="position:absolute; top: 6px; right: 12px;" class="hint">git status · diff · log · push</div>
+            <div class="row" style="gap: 10px; margin-top: 8px;">
+              <div style="border: 2px solid var(--s-run); border-radius: 7px; padding: 8px 10px; flex: 1;" class="row"><span class="sc run solid"><svg class="i"><use href="#i-bolt"/></svg>This run</span><span class="hint">3 answers</span></div>
+              <div style="border: 2px solid var(--s-conv); border-radius: 7px; padding: 8px 10px; flex: 1;" class="row"><span class="sc conv solid"><svg class="i"><use href="#i-chat"/></svg>This conversation</span><span class="data">tools</span><span class="hint">· 9</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="justify-content: flex-end; margin-top: 10px;"><span class="btn">Cancel</span><span class="btn acc">Wrap docs-sites in web/no-fetch</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 9 -->
+<section class="d" id="d9">
+<header><span class="n">9</span><h2>Cards over the bar</h2></header>
+<p class="why">The shield opens <b>a row of cards that sit right over the composer's segments</b>, one card per segment, so the bar and the full view are the same thing at two sizes. Each card has a <b>scope header</b> and its first lines. Between cards is a slim <b>＋ gutter</b>; the gutter before the picked card has widened into a slot with the picker in it.</p>
+<div class="stage">
+<div class="row" style="align-items: stretch; gap: 0;">
+  <div class="float" style="width: 150px;"><div style="background: color-mix(in srgb, var(--s-built) 14%, transparent); color: var(--s-built); padding: 5px 10px; font: 600 10px var(--font-app);" class="row"><svg class="i sm"><use href="#i-jaira"/></svg>Built in</div><div style="padding: 8px 10px;" class="col"><span class="data">ask-first</span><span class="hint">the base</span><div class="col" style="gap: 3px; margin-top: 6px; font: 500 10.5px var(--font-data)"><span class="row">read_file <span class="m places">2</span></span><span class="row">edit <span class="m ask">ask</span></span><span class="row">shell <span class="m ask">ask</span></span><span class="hint">+11</span></div></div></div>
+  <div style="width: 16px; display: grid; place-items: center; color: var(--tok-hint)"><svg class="i xs"><use href="#i-plus"/></svg></div>
+  <div class="float" style="width: 150px;"><div style="background: color-mix(in srgb, var(--s-proj) 14%, transparent); color: var(--s-proj); padding: 5px 10px; font: 600 10px var(--font-app);" class="row"><svg class="i sm"><use href="#i-folder"/></svg>Project · standing</div><div style="padding: 8px 10px;" class="col"><span class="data">build-safe</span><span class="hint">from settings</span><div class="col" style="gap: 3px; margin-top: 6px; font: 500 10.5px var(--font-data)"><span class="row">npm run build <span class="m allow">1</span></span><span class="row">npm test <span class="m allow">allow</span></span><span class="row">tsc <span class="m allow">allow</span></span></div></div></div>
+  <div class="ghost" style="width: 210px; border-radius: 12px; margin: 0 8px; padding: 8px;"><div class="row"><span class="newtag">new</span><span class="hint acc">under docs-sites</span></div><div class="find" style="display:flex; gap: 6px; align-items:center; border: 1px solid var(--line); border-radius: 7px; padding: 3px 7px; margin: 6px 0; background: var(--panel); font-size: 11.5px;"><svg class="i sm hint"><use href="#i-search"/></svg><span class="hint">Find a set</span></div><div class="col" style="gap: 2px; font: 500 11px var(--font-data)"><span class="row" style="color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); border-radius: 5px; padding: 2px 5px;"><span class="dot mach"></span>web/no-fetch</span><span class="row" style="padding: 2px 5px"><span class="dot mach"></span>net/proxy-only</span><span class="row" style="padding: 2px 5px"><span class="dot proj"></span>app/build</span><span class="row" style="padding: 2px 5px"><span class="dot shared"></span>web/github</span><span class="row" style="padding: 2px 5px"><span class="dot built"></span>chat/read-only</span></div></div>
+  <div class="float" style="width: 150px; outline: 2px solid var(--accent);"><div style="background: color-mix(in srgb, var(--s-shared) 14%, transparent); color: var(--s-shared); padding: 5px 10px; font: 600 10px var(--font-app);" class="row"><svg class="i sm"><use href="#i-users"/></svg>Shared</div><div style="padding: 8px 10px;" class="col"><span class="data acc">docs-sites</span><span class="hint">you, here</span><div class="col" style="gap: 3px; margin-top: 6px; font: 500 10.5px var(--font-data)"><span class="row">web_fetch <span class="m places">3</span></span></div></div></div>
+  <div style="width: 16px; display: grid; place-items: center; color: var(--tok-hint)"><svg class="i xs"><use href="#i-plus"/></svg></div>
+  <div class="float" style="width: 140px;"><div style="background: color-mix(in srgb, var(--s-you) 14%, transparent); color: var(--s-you); padding: 5px 10px; font: 600 10px var(--font-app);" class="row"><svg class="i sm"><use href="#i-user"/></svg>Just you</div><div style="padding: 8px 10px;" class="col"><span class="data">quiet-git</span><span class="hint">you, here</span><div class="col" style="gap: 3px; margin-top: 6px; font: 500 10.5px var(--font-data)"><span class="row">git status <span class="m allow">allow</span></span><span class="row">git push <span class="m places">2</span></span><span class="hint">+2</span></div></div></div>
+  <div style="width: 16px; display: grid; place-items: center; color: var(--tok-hint)"><svg class="i xs"><use href="#i-plus"/></svg></div>
+  <div class="float" style="width: 150px;"><div style="background: color-mix(in srgb, var(--s-conv) 14%, transparent); color: var(--s-conv); padding: 5px 10px; font: 600 10px var(--font-app);" class="row"><svg class="i sm"><use href="#i-chat"/></svg>Conversation</div><div style="padding: 8px 10px;" class="col"><span class="data">tools · 9</span><span class="hint acc">3 from this run</span><div class="col" style="gap: 3px; margin-top: 6px; font: 500 10.5px var(--font-data)"><span class="row">screenshot <span class="m un">off</span></span><span class="row">edit <span class="m allow">src/</span> <span class="sc run" style="padding: 1px 4px">run</span></span><span class="hint">+7</span></div></div></div>
+</div>
+<div class="composer" style="margin-top: 14px;"><div class="text">Ask anything…</div><div class="foot"><span class="segs"><span class="seg on"><svg class="i sm"><use href="#i-shield"/></svg></span><span class="seg"><span class="dot built"></span>ask-first <svg class="i xs"><use href="#i-chev"/></svg></span><span class="seg"><span class="dot proj"></span>build-safe</span><span class="seg"><span class="dot shared"></span>docs-sites</span><span class="seg"><span class="dot you"></span>quiet-git</span><span class="seg"><span class="dot conv"></span>tools · 9 · <span class="acc">3</span></span><span class="seg">+</span></span><span class="chip">Opus 5.5</span><span class="send"><svg class="i sm"><use href="#i-send"/></svg></span></div></div>
+<p class="hint" style="margin: 8px 0 0">The bar gains a scope dot on every segment, so where a layer lives is seen without opening anything.</p>
+</div>
+</section>
+
+<!-- ============================================================ 10 -->
+<section class="d" id="d10">
+<header><span class="n">10</span><h2>Lay in, with what changes</h2></header>
+<p class="why">Built around the add itself. Pressing <b>Add before</b> on a layer turns the shield into three panes: the <b>stack</b> with a caret where the new layer will go, the <b>sets by scope</b> to choose from, and <b>what changes</b> — each line whose answer moves, and the lines the new layer writes that a newer layer already overrides, so you see before laying it in that docs-sites will still win.</p>
+<div class="stage">
+<div class="float" style="width: 100%;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Add a layer before</span><span class="data acc">web/docs-sites</span><span class="grow"></span><span class="kbd">esc</span></div>
+  <div style="display:flex; height: 300px;">
+    <div style="width: 230px; border-right: 1px solid var(--panel-2); padding: 8px;" class="col">
+      <div class="lrow"><span class="dot built"></span><span class="nm grow">chat/ask-first</span></div>
+      <div class="lrow"><span class="dot proj"></span><span class="nm grow">chat/build-safe</span></div>
+      <div class="lrow ghost" style="border-radius: 7px; margin: 3px 0;"><span class="dot mach"></span><span class="nm acc grow">web/no-fetch</span><span class="newtag">here</span></div>
+      <div class="lrow on"><span class="dot shared"></span><span class="nm grow">web/docs-sites</span></div>
+      <div class="lrow"><span class="dot you"></span><span class="nm grow">me/quiet-git</span></div>
+      <div class="lrow"><span class="dot run"></span><span class="nm grow">this run</span></div>
+      <div class="lrow"><span class="dot conv"></span><span class="nm grow">tools</span></div>
+      <div class="grow"></div>
+      <div class="row hint" style="padding: 4px 8px"><span class="kbd">↑</span><span class="kbd">↓</span> move the caret</div>
+    </div>
+    <div style="width: 270px; border: 0; border-right: 1px solid var(--panel-2); border-radius: 0; box-shadow: none;" class="pick">
+      <div class="find" style="margin-top: 8px"><svg class="i sm"><use href="#i-search"/></svg>Find a set</div>
+      <div class="grp"><span class="dot mach"></span>This machine <span class="hint" style="text-transform:none; letter-spacing:0">~/.jaira/machine</span></div>
+      <div class="it on"><svg class="i sm"><use href="#i-file"/></svg>web/no-fetch<span class="hint">1 line</span></div>
+      <div class="it"><svg class="i sm"><use href="#i-file"/></svg>net/proxy-only<span class="hint">2 lines</span></div>
+      <div class="grp"><span class="dot proj"></span>Project</div>
+      <div class="it"><svg class="i sm"><use href="#i-file"/></svg>app/build<span class="hint">5 lines</span></div>
+      <div class="grp"><span class="dot shared"></span>Shared</div>
+      <div class="it"><svg class="i sm"><use href="#i-file"/></svg>web/github<span class="hint">1 line</span></div>
+      <div class="grp"><span class="dot built"></span>Built in</div>
+      <div class="it"><svg class="i sm"><use href="#i-file"/></svg>chat/read-only<span class="hint">preset</span></div>
+    </div>
+    <div class="grow col">
+      <div style="padding: 10px 12px 4px;" class="row"><span class="t" style="font-weight: 600">What changes</span><span class="hint">under the whole stack</span></div>
+      <div class="lines">
+        <div class="line">web_fetch <span class="hint">elsewhere</span><span class="grow"></span><span class="m ask over">ask</span><svg class="i sm hint"><use href="#i-arrow"/></svg><span class="m deny">deny</span></div>
+        <div class="line place" style="opacity:.7">3 doc sites<span class="grow"></span><span class="m allow">allow</span><span class="hint" style="font-family: var(--font-app)">kept · docs-sites is newer</span></div>
+      </div>
+      <div style="padding: 4px 12px;"><div class="callout"><b>1 line changes.</b> docs-sites is newer, so its 3 sites stay allowed; every other fetch is now refused. Laid on top instead, no-fetch would refuse the doc sites too.</div></div>
+      <div class="grow"></div>
+      <div class="ffoot" style="color: var(--dim)"><span class="row" style="gap: 6px">Keep it <span class="btn" style="padding: 2px 8px">in this conversation ⌄</span></span><span class="grow"></span><span class="btn">Cancel</span><span class="btn acc">Lay in before docs-sites</span></div>
+    </div>
+  </div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 11 -->
+<section class="d" id="d11">
+<header><span class="n">11</span><h2>Bands by who put it there</h2></header>
+<p class="why">The stack's order already says <i>who</i> laid each layer (0023 §2.6): the base, the project's standing layers from settings, this conversation's layers, this run, the tools. Here those are <b>bands</b>, and each row inside a band still shows its file's <b>scope</b>. Rows <b>drag</b>; a set dragged in from the drawer (or <b>＋ before</b> on a row) shows its drop line. A band says where an insert there is kept.</p>
+<div class="stage">
+<div style="display:flex; gap: 16px; align-items: flex-start;">
+<div class="float" style="width: 560px;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="grow"></span><span class="btn"><svg class="i sm"><use href="#i-layers"/></svg>Sets</span></div>
+  <div style="padding: 6px 10px 10px;">
+    <div class="row hint" style="padding: 6px 4px 3px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em;">The base<span class="grow"></span><span style="text-transform: none; letter-spacing: 0; font-weight: 400">swap it in one press</span></div>
+    <div class="lrow" style="border: 1px solid var(--line);"><svg class="i sm hint"><use href="#i-grip"/></svg><span class="nm grow">chat/ask-first <svg class="i xs"><use href="#i-chev"/></svg></span><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span></div>
+    <div class="row hint" style="padding: 10px 4px 3px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em;">Standing · project settings<span class="grow"></span><span style="text-transform: none; letter-spacing: 0; font-weight: 400">every chat in this project</span></div>
+    <div class="lrow" style="border: 1px solid var(--line);"><svg class="i sm hint"><use href="#i-grip"/></svg><span class="nm grow">chat/build-safe</span><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span></div>
+    <div class="row hint" style="padding: 10px 4px 3px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em;">This conversation's layers<span class="grow"></span><span style="text-transform: none; letter-spacing: 0; font-weight: 400">kept on the task</span></div>
+    <div style="height: 3px; background: var(--accent); border-radius: 2px; margin: 2px 0 2px 0; position: relative;"><span style="position:absolute; left: -4px; top: -3px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent);"></span></div>
+    <div class="lrow on" style="border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);"><svg class="i sm hint"><use href="#i-grip"/></svg><span class="nm grow">web/docs-sites</span><span class="btn ghost" style="padding: 0 4px">＋ before</span><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span></div>
+    <div class="lrow" style="border: 1px solid var(--line); margin-top: 4px"><svg class="i sm hint"><use href="#i-grip"/></svg><span class="nm grow">me/quiet-git</span><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span></div>
+    <div class="row hint" style="padding: 10px 4px 3px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em;">This run<span class="grow"></span><span style="text-transform: none; letter-spacing: 0; font-weight: 400">gone when the run ends</span></div>
+    <div class="lrow" style="border: 1px dashed var(--line);"><span class="nm grow">3 answers <span class="hint">· edit src/ · npm run lint · rm -rf dist</span></span><span class="btn ghost" style="padding: 0 4px">clear</span></div>
+    <div class="row hint" style="padding: 10px 4px 3px; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em;">Tools · ticked here</div>
+    <div class="lrow" style="border: 1px solid var(--line);"><svg class="i sm"><use href="#i-tool"/></svg><span class="nm grow">tools · 9</span><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span></div>
+  </div>
+</div>
+<div class="col" style="gap: 6px; margin-top: 130px; position: relative;">
+  <div class="note" style="position: static; margin-bottom: 4px;"><svg class="i" style="transform: scaleX(-1)"><use href="#i-arrow"/></svg>dropping it before docs-sites</div>
+  <div class="lrow ghost" style="width: 250px; box-shadow: var(--lift); transform: rotate(-2deg);"><svg class="i sm hint"><use href="#i-grip"/></svg><span class="nm grow acc">web/no-fetch</span><span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span></div>
+  <div class="pick" style="width: 250px; margin-top: 18px; opacity: .85"><div class="lbl">Sets — drag one in</div><div class="grp"><span class="dot mach"></span>This machine</div><div class="it" style="opacity:.4">web/no-fetch</div><div class="it">net/proxy-only</div><div class="grp"><span class="dot proj"></span>Project</div><div class="it">app/build</div><div class="grp"><span class="dot shared"></span>Shared</div><div class="it">web/github</div><div style="height:6px"></div></div>
+</div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 12 -->
+<section class="d" id="d12">
+<header><span class="n">12</span><h2>Who decides what</h2></header>
+<p class="why">Each layer row carries a <b>strip of cells, one per line</b> the stack knows (columns aligned across rows). A cell is <b>solid</b> where that layer's answer stands, <b>hatched</b> where it writes the line but a newer layer overrides it, and empty where it says nothing. So a layer whose strip is all hatched is doing nothing, and a new layer's preview row shows at once what it would actually decide.</p>
+<div class="stage">
+<div class="float" style="width: 100%;">
+  <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">who decides each line</span><span class="grow"></span><span class="hint">hover a cell for the line</span></div>
+  <style>
+    .strip { display: grid; grid-template-columns: repeat(14, 18px); gap: 3px; }
+    .strip i { height: 16px; border-radius: 3px; background: transparent; border: 1px solid var(--panel-3); }
+    .strip i.s { background: var(--c); border-color: transparent; }
+    .strip i.h { border-color: color-mix(in srgb, var(--c) 45%, transparent); background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 35%, transparent) 0 2px, transparent 2px 5px); }
+    .cake { display: grid; grid-template-columns: 26px 200px 140px 1fr 70px; align-items: center; gap: 10px; padding: 6px 12px; }
+    .cake + .cake { border-top: 1px solid var(--panel-2); }
+    .cake .sc { justify-self: start; }
+    .heads { display: grid; grid-template-columns: repeat(14, 18px); gap: 3px; font: 500 9px var(--font-data); color: var(--tok-hint); }
+    .heads span { writing-mode: vertical-rl; transform: rotate(180deg); height: 72px; white-space: nowrap; }
+  </style>
+  <div class="cake" style="padding-top: 10px;"><span></span><span></span><span></span><div class="heads"><span>read_file</span><span>glob</span><span>grep</span><span>edit</span><span>write_file</span><span>shell</span><span>npm run build</span><span>npm test</span><span>tsc</span><span>git status</span><span>git push</span><span>web_fetch</span><span>web_search</span><span>screenshot</span></div><span class="hint" style="align-self: end">decides</span></div>
+  <div class="cake" style="--c: var(--s-built)"><span class="num">1</span><span class="data">chat/ask-first</span><span class="sc built"><svg class="i"><use href="#i-jaira"/></svg>Built in</span><div class="strip"><i class="s"></i><i class="s"></i><i class="s"></i><i class="h"></i><i class="s"></i><i class="s"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="s"></i><i class="h"></i></div><span>6 <span class="hint">of 14</span></span></div>
+  <div class="cake" style="--c: var(--s-proj)"><span class="num">2</span><span class="data">chat/build-safe</span><span class="sc proj"><svg class="i"><use href="#i-folder"/></svg>Project</span><div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><i class="s"></i><i class="s"></i><i class="s"></i><i></i><i></i><i></i><i></i><i></i></div><span>3 <span class="hint">of 3</span></span></div>
+  <div class="cake ghost" style="--c: var(--s-mach); border-radius: 8px; margin: 2px 6px;"><span><span class="newtag">new</span></span><span class="data acc">web/no-fetch</span><span class="sc mach"><svg class="i"><use href="#i-monitor"/></svg>This machine</span><div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="s" style="outline: 2px solid var(--accent); outline-offset: 1px"></i><i></i><i></i></div><span class="acc">1 <span class="hint">elsewhere</span></span></div>
+  <div class="cake" style="--c: var(--s-shared); background: color-mix(in srgb, var(--accent) 6%, transparent)"><span class="num">3</span><span class="data acc">web/docs-sites</span><span class="sc shared"><svg class="i"><use href="#i-users"/></svg>Shared</span><div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="s"></i><i></i><i></i></div><span>1 <span class="hint">3 sites</span></span></div>
+  <div class="cake" style="--c: var(--s-you)"><span class="num">4</span><span class="data">me/quiet-git</span><span class="sc you"><svg class="i"><use href="#i-user"/></svg>Just you</span><div class="strip"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="s"></i><i class="s"></i><i></i><i></i><i></i></div><span>2 <span class="hint">of 4</span></span></div>
+  <div class="cake" style="--c: var(--s-run)"><span class="num">5</span><span class="data">this run</span><span class="sc run"><svg class="i"><use href="#i-bolt"/></svg>This run</span><div class="strip"><i></i><i></i><i></i><i class="s"></i><i></i><i class="h"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><span>1 <span class="hint">of 3</span></span></div>
+  <div class="cake" style="--c: var(--s-conv)"><span class="num">6</span><span class="data">tools</span><span class="sc conv"><svg class="i"><use href="#i-chat"/></svg>Conversation</span><div class="strip"><i></i><i></i><i></i><i></i><i></i><i class="s"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="s"></i></div><span>2 <span class="hint">of 9</span></span></div>
+  <div class="ffoot" style="color: var(--dim)"><span class="row" style="gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: var(--s-shared)"></span>stands</span><span class="row" style="gap: 6px"><span style="width: 12px; height: 12px; border-radius: 3px; background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--s-shared) 35%, transparent) 0 2px, transparent 2px 5px); border: 1px solid var(--line)"></span>overridden by a newer layer</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn acc">Lay in before docs-sites</span></div>
+</div>
+</div>
+</section>
+
+</body>
+</html>

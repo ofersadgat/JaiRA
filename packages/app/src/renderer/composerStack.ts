@@ -753,11 +753,11 @@ export function panelRowsOf(layers: readonly LayerSegment[], bar: readonly Stack
 }
 
 /** The panel's widths. */
-export const PANEL_WIDTHS = { list: 300, rows: 400, whole: 900, contents: 500 } as const;
+export const PANEL_WIDTHS = { list: 300, rows: 400, whole: 900, board: 1480, contents: 500 } as const;
 /** How tall the panel stands while contents are unfolded beside a list: as tall as the room over the bar leaves, 200 to 440. */
 export const UNFOLDED_HEIGHT = { min: 200, max: 440 } as const;
 
-export type PanelView = "list" | "rows" | "whole";
+export type PanelView = "list" | "rows" | "whole" | "board";
 
 /**
  * How wide the panel's two columns are: the list's (or the rows', or the whole picture's), and the
@@ -766,7 +766,7 @@ export type PanelView = "list" | "rows" | "whole";
  */
 export function panelColumnsOf(view: PanelView, unfolded: boolean, room: number, phone: boolean): { left: number; right: number; over: boolean } {
   const left = Math.min(PANEL_WIDTHS[view], room);
-  if (!unfolded || view === "whole") return { left, right: 0, over: false };
+  if (!unfolded || view === "whole" || view === "board") return { left, right: 0, over: false };
   if (phone || room - left < 320) return { left, right: 0, over: true };
   return { left, right: Math.min(PANEL_WIDTHS.contents, room - left), over: false };
 }

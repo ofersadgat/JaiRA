@@ -1184,7 +1184,7 @@ export class WindowsSystem implements SystemBackend {
 
   async software(kind: SoftwareKind): Promise<SoftwareRow[]> {
     if (kind === "packages") {
-      // What winget knows of what is installed, by the id `install_software` takes.
+      // What winget knows of what is installed, by the id `install_program` takes.
       return withScratch("packages.json", async (file) => {
         const { code, output } = await runProgram("winget", ["export", "-o", file, "--accept-source-agreements", "--disable-interactivity"], 180_000);
         let parsed: { Sources?: Array<{ SourceDetails?: { Name?: string }; Packages?: Array<{ PackageIdentifier?: string; Version?: string }> }> };

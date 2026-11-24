@@ -57,13 +57,13 @@ export interface ServiceRow {
 export type ServiceAction = "start" | "stop" | "restart" | "pause" | "resume" | "set_start_type";
 export const SERVICE_ACTIONS: readonly ServiceAction[] = ["start", "stop", "restart", "pause", "resume", "set_start_type"];
 
-/** What `list_software` lists: installed programs, store apps, script modules, a package manager's packages. */
+/** What `list_programs` lists: installed programs, store apps, script modules, a package manager's packages. */
 export type SoftwareKind = "programs" | "apps" | "modules" | "packages";
 export const SOFTWARE_KINDS: readonly SoftwareKind[] = ["programs", "apps", "modules", "packages"];
 
 export interface SoftwareRow {
   name: string;
-  /** What `install_software` takes to name it, where there is such a thing. */
+  /** What `install_program` takes to name it, where there is such a thing. */
   id?: string;
   version?: string;
   publisher?: string;

@@ -1,0 +1,880 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0023-overlays-and-scopes">
+<meta name="state" content="the permission editor, round 1 · places on a board">
+<meta name="captured" content="2026-11-23">
+<meta name="reflects" content="proposed">
+<title>The permission editor · places on a board · 8 versions</title>
+<style>
+/* Shared by the permission-layers rounds. Lifted from round 1's own style block. */
+/* Proposals for the shield's whole picture (decision 0023 §4.1, amended 2026-11-03 ruling 13), drawn in
+   today's client: the `ink` palette as processes.css copies it, light and dark (#dark). Self-contained.
+   "Scope" here is 0023's: WHERE a set lives (built in, Shared, the project, this machine, the project on
+   this machine, Just you, you in the project, this run, this conversation). "Place" stays a line's. */
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --fill-ghost-hover: rgba(18,21,38,.05); --fill-ghost-selected: rgba(18,21,38,.09);
+  --tok-hint: #949cad; --p0: #737b8d; --p1: #3f76d4; --p2: #b57a1c; --p3: #7d5fc7; --ws-tool: #a8508a; --ws-run: #3d7a4c; --ws-read: #2f8a9e;
+  --lift: 0 12px 32px rgba(24,30,42,.18); --compose-foot: #fafafe;
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* a scope's hue */
+  --s-built: var(--p0); --s-shared: var(--p1); --s-proj: var(--p2); --s-mach: var(--p3); --s-you: var(--ws-tool); --s-run: var(--accent); --s-conv: var(--ws-run);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #141620; --panel-3: #1e2130; --line: #242838; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72;
+  --fill-accent: #5a5fe0; --fill-ghost-hover: rgba(255,255,255,.05); --fill-ghost-selected: rgba(255,255,255,.09);
+  --tok-hint: #5a6274; --p0: #8b93a7; --p1: #6e9df0; --p2: #d7a145; --p3: #a98ee6; --ws-tool: #e08cc6; --ws-run: #7ccf8e; --ws-read: #6cc3d6;
+  --lift: 0 18px 50px rgba(0,0,0,.5); --compose-foot: #141620;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; vertical-align: -2px; }
+svg.i.sm { width: 12px; height: 12px; } svg.i.xs { width: 10px; height: 10px; } svg.i.lg { width: 16px; height: 16px; }
+.data { font-family: var(--font-data); font-size: 12px; font-weight: 500; }
+.hint { color: var(--tok-hint); font-size: 11px; }
+.dim { color: var(--dim); }
+.acc { color: var(--accent); }
+.grow { flex: 1; }
+.row { display: flex; align-items: center; gap: 8px; }
+.col { display: flex; flex-direction: column; }
+
+/* page */
+.top { display: flex; align-items: baseline; gap: 16px; margin-bottom: 6px; }
+.top h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.top a { font: 500 11px var(--font-data); color: var(--accent); }
+.lede { max-width: 900px; color: var(--dim); margin: 0 0 8px; }
+.legend { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0 26px; align-items: center; }
+.toc { display: grid; grid-template-columns: repeat(4, minmax(0, 220px)); gap: 4px 18px; margin: 0 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc a:hover { color: var(--accent); }
+.toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 54px; }
+section.d > header { display: flex; gap: 14px; align-items: baseline; margin-bottom: 4px; }
+section.d > header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 1px 7px; }
+section.d > header h2 { margin: 0; font-size: 16px; font-weight: 650; }
+section.d > p.why { margin: 0 0 12px 0; max-width: 940px; color: var(--dim); }
+section.d > p.why b { color: var(--text); font-weight: 600; }
+.stage { position: relative; background: var(--panel-2); border: 1px solid var(--line); border-radius: 12px; padding: 22px; overflow: hidden; }
+.stage.split { display: flex; gap: 22px; align-items: flex-end; }
+
+/* the float the shield opens */
+.float { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); overflow: hidden; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--panel-2); }
+.fhead .t { font-weight: 600; font-size: 12.5px; }
+.ffoot { display: flex; align-items: center; gap: 14px; padding: 8px 12px; border-top: 1px solid var(--panel-2); font-size: 11px; color: var(--accent); flex-wrap: wrap; }
+.ffoot .bad { color: var(--bad); margin-left: auto; }
+
+/* scope badge */
+.sc { --c: var(--s-built); display: inline-flex; align-items: center; gap: 4px; font: 600 10px/1 var(--font-app); letter-spacing: .01em; color: var(--c); background: color-mix(in srgb, var(--c) 12%, transparent); border: 1px solid color-mix(in srgb, var(--c) 22%, transparent); border-radius: 99px; padding: 3px 7px 3px 5px; white-space: nowrap; }
+.sc svg.i { width: 10px; height: 10px; stroke-width: 2.2; }
+.sc.built { --c: var(--s-built); } .sc.shared { --c: var(--s-shared); } .sc.proj { --c: var(--s-proj); } .sc.mach { --c: var(--s-mach); } .sc.you { --c: var(--s-you); } .sc.run { --c: var(--s-run); } .sc.conv { --c: var(--s-conv); }
+.sc.solid { color: #fff; background: var(--c); border-color: transparent; }
+.dot { --c: var(--s-built); width: 8px; height: 8px; border-radius: 50%; background: var(--c); flex: none; }
+.dot.built { --c: var(--s-built); } .dot.shared { --c: var(--s-shared); } .dot.proj { --c: var(--s-proj); } .dot.mach { --c: var(--s-mach); } .dot.you { --c: var(--s-you); } .dot.run { --c: var(--s-run); } .dot.conv { --c: var(--s-conv); }
+
+/* decisions */
+.m { display: inline-block; font: 600 10.5px/1 var(--font-data); padding: 3px 6px; border-radius: 5px; white-space: nowrap; }
+.m.allow { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.m.ask { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.m.deny { color: var(--bad); background: color-mix(in srgb, var(--bad) 11%, transparent); }
+.m.un { color: var(--dim); background: var(--panel-3); }
+.m.fn { color: var(--p3); background: color-mix(in srgb, var(--p3) 12%, transparent); }
+.m.places { color: var(--dim); background: var(--panel-3); font-weight: 500; }
+.m.over { opacity: .38; text-decoration: line-through; }
+
+/* buttons */
+.btn { display: inline-flex; align-items: center; gap: 5px; font: 500 11.5px var(--font-app); color: var(--text); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 4px 9px; white-space: nowrap; }
+.btn.acc { color: var(--on-accent); background: var(--fill-accent); border-color: transparent; }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent); }
+.btn.dashed { border-style: dashed; color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.kbd { font: 500 10px var(--font-data); color: var(--tok-hint); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.glyph { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; background: var(--panel-2); color: var(--dim); flex: none; }
+.glyph.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+
+/* the composer, under a float */
+.composer { width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; margin-top: 10px; }
+.composer .text { padding: 10px 14px 8px; color: var(--tok-hint); }
+.composer .foot { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--compose-foot); border-top: 1px solid var(--panel-2); border-radius: 0 0 12px 12px; }
+.seg { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font: 500 11.5px var(--font-app); background: var(--panel-2); color: var(--dim); }
+.seg:first-child { border-radius: 99px 0 0 99px; } .seg:last-child { border-radius: 0 99px 99px 0; }
+.seg.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.segs { display: inline-flex; gap: 1px; }
+.chip { font: 500 11.5px var(--font-app); color: var(--dim); padding: 3px 9px; border-radius: 99px; }
+.send { margin-left: auto; width: 26px; height: 26px; border-radius: 50%; background: var(--fill-accent); color: #fff; display: grid; place-items: center; }
+
+/* a seam between two layers, where one is laid in */
+.seam { position: relative; height: 10px; }
+.seam::before { content: ""; position: absolute; left: 34px; right: 8px; top: 50%; border-top: 1px dashed transparent; }
+.seam .plus { position: absolute; left: 12px; top: -4px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: var(--tok-hint); opacity: 0; }
+.seam.hover { height: 22px; }
+.seam.hover::before { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.seam.hover .plus { opacity: 1; color: var(--on-accent); background: var(--fill-accent); }
+.seam.hover .say { position: absolute; left: 40px; top: -6px; font-size: 10.5px; color: var(--accent); background: var(--panel); padding: 0 6px; }
+
+/* a list row */
+.lrow { display: flex; align-items: center; gap: 9px; padding: 5px 8px; border-radius: 7px; }
+.lrow.on { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lrow .nm { font: 500 12px var(--font-data); }
+.lrow.on .nm { color: var(--accent); }
+.lrow .sub { font-size: 10.5px; color: var(--tok-hint); line-height: 1.3; }
+.num { font: 600 10px var(--font-data); color: var(--tok-hint); width: 14px; text-align: right; flex: none; }
+
+/* contents lines */
+.lines { padding: 4px 0; }
+.line { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font: 500 11.5px var(--font-data); }
+.line .w { color: var(--tok-hint); font: 400 10.5px var(--font-app); margin-left: auto; }
+.line.place { padding-left: 30px; color: var(--dim); }
+.line.place::before { content: ""; width: 8px; border-top: 1px solid var(--rule); margin-left: -14px; }
+.where { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-bottom: 1px solid var(--panel-2); background: color-mix(in srgb, var(--c, var(--s-shared)) 5%, transparent); }
+.where .path { font: 500 11px var(--font-data); color: var(--dim); }
+.crumbs { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; }
+.crumbs span { padding: 2px 5px; border-radius: 5px; } .crumbs span:hover { background: var(--fill-ghost-hover); }
+.crumbs .last { font: 500 12px var(--font-data); }
+.crumbs svg { color: var(--tok-hint); }
+
+/* a set picker popover (add before) */
+.pick { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift); width: 280px; overflow: hidden; }
+.pick .find { display: flex; align-items: center; gap: 7px; margin: 8px 8px 4px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--tok-hint); font-size: 12px; }
+.pick .grp { font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 8px 12px 3px; display: flex; align-items: center; gap: 6px; }
+.pick .it { display: flex; align-items: center; gap: 8px; padding: 4px 12px; font: 500 11.5px var(--font-data); }
+.pick .it.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
+.pick .it .hint { font-family: var(--font-app); margin-left: auto; }
+.pick .lbl { padding: 8px 12px 2px; font-size: 11px; color: var(--dim); }
+.pick .lbl b { font-family: var(--font-data); font-weight: 500; color: var(--text); }
+
+.note { position: absolute; font-size: 10.5px; color: var(--accent); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.ghost { border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent) !important; background: color-mix(in srgb, var(--accent) 5%, var(--panel)) !important; }
+.newtag { font: 700 9px var(--font-app); letter-spacing: .05em; text-transform: uppercase; color: var(--on-accent); background: var(--fill-accent); border-radius: 4px; padding: 2px 5px; }
+.callout { font-size: 11px; color: var(--dim); background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 6px; padding: 7px 10px; }
+.callout b { color: var(--text); font-weight: 600; }
+.callout code, .why code, .lede code { font: 500 11px var(--font-data); }
+</style>
+<style>
+/* Round 2. "Scope" is now WHERE a layer's rules apply: folders, credential files, sites, branches, programs —
+   0023's places, read off the lines (§3). Where a set's FILE is kept (built in, Shared, the project…) is
+   demoted to a small grey tag. The base is the shipped chat/auto, whose answers really differ by place. */
+.pl { --c: var(--dim); display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1 var(--font-data); color: var(--text); background: color-mix(in srgb, var(--c) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: 6px; padding: 3px 6px; white-space: nowrap; }
+.pl svg.i { color: var(--c); width: 11px; height: 11px; stroke-width: 2.1; }
+.pl[data-k=dir], .pl[data-k=file] { --c: var(--ws-read); }
+.pl[data-k=cred] { --c: var(--warn); }
+.pl[data-k=jaira], .pl[data-k=key] { --c: var(--bad); }
+.pl[data-k=site] { --c: var(--p1); }
+.pl[data-k=br] { --c: var(--p3); }
+.pl[data-k=prog] { --c: var(--ws-run); }
+.pl[data-k=any] { --c: var(--tok-hint); border-style: dashed; }
+.pl .n { color: var(--tok-hint); font-weight: 400; }
+.pl.big { font-size: 12px; padding: 5px 8px; border-radius: 7px; }
+.pl.big svg.i { width: 13px; height: 13px; }
+.pls { display: flex; flex-wrap: wrap; gap: 4px; }
+.kept { display: inline-flex; align-items: center; gap: 3px; font: 500 10px var(--font-app); color: var(--tok-hint); white-space: nowrap; }
+.kept svg.i { width: 10px; height: 10px; }
+.res { font: 400 10.5px var(--font-data); color: var(--tok-hint); }
+.sec { font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 9px 12px 3px; display: flex; align-items: center; gap: 6px; }
+.seg { white-space: nowrap; }
+.sec .pl { text-transform: none; letter-spacing: 0; }
+.m.smart { color: var(--p3); background: color-mix(in srgb, var(--p3) 12%, transparent); }
+.acts { display: flex; gap: 4px; flex-wrap: wrap; }
+.act { display: inline-flex; gap: 4px; align-items: center; font: 500 10.5px var(--font-app); color: var(--dim); }
+.box { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); }
+.kh { display: flex; align-items: center; gap: 8px; }
+.tree { font: 500 11.5px var(--font-data); }
+.tree .tn { display: grid; grid-template-columns: 1fr 190px 130px; align-items: center; gap: 10px; padding: 4px 12px; border-radius: 6px; }
+.tree .tn .nm { display: flex; align-items: center; gap: 6px; }
+.tree .tn.hl { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.tree .tn .who { font: 500 10.5px var(--font-data); color: var(--dim); }
+.ind1 { padding-left: 18px; } .ind2 { padding-left: 36px; } .ind3 { padding-left: 54px; }
+.vt { border-left: 1px solid var(--rule); }
+.grid-t { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.grid-t th { text-align: left; font: 600 10px var(--font-app); color: var(--tok-hint); text-transform: uppercase; letter-spacing: .04em; padding: 7px 10px; }
+.grid-t td { padding: 6px 10px; border-top: 1px solid var(--panel-2); vertical-align: middle; }
+.step { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--tok-hint); }
+.step b { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; font: 700 10px var(--font-app); background: var(--panel-3); color: var(--dim); }
+.step.on { color: var(--text); font-weight: 600; } .step.on b { background: var(--fill-accent); color: var(--on-accent); }
+.step.done b { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+.opt { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); font-size: 12px; }
+.opt.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
+.region { position: absolute; border-radius: 16px; border: 1.5px solid var(--c); background: color-mix(in srgb, var(--c) 6%, transparent); }
+.region > .lab { position: absolute; top: 7px; left: 10px; display: flex; gap: 6px; align-items: center; font: 600 11px var(--font-app); color: var(--c); }
+.region > .dec { position: absolute; top: 7px; right: 10px; display: flex; gap: 4px; }
+</style>
+<style>
+/* Round 3: a layer is a permission set, a permission is a line, each line has its own scope in its tool's kind. */
+.pl[data-k=repo] { --c: var(--p2); } .pl[data-k=flow] { --c: var(--ws-tool); } .pl[data-k=none] { --c: var(--tok-hint); border-style: dotted; }
+.kinds { display: inline-flex; gap: 3px; color: var(--tok-hint); }
+.kinds i svg.i { width: 11px; height: 11px; }
+.card { padding: 2px 6px 8px; overflow: auto; }
+.cs { display: flex; align-items: center; gap: 7px; font: 500 12px var(--font-app); padding: 9px 6px 4px; }
+.cs svg { color: var(--tok-hint); }
+.ln { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 7px; font-size: 11.5px; }
+.ln .hint { font-size: 10.5px; }
+.ln.open { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.ln.lit { box-shadow: inset 2px 0 0 var(--accent); }
+.ln.sub, .pr.sub { margin-left: 22px; }
+.fold { color: var(--tok-hint); } .fold.r { transform: rotate(-90deg); }
+.sp { width: 10px; flex: none; }
+.tn { font: 500 11.5px var(--font-data); white-space: nowrap; }
+.pr { display: flex; align-items: center; gap: 8px; padding: 3px 8px 3px 34px; font-size: 11px; }
+.pr .hint { font-size: 10.5px; }
+.pr.add { color: var(--accent); font-size: 11px; }
+.pc { --a: var(--dim); display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1 var(--font-data); color: var(--text); background: color-mix(in srgb, var(--a) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--a) 40%, transparent); border-radius: 6px; padding: 3px 6px; white-space: nowrap; }
+.pc svg.i { width: 11px; height: 11px; color: var(--a); stroke-width: 2.1; }
+.pc.allow { --a: var(--ok); } .pc.smart { --a: var(--p3); } .pc.ask { --a: var(--warn); } .pc.deny { --a: var(--bad); }
+.pc.mix { --a: var(--dim); background: linear-gradient(90deg, color-mix(in srgb, var(--p3) 14%, var(--panel)), color-mix(in srgb, var(--warn) 14%, var(--panel)) 60%, color-mix(in srgb, var(--bad) 14%, var(--panel))); }
+.pc.over { opacity: .4; text-decoration: line-through; }
+.pc .lv { margin-left: 2px; }
+.flag { font: 500 10px var(--font-data); color: var(--dim); border: 1px dashed var(--rule); border-radius: 5px; padding: 2px 5px; white-space: nowrap; }
+.lv { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 8px; font: 700 9.5px var(--font-data); color: var(--dim); background: var(--panel-3); }
+.lv.over { opacity: .45; text-decoration: line-through; }
+.lv.acc { color: var(--on-accent); background: var(--fill-accent); }
+.mini { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 3px; }
+.mini .tn { font-size: 10.5px; color: var(--dim); min-width: 62px; }
+.mini.px { padding: 4px 10px; }
+.rows3 { padding: 0 6px 10px; }
+.r3 { display: grid; grid-template-columns: 250px 1fr; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; }
+.r3:hover { background: var(--fill-ghost-hover); }
+.tog { width: 24px; height: 14px; border-radius: 7px; background: var(--panel-3); position: relative; display: inline-block; }
+.tog.on { background: var(--fill-accent); } .tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: #fff; } .tog.on::after { left: 12px; }
+.lay { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; font-size: 11.5px; min-height: 32px; }
+.lay .nm { font: 500 11.5px var(--font-data); width: 140px; flex: none; }
+.lay.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.lay.ghost { margin: 2px 0; }
+.dl { height: 1px; background: var(--panel-2); margin: 8px 0; }
+.sent p { margin: 2px 0 6px 26px; line-height: 1.9; font-size: 12px; }
+.sent .pl { vertical-align: 1px; }
+.sh { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.sh.on .lv { color: var(--on-accent); background: var(--fill-accent); }
+.ok { font-size: 10.5px; color: var(--ok); font-weight: 600; }
+.cov { font-size: 10.5px; color: var(--tok-hint); }
+</style><style>
+/* Round 4: the common case — one scope per kind in a layer, then an answer per permission. */
+.kb { margin: 8px 12px; border: 1px solid var(--line); border-radius: 9px; padding-bottom: 6px; }
+.kb.empty { padding: 8px 12px; border-style: dashed; }
+.kbh { display: flex; align-items: center; gap: 8px; padding: 8px 10px 6px; flex-wrap: wrap; }
+.ans { display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 22px; font-size: 11.5px; }
+.ans .tn { min-width: 260px; }
+.ans.faint { opacity: .55; } .ans.add { color: var(--accent); }
+.sr { padding: 5px 8px; border-radius: 7px; }
+.sr.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sr .nm { font: 500 12px var(--font-data); } .sr.on .nm { color: var(--accent); }
+.srl { display: flex; align-items: center; gap: 6px; margin-top: 3px; padding-left: 6px; font-size: 11px; }
+.hl3 { display: flex; align-items: center; gap: 12px; padding: 6px 8px; border-radius: 8px; }
+.hl3.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.hl3 .who { font-size: 10.5px; color: var(--dim); white-space: nowrap; }
+.ktitle { display: flex; align-items: center; padding: 10px 12px 2px; }
+.mx td, .mx th { white-space: nowrap; }
+.kx td { vertical-align: top; }
+.kc { display: inline-flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.scard { --c: var(--dim); background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 10px; box-shadow: var(--lift); }
+.scard.on { outline: 2px solid var(--accent); }
+.sch { display: flex; align-items: center; gap: 8px; padding: 7px 10px; background: color-mix(in srgb, var(--c) 7%, transparent); border-radius: 0 9px 0 0; }
+.scb { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 7px 10px; }
+.pp { display: inline-flex; align-items: center; gap: 5px; font: 500 11px var(--font-data); border: 1px solid var(--line); border-radius: 99px; padding: 2px 3px 2px 9px; }
+.ans4 { display: flex; align-items: center; gap: 10px; padding: 4px 12px 4px 22px; }
+.ans4 .tn { width: 200px; }
+.seg4 { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+.seg4 span { font: 500 10.5px var(--font-data); padding: 3px 9px; color: var(--dim); border-right: 1px solid var(--line); }
+.seg4 span:last-child { border-right: 0; }
+.seg4 .on { background: var(--panel-3); color: var(--text); }
+.seg4 .on.a { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+.seg4 .on.s { background: color-mix(in srgb, var(--p3) 15%, transparent); color: var(--p3); }
+.opt.dashed-o { border-style: dashed; }
+.warnpill { font: 600 10px var(--font-app); color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); border-radius: 99px; padding: 2px 8px; }
+.own { white-space: nowrap; font: 600 10px var(--font-app); color: var(--warn); border: 1px dashed color-mix(in srgb, var(--warn) 60%, transparent); border-radius: 5px; padding: 1px 6px; }
+.spl { display: flex; align-items: center; gap: 7px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font-size: 11px; }
+.fall { opacity: .38; }
+.s1 { margin: 4px 0 !important; padding: 3px 0; }
+.s1 .lv { margin-right: 8px; }
+.s1.on { background: color-mix(in srgb, var(--accent) 8%, transparent); border-radius: 8px; padding: 3px 6px; }
+.sent u { text-decoration-color: var(--rule); text-underline-offset: 3px; font-weight: 600; }
+<style>
+/* Round 5: iterating on round 4's 6 (kinds × the stack), 7 (scope cards) and 16 (a layer across kinds).
+   One shape everywhere: a scope, then the permissions it answers, each drawn as  name | answer. */
+[data-kind=path] { --k: var(--ws-read); } [data-kind=site] { --k: var(--p1); } [data-kind=br] { --k: var(--p3); }
+[data-kind=prog] { --k: var(--ws-run); } [data-kind=none] { --k: var(--tok-hint); } [data-kind=repo] { --k: var(--p2); } [data-kind=flow] { --k: var(--ws-tool); }
+.stage.scroll { overflow-x: auto; }
+/* name | answer */
+.pv { --a: var(--dim); display: inline-flex; align-items: stretch; font: 500 11px/1 var(--font-app); border: 1px solid color-mix(in srgb, var(--a) 32%, var(--line)); border-radius: 6px; overflow: hidden; white-space: nowrap; background: var(--panel); flex: none; }
+.pv > b { font-weight: 500; padding: 4px 7px; color: var(--text); }
+.pv > i { font: 600 10.5px/1 var(--font-data); font-style: normal; padding: 4px 7px; color: var(--a); background: color-mix(in srgb, var(--a) 12%, transparent); border-left: 1px solid color-mix(in srgb, var(--a) 22%, transparent); display: inline-flex; align-items: center; }
+.pv > i s { text-decoration: none; font: 700 9px/1 var(--font-data); margin-left: 5px; padding: 2px 4px; border-radius: 6px; background: var(--panel); color: var(--dim); }
+.pv.allow { --a: var(--ok); } .pv.smart { --a: var(--p3); } .pv.ask { --a: var(--warn); } .pv.deny { --a: var(--bad); } .pv.un { --a: var(--dim); }
+.pv.unset { --a: var(--tok-hint); border-style: dashed; } .pv.unset > b { color: var(--tok-hint); } .pv.unset > i { background: transparent; font-weight: 500; }
+.pv.dimmed { opacity: .35; }
+.pvs { display: flex; flex-wrap: wrap; gap: 4px; }
+/* a scope, then what it answers */
+.mp { --k: var(--dim); display: flex; flex-direction: column; gap: 5px; }
+.mp + .mp { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.mp .to { display: flex; flex-wrap: wrap; gap: 4px; padding-left: 9px; margin-left: 6px; border-left: 2px solid color-mix(in srgb, var(--k) 50%, transparent); }
+.mp .pn5 { font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); }
+.g5 th.wide { min-width: 270px; }
+.stage.scroll > .float { width: fit-content; }
+.mp.h { flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mp.h .to { border-left: 0; padding-left: 0; margin-left: 0; }
+.mp.h .arr { color: var(--tok-hint); }
+.kn { --k: var(--dim); display: inline-flex; align-items: center; gap: 6px; font: 600 12px var(--font-app); color: var(--k); white-space: nowrap; }
+.kn svg.i { width: 13px; height: 13px; }
+.kt { --k: var(--dim); width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; color: var(--k); background: color-mix(in srgb, var(--k) 14%, transparent); flex: none; }
+.kt svg.i { width: 13px; height: 13px; }
+.kt.sm { width: 18px; height: 18px; border-radius: 5px; } .kt.sm svg.i { width: 11px; height: 11px; }
+.kt.off { color: var(--tok-hint); background: transparent; border: 1px dashed var(--rule); }
+.khint { font: 400 10.5px var(--font-app); color: var(--tok-hint); }
+/* the grid */
+.g5 { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 11.5px; }
+.g5 th { text-align: left; font: 500 11px var(--font-app); color: var(--dim); padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; vertical-align: bottom; }
+.g5 th .data { color: var(--text); }
+.g5 td { padding: 10px; border-bottom: 1px solid var(--panel-2); border-left: 1px solid var(--panel-2); vertical-align: top; }
+.g5 tr:last-child td { border-bottom: 0; }
+.g5 td.kl { border-left: 0; white-space: nowrap; width: 1%; padding-right: 14px; }
+.g5 td.kl .khint { display: block; margin-top: 2px; }
+.g5 td.e { text-align: center; vertical-align: middle; } .g5 td.e::after { content: "—"; color: var(--rule); }
+.g5 .cur { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.g5 th.cur { color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.g5 .gh { background: color-mix(in srgb, var(--accent) 5%, transparent); border-left: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); border-right: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.g5 .sel { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.g5 th.sel { color: var(--accent); }
+.g5 .faint > * { opacity: .45; }
+.g5 tr.grp td { background: var(--panel-2); font: 600 10px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 5px 10px; }
+.g5 tr.gh td { background: color-mix(in srgb, var(--accent) 5%, transparent); border-top: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); border-bottom: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.g5 tr.cur td { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.g5 tr.cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.g5 .lname { display: flex; align-items: center; gap: 7px; } .g5 .lname .data { font-size: 12px; }
+.g5 .part { padding-left: 34px; color: var(--dim); }
+/* the spreadsheet */
+.ss { border-collapse: separate; border-spacing: 0; font-size: 11px; }
+.ss th, .ss td { padding: 4px 5px; text-align: center; border-left: 1px solid var(--panel-2); white-space: nowrap; }
+.ss th:first-child, .ss td:first-child { text-align: left; border-left: 0; padding-right: 12px; }
+.ss thead th { font: 500 10.5px var(--font-app); color: var(--dim); vertical-align: bottom; padding-bottom: 7px; }
+.ss thead tr.sup th { font-weight: 600; color: var(--text); border-bottom: 0; padding-bottom: 2px; }
+.ss thead tr:last-child th { border-bottom: 1px solid var(--line); }
+.ss tr.kr td { padding-top: 12px; padding-bottom: 6px; vertical-align: bottom; border-bottom: 1px solid var(--panel-2); }
+.ss tr.kr td .col { align-items: center; gap: 3px; }
+.ss td.no { background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--rule) 22%, transparent) 5px 6px); }
+.ss td.ns::after { content: "·"; color: var(--tok-hint); }
+.ss .pnm { font: 500 11.5px var(--font-app); padding-left: 20px; }
+.ss .pnm .tools { display: block; font: 400 9.5px var(--font-data); color: var(--tok-hint); }
+.ss .cur { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.ss .gh { background: color-mix(in srgb, var(--accent) 6%, transparent); border-left: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); border-right: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); }
+.pl.s { font-size: 10px; padding: 2px 5px; }
+/* cards */
+.kcard { --k: var(--dim); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+.kcard .kh5 { display: flex; align-items: center; gap: 8px; padding: 9px 12px 7px; }
+.kcard .kh5 .kn { font-size: 11.5px; }
+.kt + .kn > svg.i { display: none; }
+:is(.kh5, .row, .pset):has(> .kt.sm) > .pl > svg.i { display: none; }
+.kcard .scope { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 12px 10px 44px; }
+.kcard .pb { border-top: 1px solid var(--panel-2); padding: 4px 0; background: color-mix(in srgb, var(--panel-2) 45%, var(--panel)); }
+.prow { display: flex; align-items: center; gap: 8px; padding: 4px 12px 4px 44px; min-height: 28px; }
+.prow .pn { font: 500 12px var(--font-app); min-width: 48px; }
+.prow .tools { font: 400 10.5px var(--font-data); color: var(--tok-hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.prow > .m, .prow > .seg4, .prow > .r { margin-left: auto; }
+.prow.unset .pn { color: var(--tok-hint); }
+.kcard.cur { border-color: color-mix(in srgb, var(--accent) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+.kcard.gh { border: 1.5px dashed color-mix(in srgb, var(--accent) 55%, transparent); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
+.kcard.gh .pb { background: transparent; }
+.kcard.sel { border-color: var(--accent); }
+.kcard.off { background: transparent; border-style: dashed; }
+.kcard .lt { display: flex; align-items: center; gap: 6px; padding: 7px 12px 0; font: 500 10.5px var(--font-data); color: var(--dim); }
+.lg5 { display: flex; align-items: center; gap: 8px; padding: 0 2px 7px; }
+.lg5 .data { font-size: 12.5px; font-weight: 600; }
+.lg5.cur .data { color: var(--accent); }
+.cards { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.cards > .kcard { width: 300px; }
+.seam5 { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: var(--tok-hint); font-size: 10.5px; }
+.seam5::before, .seam5::after { content: ""; flex: 1; border-top: 1px dashed var(--line); }
+.seam5 .plus { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line); background: var(--panel); }
+.seam5.on { color: var(--accent); } .seam5.on::before, .seam5.on::after { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.seam5.on .plus { color: var(--on-accent); background: var(--fill-accent); border-color: transparent; }
+.board { display: grid; gap: 12px; align-items: start; }
+.bcol > .bh { display: flex; align-items: center; gap: 7px; padding: 0 2px 8px; }
+.bcol > .kcard + .kcard, .bcol > .kcard + .seam5 + .kcard { margin-top: 8px; }
+.ag { display: flex; align-items: baseline; gap: 8px; padding: 4px 12px 4px 44px; font-size: 11.5px; }
+.ag .m { width: 44px; text-align: center; flex: none; }
+.wt { width: 100%; border-collapse: collapse; }
+.wt th { text-align: left; font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 8px 12px 6px; border-bottom: 1px solid var(--panel-2); }
+.wt td { padding: 9px 12px; border-bottom: 1px solid var(--panel-2); vertical-align: top; }
+.wt tr:last-child td { border-bottom: 0; }
+.wt tr.off td { color: var(--tok-hint); }
+.say5 { font-size: 12.5px; padding: 10px 14px 12px; border-bottom: 1px solid var(--panel-2); line-height: 1.9; }
+.say5 .pl { vertical-align: 1px; }
+.vt5 { display: flex; flex-direction: column; gap: 2px; padding: 8px; border-right: 1px solid var(--panel-2); width: 210px; flex: none; }
+.vt5 .tb { display: flex; align-items: center; gap: 9px; padding: 7px 8px; border-radius: 8px; }
+.vt5 .tb.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.vt5 .tb .col { min-width: 0; } .vt5 .tb .t5 { font: 600 12px var(--font-app); } .vt5 .tb .s5 { font: 400 10.5px var(--font-data); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vt5 .tb.off .t5 { color: var(--tok-hint); font-weight: 500; }
+.vt5 .vsep { font: 600 9.5px var(--font-app); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-hint); padding: 10px 8px 3px; }
+.srow { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid var(--panel-2); font: 500 12px var(--font-data); }
+.srow .grow + .hint { font-family: var(--font-app); }
+.inp { display: flex; align-items: center; gap: 7px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--tok-hint); font-size: 11.5px; }
+.inp.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-family: var(--font-data); }
+.caret { display: inline-block; width: 1px; height: 13px; background: var(--accent); vertical-align: -2px; }
+.sugg { margin: 4px 0 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); box-shadow: var(--lift); overflow: hidden; }
+.sugg .it { display: flex; align-items: center; gap: 8px; padding: 5px 10px; font: 500 11.5px var(--font-data); }
+.sugg .it.on { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.sugg .it .hint { margin-left: auto; font-family: var(--font-app); }
+.res5 { display: flex; flex-direction: column; gap: 6px; }
+.res5 .rr { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.beats { font-size: 10.5px; color: var(--dim); line-height: 1.45; margin-top: 6px; padding: 5px 8px; border-radius: 6px; background: var(--panel-2); }
+.beats b { color: var(--text); font-weight: 600; }
+.pop5 { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift); width: 340px; overflow: hidden; z-index: 2; }
+.pop5::before { content: ""; position: absolute; top: -6px; left: 40px; width: 10px; height: 10px; background: var(--panel); border-left: 1px solid var(--line); border-top: 1px solid var(--line); transform: rotate(45deg); }
+.ring { box-shadow: 0 0 0 2px var(--accent); border-radius: 7px; }
+.eff { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 11.5px; border-top: 1px solid var(--panel-2); }
+.eff .from { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.tabs5 { display: flex; gap: 2px; padding: 6px 10px 0; border-bottom: 1px solid var(--panel-2); }
+.tabs5 span { padding: 6px 10px; font: 500 12px var(--font-app); color: var(--dim); border-bottom: 2px solid transparent; }
+.tabs5 span.on { color: var(--accent); border-color: var(--accent); }
+.pset { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--panel-2); }
+.pset.on { background: color-mix(in srgb, var(--accent) 8%, transparent); box-shadow: inset 3px 0 0 var(--accent); }
+.pset .data { font-size: 12px; }
+.chg { display: flex; align-items: center; gap: 8px; padding: 5px 12px; font-size: 11.5px; }
+.chg .m.over { margin-left: 0; }
+</style>
+<style>
+/* The editor board: a row per permission (grouped by the resource kind it governs), a column per answer,
+   and each place a chip in the cell of its answer. Moving a chip changes that place's answer: the board
+   is a line's place map, drawn out. */
+:root { --a-allow: var(--ok); --a-smart: var(--p3); --a-ask: var(--warn); --a-deny: var(--bad); --a-off: var(--dim); }
+.bd { border-collapse: separate; border-spacing: 0; width: 100%; font-size: 11.5px; table-layout: fixed; }
+.bd th { text-align: left; padding: 9px 10px 8px; border-bottom: 1px solid var(--line); font: 600 11.5px var(--font-app); }
+.bd th.pc5 { width: 170px; }
+.bd th.offc { width: 110px; }
+.bd td { padding: 5px 6px; border-bottom: 1px solid var(--panel-2); border-left: 1px solid var(--panel-2); vertical-align: middle; height: 38px; }
+.bd td:first-child { border-left: 0; padding-left: 12px; }
+.bd tr.khr td { background: var(--panel-2); height: auto; padding: 6px 12px; border-left: 0; }
+.bd tr.khr td .row { gap: 10px; }
+.bd td.a-allow { background: color-mix(in srgb, var(--a-allow) 3%, transparent); }
+.bd td.a-smart { background: color-mix(in srgb, var(--a-smart) 3%, transparent); }
+.bd td.a-ask { background: color-mix(in srgb, var(--a-ask) 3%, transparent); }
+.bd td.a-deny { background: color-mix(in srgb, var(--a-deny) 3%, transparent); }
+.bd td.a-off { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--rule) 16%, transparent) 6px 7px); }
+.bd td.drop { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
+.bd tr.fadedrow td { opacity: .5; }
+.pname { display: flex; flex-direction: column; line-height: 1.25; }
+.pname b { font: 600 12px var(--font-app); }
+.pname span { font: 400 10px var(--font-data); color: var(--tok-hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pname span.kn { font: 600 12px var(--font-app); color: var(--k); overflow: visible; }
+.ah { --a: var(--dim); display: inline-flex; align-items: center; gap: 6px; color: var(--a); }
+.ah::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--a); }
+.ah.allow { --a: var(--a-allow); } .ah.smart { --a: var(--a-smart); } .ah.ask { --a: var(--a-ask); } .ah.deny { --a: var(--a-deny); } .ah.off { --a: var(--a-off); }
+.ah .hint { font-weight: 400; }
+th.allow { box-shadow: inset 0 3px 0 var(--a-allow); } th.smart { box-shadow: inset 0 3px 0 var(--a-smart); } th.ask { box-shadow: inset 0 3px 0 var(--a-ask); } th.deny { box-shadow: inset 0 3px 0 var(--a-deny); } th.off { box-shadow: inset 0 3px 0 var(--a-off); }
+/* a place chip you can move */
+.pl.ch { margin: 2px; padding: 3px 4px 3px 5px; box-shadow: 0 1px 1px rgba(0,0,0,.05); cursor: grab; }
+.pl.ch .lb { font: 700 9px/1 var(--font-data); font-style: normal; color: var(--dim); background: var(--panel-3); border-radius: 4px; padding: 2px 4px; margin-left: 3px; }
+.pl.ch .lb.acc { color: var(--on-accent); background: var(--fill-accent); }
+.pl.ch.drag { box-shadow: var(--lift); transform: rotate(-2.5deg); border-color: var(--accent); cursor: grabbing; }
+.pl.ch.was { opacity: .35; border-style: dashed; box-shadow: none; }
+.pl.ch.over { opacity: .42; text-decoration: line-through; box-shadow: none; }
+.pl.ch.sel { box-shadow: 0 0 0 2px var(--accent); }
+.pl.ch.mine { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.pl.ch[data-l] { border-left: 3px solid var(--lc); }
+.tg { display: inline-flex; gap: 1px; margin-left: 3px; }
+.tg i { font: 700 8.5px/1 var(--font-app); font-style: normal; padding: 2px 3px; border-radius: 3px; background: var(--panel-3); color: var(--dim); }
+.toast { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-top: 1px solid var(--panel-2); font-size: 11.5px; background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.toast b { font-weight: 600; }
+.ed .fhead .seg4 span { padding: 3px 10px; }
+.tray td.nset { background: var(--panel-2); }
+.addp { display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px var(--font-app); color: var(--accent); padding: 3px 6px; border-radius: 6px; border: 1px dashed color-mix(in srgb, var(--accent) 40%, transparent); margin: 2px; }
+.rail { width: 190px; flex: none; border-right: 1px solid var(--panel-2); padding: 8px; }
+.rail .ri { display: flex; align-items: center; gap: 7px; padding: 5px 6px; border-radius: 7px; font: 500 11px var(--font-data); }
+.rail .ri .sw { width: 10px; height: 10px; border-radius: 3px; background: var(--lc); flex: none; }
+.rail .ri.on { background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.rail .ri.hid { color: var(--tok-hint); } .rail .ri.hid .sw { opacity: .3; }
+.rail .ri svg { margin-left: auto; color: var(--tok-hint); }
+.l1 { --lc: var(--p0); } .l2 { --lc: var(--ws-read); } .l3 { --lc: var(--p1); } .l4 { --lc: var(--p3); } .l5 { --lc: var(--ws-tool); } .l6 { --lc: var(--ws-run); } .lN { --lc: var(--accent); }
+.qpop { position: absolute; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--lift); width: 330px; z-index: 3; font-size: 11.5px; }
+.qpop .qh { padding: 9px 12px 6px; font-weight: 600; }
+.qpop .qg { padding: 4px 12px 8px; border-top: 1px solid var(--panel-2); }
+.qpop .qg .sec { padding-left: 0; }
+.qpop .ro { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+.rad { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--rule); flex: none; }
+.rad.on { border: 4px solid var(--accent); }
+.chk { width: 13px; height: 13px; border-radius: 3px; border: 1.5px solid var(--rule); flex: none; }
+.chk.on { background: var(--fill-accent); border-color: transparent; }
+.lane { display: grid; grid-template-columns: 170px repeat(4, 1fr) 100px; align-items: stretch; }
+.lane > div { padding: 4px 6px; min-height: 36px; display: flex; flex-wrap: wrap; align-items: center; }
+.lane > div:first-child { padding-left: 12px; }
+.trk { display: grid; grid-template-columns: repeat(4, 1fr) 100px; border-radius: 9px; overflow: hidden; margin: 3px 0; }
+.trk > div { min-height: 34px; display: flex; flex-wrap: wrap; align-items: center; padding: 3px 5px; }
+.trk .t-allow { background: color-mix(in srgb, var(--a-allow) 14%, var(--panel)); }
+.trk .t-smart { background: color-mix(in srgb, var(--a-smart) 14%, var(--panel)); }
+.trk .t-ask { background: color-mix(in srgb, var(--a-ask) 14%, var(--panel)); }
+.trk .t-deny { background: color-mix(in srgb, var(--a-deny) 14%, var(--panel)); }
+.trk .t-off { background: var(--panel-3); }
+.trow { display: grid; grid-template-columns: 170px 1fr; align-items: center; padding: 0 12px; }
+.insp { width: 300px; flex: none; border-left: 1px solid var(--panel-2); }
+.insp .ih { padding: 12px 14px 8px; }
+.insp .ib { padding: 8px 14px; border-top: 1px solid var(--panel-2); font-size: 11.5px; }
+.mv { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.mv span { flex: 1; text-align: center; padding: 5px 0; font: 500 10.5px var(--font-data); border-right: 1px solid var(--line); color: var(--dim); }
+.mv span:last-child { border-right: 0; }
+.mv span.on { background: color-mix(in srgb, var(--a-ask) 16%, transparent); color: var(--a-ask); font-weight: 700; }
+.composer.mini .text { padding: 8px 14px 6px; }
+.sum { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.cnt { font: 600 10px var(--font-data); padding: 2px 6px; border-radius: 99px; }
+.cnt.allow { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.cnt.smart { color: var(--p3); background: color-mix(in srgb, var(--p3) 12%, transparent); }
+.cnt.ask { color: var(--warn); background: color-mix(in srgb, var(--warn) 13%, transparent); }
+.cnt.deny { color: var(--bad); background: color-mix(in srgb, var(--bad) 11%, transparent); }
+.ico-h { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; font: 700 11px var(--font-app); color: #fff; background: var(--a); }
+</style>
+</style><script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14"/><path d="m6 13 6 6 6-6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15"/><path d="m13 6 6 6-6 6"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="M6 6l12 12"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6a1 1 0 0 0-1 1v16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8Z"/><path d="M14 3v5h5"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-users" viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"/><path d="M2.5 19.5c1.2-3 3.6-4.5 6.5-4.5s5.3 1.5 6.5 4.5"/><path d="M16 4.3a3.5 3.5 0 0 1 0 6.4"/><path d="M18 15.3c1.6.7 2.8 2.1 3.5 4.2"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13h6l-1 8 8-10h-6Z"/></symbol>
+<symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4Z"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14Z"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M10 20H4v-6"/><path d="M20 4l-7 7"/><path d="M4 20l7-7"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+<symbol id="i-insert" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 17h16"/><path d="M12 9.5v5"/><path d="M9.5 12h5"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10"/><path d="M18 10c0 4-6 3-12 7"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-any" viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M5 8l14 8"/><path d="M19 8 5 16"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m17 6 3 3"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+<symbol id="i-layers" viewBox="0 0 24 24"><path d="M12 3 3 8l9 5 9-5Z"/><path d="M3 13l9 5 9-5"/></symbol>
+<symbol id="i-repo" viewBox="0 0 24 24"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3Z"/><path d="M5 17a3 3 0 0 1 3-3h11"/></symbol>
+<symbol id="i-flow" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v5.5"/></symbol>
+<symbol id="i-none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M6.5 17.5 17.5 6.5"/></symbol></defs></svg>
+
+<div class="top"><h1>The permission editor: places on a board</h1><a href="#dark" onclick="setTimeout(()=>location.reload())">dark</a></div>
+<p class="lede"><b>The board.</b> Rows are <b>what the access governs</b>: a row per permission, grouped by the kind of resource (paths, sites, branches, programs, no place). Columns are <b>the access</b>: <span class="m allow">allow</span> <span class="m smart">smart</span> <span class="m ask">ask</span> <span class="m deny">deny</span>, and <span class="m un">off</span> (unavailable). Each <b>place is a chip</b> sitting in the column of its answer, so a row is exactly a line's place map from decision 0023: <code>edit: { "**": "smart", "credentials": "ask", ".jaira": "deny" }</code> is three chips in three columns. <b>Moving a chip changes that place's answer.</b> Adding a chip adds a place; dragging one off the row removes it.</p>
+<p class="lede">The editor shows <b>the result</b> of the stack (the six layers from the earlier rounds), and every chip carries the number of the layer that set it. The open question each version answers differently: when you move a chip in the result, <b>which layer gets the edit?</b> Version 3 edits a single layer instead.</p>
+<div class="legend"><span class="hint">Chips:</span><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span><span class="hint">a place, set by layer 5</span><span class="pl ch was" data-k="any">any site<i class="lb">1</i></span><span class="hint">where a dragged chip came from</span><span class="pl ch over" data-k="any">everywhere<i class="lb">1</i></span><span class="hint">overridden by a newer layer</span></div>
+<nav class="toc">
+<a href="#e1"><b>1</b>The board</a><a href="#e2"><b>2</b>A row per kind, tagged chips</a><a href="#e3"><b>3</b>One layer, with a tray</a><a href="#e4"><b>4</b>The board and its layers</a>
+<a href="#e5"><b>5</b>Asking on the drop</a><a href="#e6"><b>6</b>Inside the shield</a><a href="#e7"><b>7</b>Tracks</a><a href="#e8"><b>8</b>A chip, inspected</a>
+</nav>
+
+<!-- ============================================================ 1 -->
+<section class="d" id="e1">
+<header><span class="n">1</span><h2>The board</h2></header>
+<p class="why">The plain version. The editor shows the <b>result</b>, with a switch to view one layer instead. Every permission is a row and every answer a column. The chips are the places, each with its layer's number. Here <b>any site</b> is being dragged from Smart to Deny on the Fetch row: its old spot shows a dashed ghost, and the target cell lights up. A move goes to the layer named at the top right, <b>edits go to</b>, which defaults to the current layer. A bar at the bottom says what changed and offers undo.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="seg4"><span class="on">Result</span><span>One layer</span></span><span class="hint">of 6 layers</span><span class="grow"></span><span class="hint">edits go to</span><span class="btn"><span class="lv acc">3</span>web/docs-sites<svg class="i xs"><use href="#i-chev"/></svg></span></div>
+ <table class="bd">
+  <thead><tr><th class="pc5">Permission</th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th><th class="off offc"><span class="ah off">Off</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="6"><div class="row"><span class="kn" data-kind="path">Paths</span><span class="khint">files and folders</span></div></td></tr>
+   <tr><td><div class="pname"><b>Read</b><span>read_file · glob · grep</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="dir">$PROJECT<i class="lb">1</i></span><span class="pl ch" data-k="dir">$WORKTREE<i class="lb">1</i></span><span class="pl ch" data-k="dir">$AGENT_WORKSPACE<i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="any">**<i class="lb">1</i></span><span class="pl ch" data-k="cred">credentials <span class="n">8</span><i class="lb">1</i></span></td>
+    <td class="a-deny"><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td>
+    <td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Edit</b><span>edit · write_file</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="cred">credentials <span class="n">8</span><i class="lb">1</i></span></td>
+    <td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td>
+    <td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Run</b><span>shell · script · commands</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span><span class="pl ch" data-k="dir">packages/app<i class="lb">2</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td>
+    <td class="a-ask"></td>
+    <td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td>
+    <td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><span class="kn" data-kind="site">Sites</span><span class="khint">what the agent may fetch</span></div></td></tr>
+   <tr><td><div class="pname"><b>Fetch</b><span>web_fetch</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="site">developer.mozilla.org<i class="lb">3</i></span><span class="pl ch" data-k="site">docs.python.org<i class="lb">3</i></span><span class="pl ch" data-k="site">*.readthedocs.io<i class="lb">3</i></span><span class="pl ch" data-k="site">localhost<i class="lb">5</i></span><span class="pl ch" data-k="site">*.vercel.app<i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch was" data-k="any">any site<i class="lb">1</i></span></td>
+    <td class="a-ask"></td>
+    <td class="a-deny drop"><span class="pl ch drag" data-k="any">any site<i class="lb acc">3</i></span></td>
+    <td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><span class="kn" data-kind="br">Branches</span><span class="khint">where the agent may push and merge</span></div></td></tr>
+   <tr><td><div class="pname"><b>Push</b><span>git_push</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="br">claude/**<i class="lb">4</i></span><span class="pl ch" data-k="br">web/**<i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">any branch<i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="br">main<i class="lb">1</i></span><span class="pl ch" data-k="br">master<i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<i class="lb">1</i></span></td>
+    <td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Merge</b><span>git_merge</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="br">claude/**<i class="lb">4</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">any branch<i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="br">main<i class="lb">1</i></span><span class="pl ch" data-k="br">master<i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<i class="lb">1</i></span></td>
+    <td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><span class="kn" data-kind="prog">Programs</span><span class="khint">which running programs the agent may see</span></div></td></tr>
+   <tr><td><div class="pname"><b>List</b><span>list_processes</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="prog">node<i class="lb">6</i></span></td><td class="a-smart"></td>
+    <td class="a-ask"><span class="pl ch" data-k="any">any program<i class="lb">1</i></span></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><span class="kn" data-kind="none">No place</span><span class="khint">one answer for the whole tool</span></div></td></tr>
+   <tr><td><div class="pname"><b>Search</b><span>web_search</span></div></td><td class="a-allow"></td>
+    <td class="a-smart"><span class="pl ch" data-k="none">everywhere<i class="lb">1</i></span></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Screenshot</b><span>screenshot</span></div></td><td class="a-allow"></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td>
+    <td class="a-off"><span class="pl ch" data-k="none">everywhere<i class="lb">6</i></span></td></tr>
+  </tbody>
+ </table>
+ <div class="toast"><svg class="i sm acc"><use href="#i-arrow"/></svg><span><b>Fetch at any site:</b> <span class="m smart">smart</span> → <span class="m deny">deny</span>, saved to <span class="lv acc">3</span> web/docs-sites. Its own three sites still allow.</span><span class="grow"></span><span class="btn ghost">Undo</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 2 -->
+<section class="d" id="e2">
+<header><span class="n">2</span><h2>A row per kind, tagged chips</h2></header>
+<p class="why">This version follows the case from the last round, where a layer has one scope per kind. Here a row is <b>a kind of resource</b>, not a permission. A chip is a place carrying small <b>tags for the permissions</b> that get that answer there: <b>R</b> read, <b>E</b> edit, <b>X</b> run. So <code>**</code> sits in Ask tagged R, and again in Smart tagged E X. Dragging a chip moves all of its tags. To split one off, drag the tag alone. The board is half as tall as 1, and a layer that treats all its permissions alike shows as a single chip.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="seg4"><span class="on">Result</span><span>One layer</span></span><span class="grow"></span><span class="hint">edits go to</span><span class="btn"><span class="lv acc">3</span>web/docs-sites<svg class="i xs"><use href="#i-chev"/></svg></span></div>
+ <table class="bd">
+  <thead><tr><th class="pc5">Resource</th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th><th class="off offc"><span class="ah off">Off</span></th></tr></thead>
+  <tbody>
+   <tr><td><div class="pname"><span class="kn" data-kind="path">Paths</span><span style="margin-top: 3px">R read · E edit · X run</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<span class="tg"><i>R</i><i>E</i><i>X</i></span><i class="lb">5</i></span><span class="pl ch" data-k="dir">packages/app<span class="tg"><i>X</i></span><i class="lb">2</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">**<span class="tg"><i>E</i><i>X</i></span><i class="lb">1</i></span><span class="pl ch" data-k="dir">project 3<span class="tg"><i>R</i></span><i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="any">**<span class="tg"><i>R</i></span><i class="lb">1</i></span><span class="pl ch" data-k="cred">credentials 8<span class="tg"><i>R</i><i>E</i></span><i class="lb">1</i></span></td>
+    <td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<span class="tg"><i>E</i><i>X</i></span><i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<span class="tg"><i>R</i><i>E</i><i>X</i></span><i class="lb">1</i></span></td>
+    <td class="a-off"></td></tr>
+   <tr><td><div class="pname"><span class="kn" data-kind="site">Sites</span><span style="margin-top: 3px">F fetch</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="site">3 docs sites<span class="tg"><i>F</i></span><i class="lb">3</i></span><span class="pl ch" data-k="site">localhost<span class="tg"><i>F</i></span><i class="lb">5</i></span><span class="pl ch" data-k="site">*.vercel.app<span class="tg"><i>F</i></span><i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">any site<span class="tg"><i>F</i></span><i class="lb">1</i></span></td>
+    <td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><span class="kn" data-kind="br">Branches</span><span style="margin-top: 3px">P push · M merge</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="br">claude/**<span class="tg"><i>P</i><i>M</i></span><i class="lb">4</i></span><span class="pl ch" data-k="br">web/**<span class="tg"><i>P</i></span><i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">any branch<span class="tg"><i>P</i><i>M</i></span><i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="br">main<span class="tg"><i>P</i><i>M</i></span><i class="lb">1</i></span><span class="pl ch" data-k="br">master<span class="tg"><i>P</i><i>M</i></span><i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<span class="tg"><i>P</i><i>M</i></span><i class="lb">1</i></span></td>
+    <td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><span class="kn" data-kind="prog">Programs</span><span style="margin-top: 3px">L list</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="prog">node<span class="tg"><i>L</i></span><i class="lb">6</i></span></td><td class="a-smart"></td>
+    <td class="a-ask"><span class="pl ch" data-k="any">any program<span class="tg"><i>L</i></span><i class="lb">1</i></span></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><span class="kn" data-kind="none">No place</span><span style="margin-top: 3px">the tool itself</span></div></td><td class="a-allow"></td>
+    <td class="a-smart"><span class="pl ch" data-k="none">Search<i class="lb">1</i></span></td><td class="a-ask"></td><td class="a-deny"></td>
+    <td class="a-off"><span class="pl ch" data-k="none">Screenshot<i class="lb">6</i></span></td></tr>
+  </tbody>
+ </table>
+ <div class="toast" style="background: var(--panel)"><span class="hint">Hover a tag to name it: <b>E</b> on <code>**</code> is <b>Edit</b>, <code>edit · write_file</code>. Drag the tag alone to move only Edit.</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 3 -->
+<section class="d" id="e3">
+<header><span class="n">3</span><h2>One layer, with a tray</h2></header>
+<p class="why">The editor for <b>a single set</b> rather than the result. Each kind's header holds <b>the layer's places for that kind</b>, listed once with <b>＋ place</b>, as in the one-scope-per-kind case. Every permission row starts with those chips in a grey <b>Not set</b> tray. Dragging a chip from the tray into a column gives the permission an answer there; dragging it back clears it. Here <code>web/**</code> is moving from Merge's tray into Allow. Kinds the layer doesn't scope are folded at the bottom, each with a button to start a scope.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px">
+ <div class="fhead"><span class="lv">5</span><span class="data" style="font-weight: 600; font-size: 12.5px">me/web-dev</span><span class="kept" data-kept="you">Just you</span><span class="seg4"><span>Result</span><span class="on">One layer</span></span><span class="grow"></span><span class="btn dashed"><svg class="i sm"><use href="#i-insert"/></svg>Add before</span></div>
+ <table class="bd tray">
+  <thead><tr><th class="pc5">Permission</th><th style="width: 150px"><span class="ah" style="--a: var(--tok-hint)">Not set</span></th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th><th class="off offc"><span class="ah off">Off</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="7"><div class="row"><span class="kn" data-kind="path">Paths</span><span class="khint">this layer's places:</span><span class="pl" data-k="dir">apps/site</span><span class="addp"><svg class="i xs"><use href="#i-plus"/></svg>place</span></div></td></tr>
+   <tr><td><div class="pname"><b>Read</b><span>read_file · glob · grep</span></div></td><td class="nset"></td><td class="a-allow"><span class="pl ch mine" data-k="dir">apps/site</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Edit</b><span>edit · write_file</span></div></td><td class="nset"></td><td class="a-allow"><span class="pl ch mine" data-k="dir">apps/site</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Run</b><span>shell · script · commands</span></div></td><td class="nset"></td><td class="a-allow"><span class="pl ch mine" data-k="dir">apps/site</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="7"><div class="row"><span class="kn" data-kind="site">Sites</span><span class="khint">this layer's places:</span><span class="pl" data-k="site">localhost</span><span class="pl" data-k="site">*.vercel.app</span><span class="addp"><svg class="i xs"><use href="#i-plus"/></svg>place</span></div></td></tr>
+   <tr><td><div class="pname"><b>Fetch</b><span>web_fetch</span></div></td><td class="nset"></td><td class="a-allow"><span class="pl ch mine" data-k="site">localhost</span><span class="pl ch mine" data-k="site">*.vercel.app</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="7"><div class="row"><span class="kn" data-kind="br">Branches</span><span class="khint">this layer's places:</span><span class="pl" data-k="br">web/**</span><span class="addp"><svg class="i xs"><use href="#i-plus"/></svg>place</span></div></td></tr>
+   <tr><td><div class="pname"><b>Push</b><span>git_push</span></div></td><td class="nset"></td><td class="a-allow"><span class="pl ch mine" data-k="br">web/**</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Merge</b><span>git_merge</span></div></td><td class="nset"><span class="pl ch was" data-k="br">web/**</span></td><td class="a-allow drop"><span class="pl ch drag" data-k="br">web/**</span></td><td class="a-smart"></td><td class="a-ask"></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr fadedrow"><td colspan="7"><div class="row"><span class="kn" data-kind="prog">Programs</span><span class="kn" data-kind="repo">Repositories</span><span class="kn" data-kind="flow">Workflows</span><span class="kn" data-kind="none">No place</span><span class="khint">not scoped by this layer</span><span class="grow"></span><span class="btn ghost" style="opacity: 1">＋ Scope a kind</span></div></td></tr>
+  </tbody>
+ </table>
+ <div class="toast" style="background: var(--panel)"><span class="hint">A chip in the tray is a place this layer knows but doesn't answer for that permission. The layers below decide there: Merge on web/** is still <span class="lv">1</span>'s <b>smart</b> until you place it.</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 4 -->
+<section class="d" id="e4">
+<header><span class="n">4</span><h2>The board and its layers</h2></header>
+<p class="why">The result board with <b>the stack on its left</b>. Each layer has a colour, and its chips carry that colour on their left edge, so you can see the board's makeup at a glance. Hovering a layer brings its chips forward. The eye hides a layer's chips, so you can see what the board would be without it. <b>Overridden</b> chips stay in their old column, struck through, so you can see what a newer layer replaced: Screenshot <b>ask</b> from 1 under <b>off</b> from 6, and Fetch at any site <b>smart</b> under the new layer's <b>deny</b>. Clicking a layer makes it the one that edits go to.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px; display: flex">
+ <div class="rail">
+  <div class="sec" style="padding: 4px 6px 6px">Layers · edits go to the ring</div>
+  <div class="ri l6"><span class="sw"></span>6 tools<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri l5"><span class="sw"></span>5 me/web-dev<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri l4 hid"><span class="sw"></span>4 me/push-claude<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri l3"><span class="sw"></span>3 web/docs-sites<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri lN on" style="box-shadow: inset 0 0 0 1.5px var(--accent)"><span class="sw"></span>new · web/no-fetch<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri l2"><span class="sw"></span>2 chat/build-safe<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="ri l1"><span class="sw"></span>1 chat/auto/<svg class="i sm"><use href="#i-eye"/></svg></div>
+  <div class="hint" style="padding: 10px 6px 0; line-height: 1.5">4 is hidden: its <code>claude/**</code> chips are gone from Push and Merge, which fall to any branch.</div>
+ </div>
+ <div class="grow" style="min-width: 0">
+ <table class="bd">
+  <thead><tr><th class="pc5" style="width: 130px">Permission</th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th><th class="off" style="width: 100px"><span class="ah off">Off</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="6"><span class="kn" data-kind="path">Paths</span></td></tr>
+   <tr><td><div class="pname"><b>Read</b></div></td><td class="a-allow"><span class="pl ch l5" data-l data-k="dir">apps/site</span></td><td class="a-smart"><span class="pl ch l1" data-l data-k="dir">project 3</span></td><td class="a-ask"><span class="pl ch l1" data-l data-k="any">**</span><span class="pl ch l1" data-l data-k="cred">credentials 8</span></td><td class="a-deny"><span class="pl ch l1" data-l data-k="key">machine key</span></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Edit</b></div></td><td class="a-allow"><span class="pl ch l5" data-l data-k="dir">apps/site</span></td><td class="a-smart"><span class="pl ch l1" data-l data-k="any">**</span></td><td class="a-ask"><span class="pl ch l1" data-l data-k="cred">credentials 8</span></td><td class="a-deny"><span class="pl ch l1" data-l data-k="jaira">.jaira</span><span class="pl ch l1" data-l data-k="key">machine key</span></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Run</b></div></td><td class="a-allow"><span class="pl ch l5" data-l data-k="dir">apps/site</span><span class="pl ch l2" data-l data-k="dir">packages/app</span></td><td class="a-smart"><span class="pl ch l1" data-l data-k="any">**</span></td><td class="a-ask"></td><td class="a-deny"><span class="pl ch l1" data-l data-k="jaira">.jaira</span><span class="pl ch l1" data-l data-k="key">machine key</span></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><span class="kn" data-kind="site">Sites</span></td></tr>
+   <tr><td><div class="pname"><b>Fetch</b></div></td><td class="a-allow"><span class="pl ch l3" data-l data-k="site">3 docs sites</span><span class="pl ch l5" data-l data-k="site">localhost</span><span class="pl ch l5" data-l data-k="site">*.vercel.app</span></td><td class="a-smart"><span class="pl ch over l1" data-l data-k="any">any site</span></td><td class="a-ask"></td><td class="a-deny"><span class="pl ch lN" data-l data-k="any">any site</span></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><span class="kn" data-kind="br">Branches</span></td></tr>
+   <tr><td><div class="pname"><b>Push</b></div></td><td class="a-allow"><span class="pl ch l5" data-l data-k="br">web/**</span></td><td class="a-smart"><span class="pl ch l1" data-l data-k="any">any branch</span></td><td class="a-ask"><span class="pl ch l1" data-l data-k="br">main</span><span class="pl ch l1" data-l data-k="br">master</span><span class="pl ch l1" data-l data-k="br">release/**</span></td><td class="a-deny"></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><span class="kn" data-kind="none">No place</span></td></tr>
+   <tr><td><div class="pname"><b>Screenshot</b></div></td><td class="a-allow"></td><td class="a-smart"></td><td class="a-ask"><span class="pl ch over l1" data-l data-k="none">everywhere</span></td><td class="a-deny"></td><td class="a-off"><span class="pl ch l6" data-l data-k="none">everywhere</span></td></tr>
+  </tbody>
+ </table>
+ </div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 5 -->
+<section class="d" id="e5">
+<header><span class="n">5</span><h2>Asking on the drop</h2></header>
+<p class="why">The board gives no fixed answer to "which layer?" Instead, <b>dropping a chip asks</b>, with the usual answer chosen in advance so a drop and Enter is enough. It asks two things:
+<br>• <b>Which permissions:</b> this one, or all of this kind's permissions in the layer, to keep its scope uniform.
+<br>• <b>Which layer:</b> the one where the chip lives, the current layer, or a <b>new layer</b> laid in before the current one.
+<br>Here <code>apps/site</code> has been dropped from Allow into Ask on the Read row.</p>
+<div class="stage" style="min-height: 470px">
+<div class="float ed" style="max-width: 1000px">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="seg4"><span class="on">Result</span><span>One layer</span></span><span class="grow"></span><span class="hint">a drop asks where it goes</span></div>
+ <table class="bd">
+  <thead><tr><th class="pc5">Permission</th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th><th class="off offc"><span class="ah off">Off</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="6"><span class="kn" data-kind="path">Paths</span></td></tr>
+   <tr><td><div class="pname"><b>Read</b><span>read_file · glob · grep</span></div></td>
+    <td class="a-allow"><span class="pl ch was" data-k="dir">apps/site<i class="lb">5</i></span></td>
+    <td class="a-smart"><span class="pl ch" data-k="dir">project 3<i class="lb">1</i></span></td>
+    <td class="a-ask drop"><span class="pl ch" data-k="any">**<i class="lb">1</i></span><span class="pl ch" data-k="cred">credentials 8<i class="lb">1</i></span><span class="pl ch drag" data-k="dir">apps/site<i class="lb acc">?</i></span></td>
+    <td class="a-deny"><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Edit</b><span>edit · write_file</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td>
+    <td class="a-ask"><span class="pl ch" data-k="cred">credentials 8<i class="lb">1</i></span></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td><td class="a-off"></td></tr>
+   <tr><td><div class="pname"><b>Run</b><span>shell · script · commands</span></div></td>
+    <td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span><span class="pl ch" data-k="dir">packages/app<i class="lb">2</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td>
+    <td class="a-ask"></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td><td class="a-off"></td></tr>
+  </tbody>
+ </table>
+</div>
+<div class="qpop" style="left: 790px; top: 96px">
+ <div class="qh"><code>apps/site</code> → <span class="m ask">ask</span></div>
+ <div class="qg"><div class="sec">For</div>
+  <div class="ro"><span class="rad on"></span>Read only</div>
+  <div class="ro"><span class="rad"></span>Every Paths permission in the layer <span class="hint">Read · Edit · Run</span></div></div>
+ <div class="qg"><div class="sec">In</div>
+  <div class="ro"><span class="rad on"></span><span class="lv">5</span>me/web-dev <span class="hint">where apps/site lives</span></div>
+  <div class="ro"><span class="rad"></span><span class="lv">3</span>web/docs-sites <span class="hint">the current layer</span></div>
+  <div class="ro"><span class="rad"></span><svg class="i sm acc"><use href="#i-insert"/></svg>A new layer before docs-sites</div></div>
+ <div class="ffoot" style="color: var(--dim)"><span class="kbd">Enter</span>to accept<span class="grow"></span><span class="btn">Cancel</span><span class="btn acc">Move</span></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 6 -->
+<section class="d" id="e6">
+<header><span class="n">6</span><h2>Inside the shield</h2></header>
+<p class="why">The same board at the width of the composer, opened from the shield. Columns are labelled by colour and a letter, and chips shrink to their places. <b>One kind is open at a time</b>; the others fold to a line counting chips per answer. Opening Sites folds Paths. Layer numbers appear only when you hover a chip. <b>Open the editor</b> shows the full board, as in 1.</p>
+<div class="stage">
+<div class="float ed" style="width: 760px">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="hint">result of 6 layers</span><span class="grow"></span><span class="btn ghost"><svg class="i sm"><use href="#i-expand"/></svg>Open the editor</span></div>
+ <table class="bd" style="font-size: 11px">
+  <thead><tr><th style="width: 92px"></th><th class="allow"><span class="ico-h" style="--a: var(--a-allow)">A</span></th><th class="smart"><span class="ico-h" style="--a: var(--a-smart)">S</span></th><th class="ask"><span class="ico-h" style="--a: var(--a-ask)">?</span></th><th class="deny"><span class="ico-h" style="--a: var(--a-deny)">D</span></th><th class="off" style="width: 54px"><span class="ico-h" style="--a: var(--a-off)">–</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="6"><div class="row"><svg class="i xs hint"><use href="#i-chev"/></svg><span class="kn" data-kind="path">Paths</span></div></td></tr>
+   <tr><td><b>Read</b></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site</span></td><td class="a-smart"><span class="pl ch" data-k="dir">project 3</span></td><td class="a-ask"><span class="pl ch" data-k="any">**</span><span class="pl ch" data-k="cred">creds 8</span></td><td class="a-deny"><span class="pl ch" data-k="key">key</span></td><td class="a-off"></td></tr>
+   <tr><td><b>Edit</b></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site</span></td><td class="a-smart"><span class="pl ch" data-k="any">**</span></td><td class="a-ask"><span class="pl ch" data-k="cred">creds 8</span></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira</span><span class="pl ch" data-k="key">key</span></td><td class="a-off"></td></tr>
+   <tr><td><b>Run</b></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site</span><span class="pl ch" data-k="dir">packages/app<i class="lb">2</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">**</span></td><td class="a-ask"></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira</span><span class="pl ch" data-k="key">key</span></td><td class="a-off"></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><svg class="i xs hint" style="transform: rotate(-90deg)"><use href="#i-chev"/></svg><span class="kn" data-kind="site">Sites</span><span class="grow"></span><span class="sum"><span class="cnt allow">5</span><span class="cnt smart">1</span></span></div></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><svg class="i xs hint" style="transform: rotate(-90deg)"><use href="#i-chev"/></svg><span class="kn" data-kind="br">Branches</span><span class="grow"></span><span class="sum"><span class="cnt allow">3</span><span class="cnt smart">2</span><span class="cnt ask">6</span></span></div></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><svg class="i xs hint" style="transform: rotate(-90deg)"><use href="#i-chev"/></svg><span class="kn" data-kind="prog">Programs</span><span class="grow"></span><span class="sum"><span class="cnt allow">1</span><span class="cnt ask">1</span></span></div></td></tr>
+   <tr class="khr"><td colspan="6"><div class="row"><svg class="i xs hint" style="transform: rotate(-90deg)"><use href="#i-chev"/></svg><span class="kn" data-kind="none">No place</span><span class="grow"></span><span class="sum"><span class="cnt smart">1</span><span class="cnt" style="color: var(--dim); background: var(--panel-3)">1 off</span></span></div></td></tr>
+  </tbody>
+ </table>
+</div>
+<div class="composer mini" style="width: 760px"><div class="text">Ask anything…</div><div class="foot"><span class="glyph on"><svg class="i sm"><use href="#i-shield"/></svg></span><span class="chip">docs-sites</span><span class="send"><svg class="i sm"><use href="#i-send"/></svg></span></div></div>
+</div>
+</section>
+
+<!-- ============================================================ 7 -->
+<section class="d" id="e7">
+<header><span class="n">7</span><h2>Tracks</h2></header>
+<p class="why">The same mapping drawn as <b>a track per permission</b>: one continuous bar from allow to off, tinted by answer. Chips sit on the bar like beads, and moving one along the track shifts its answer one step at a time, by mouse or arrow keys. There are no cell borders, so the board reads as bands of colour, and an all-green row stands out. The column labels sit once over the top.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px; padding-bottom: 8px">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="seg4"><span class="on">Result</span><span>One layer</span></span><span class="grow"></span><span class="hint">edits go to</span><span class="btn"><span class="lv acc">3</span>web/docs-sites<svg class="i xs"><use href="#i-chev"/></svg></span></div>
+ <div class="trow" style="padding-top: 8px"><span></span><div class="trk" style="margin: 0"><div><span class="ah allow">Allow</span></div><div><span class="ah smart">Smart</span></div><div><span class="ah ask">Ask</span></div><div><span class="ah deny">Deny</span></div><div><span class="ah off">Off</span></div></div></div>
+ <div class="trow"><span class="kn" data-kind="path" style="padding: 8px 0 2px">Paths</span><span></span></div>
+ <div class="trow"><div class="pname"><b>Read</b><span>read_file · glob · grep</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></div><div class="t-smart"><span class="pl ch" data-k="dir">project 3<i class="lb">1</i></span></div><div class="t-ask"><span class="pl ch" data-k="any">**<i class="lb">1</i></span><span class="pl ch" data-k="cred">credentials 8<i class="lb">1</i></span></div><div class="t-deny"><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></div><div class="t-off"></div></div></div>
+ <div class="trow"><div class="pname"><b>Edit</b><span>edit · write_file</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></div><div class="t-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></div><div class="t-ask"><span class="pl ch sel" data-k="cred">credentials 8<i class="lb">1</i></span><span class="hint">← →</span></div><div class="t-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></div><div class="t-off"></div></div></div>
+ <div class="trow"><div class="pname"><b>Run</b><span>shell · script · commands</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span><span class="pl ch" data-k="dir">packages/app<i class="lb">2</i></span></div><div class="t-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></div><div class="t-ask"></div><div class="t-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></div><div class="t-off"></div></div></div>
+ <div class="trow"><span class="kn" data-kind="site" style="padding: 8px 0 2px">Sites</span><span></span></div>
+ <div class="trow"><div class="pname"><b>Fetch</b><span>web_fetch</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="site">3 docs sites<i class="lb">3</i></span><span class="pl ch" data-k="site">localhost<i class="lb">5</i></span><span class="pl ch" data-k="site">*.vercel.app<i class="lb">5</i></span></div><div class="t-smart"><span class="pl ch" data-k="any">any site<i class="lb">1</i></span></div><div class="t-ask"></div><div class="t-deny"></div><div class="t-off"></div></div></div>
+ <div class="trow"><span class="kn" data-kind="br" style="padding: 8px 0 2px">Branches</span><span></span></div>
+ <div class="trow"><div class="pname"><b>Push</b><span>git_push</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="br">claude/**<i class="lb">4</i></span><span class="pl ch" data-k="br">web/**<i class="lb">5</i></span></div><div class="t-smart"><span class="pl ch" data-k="any">any branch<i class="lb">1</i></span></div><div class="t-ask"><span class="pl ch" data-k="br">main<i class="lb">1</i></span><span class="pl ch" data-k="br">master<i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<i class="lb">1</i></span></div><div class="t-deny"></div><div class="t-off"></div></div></div>
+ <div class="trow"><div class="pname"><b>Merge</b><span>git_merge</span></div><div class="trk"><div class="t-allow"><span class="pl ch" data-k="br">claude/**<i class="lb">4</i></span></div><div class="t-smart"><span class="pl ch" data-k="any">any branch<i class="lb">1</i></span></div><div class="t-ask"><span class="pl ch" data-k="br">main<i class="lb">1</i></span><span class="pl ch" data-k="br">master<i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<i class="lb">1</i></span></div><div class="t-deny"></div><div class="t-off"></div></div></div>
+ <div class="trow"><span class="kn" data-kind="none" style="padding: 8px 0 2px">No place</span><span></span></div>
+ <div class="trow"><div class="pname"><b>Screenshot</b><span>screenshot</span></div><div class="trk"><div class="t-allow"></div><div class="t-smart"></div><div class="t-ask"></div><div class="t-deny"></div><div class="t-off"><span class="pl ch" data-k="none">everywhere<i class="lb">6</i></span></div></div></div>
+</div>
+</div>
+</section>
+
+<!-- ============================================================ 8 -->
+<section class="d" id="e8">
+<header><span class="n">8</span><h2>A chip, inspected</h2></header>
+<p class="why">Clicking a chip selects it and opens an <b>inspector</b> on the right, for what dragging can't show:
+<br>• the place written out (credentials is eight patterns);
+<br>• the layer that set it, and what it overrides;
+<br>• the same place on this kind's other rows;
+<br>• an answer bar to move it from the keyboard, plus a checkbox to <b>apply the move to Read, Edit and Run</b> at once.
+<br>Each row's <b>＋</b> opens a place field with suggestions for its kind. One is open on Fetch.</p>
+<div class="stage">
+<div class="float ed" style="max-width: 1180px; display: flex">
+ <div class="grow" style="min-width: 0">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions</span><span class="seg4"><span class="on">Result</span><span>One layer</span></span><span class="grow"></span></div>
+ <table class="bd">
+  <thead><tr><th class="pc5" style="width: 130px">Permission</th><th class="allow"><span class="ah allow">Allow</span></th><th class="smart"><span class="ah smart">Smart</span></th><th class="ask"><span class="ah ask">Ask</span></th><th class="deny"><span class="ah deny">Deny</span></th></tr></thead>
+  <tbody>
+   <tr class="khr"><td colspan="5"><span class="kn" data-kind="path">Paths</span></td></tr>
+   <tr><td><div class="pname"><b>Read</b></div></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></td><td class="a-smart"><span class="pl ch" data-k="dir">project 3<i class="lb">1</i></span></td><td class="a-ask"><span class="pl ch" data-k="any">**<i class="lb">1</i></span><span class="pl ch sel" data-k="cred">credentials 8<i class="lb">1</i></span></td><td class="a-deny"><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td></tr>
+   <tr><td><div class="pname"><b>Edit</b></div></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td><td class="a-ask"><span class="pl ch" data-k="cred" style="box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--accent) 45%, transparent)">credentials 8<i class="lb">1</i></span></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td></tr>
+   <tr><td><div class="pname"><b>Run</b></div></td><td class="a-allow"><span class="pl ch" data-k="dir">apps/site<i class="lb">5</i></span><span class="pl ch" data-k="dir">packages/app<i class="lb">2</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">**<i class="lb">1</i></span></td><td class="a-ask"></td><td class="a-deny"><span class="pl ch" data-k="jaira">.jaira<i class="lb">1</i></span><span class="pl ch" data-k="key">machine key<i class="lb">1</i></span></td></tr>
+   <tr class="khr"><td colspan="5"><span class="kn" data-kind="site">Sites</span></td></tr>
+   <tr><td><div class="pname"><b>Fetch</b></div></td><td class="a-allow" style="position: relative"><span class="pl ch" data-k="site">3 docs sites<i class="lb">3</i></span><span class="pl ch" data-k="site">localhost<i class="lb">5</i></span><span class="pl ch" data-k="site">*.vercel.app<i class="lb">5</i></span><span class="inp on" style="display: inline-flex; margin: 2px; padding: 2px 7px">docs.rs<span class="caret"></span></span>
+     <div class="sugg" style="position: absolute; left: 6px; top: calc(100% - 2px); width: 240px; z-index: 2"><div class="it on"><svg class="i sm" style="color: var(--p1)"><use href="#i-globe"/></svg>docs.rs<span class="hint">fetched 4× here</span></div><div class="it"><svg class="i sm" style="color: var(--p1)"><use href="#i-globe"/></svg>*.docs.rs<span class="hint">and its subdomains</span></div></div></td>
+    <td class="a-smart"><span class="pl ch" data-k="any">any site<i class="lb">1</i></span></td><td class="a-ask"></td><td class="a-deny"></td></tr>
+   <tr class="khr"><td colspan="5"><span class="kn" data-kind="br">Branches</span></td></tr>
+   <tr><td><div class="pname"><b>Push</b></div></td><td class="a-allow"><span class="pl ch" data-k="br">claude/**<i class="lb">4</i></span><span class="pl ch" data-k="br">web/**<i class="lb">5</i></span></td><td class="a-smart"><span class="pl ch" data-k="any">any branch<i class="lb">1</i></span></td><td class="a-ask"><span class="pl ch" data-k="br">main<i class="lb">1</i></span><span class="pl ch" data-k="br">master<i class="lb">1</i></span><span class="pl ch" data-k="br">release/**<i class="lb">1</i></span></td><td class="a-deny"></td></tr>
+  </tbody>
+ </table>
+ </div>
+ <div class="insp">
+  <div class="ih"><div class="row"><span class="pl big" data-k="cred">credentials</span><span class="grow"></span><svg class="i sm hint"><use href="#i-x"/></svg></div><div class="hint" style="margin-top: 6px">A named place · 8 patterns</div></div>
+  <div class="ib"><div class="pls"><span class="pl" data-k="cred">**/.env</span><span class="pl" data-k="cred">**/.env.*</span><span class="pl" data-k="cred">**/*.pem</span><span class="pl" data-k="cred">**/id_rsa*</span><span class="pl" data-k="cred">~/.ssh</span><span class="pl" data-k="cred">~/.aws</span><span class="pl" data-k="cred">~/.claude/.credentials.json</span><span class="pl" data-k="cred">~/.codex/auth.json</span></div></div>
+  <div class="ib"><div class="sec" style="padding: 0 0 6px">Read here</div><div class="mv"><span>allow</span><span>smart</span><span class="on">ask</span><span>deny</span><span>off</span></div><div class="row" style="margin-top: 8px"><span class="chk on"></span>Apply to Read, Edit and Run</div><div class="hint" style="margin-top: 6px"><span class="kbd">←</span> <span class="kbd">→</span> move · <span class="kbd">Shift</span> with the box ticked</div></div>
+  <div class="ib"><div class="sec" style="padding: 0 0 6px">Set by</div><div class="row"><span class="lv">1</span><span class="data">chat/auto/</span><span class="hint">· credentials part · built in</span></div><div class="hint" style="margin-top: 6px">Built in, so a move is saved as an override in <span class="lv acc">3</span> web/docs-sites.</div></div>
+  <div class="ib"><div class="sec" style="padding: 0 0 6px">Elsewhere in Paths</div><div class="row" style="gap: 6px"><span class="pv ask" ><b>Edit</b><i>ask</i></span><span class="pv smart"><b>Run</b><i>smart</i></span><span class="hint">Run: from **</span></div></div>
+ </div>
+</div>
+</div>
+</section>
+
+<script>
+const ICON = { dir: "folder", file: "file", cred: "lock", jaira: "jaira", key: "key", site: "globe", br: "branch", prog: "term", any: "any", repo: "repo", flow: "flow", none: "none" };
+for (const e of document.querySelectorAll("[data-k]")) e.insertAdjacentHTML("afterbegin", `<svg class="i"><use href="#i-${ICON[e.dataset.k]}"/></svg>`);
+const KEPT = { built: "jaira", shared: "users", proj: "folder", mach: "monitor", you: "user", run: "bolt", conv: "chat" };
+for (const e of document.querySelectorAll(".kept[data-kept]")) e.insertAdjacentHTML("afterbegin", `<svg class="i"><use href="#i-${KEPT[e.dataset.kept]}"/></svg>`);
+const KIND = { path: "folder", site: "globe", br: "branch", prog: "term", none: "none", repo: "repo", flow: "flow" };
+for (const e of document.querySelectorAll(".kn[data-kind], .kt[data-kind]")) e.insertAdjacentHTML("afterbegin", `<svg class="i"><use href="#i-${KIND[e.dataset.kind]}"/></svg>`);
+</script></body>
+</html>

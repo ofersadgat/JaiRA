@@ -258,10 +258,10 @@ to read and offer them:
 | program | `list_processes`, `stop_process`, `read_process`, `wait_process`, `list_windows`, `open_app`, `screenshot`, `control_input`; the shell's process commands | a process's program, by its name or by what the machine says its pid is; a window's process's; the program that has the keyboard |
 | host | `runner:ssh` | the host |
 | service | `list_services`, `control_service`; `systemctl`, `service`, `sc`, `net start`, `*-Service`, `launchctl`, `brew services` | the service's name |
-| package | `list_software`, `install_software`; the package managers in the shell | the package, by the manager's id (`Git.Git`, `node`) |
+| package | `list_programs`, `install_program`; the package managers in the shell | the package, by the manager's id (`Git.Git`, `node`) |
 | area | `read_system`, `read_settings`, `write_settings`; `reg`, `setx`, `defaults`, the registry cmdlets, `sysctl`, `timedatectl` | a part of the machine, written as a path: what `read_system` reads (`summary`, `users`, `logs/System`), a setting's area, key and name (`registry/HKCU/Software/Foo/Bar`, `environment/PATH`, `time_zone`) |
 | machine | `read_clipboard`; and a kind of every System tool's resource | the machine's name, as Settings → Machines shows it; `wsl:<distro>` or `container` for a shell line run there |
-| action | `power`; and a kind of `stop_process`, `control_service`, `install_software`, `write_settings`, `open_app`, `control_input` | what the call does: `lock`, `restart`, `stop`, `force`, `uninstall`, `delete`, `keys`, `pointer` |
+| action | `power`; and a kind of `stop_process`, `control_service`, `install_program`, `write_settings`, `open_app`, `control_input` | what the call does: `lock`, `restart`, `stop`, `force`, `uninstall`, `delete`, `keys`, `pointer` |
 | none | `web_search` | — (a query names no place) |
 
 A map on a line whose tool takes no place is refused by the linter. An MCP tool the configuration maps
@@ -287,7 +287,7 @@ for permissions … permissions are combined via intersection. i.e. both apply".
   | `open_app` | program | owner, machine, action, path, site |
   | `control_input` | program | owner, machine, action (`keys`, `pointer`) |
   | `list_services` (filtered), `control_service` | service | machine; action for `control_service` |
-  | `list_software` (filtered), `install_software` | package | machine; action and manager for `install_software` |
+  | `list_programs` (filtered), `install_program` | package | machine; action and manager for `install_program` |
   | `read_system`, `read_settings` | area | machine; owner for `read_settings` |
   | `write_settings` | area | owner, machine, action (`set`, `delete`) |
   | `power` | action | machine |
@@ -331,7 +331,7 @@ for permissions … permissions are combined via intersection. i.e. both apply".
   that cannot, a name the line decides as it runs: `(pid 4242)`, which takes the strictest answer of its
   kind, and the line's `**` too. The dialog offers no narrower answer than anywhere for it.
 - **A list is filtered** (`ToolSpec.lists`: `list_processes`, `list_windows`, `list_services`,
-  `list_software`). It is not judged by what it asked for: the gate is handed its line's loosest answer,
+  `list_programs`). It is not judged by what it asked for: the gate is handed its line's loosest answer,
   and the tool judges each row it would show as a resource. A row the set refuses is left out; the rows it
   asks about are put to the person once, named ("the permission set asks about 2 more processes: python
   (user), …"), and shown on a yes; the answer says how many were left out and why. Where nothing on the

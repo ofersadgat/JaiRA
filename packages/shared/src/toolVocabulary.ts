@@ -367,8 +367,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   { name: "wait_process", label: "wait_process", title: "Wait for process", icon: "system", category: "system", hint: "wait until a running program exits, or prints what is asked for (\"until ready\")", scope: "program", pidArgs: ["pid"], dimensions: ["owner", "machine"] },
   { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running", scope: "service", dimensions: ["machine"], lists: true },
   { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "service", placeArgs: ["name"], dimensions: ["machine", "action"] },
-  { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules", scope: "package", dimensions: ["machine"], lists: true },
-  { name: "install_software", label: "install_software", title: "Install software", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module", scope: "package", placeArgs: ["id"], dimensions: ["machine", "action", "manager"] },
+  { name: "list_programs", label: "list_programs", title: "List programs", icon: "system", category: "system", hint: "what is installed: programs, packages and modules", scope: "package", dimensions: ["machine"], lists: true },
+  { name: "install_program", label: "install_program", title: "Install program", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module", scope: "package", placeArgs: ["id"], dimensions: ["machine", "action", "manager"] },
   { name: "read_settings", label: "read_settings", title: "Read settings", icon: "system", category: "system", hint: "the machine's settings: the registry, preferences, environment, time and time zone", scope: "area", dimensions: ["owner", "machine"] },
   { name: "write_settings", label: "write_settings", title: "Change settings", icon: "system", category: "system", hint: "change a setting of the machine", scope: "area", dimensions: ["owner", "machine", "action"] },
   { name: "read_clipboard", label: "read_clipboard", title: "Read clipboard", icon: "system", category: "system", hint: "what is on the clipboard", scope: "machine" },
@@ -450,7 +450,7 @@ export const SYSTEM_AREAS: readonly SystemArea[] = [
   { id: "machine", label: "Machine", hint: "what it is: OS, hardware, disks, users, logs · restart, shut down, sleep, lock", look: "read_system", change: "power" },
   { id: "processes", label: "Processes", hint: "the programs running · stop one", look: "list_processes", change: "stop_process" },
   { id: "services", label: "Services", hint: "the services and their state · start, stop, restart, enable, disable", look: "list_services", change: "control_service" },
-  { id: "software", label: "Software", hint: "what is installed · install, update, remove", look: "list_software", change: "install_software" },
+  { id: "software", label: "Software", hint: "what is installed · install, update, remove", look: "list_programs", change: "install_program" },
   { id: "settings", label: "Settings", hint: "registry, preferences, environment, time · change one", look: "read_settings", change: "write_settings" },
   { id: "clipboard", label: "Clipboard", hint: "what is on it · put text or an image on it", look: "read_clipboard", change: "write_clipboard" },
   { id: "apps", label: "Apps & windows", hint: "what is open · launch, open a file or link, focus, close", look: "list_windows", change: "open_app" },
@@ -461,7 +461,21 @@ export const SYSTEM_AREAS: readonly SystemArea[] = [
 export const SYSTEM_AREA_OF: ReadonlyMap<string, SystemArea> = new Map(SYSTEM_AREAS.flatMap((area) => [[area.look, area], [area.change, area]] as const));
 
 /** By logical name — the lookup every consumer wants. */
-export const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOL_SPECS.map((spec) => [spec.name, spec]));
+/**
+ * The names a tool had (decision 0034, 2026-11-23: what is installed is programs — `list_software` and
+ * `install_software` were renamed). A permission set, a setting or a state that still writes one means
+ * the tool it is now: a line's subject reads as the new name (`normalizeSubject`, which says so), and
+ * the spec is found by either.
+ */
+export const TOOL_ALIASES: Readonly<Record<string, string>> = { list_software: "list_programs", install_software: "install_program" };
+
+/** A tool's name as it is now: an old name read as the new one, anything else as it is. */
+export const canonicalToolName = (name: string): string => TOOL_ALIASES[name] ?? name;
+
+export const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map([
+  ...TOOL_SPECS.map((spec) => [spec.name, spec] as const),
+  ...Object.entries(TOOL_ALIASES).map(([old, now]) => [old, TOOL_SPECS.find((spec) => spec.name === now)!] as const),
+]);
 
 /** Is this a standard tool something SERVES today? See {@link ToolSpec.unserved}. */
 export function isServedTool(name: string): boolean {

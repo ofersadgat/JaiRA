@@ -136,6 +136,8 @@ export interface PermissionStackViewLayer {
   icon: string;
   /** How many lines the layer says — for runtime, how many answers are kept. */
   lines: number;
+  /** The layer's own lines, as written — what the permission board draws in the layer's columns (decision 0034). Not for runtime. */
+  own?: Record<string, unknown>;
 }
 
 /** One line of the stack composed (§7.4 "Everything"), and who decided it. */
@@ -219,6 +221,7 @@ export function permissionStackViewOf(
     ...(layer.via !== undefined ? { via: layer.via } : {}),
     role: layer.role,
     lines: ownLineCount(layer.decl),
+    own: ownLinesOf(layer.decl),
     ...describe(layer),
   }));
   // The runtime layer stands under the tools layer (§2.6 step 4), and over everything else.

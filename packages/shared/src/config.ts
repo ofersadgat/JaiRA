@@ -25,6 +25,7 @@ import {
 import { EXECUTOR_STEPS, type JairaExecutorSteps } from "./executorStack";
 import { parseFunctionRule, type JairaOperationNode, type JairaPromptNode } from "./executorTree";
 import { defaultMcp, parseMcp, type JairaMcpConfig } from "./mcp";
+import { RESOURCE_PERMISSIONS, resourceAccessOf } from "./resourceVocabulary";
 import { candidatesOf, parsePresetModel, presetNameRefusal } from "./presetModels";
 import { defaultAppearanceConfig, parseAppearanceConfig, type JairaAppearanceConfig } from "./appearanceConfig";
 import { UPDATE_CHANNELS, type UpdateChannel } from "./updates";
@@ -431,6 +432,19 @@ export interface JairaConfig {
 export interface JairaPermissionsConfig {
   /** By bucket (`""` for the top level, `control`, `feature/implementation`): the references laid over its sets, oldest first. */
   layers: Record<string, string[]>;
+  /**
+   * Tool mapping (decision 0034): which resource permissions a tool touches, by the tool's name
+   * (`read_file`, `runner:*`, `mcp__github__create_issue`) — `["files.read"]`, or `[]` for none.
+   * Overrides what ships (`DEFAULT_TOOL_RESOURCES`) for the tools it names; the permission board groups
+   * tools by it. Absent when no layer says one.
+   */
+  resources?: Record<string, string[]>;
+  /**
+   * Place sets (decision 0034): a name and the places it stands for — `"credentials": ["**\/.env", …]` —
+   * drawn by the permission board as one chip. Adds to what ships (`BUILTIN_PLACE_SETS`) or replaces a set
+   * of the same name. Absent when no layer says one.
+   */
+  placeSets?: Record<string, string[]>;
 }
 
 /**
@@ -440,7 +454,7 @@ export interface JairaPermissionsConfig {
 function parsePermissions(raw: unknown): JairaPermissionsConfig {
   if (raw === undefined) return { layers: {} };
   const block = plainObject(raw, "config.permissions");
-  allowedFields(block, ["layers"], "config.permissions");
+  allowedFields(block, ["layers", "resources", "placeSets"], "config.permissions");
   const layers: Record<string, string[]> = {};
   if (block["layers"] !== undefined) {
     for (const [bucket, list] of Object.entries(plainObject(block["layers"], "config.permissions.layers"))) {
@@ -453,7 +467,28 @@ function parsePermissions(raw: unknown): JairaPermissionsConfig {
       layers[bucket] = (list as string[]).map((each) => each.trim());
     }
   }
-  return { layers };
+  let resources: Record<string, string[]> | undefined;
+  if (block["resources"] !== undefined) {
+    resources = {};
+    for (const [tool, list] of Object.entries(plainObject(block["resources"], "config.permissions.resources"))) {
+      const where = `config.permissions.resources[${JSON.stringify(tool)}]`;
+      if (!Array.isArray(list) || !list.every((each) => typeof each === "string")) throw new Error(`${where} must be a list of resource permissions, like ["files.read"]`);
+      const unknown = (list as string[]).find((each) => resourceAccessOf(each.trim()) === undefined);
+      if (unknown !== undefined) throw new Error(`${where}: ${JSON.stringify(unknown)} is no resource permission — they are ${RESOURCE_PERMISSIONS.join(", ")}`);
+      resources[tool.trim()] = (list as string[]).map((each) => each.trim());
+    }
+  }
+  let placeSets: Record<string, string[]> | undefined;
+  if (block["placeSets"] !== undefined) {
+    placeSets = {};
+    for (const [name, list] of Object.entries(plainObject(block["placeSets"], "config.permissions.placeSets"))) {
+      const where = `config.permissions.placeSets[${JSON.stringify(name)}]`;
+      if (name.trim() === "") throw new Error(`${where}: a place set needs a name`);
+      if (!Array.isArray(list) || !list.every((each) => typeof each === "string" && each.trim() !== "")) throw new Error(`${where} must be a list of places, like ["**/.env", "~/.ssh"]`);
+      placeSets[name.trim()] = (list as string[]).map((each) => each.trim());
+    }
+  }
+  return { layers, ...(resources !== undefined ? { resources } : {}), ...(placeSets !== undefined ? { placeSets } : {}) };
 }
 
 /**

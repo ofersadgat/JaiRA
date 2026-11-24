@@ -1,7 +1,7 @@
 /**
  * The System tools (decision 0019): the machine the engine runs on and its desktop, each area a LOOK and a
  * CHANGE — `read_system`/`power`, `list_processes`/`stop_process`, `list_services`/`control_service`,
- * `list_software`/`install_software`, `read_settings`/`write_settings`, `read_clipboard`/`write_clipboard`,
+ * `list_programs`/`install_program`, `read_settings`/`write_settings`, `read_clipboard`/`write_clipboard`,
  * `list_windows`/`open_app`, `screenshot`/`control_input`.
  *
  * What a tool does on one operating system is its backend's (`system/windows.ts`, `system/macos.ts`);
@@ -69,8 +69,8 @@ export const SYSTEM_TOOL_NAMES = [
   "wait_process",
   "list_services",
   "control_service",
-  "list_software",
-  "install_software",
+  "list_programs",
+  "install_program",
   "read_settings",
   "write_settings",
   "read_clipboard",
@@ -955,11 +955,11 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
       },
     ),
 
-    list_software: tool(
-      "list_software",
+    list_programs: tool(
+      "list_programs",
       {
         description:
-          "List what is installed. `kind`: 'programs' (installed programs — on macOS, the applications), 'apps' (Windows' store apps), 'modules' (PowerShell's modules), 'packages' (what the package manager installed — winget's on Windows, Homebrew's on macOS — by the `id` install_software takes). `name` keeps those whose name or publisher holds it.",
+          "List what is installed. `kind`: 'programs' (installed programs — on macOS, the applications), 'apps' (Windows' store apps), 'modules' (PowerShell's modules), 'packages' (what the package manager installed — winget's on Windows, Homebrew's on macOS — by the `id` install_program takes). `name` keeps those whose name or publisher holds it.",
         inputSchema: {
           type: "object",
           properties: {
@@ -973,13 +973,13 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
       async (b, args, ctx) => {
         const kind = oneOf(args["kind"], SOFTWARE_KINDS, "kind", "programs");
         const rows = matching(await b.software(kind), text(args["name"]), ["name", "publisher", "id"]);
-        const allowed = await allowedRows(ctx, "list_software", rows, (row) => ({ package: [row.id ?? row.name] }), (row) => row.id ?? row.name, "packages");
+        const allowed = await allowedRows(ctx, "list_programs", rows, (row) => ({ package: [row.id ?? row.name] }), (row) => row.id ?? row.name, "packages");
         return { ...(cut(allowed.rows.sort((x, y) => x.name.localeCompare(y.name)), count(args["limit"], "limit", 100, 500), "software") as Record<string, JsonValue>), ...(allowed.leftOut ?? {}) };
       },
     ),
 
-    install_software: tool(
-      "install_software",
+    install_program: tool(
+      "install_program",
       {
         description:
           "Install, upgrade or uninstall software by the package manager's `id`: on Windows winget's (`manager` 'winget', the default — e.g. 'Git.Git', 'jqlang.jq') or a PowerShell module from the gallery (`manager` 'powershell'); on macOS Homebrew's ('brew'). A project's own dependencies are the project's package manager's, run through `shell` — this is for the machine. Always asks the person first. Answers the manager's exit code and the last of what it wrote.",
@@ -987,7 +987,7 @@ export function createSystemTools(options: SystemToolOptions = {}): Record<strin
           type: "object",
           properties: {
             action: { type: "string", enum: [...INSTALL_ACTIONS] },
-            id: { type: "string", description: "The package's id, as list_software (kind 'packages') or the manager's search names it." },
+            id: { type: "string", description: "The package's id, as list_programs (kind 'packages') or the manager's search names it." },
             manager: { type: "string", enum: ["winget", "powershell", "brew"] },
             version: { type: "string", description: "install only: this version." },
           },

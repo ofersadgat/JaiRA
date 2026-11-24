@@ -110,8 +110,8 @@ const SKILL_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
  * asks, except that read-only lets the looks go ahead (the clipboard and the screen too: they only
  * read) and refuses the changes, and full allows all sixteen.
  */
-const SYSTEM_LOOKS = ["read_system", "list_processes", "list_services", "list_software", "read_settings", "read_clipboard", "list_windows", "screenshot"];
-const SYSTEM_CHANGES = ["power", "stop_process", "control_service", "install_software", "write_settings", "write_clipboard", "open_app", "control_input"];
+const SYSTEM_LOOKS = ["read_system", "list_processes", "list_services", "list_programs", "read_settings", "read_clipboard", "list_windows", "screenshot"];
+const SYSTEM_CHANGES = ["power", "stop_process", "control_service", "install_program", "write_settings", "write_clipboard", "open_app", "control_input"];
 const SYSTEM_TOOLS: Record<string, Record<string, PermissionSetMode>> = Object.fromEntries([
   ...SYSTEM_LOOKS.map((name) => [name, { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "allow" }] as const),
   ...SYSTEM_CHANGES.map((name) => [name, { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "deny" }] as const),

@@ -1761,7 +1761,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // A state's say about where is on its set's lines, and the narrowing below reads it.
   const places = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
   // What, by the call: the line's own judgement — and a tool that always asks (`power`,
-  // `install_software`) asks at least, whatever its line says. Both gates read this one.
+  // `install_program`) asks at least, whatever its line says. Both gates read this one.
   const alwaysAsks = (tool: { name: string }): boolean => policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name);
   const narrowing: ScopeNarrowing = Object.assign(
     (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) =>
@@ -2105,10 +2105,10 @@ const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): Permis
 
 /**
  * The tools a person is always asked about, as a push is: `power` takes the machine away, and
- * `install_software` runs third-party code, which is the install ask the shell's package managers have
+ * `install_program` runs third-party code, which is the install ask the shell's package managers have
  * (decision 0019 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
  */
-export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_software"]);
+export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_program"]);
 
 /** A call a rule refused, as `CompilePolicyOptions.onRefused` is told it. */
 export interface RuleRefusal {
@@ -2347,7 +2347,7 @@ export interface MappedCallJudges {
   shell?: (input: Record<string, unknown>) => CommandApproval;
   /** What the scope tables say about the call's place, for a tool that takes one. */
   scope?: (tool: string, input: Record<string, unknown>) => PermissionMode | undefined;
-  /** `power` and `install_software` always ask, unless `functions.shell.builtins` is off. */
+  /** `power` and `install_program` always ask, unless `functions.shell.builtins` is off. */
   builtins?: boolean;
   grants?: CommandGrants;
 }

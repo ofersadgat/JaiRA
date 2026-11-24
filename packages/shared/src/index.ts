@@ -53,6 +53,8 @@ export * from "./permissionLayers";
 export * from "./permissionSetTree";
 export * from "./places";
 export * from "./resources";
+export * from "./resourceVocabulary";
+export * from "./placeSets";
 export * from "./commandRunners";
 export * from "./mcp";
 export * from "./permissionSetBuckets";

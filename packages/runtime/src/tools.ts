@@ -52,6 +52,7 @@ import {
   resolveUrlScope,
   scopeModeOf,
   TOOL_SPEC_BY_NAME,
+  canonicalToolName,
   TOOL_SPECS,
   permissionSetOfEnvironment,
   isLoweredPermissionSet,
@@ -1058,7 +1059,8 @@ export function gateTools(options: {
   const authored = (): PermissionsDecl | undefined => now().authored;
   if (options.names.length === 0) return { tools: {}, gate, authored };
   const out: Record<string, Tool> = {};
-  for (const name of options.names) {
+  // A state may still name a tool by its old name (`list_software`): it is offered as the tool it is now.
+  for (const name of [...new Set(options.names.map(canonicalToolName))]) {
     const tool = options.registry.tools.get(name);
     if (tool === undefined) throw refusal(log, `tool '${name}' is not registered`);
     out[name] = withPermission(tool, () => {

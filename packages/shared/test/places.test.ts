@@ -53,8 +53,8 @@ describe("the kind of place a line is about (§3.1)", () => {
     ["read_system", "area"],
     ["read_settings", "area"],
     ["write_settings", "area"],
-    ["list_software", "package"],
-    ["install_software", "package"],
+    ["list_programs", "package"],
+    ["install_program", "package"],
     ["write_clipboard", "path"],
     ["read_clipboard", "machine"],
     ["power", "action"],
@@ -258,7 +258,7 @@ describe("the System tools' resources (§3.1, amended 2026-11-23)", () => {
     expect(resourceOfCall(spec("open_app"), { action: "open", target: "https://example.com/x" }, undefined, { facts })).toEqual({ program: ["(the app it opens in)"], owner: ["session"], machine: ["desk"], action: ["open"], site: ["https://example.com/x"] });
     expect(resourceOfCall(spec("open_app"), { action: "open", target: "C:\\work\\a.txt" }, undefined, { facts })).toMatchObject({ path: ["C:\\work\\a.txt"] });
     expect(resourceOfCall(spec("control_service"), { name: "spooler", action: "stop" }, undefined, { facts })).toEqual({ service: ["spooler"], machine: ["desk"], action: ["stop"] });
-    expect(resourceOfCall(spec("install_software"), { action: "install", id: "Git.Git" }, undefined, { facts })).toEqual({ package: ["Git.Git"], machine: ["desk"], action: ["install"], manager: ["(the default manager)"] });
+    expect(resourceOfCall(spec("install_program"), { action: "install", id: "Git.Git" }, undefined, { facts })).toEqual({ package: ["Git.Git"], machine: ["desk"], action: ["install"], manager: ["(the default manager)"] });
     expect(resourceOfCall(spec("write_settings"), { area: "registry", key: "HKLM\\SYSTEM", name: "x", value: 1 }, undefined, { facts })).toEqual({ area: ["registry/HKLM/SYSTEM/x"], owner: ["system"], machine: ["desk"], action: ["set"] });
     expect(resourceOfCall(spec("write_settings"), { area: "environment", name: "PATH", delete: true }, undefined, { facts })).toMatchObject({ owner: ["user"], action: ["delete"] });
     expect(resourceOfCall(spec("power"), { action: "lock" }, undefined, { facts })).toEqual({ action: ["lock"], machine: ["desk"] });

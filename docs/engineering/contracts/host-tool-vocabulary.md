@@ -59,8 +59,10 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `open_merge_request`, `comment_merge_request`, `git_merge`, `close_merge_request`, `git_push` | false | `registerGitTools` | none | none |
 | `list_pipelines`, `read_pipeline`, `read_pipeline_job`, `download_pipeline_artifact` | true | `registerGitTools` (from `ciTools.ts`) | none | none |
 | `wait_for_event` | true | `registerGitTools` | none | none |
-| `read_system`, `list_processes`, `list_services`, `list_software`, `read_settings`, `read_clipboard`, `list_windows`, `screenshot` | true | `registerSystemTools` | none | none |
-| `power`, `stop_process`, `control_service`, `install_software`, `write_settings`, `write_clipboard`, `open_app`, `control_input` | false | `registerSystemTools` | none | none |
+| `read_system`, `list_processes`, `list_services`, `list_programs`, `read_settings`, `read_clipboard`, `list_windows`, `screenshot` | true | `registerSystemTools` | none | none |
+| `power`, `stop_process`, `control_service`, `install_program`, `write_settings`, `write_clipboard`, `open_app`, `control_input` | false | `registerSystemTools` | none | none |
+
+`list_programs` and `install_program` were `list_software` and `install_software` until 2026-11-23 ([0034](../decisions/0034-the-permission-board.md)). The old names are aliases (`TOOL_ALIASES`): a permission set's line, a setting or a state's tool list that writes one means the tool as it is now, and the set's reader says so.
 
 The **Git tools** ([0010](../decisions/0010-git-tools-and-events.md) §1), category `git`, reach the forge of
 the WORKSPACE's git remote (the one named in `remote`, else the only one, else `origin`) through the
@@ -98,7 +100,7 @@ package's `id`); a list is cut to `limit` and says its `count`. Rules the same o
 - `screenshot` (and a picture on the clipboard) is kept as the task's artifact under `system/…` and handed
   to the model as an image: the result carries it under `$images`, which every route sends as an image
   (`@declarative-ai/json`'s `splitToolImages`).
-- `power` and `install_software` always ask, as a push does, unless `functions.shell.builtins` is off.
+- `power` and `install_program` always ask, as a push does, unless `functions.shell.builtins` is off.
 
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no

@@ -172,13 +172,15 @@ async function main(): Promise<void> {
       await settle(500);
     }
 
-    // 8. The shield: the whole picture, as it was.
+    // 8. The shield: the permission board (decision 0034), and from it the whole picture, as it was.
     await app.resize(1400, 900);
     await settle(800);
     await click(`document.querySelector('${BAR} [aria-label="Permissions"]')`, "the shield", 1200);
+    check(/Layers and sets/.test(await floatText()) && /Result/.test(await floatText()), "8. the shield opens the permission board");
+    await click(byText("Layers and sets…", inFloat), "Layers and sets…", 1200);
     await app.shot("8-whole", undefined, false);
     const whole = await floatText();
-    check(/This conversation/.test(whole) && /what the whole stack comes to/.test(whole) && /Done/.test(whole), "8. the shield opens the whole picture");
+    check(/This conversation/.test(whole) && /what the whole stack comes to/.test(whole) && /Done/.test(whole), "8. its Layers and sets… opens the whole picture");
     await app.press("Escape", 27);
     await settle(400);
     check((await floatBox()) === null, "8. Escape closes the panel");

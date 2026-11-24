@@ -8,6 +8,10 @@ decides_for: [engineering/units/tool-policy, engineering/units/host-tools]
 
 # 0019. System tools
 
+Renamed 2026-11-23 ([0034](0034-the-permission-board.md)): `list_software` is `list_programs` and
+`install_software` is `install_program`; the old names are read as the new ones. This record uses the new
+names.
+
 Amends decision 0007 (§3 and §4, and its amendment of 2026-10-20). Mockup — the real Settings →
 Tools card as shipped, and the same component drawn over the proposed vocabulary:
 https://claude.ai/artifact/N1wWRE6eKUz36ybZuKWuZh. Built 2026-10-20 — see Built, at the end, for where it
@@ -45,7 +49,7 @@ software, settings, the clipboard, apps and the screen" — between Execution an
 | Machine | `read_system` — what the machine is: OS, hardware, disks, network, users, logs | `power` — restart, shut down, sleep, sign out, lock |
 | Processes | `list_processes` — the programs running, and what each uses | `stop_process` — stop a running program |
 | Services | `list_services` — the services, and whether each is running | `control_service` — start, stop, restart, enable, disable |
-| Software | `list_software` — programs, packages and modules installed | `install_software` — install, update, remove |
+| Software | `list_programs` — programs, packages and modules installed | `install_program` — install, update, remove |
 | Settings | `read_settings` — the registry, preferences, environment, time and time zone | `write_settings` — change one |
 | Clipboard | `read_clipboard` — what is on it | `write_clipboard` — put text or an image on it |
 | Apps & windows | `list_windows` — the apps and windows open | `open_app` — launch an app, open a file or link in its app, focus or close a window |
@@ -68,7 +72,7 @@ licence page gain nothing.
   elsewhere; stopping is `killTree`. JaiRA's own engine, app and agent processes are refused.
 - `list_services` / `control_service` — the Service Control Manager (`Get-Service`, `sc.exe`),
   `systemctl`, `launchctl`. A service that needs an administrator says so instead of failing silently.
-- `list_software` / `install_software` — `winget` and PowerShell's modules on Windows, `brew` on macOS,
+- `list_programs` / `install_program` — `winget` and PowerShell's modules on Windows, `brew` on macOS,
   the distribution's manager on Linux.
 - `read_settings` / `write_settings` — the registry and the user's persistent environment variables,
   time and time zone on Windows; `defaults` and `systemsetup` on macOS; `gsettings` and `timedatectl`
@@ -99,8 +103,8 @@ dialect — so a set's `stop_process` line holds `kill`, `taskkill` and `Stop-Pr
 | `stop_process` | `kill`, `pkill`, `killall` | `Stop-Process` | `taskkill` |
 | `list_services` | `systemctl status\|list-units`, `service --status-all`, `launchctl list` | `Get-Service` | `sc query` |
 | `control_service` | `systemctl start\|stop\|restart\|enable\|disable`, `launchctl load\|unload` | `Start-`, `Stop-`, `Restart-`, `Suspend-`, `Resume-`, `Set-`, `New-Service` | `sc start\|stop\|config`, `net start\|stop` |
-| `list_software` | `dpkg -l`, `rpm -qa`, `brew list`, `apt list --installed` | `Get-Package`, `Get-InstalledModule`, `Get-InstalledScript` | `winget list`, `choco list` |
-| `install_software` | `apt`, `dnf`, `pacman`, `brew install\|uninstall`, `npm install -g` | `Install-`, `Uninstall-`, `Update-`, `Save-Module` and their kind | `winget install\|uninstall\|upgrade`, `choco`, `scoop` |
+| `list_programs` | `dpkg -l`, `rpm -qa`, `brew list`, `apt list --installed` | `Get-Package`, `Get-InstalledModule`, `Get-InstalledScript` | `winget list`, `choco list` |
+| `install_program` | `apt`, `dnf`, `pacman`, `brew install\|uninstall`, `npm install -g` | `Install-`, `Uninstall-`, `Update-`, `Save-Module` and their kind | `winget install\|uninstall\|upgrade`, `choco`, `scoop` |
 | `read_settings` | `defaults read`, `gsettings get`, `timedatectl status` | `Get-ItemProperty` on a registry drive, `Get-ExecutionPolicy` | `reg query` |
 | `write_settings` | `defaults write`, `gsettings set`, `timedatectl set-*` | `Set-`, `New-`, `Remove-ItemProperty` on a registry drive, `Set-Date`, `Set-TimeZone`, `Set-ExecutionPolicy` | `reg add\|delete`, `setx` |
 | `read_clipboard` | `pbpaste`, `wl-paste`, `xclip -o` | `Get-Clipboard` | — |
@@ -113,7 +117,7 @@ dialect — so a set's `stop_process` line holds `kill`, `taskkill` and `Stop-Pr
 `Invoke-Item` moves from `script` to `open_app`. `Start-Process` stays a runner: it opens the program
 it starts, which is judged as itself. A registry path given to a file cmdlet (`HKCU:\…`) is a setting,
 not a file. A project's own package manager (`npm install`, `pip install` in a venv) stays the command
-it is, under the built-in install ask; a global install is `install_software`. What the 139 cmdlets of
+it is, under the built-in install ask; a global install is `install_program`. What the 139 cmdlets of
 `powershellCmdlets.test.ts` that act on the machine become is pinned there, cmdlet by cmdlet.
 
 ### 4. Agents' own system tools
@@ -129,7 +133,7 @@ tools and refuses the eight change tools, and `full` allows all sixteen. `chat_c
 
 ### 6. Built-ins
 
-`power` is a built-in ask, as a push is; `install_software` keeps the install ask the shell's managers
+`power` is a built-in ask, as a push is; `install_program` keeps the install ask the shell's managers
 have. `stop_process` refuses JaiRA's own processes whatever a set says.
 
 ## Rulings (the person, 2026-10-20)
@@ -154,8 +158,8 @@ The seven open questions of the proposal, answered:
 
 | | `ask-first` | `read-only` | `auto` | `full` |
 | --- | --- | --- | --- | --- |
-| the eight look tools (`read_system`, `list_processes`, `list_services`, `list_software`, `read_settings`, `read_clipboard`, `list_windows`, `screenshot`) | ask | allow | ask | allow |
-| the eight change tools (`power`, `stop_process`, `control_service`, `install_software`, `write_settings`, `write_clipboard`, `open_app`, `control_input`) | ask | deny | ask | allow |
+| the eight look tools (`read_system`, `list_processes`, `list_services`, `list_programs`, `read_settings`, `read_clipboard`, `list_windows`, `screenshot`) | ask | allow | ask | allow |
+| the eight change tools (`power`, `stop_process`, `control_service`, `install_program`, `write_settings`, `write_clipboard`, `open_app`, `control_input`) | ask | deny | ask | allow |
 
 A permission set that holds no System tool offers none: the person's own sets need no migration, and
 a shell command that is a System tool answers to that tool's line, then to `other`, as `cat` answers

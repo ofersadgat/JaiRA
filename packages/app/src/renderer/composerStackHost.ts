@@ -53,6 +53,10 @@ export interface ComposerStack {
   write: (next: StackForm) => void;
   /** The Tools card's map, written as the tools layer. */
   writeTools: (next: PermissionSet) => void;
+  /** The conversation's own lines, edited as written (the permission board, decision 0034). */
+  writeOwn: (edit: (lines: Record<string, unknown>) => Record<string, unknown>) => void;
+  /** Read the stack again — after a set it is made of was written. */
+  refresh: () => void;
   /** Let go of the run's answers these keys name, or every one. */
   forget: (keys?: readonly string[]) => Promise<void>;
   /** Pin a layer to this project's standing layers of the stack's bucket, or take it off. */
@@ -110,6 +114,11 @@ export function useComposerStack({
     treeRequest: fullRequest,
     write: (next) => write(ownedFormOf(next, belowKnown, inherited)),
     writeTools: (next) => write(toolsWriteOf(ownedFormOf(form, belowKnown, inherited), below, next)),
+    writeOwn: (edit) => {
+      const owned = ownedFormOf(form, belowKnown, inherited);
+      write({ layers: [...owned.layers], tools: edit({ ...(owned.tools ?? {}) }) });
+    },
+    refresh,
     forget: async (keys) => {
       if (host?.taskId === undefined) return;
       await invoke("permissionSets:forgetRuntime", { taskId: host.taskId, ...(host.project !== undefined ? { project: host.project } : {}), ...(keys !== undefined ? { keys: [...keys] } : {}) });

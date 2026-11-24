@@ -36,6 +36,7 @@ import {
   type StackSegment,
 } from "@jaira/ui/composerStack";
 import { useComposerStack, type StackHost } from "@jaira/ui/composerStackHost";
+import { usePermissionBoardHost } from "@jaira/ui/permissionBoardHost";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
@@ -179,6 +180,7 @@ export function Composer({
   const planned = plan?.settings ?? EMPTY_SETTINGS;
   const inherited = useMemo(() => mapOfSettings(planned), [planned]);
   const stack = useComposerStack({ host: stackHost, settings: planned, inherited, overrides, onOverrides });
+  const permissionBoard = usePermissionBoardHost({ stack, host: stackHost });
   const facts = composerFactsOf(plan, undefined, stack.map);
   const { settings, origin, offered, map, effective, route, current, cliRoute, toolsOrigin } = facts;
   const thinking = useModelParameters(effective.model);
@@ -293,7 +295,8 @@ export function Composer({
   const close = (): void => setCard(null);
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
   /** What a segment opens (2026-11-14): a layer its list, `+` the list to lay one on top, `⋯ n` the rows — the tools segment its card. */
-  const doorOf = (segment: StackSegment): StackDoor | undefined => (segment.kind === "layer" ? { kind: "layer", layer: segment } : segment.kind === "fold" ? { kind: "rows" } : segment.kind === "add" ? { kind: "add" } : undefined);
+  const doorOf = (segment: StackSegment): StackDoor | undefined =>
+    segment.kind === "layer" ? { kind: "layer", layer: segment } : segment.kind === "fold" ? { kind: "rows" } : segment.kind === "add" ? { kind: "add" } : segment.kind === "tools" ? { kind: "board", order: "tools" } : undefined;
   /** A segment's panel, or closed when it was the one open. Another pressed while it is open carries the panel there. */
   const openSegment = (segment: StackSegment, at: FloatRect): void => {
     if (segment.kind === "tools") setEverything(false);
@@ -653,7 +656,7 @@ export function Composer({
           />
         </ChipCard>
       ) : null}
-      {card?.which === "stack" && card.key === "tools" ? (
+      {card?.which === "stack" && card.key === "tools" && card.door === undefined ? (
         // `tools`, the stack's last layer: today's Tools card over what the stack comes to, what this
         // run answered marked on its lines — and its head's switch onto Everything, the same rows tagged
         // with who decided each (§7.4).
@@ -664,7 +667,15 @@ export function Composer({
           from={plan?.from}
           onReset={resetPermissionSet}
           onClose={close}
-          lead={<ToolsSwitch everything={everything} onEverything={setEverything} />}
+          lead={
+            <View flexDirection="row" alignItems="center" gap={8}>
+              <ToolsSwitch everything={everything} onEverything={setEverything} />
+              {/* The board, from the Result (decision 0034): the source permission sets a press away. */}
+              <Press onPress={() => setCard({ which: "stack", at: card.at, key: "board", door: { kind: "board", order: "tools" } })} label="Open the permission board" title="Every tool by the resource it touches, with the layers each answer comes from" grow={false} box={({ hovered }) => ({ paddingVertical: 3, paddingHorizontal: 8, borderRadius: 7, backgroundColor: hovered ? t.tint("accent", 9) : "transparent" })}>
+                <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 500, color: "accent" }}>Board</Txt>
+              </Press>
+            </View>
+          }
         >
           {toolsBody}
         </ChipCard>
@@ -691,6 +702,8 @@ export function Composer({
               {toolsBody}
             </>
           }
+          board={permissionBoard}
+          onToolList={() => setCard((was) => (was === null ? null : { which: "stack", at: was.at, key: "tools" }))}
           onClose={close}
         />
       ) : null}

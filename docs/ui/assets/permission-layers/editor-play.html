@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0023-overlays-and-scopes">
+<meta name="state" content="the permission editor · an interactive board to compare row treatments">
+<meta name="captured" content="2026-11-23">
+<meta name="reflects" content="proposed">
+<title>The permission board · try the row treatments</title>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff;
+  --tok-hint: #949cad; --p0: #737b8d; --p1: #3f76d4; --p2: #b57a1c; --p3: #7d5fc7; --ws-tool: #a8508a; --ws-run: #3d7a4c; --ws-read: #2f8a9e;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --a-allow: var(--ok); --a-smart: var(--p3); --a-ask: var(--warn); --a-deny: var(--bad); --a-off: var(--dim);
+  --solid-ink: #fff;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72;
+  --fill-accent: #5a5fe0;
+  --tok-hint: #5f6779; --p0: #8b93a7; --p1: #6e9df0; --p2: #d7a145; --p3: #a98ee6; --ws-tool: #e08cc6; --ws-run: #7ccf8e; --ws-read: #6cc3d6;
+  --lift: 0 18px 50px rgba(0,0,0,.5);
+  --solid-ink: #0f1017;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 24px 28px 80px; }
+svg.i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+code { font: 500 11.5px var(--font-data); }
+h1 { font-size: 20px; margin: 0 0 4px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 980px; margin: 0 0 14px; }
+
+/* controls */
+.bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 0 12px; background: var(--bg); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--panel); }
+.seg button { font: 500 12px var(--font-app); color: var(--dim); background: none; border: 0; border-right: 1px solid var(--line); padding: 6px 12px; cursor: pointer; display: inline-flex; gap: 6px; align-items: baseline; }
+.seg button:last-child { border-right: 0; }
+.seg button b { font: 700 11px var(--font-data); color: var(--accent); }
+.seg button.on { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--text); font-weight: 600; }
+.tg2 { display: inline-flex; align-items: center; gap: 6px; font: 500 12px var(--font-app); color: var(--dim); cursor: pointer; user-select: none; }
+.tg2 input { accent-color: var(--accent); }
+.btn { font: 500 12px var(--font-app); color: var(--accent); background: none; border: 1px solid transparent; border-radius: 7px; padding: 5px 8px; cursor: pointer; }
+.btn:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.about { font-size: 12px; color: var(--dim); max-width: 1100px; margin: 0 0 12px; min-height: 36px; }
+.about b { color: var(--text); }
+.log { font: 400 11.5px var(--font-app); color: var(--dim); margin-top: 10px; min-height: 20px; }
+.log b { color: var(--text); }
+
+/* the board */
+.float { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); overflow: hidden; max-width: 1320px; }
+.fhead { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.fhead .t { font-weight: 600; font-size: 12.5px; }
+.hint { color: var(--tok-hint); font-size: 11px; }
+.r { display: grid; grid-template-columns: 290px repeat(4, minmax(0, 1fr)) 100px; }
+.r > .c { padding: 4px 6px; display: flex; flex-wrap: wrap; align-items: center; align-content: center; border-left: 1px solid var(--panel-2); min-width: 0; }
+.r > .lab { padding: 0 10px 0 12px; display: flex; align-items: center; gap: 8px; min-width: 0; position: relative; }
+.r.hd > div { padding: 9px 10px 8px; font: 600 11.5px var(--font-app); border-bottom: 1px solid var(--line); }
+.ah { display: inline-flex; align-items: center; gap: 6px; color: var(--a); }
+.ah::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--a); }
+.h-allow { --a: var(--a-allow); box-shadow: inset 0 3px 0 var(--a-allow); } .h-smart { --a: var(--a-smart); box-shadow: inset 0 3px 0 var(--a-smart); } .h-ask { --a: var(--a-ask); box-shadow: inset 0 3px 0 var(--a-ask); } .h-deny { --a: var(--a-deny); box-shadow: inset 0 3px 0 var(--a-deny); } .h-off { --a: var(--a-off); box-shadow: inset 0 3px 0 var(--a-off); }
+.c.allow { background: color-mix(in srgb, var(--a-allow) 3.5%, transparent); }
+.c.smart { background: color-mix(in srgb, var(--a-smart) 3.5%, transparent); }
+.c.ask { background: color-mix(in srgb, var(--a-ask) 3.5%, transparent); }
+.c.deny { background: color-mix(in srgb, var(--a-deny) 3.5%, transparent); }
+.c.off { background: repeating-linear-gradient(135deg, transparent 0 6px, color-mix(in srgb, var(--rule) 16%, transparent) 6px 7px); }
+.c.over { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--accent) 60%, transparent); }
+.lv1, .lv2 { cursor: pointer; }
+.lab .chev { width: 10px; height: 10px; color: var(--tok-hint); transition: transform .12s; }
+.closed > .lab .chev { transform: rotate(-90deg); }
+.lab .nm { font-weight: 700; }
+.lab .sub { display: block; font: 400 10px var(--font-data); color: var(--tok-hint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lab .txt { min-width: 0; display: flex; flex-direction: column; }
+.tile { display: inline-grid; place-items: center; flex: none; color: var(--k); }
+.vb { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; flex: none; }
+.also { display: inline-flex; font: 500 9.5px var(--font-app); color: var(--accent); border: 1px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 99px; padding: 0 6px; white-space: nowrap; }
+.full { grid-column: 1 / -1; }
+
+/* kinds */
+[data-kind=path] { --k: var(--ws-read); } [data-kind=site] { --k: var(--p1); } [data-kind=br] { --k: var(--p3); }
+[data-kind=prog] { --k: var(--ws-run); } [data-kind=mach] { --k: var(--p0); } [data-kind=tool] { --k: var(--ws-tool); }
+
+/* chips */
+.pl { --c: var(--dim); display: inline-flex; align-items: center; gap: 4px; font: 500 10.5px/1 var(--font-data); color: var(--text); background: color-mix(in srgb, var(--c) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--c) 30%, transparent); border-radius: 6px; padding: 3px 5px; margin: 2px; white-space: nowrap; cursor: grab; box-shadow: 0 1px 1px rgba(0,0,0,.05); }
+.pl svg.i { width: 11px; height: 11px; color: var(--c); stroke-width: 2.1; }
+.pl[data-k=dir] { --c: var(--ws-read); } .pl[data-k=cred] { --c: var(--warn); } .pl[data-k=jaira], .pl[data-k=key] { --c: var(--bad); }
+.pl[data-k=site] { --c: var(--p1); } .pl[data-k=br] { --c: var(--p3); } .pl[data-k=prog] { --c: var(--ws-run); }
+.pl[data-k=own] { --c: var(--ws-tool); } .pl[data-k=act] { --c: var(--p3); } .pl[data-k=area] { --c: var(--p2); } .pl[data-k=mach] { --c: var(--p0); }
+.pl[data-k=any] { --c: var(--tok-hint); border-style: dashed; }
+.pl[data-k=tool] { --c: var(--ws-tool); }
+.pl.dragging { opacity: .35; }
+.pl .tg { display: inline-flex; gap: 1px; margin-left: 2px; }
+.pl .tg i { font: 700 8.5px/1 var(--font-app); font-style: normal; padding: 2px 3px; border-radius: 3px; background: var(--panel-3); color: var(--dim); display: inline-grid; place-items: center; }
+.pl .tg i svg.i { width: 9px; height: 9px; color: var(--dim); stroke-width: 2.2; }
+.pl .sb { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 4px; margin-left: 2px; background: var(--fill-accent); }
+.pl .sb svg.i { width: 9px; height: 9px; color: var(--on-accent); }
+.pl.new { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 24%, transparent); }
+.pl.mix { background: repeating-linear-gradient(135deg, var(--panel) 0 5px, color-mix(in srgb, var(--warn) 14%, var(--panel)) 5px 7px); }
+.pl .mx { font: 700 8.5px/1 var(--font-app); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent); border-radius: 3px; padding: 1px 3px; }
+
+/* ============ A: bands and threads, more contrast ============ */
+.tA .lv1 { background: color-mix(in srgb, var(--k) 13%, var(--panel)); border-top: 2px solid color-mix(in srgb, var(--k) 40%, var(--line)); }
+.tA .lv1 > div { min-height: 52px; }
+.tA .lv1 > .c { border-left-color: color-mix(in srgb, var(--k) 14%, transparent); background: none; }
+.tA .lv1 > .lab { box-shadow: inset 5px 0 0 var(--k); padding-left: 16px; }
+.tA .lv1 .nm { font-size: 14.5px; }
+.tA .lv1 .tile { width: 28px; height: 28px; border-radius: 8px; background: var(--k); color: var(--panel); }
+.tA .lv1 .tile svg.i { width: 15px; height: 15px; stroke-width: 2.1; }
+.tA .lv2 { background: var(--panel); border-top: 1px solid var(--panel-2); }
+.tA .lv2 > div { min-height: 40px; }
+.tA .lv2 > .lab { padding-left: 46px; }
+.tA .lv2 > .lab::before { content: ""; position: absolute; left: 28px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.tA .lv2 > .lab::after { content: ""; position: absolute; left: 28px; top: calc(50% - 1px); width: 12px; height: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.tA .lv2.last.closed > .lab::before, .tA .lv2.last.noTools > .lab::before { bottom: 50%; }
+.tA .lv2 .vb { font: 650 12px var(--font-app); color: var(--k); background: color-mix(in srgb, var(--k) 15%, var(--panel)); border: 1px solid color-mix(in srgb, var(--k) 50%, transparent); border-radius: 7px; padding: 3px 9px; }
+.tA .lv2 .vb svg.i { width: 12px; height: 12px; }
+.tA .lv3 { background: color-mix(in srgb, var(--panel-3) 75%, var(--panel)); border-top: 1px dashed color-mix(in srgb, var(--rule) 55%, transparent); }
+.tA .lv3 > div { min-height: 28px; }
+.tA .lv3 > .c { background: none; }
+.tA .lv3 > .lab { padding-left: 74px; font: 500 10.5px var(--font-data); color: var(--dim); }
+.tA .lv3 > .lab::before { content: ""; position: absolute; left: 28px; top: 0; bottom: 0; width: 2px; background: color-mix(in srgb, var(--k) 55%, transparent); }
+.tA .lv3.lastacc > .lab::before { display: none; }
+.tA .lv3 > .lab::after { content: ""; position: absolute; left: 54px; top: 0; bottom: 0; width: 12px; border-left: 1.5px solid color-mix(in srgb, var(--k) 45%, transparent); }
+.tA .lv3.lasttool > .lab::after { bottom: 50%; border-bottom: 1.5px solid color-mix(in srgb, var(--k) 45%, transparent); border-bottom-left-radius: 4px; }
+.tA .lv3:not(.lasttool) > .lab { background: linear-gradient(color-mix(in srgb, var(--k) 45%, transparent), color-mix(in srgb, var(--k) 45%, transparent)) 54px 50% / 10px 1.5px no-repeat; }
+.tA .lv3 .pl { font-size: 10px; padding: 2px 4px; }
+
+/* ============ B: solid headers, with icons ============ */
+.tB .lv1 { background: color-mix(in srgb, var(--k) 88%, #000); color: var(--solid-ink); }
+:root[data-theme="dark"] .tB .lv1 { background: color-mix(in srgb, var(--k) 80%, #000); }
+.tB .lv1 > div { min-height: 40px; }
+.tB .lv1 > .c { border-left-color: rgba(255,255,255,.12); background: none; }
+.tB .lv1 .nm { font-size: 13.5px; color: #fff; }
+.tB .lv1 .sub, .tB .lv1 .chev, .tB .lv1 .hint { color: rgba(255,255,255,.78) !important; }
+.tB .lv1 .tile { width: 22px; height: 22px; border-radius: 6px; background: rgba(255,255,255,.2); color: #fff; }
+.tB .lv1 .pl { background: var(--panel); }
+.tB .lv2 { background: var(--panel); border-top: 1px solid var(--line); }
+.tB .lv2 > div { min-height: 38px; }
+.tB .lv2 > .lab { padding-left: 24px; }
+.tB .lv2 .vb { font: 650 12.5px var(--font-app); color: var(--text); }
+.tB .lv2 .vb svg.i { color: var(--k); width: 14px; height: 14px; }
+.tB .lv3 { background: var(--panel-2); border-top: 1px solid var(--panel-3); }
+.tB .lv3 > div { min-height: 28px; }
+.tB .lv3 > .c { background: none; }
+.tB .lv3 > .lab { padding-left: 48px; font: 500 10.5px var(--font-data); color: var(--dim); }
+.tB .lv3 .pl { font-size: 10px; padding: 2px 4px; }
+
+/* ============ C: a card per resource ============ */
+.tC { background: var(--panel-2); padding: 0 10px 10px; }
+.tC .r.hd { margin: 0 -10px; padding: 0 11px; background: var(--panel); }
+.tC .grp { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-top: 10px; overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.05); }
+.tC .lv1 > div { min-height: 46px; }
+.tC .lv1 > .c { background: none; border-left-color: var(--panel-2); }
+.tC .grp.open > .lv1 { border-bottom: 1px solid var(--line); }
+.tC .lv1 .nm { font-size: 14px; }
+.tC .lv1 .tile { width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--k) 16%, var(--panel)); }
+.tC .grp { box-shadow: inset 0 3px 0 var(--k), 0 1px 2px rgba(0,0,0,.05); }
+.tC .lv2 { border-top: 1px solid var(--panel-2); }
+.tC .lv2:first-of-type { border-top: 0; }
+.tC .lv2 > div { min-height: 38px; }
+.tC .lv2 > .lab { padding-left: 30px; }
+.tC .lv2 .vb { font: 600 12px var(--font-app); color: var(--text); }
+.tC .lv2 .vb svg.i { color: var(--k); }
+.tC .lv2.open { background: color-mix(in srgb, var(--k) 5%, var(--panel)); }
+.tC .tray { background: var(--panel-2); border-top: 1px solid var(--panel-3); border-bottom: 1px solid var(--panel-3); box-shadow: inset 0 4px 6px -4px rgba(0,0,0,.18), inset 0 -4px 6px -4px rgba(0,0,0,.12); }
+.tC .lv3 + .lv3 { border-top: 1px solid var(--panel-3); }
+.tC .lv3 > div { min-height: 27px; }
+.tC .lv3 > .c { background: none; border-left-color: var(--panel-3); }
+.tC .lv3 > .lab { padding-left: 52px; font: 500 10.5px var(--font-data); color: var(--dim); }
+.tC .lv3 .pl { font-size: 10px; padding: 2px 4px; }
+
+/* ============ D: tinted accesses ============ */
+.tD .lv1 { background: var(--panel); border-top: 1px solid var(--line); }
+.tD .grp + .grp .lv1 { border-top: 10px solid var(--panel-2); }
+.tD .lv1 > div { min-height: 48px; border-bottom: 2px solid var(--k); }
+.tD .lv1 > .c { background: none; }
+.tD .lv1 .nm { font-size: 15px; letter-spacing: -.01em; }
+.tD .lv1 .tile { width: 22px; height: 22px; }
+.tD .lv1 .tile svg.i { width: 20px; height: 20px; stroke-width: 1.9; }
+.tD .lv2 { background: color-mix(in srgb, var(--k) 9%, var(--panel)); border-top: 1px solid color-mix(in srgb, var(--k) 18%, var(--panel)); }
+.tD .lv2 > div { min-height: 38px; }
+.tD .lv2 > .c { background: none; border-left-color: color-mix(in srgb, var(--k) 14%, transparent); }
+.tD .lv2 > .lab { padding-left: 22px; }
+.tD .lv2 .vb { font: 650 12px var(--font-app); color: color-mix(in srgb, var(--k) 70%, var(--text)); }
+.tD .lv2 .vb svg.i { color: var(--k); }
+.tD .lv3 { background: var(--panel); border-top: 1px dotted var(--rule); }
+.tD .lv3 > div { min-height: 28px; }
+.tD .lv3 > .lab { padding-left: 46px; font: 500 10.5px var(--font-data); color: var(--dim); }
+.tD .lv3 > .lab::before { content: "↳"; position: absolute; left: 30px; color: var(--k); font: 600 11px var(--font-app); }
+.tD .lv3 .pl { font-size: 10px; padding: 2px 4px; }
+
+/* access icons off */
+.noicons .vb svg.i { display: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4-3 6.6-7 9-4-2.4-7-5-7-9V6Z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6a1 1 0 0 1 1-1h5l2 2h9a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"/><path d="M3 12h18"/><path d="M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/></symbol>
+<symbol id="i-branch" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10"/><path d="M18 10c0 4-6 3-12 7"/></symbol>
+<symbol id="i-term" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><path d="M4 5h16v11H4Z"/><path d="M9 20h6"/><path d="M12 16v4"/></symbol>
+<symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.6 6.3a1 1 0 0 0 0 1.4l1.7 1.7a1 1 0 0 0 1.4 0l4-4a6 6 0 0 1-7.9 7.9l-6.9 6.9a2.1 2.1 0 0 1-3-3l6.9-6.9a6 6 0 0 1 7.9-7.9Z"/></symbol>
+<symbol id="i-any" viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M5 8l14 8"/><path d="M19 8 5 16"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><path d="M6 11h12v9H6Z"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9"/><path d="m17 6 3 3"/></symbol>
+<symbol id="i-jaira" viewBox="0 0 24 24"><path d="M12 3.5 20.5 12 12 20.5 3.5 12Z"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"/><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"/></symbol>
+<symbol id="i-act" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h10"/><path d="M18 7h2"/><circle cx="16" cy="7" r="2"/><path d="M4 17h2"/><path d="M10 17h10"/><circle cx="8" cy="17" r="2"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 3 5 13h6l-1 8 8-10h-6Z"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16Z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6"/><path d="M20 4 11 13"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v12"/><path d="m6 11 6 6 6-6"/><path d="M5 20h14"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M12 20V8"/><path d="m6 13 6-6 6 6"/><path d="M5 4h14"/></symbol>
+<symbol id="i-merge" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 7v10"/><path d="M6 7c0 4 5 5 10 5"/></symbol>
+<symbol id="i-hand" viewBox="0 0 24 24"><path d="M5 3l14 7-6 2-2 6Z"/></symbol>
+<symbol id="i-camera" viewBox="0 0 24 24"><path d="M4 8h3l2-3h6l2 3h3v11H4Z"/><circle cx="12" cy="13" r="3.5"/></symbol>
+<symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 7a8 8 0 1 0 11.4 0"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="M9 4h6v3H9Z"/><path d="M9 5.5H6v15h12v-15h-3"/></symbol>
+</defs></svg>
+
+<h1>The permission board · try the row treatments</h1>
+<p class="lede">The runtime view with three levels: a <b>resource</b>, its <b>accesses</b>, and the <b>tools</b> on each access. Switch treatments to compare them, turn the access icons on or off, and play with it. <b>Click a resource</b> or an <b>access</b> to open it. <b>Drag a chip</b> to another column in its own row. A resource's chip moves every access it's tagged with; an access's chip moves all its tools; a tool's chip moves only that tool. Tools that disagree make a <b>MIXED</b> chip on their access, parked in the strictest column. Everything you move is marked ⚡, given this session.</p>
+
+<div class="bar">
+ <div class="seg" id="treat"><button data-t="A" class="on"><b>A</b>bands and threads</button><button data-t="B"><b>B</b>solid headers</button><button data-t="C"><b>C</b>a card per resource</button><button data-t="D"><b>D</b>tinted accesses</button></div>
+ <label class="tg2"><input type="checkbox" id="icons" checked>Access icons</label>
+ <label class="tg2"><input type="checkbox" id="dark">Dark</label>
+ <button class="btn" id="openall">Open all</button><button class="btn" id="closeall">Close all</button><button class="btn" id="reset">Reset</button>
+</div>
+<div class="about" id="about"></div>
+
+<div class="float">
+ <div class="fhead"><svg class="i"><use href="#i-shield"/></svg><span class="t">Permissions now</span><span class="hint">this conversation</span></div>
+ <div id="board"></div>
+</div>
+<div class="log" id="log"></div>
+
+<script>
+const ANS = ["allow", "smart", "ask", "deny", "off"];
+const STRICT = { allow: 0, smart: 1, ask: 2, deny: 3, off: 4 };
+const KICON = { dir: "folder", cred: "lock", key: "key", jaira: "jaira", site: "globe", br: "branch", prog: "term", own: "user", act: "act", area: "sliders", mach: "monitor", any: "any", tool: "tool" };
+const RICON = { path: "folder", site: "globe", br: "branch", prog: "term", mach: "monitor", tool: "tool" };
+const ABOUT = {
+  A: "<b>A, bands and threads</b>, with more contrast than round 3: the resource band is darker and taller with a solid tile; an access is a stronger pill on a thread; a tool sits on a grey shelf, smaller and monospaced, on a second thread.",
+  B: "<b>B, solid headers</b>: a resource is a solid bar in its kind's colour, an access is a bold white row led by its icon, and a tool is a grey indented line. The strongest split between resources.",
+  C: "<b>C, a card per resource</b>: each resource is its own card on a grey board, with its kind's colour along the top. Accesses are the card's rows; an access's tools open in a recessed tray inside the card.",
+  D: "<b>D, tinted accesses</b>: the resource is a plain heading underlined in its kind's colour, the accesses carry the tint, and tools are plain lines under them. Colour moves to the level you act on most.",
+};
+function seed() {
+  return [
+    { id: "files", name: "Files", kind: "path", accs: [
+      { id: "read", name: "Read", icon: "eye", tools: ["read_file", "glob", "grep", "write_clipboard"], places: { "dir:apps/site": "allow", "dir:project 3": "smart", "any:**": "ask", "cred:credentials 8": "ask", "key:machine key": "deny" }, over: { grep: { "any:**": "allow" } } },
+      { id: "write", name: "Write", icon: "pen", tools: ["edit", "write_file"], places: { "dir:apps/site": "allow", "any:**": "smart", "cred:credentials 8": "ask", "jaira:.jaira": "deny", "key:machine key": "deny" } },
+      { id: "run", name: "Run", icon: "play", tools: ["shell", "script", "runner:*"], places: { "dir:apps/site": "allow", "dir:packages/app": "allow", "any:**": "smart", "jaira:.jaira": "deny", "key:machine key": "deny" } },
+      { id: "open", name: "Open", icon: "ext", tools: ["open_app"], places: { "dir:project 3": "allow", "any:**": "ask", "cred:credentials 8": "deny" } } ] },
+    { id: "sites", name: "Sites", kind: "site", accs: [
+      { id: "fetch", name: "Fetch", icon: "down", tools: ["web_fetch"], places: { "site:3 docs sites": "allow", "site:localhost": "allow", "site:docs.rs": "allow", "any:any site": "smart" } },
+      { id: "open", name: "Open", icon: "ext", tools: ["open_app"], places: { "site:3 docs sites": "allow", "site:localhost": "allow", "any:any site": "ask" } } ] },
+    { id: "branches", name: "Branches", kind: "br", accs: [
+      { id: "push", name: "Push", icon: "up", tools: ["git_push"], places: { "br:claude/**": "allow", "br:web/**": "allow", "any:any branch": "smart", "br:protected 3": "ask" } },
+      { id: "merge", name: "Merge", icon: "merge", tools: ["git_merge"], places: { "br:claude/**": "allow", "any:any branch": "smart", "br:protected 3": "ask" } } ] },
+    { id: "programs", name: "Programs", kind: "prog", accs: [
+      { id: "see", name: "See", icon: "eye", tools: ["list_processes", "read_process", "wait_process"], places: { "prog:node": "allow", "prog:python": "allow", "own:session": "allow", "any:any program": "ask", "own:user": "ask", "own:system": "deny" } },
+      { id: "control", name: "Control", icon: "hand", tools: ["stop_process", "open_app", "control_input"], places: { "prog:node": "allow", "own:session": "allow", "act:stop": "allow", "any:any program": "ask", "own:user": "ask", "act:tree": "ask", "own:system": "deny", "act:force": "deny" }, over: { open_app: { "any:any program": "smart" } } },
+      { id: "screen", name: "Screen", icon: "camera", tools: ["screenshot", "list_windows"], places: { "own:session": "allow", "any:any program": "ask" } } ] },
+    { id: "machine", name: "Machine", kind: "mach", accs: [
+      { id: "read", name: "Read", icon: "eye", tools: ["read_system", "read_settings"], places: { "area:system info": "allow", "any:any area": "smart", "own:system": "ask" } },
+      { id: "change", name: "Change", icon: "pen", tools: ["write_settings"], places: { "own:user": "ask", "own:system": "deny" } },
+      { id: "power", name: "Power", icon: "power", tools: ["power"], places: { "act:lock": "ask", "act:restart": "deny", "act:shut down": "deny" } },
+      { id: "clipboard", name: "Clipboard", icon: "clip", tools: ["read_clipboard", "write_clipboard"], places: { "mach:this machine": "ask" } } ] },
+    { id: "other", name: "Other tools", kind: "tool", other: true, accs: [
+      ["list_tasks", "allow"], ["load_skill", "allow"], ["wait_for_event", "allow"], ["web_search", "smart"], ["hold_task", "smart"], ["github·search_code", "ask"],
+    ].map(([n, a]) => ({ id: n, name: n, icon: "tool", tools: [], places: { "tool:everywhere": a } })) },
+  ];
+}
+let RES, ses, fresh, openR, openA;
+function init() {
+  RES = seed();
+  ses = new Set(["sites/fetch/site:docs.rs", "programs/see/prog:python", "files/read/grep/any:**"]);
+  fresh = new Set(["sites/fetch/site:docs.rs"]);
+  openR = new Set(["files", "programs"]); openA = new Set(["files/read", "programs/control"]);
+}
+const st = { t: "A", icons: true };
+const ico = (n, cls = "i") => `<svg class="${cls}"><use href="#i-${n}"/></svg>`;
+const kindOf = (p) => p.slice(0, p.indexOf(":"));
+const nameOf = (p) => p.slice(p.indexOf(":") + 1);
+const letter = (a) => a.name[0];
+function toolAns(acc, t, p) { return acc.over?.[t]?.[p] ?? acc.places[p]; }
+function accAns(acc, p) {
+  if (!acc.tools.length) return { ans: acc.places[p], mixed: false };
+  const set = new Set(acc.tools.map((t) => toolAns(acc, t, p)));
+  if (set.size === 1) return { ans: [...set][0], mixed: false };
+  return { ans: [...set].sort((a, b) => STRICT[b] - STRICT[a])[0], mixed: true };
+}
+function chip({ p, label, tags, key, row, mixed, sesKey }) {
+  const k = kindOf(p);
+  const isSes = sesKey && ses.has(sesKey), isNew = sesKey && fresh.has(sesKey);
+  const tg = tags ? `<span class="tg">${tags.map((a) => `<i title="${a.name}">${st.icons ? ico(a.icon) : letter(a)}</i>`).join("")}</span>` : "";
+  return `<span class="pl${mixed ? " mix" : ""}${isNew ? " new" : ""}" draggable="true" data-k="${k}" data-row="${row}" data-key="${key}">${ico(KICON[k])}${label ?? nameOf(p)}${tg}${mixed ? '<span class="mx">MIXED</span>' : ""}${isSes ? `<span class="sb">${ico("bolt")}</span>` : ""}</span>`;
+}
+function cells(row, byAns) { return ANS.map((a) => `<div class="c ${a}" data-row="${row}" data-ans="${a}">${(byAns[a] || []).join("")}</div>`).join(""); }
+function alsoOf(res, tool) {
+  const others = RES.filter((r) => r !== res && r.accs.some((a) => a.tools.includes(tool))).map((r) => r.name);
+  return others.length ? `<span class="also">+ ${others.join(", ")}</span>` : "";
+}
+function render() {
+  const b = document.getElementById("board");
+  let h = `<div class="t${st.t}${st.icons ? "" : " noicons"}"><div class="r hd"><div>Resource</div>${ANS.map((a) => `<div class="h-${a}"><span class="ah">${a[0].toUpperCase() + a.slice(1)}</span></div>`).join("")}</div>`;
+  for (const res of RES) {
+    const open = openR.has(res.id);
+    h += `<div class="grp${open ? " open" : ""}" data-kind="${res.kind}">`;
+    const tile = `<span class="tile">${ico(RICON[res.kind])}</span>`;
+    const accWords = res.other ? "touch no resource · one answer each" : res.accs.map((a) => a.name.toLowerCase()).join(" · ");
+    if (open) {
+      const tools = new Set(res.accs.flatMap((a) => a.tools)).size;
+      h += `<div class="r lv1" data-res="${res.id}"><div class="lab full">${ico("chev", "i chev")}${tile}<span class="nm">${res.name}</span><span class="hint">${res.other ? res.accs.length + " tools" : res.accs.length + " accesses · " + tools + " tools"}</span></div></div>`;
+      res.accs.forEach((acc, ai) => {
+        const ak = `${res.id}/${acc.id}`, aopen = openA.has(ak) && acc.tools.length;
+        const last = ai === res.accs.length - 1;
+        const by = {};
+        for (const p of Object.keys(acc.places)) {
+          const { ans, mixed } = accAns(acc, p);
+          const sk = `${ak}/${p}`;
+          (by[ans] ||= []).push(chip({ p, key: p, row: `a:${ak}`, mixed, sesKey: sk }));
+        }
+        const sub = res.other ? "" : aopen ? `${acc.tools.length} tool${acc.tools.length > 1 ? "s" : ""}` : acc.tools.join(" · ");
+        const label = res.other ? `<span class="vb" style="font-family: var(--font-data)">${ico("tool")}${acc.name}</span>` : `<span class="vb">${ico(acc.icon)}${acc.name}</span>`;
+        h += `<div class="r lv2${aopen ? " open" : acc.tools.length ? " closed" : " noTools"}${last ? " last" : ""}" data-acc="${ak}"><div class="lab">${acc.tools.length ? ico("chev", "i chev") : '<span style="width:10px"></span>'}${label}<span class="sub" style="font: 400 10px var(--font-data); color: var(--tok-hint)">${sub}</span></div>${cells(`a:${ak}`, by)}</div>`;
+        if (aopen) {
+          if (st.t === "C") h += `<div class="tray">`;
+          acc.tools.forEach((t, ti) => {
+            const tb = {};
+            for (const p of Object.keys(acc.places)) {
+              const ans = toolAns(acc, t, p);
+              (tb[ans] ||= []).push(chip({ p, key: p, row: `t:${ak}/${t}`, sesKey: `${ak}/${t}/${p}` }));
+            }
+            h += `<div class="r lv3${ti === acc.tools.length - 1 ? " lasttool" : ""}${last ? " lastacc" : ""}"><div class="lab">${st.t === "A" || st.t === "C" ? ico("tool", "i") : ""}${t}${alsoOf(res, t)}</div>${cells(`t:${ak}/${t}`, tb)}</div>`;
+          });
+          if (st.t === "C") h += `</div>`;
+        }
+      });
+    } else {
+      const groups = new Map();
+      for (const acc of res.accs) for (const p of Object.keys(acc.places)) {
+        const { ans, mixed } = accAns(acc, p);
+        const gk = res.other ? acc.id : `${p}|${ans}|${mixed}`;
+        if (!groups.has(gk)) groups.set(gk, { p, ans, mixed, accs: [], label: res.other ? acc.name : undefined });
+        groups.get(gk).accs.push(acc);
+      }
+      const by = {};
+      for (const [gk, g] of groups) {
+        const sk = g.accs.map((a) => `${res.id}/${a.id}/${g.p}`).find((k) => ses.has(k));
+        (by[g.ans] ||= []).push(chip({ p: g.p, label: g.label, tags: res.other ? null : g.accs, key: `${g.p}|${g.accs.map((a) => a.id).join(",")}`, row: `r:${res.id}`, mixed: g.mixed, sesKey: sk }));
+      }
+      h += `<div class="r lv1 closed" data-res="${res.id}"><div class="lab">${ico("chev", "i chev")}${tile}<span class="txt"><span class="nm">${res.name}</span><span class="sub">${accWords}</span></span></div>${cells(`r:${res.id}`, by)}</div>`;
+    }
+    h += `</div>`;
+  }
+  b.innerHTML = h + "</div>";
+  document.getElementById("about").innerHTML = ABOUT[st.t];
+}
+function say(html) { document.getElementById("log").innerHTML = html; }
+// open and close
+document.getElementById("board").addEventListener("click", (e) => {
+  if (e.target.closest(".pl")) return;
+  const r1 = e.target.closest(".lv1"), r2 = e.target.closest(".lv2");
+  if (r1) { const id = r1.dataset.res; openR.has(id) ? openR.delete(id) : openR.add(id); render(); }
+  else if (r2 && !r2.classList.contains("noTools")) { const id = r2.dataset.acc; openA.has(id) ? openA.delete(id) : openA.add(id); render(); }
+});
+// drag a chip within its row
+let drag = null;
+document.addEventListener("dragstart", (e) => {
+  const pl = e.target.closest?.(".pl"); if (!pl) return;
+  drag = { row: pl.dataset.row, key: pl.dataset.key }; pl.classList.add("dragging");
+  e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", pl.dataset.key);
+});
+document.addEventListener("dragend", () => { drag = null; document.querySelectorAll(".dragging,.c.over").forEach((x) => x.classList.remove("dragging", "over")); });
+document.addEventListener("dragover", (e) => {
+  const c = e.target.closest?.(".c"); document.querySelectorAll(".c.over").forEach((x) => x !== c && x.classList.remove("over"));
+  if (c && drag && c.dataset.row === drag.row) { e.preventDefault(); c.classList.add("over"); }
+});
+document.addEventListener("drop", (e) => {
+  const c = e.target.closest?.(".c"); if (!c || !drag || c.dataset.row !== drag.row) return;
+  e.preventDefault(); move(drag.row, drag.key, c.dataset.ans); drag = null; render();
+});
+function findAcc(ak) { const [r, a] = ak.split("/"); const res = RES.find((x) => x.id === r); return [res, res.accs.find((x) => x.id === a)]; }
+function setAcc(res, acc, p, ans) {
+  acc.places[p] = ans; for (const t of Object.keys(acc.over || {})) delete acc.over[t][p];
+  const k = `${res.id}/${acc.id}/${p}`; ses.add(k); fresh.add(k);
+  for (const t of acc.tools) { ses.delete(`${res.id}/${acc.id}/${t}/${p}`); }
+}
+function move(row, key, ans) {
+  const kind = row[0], rest = row.slice(2);
+  if (kind === "r") {
+    const res = RES.find((x) => x.id === rest);
+    if (res.other) { const acc = res.accs.find((a) => a.id === key); setAcc(res, acc, "tool:everywhere", ans); say(`<b>${acc.name}</b> → ${ans}, for this conversation.`); return; }
+    const [p, ids] = key.split("|"); const accs = ids.split(",").map((id) => res.accs.find((a) => a.id === id));
+    accs.forEach((a) => setAcc(res, a, p, ans));
+    say(`<b>${res.name} · ${accs.map((a) => a.name).join(", ")}</b> at <code>${nameOf(p)}</code> → ${ans}: ${accs.flatMap((a) => a.tools).length || accs.length} tool${accs.flatMap((a) => a.tools).length === 1 ? "" : "s"} set, for this conversation.`);
+  } else if (kind === "a") {
+    const [res, acc] = findAcc(rest); setAcc(res, acc, key, ans);
+    say(`<b>${res.name} · ${acc.name}</b> at <code>${nameOf(key)}</code> → ${ans}: ${acc.tools.join(", ") || acc.name} set, for this conversation.`);
+  } else {
+    const parts = rest.split("/"); const t = parts.slice(2).join("/"); const [res, acc] = findAcc(parts.slice(0, 2).join("/"));
+    acc.over ||= {}; acc.over[t] ||= {};
+    if (acc.places[key] === ans) delete acc.over[t][key]; else acc.over[t][key] = ans;
+    const k = `${res.id}/${acc.id}/${t}/${key}`; ses.add(k); fresh.add(k);
+    say(`<b>${t}</b> at <code>${nameOf(key)}</code> → ${ans}, only this tool. ${accAns(acc, key).mixed ? `<b>${res.name} · ${acc.name}</b> is now MIXED there.` : `Its access agrees again.`}`);
+  }
+}
+document.getElementById("treat").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  st.t = b.dataset.t; document.querySelectorAll("#treat button").forEach((x) => x.classList.toggle("on", x === b)); render();
+});
+document.getElementById("icons").addEventListener("change", (e) => { st.icons = e.target.checked; render(); });
+document.getElementById("dark").addEventListener("change", (e) => { document.documentElement.dataset.theme = e.target.checked ? "dark" : ""; });
+document.getElementById("openall").onclick = () => { RES.forEach((r) => { openR.add(r.id); r.accs.forEach((a) => a.tools.length && openA.add(`${r.id}/${a.id}`)); }); render(); };
+document.getElementById("closeall").onclick = () => { openR.clear(); openA.clear(); render(); };
+document.getElementById("reset").onclick = () => { init(); say(""); render(); };
+init(); render();
+</script>
+</body>
+</html>

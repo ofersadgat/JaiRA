@@ -127,7 +127,7 @@ import { resolvePermissionStack, stackDeclOf } from "./permissionLayers";
 import { PLACE_ANYWHERE, placeKindOf } from "./places";
 import { parseToolFlagSubject, toolFlagProblem } from "./toolFlags";
 import { KIND_JOIN, kindedPlace, kindOfKey } from "./resources";
-import { PLACE_KINDS, TOOL_SPEC_BY_NAME, type PlaceKind } from "./toolVocabulary";
+import { PLACE_KINDS, TOOL_ALIASES, TOOL_SPEC_BY_NAME, type PlaceKind } from "./toolVocabulary";
 
 /** The subject that answers for everything no entry names. */
 export const OTHER_SUBJECT = "other";
@@ -428,9 +428,16 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** A subject as one spelling — two spellings of one command (`git  commit`) are one line. */
+/**
+ * A subject as one spelling — two spellings of one command (`git  commit`) are one line, and a tool's old
+ * name is its new one (`list_software` is `list_programs`, `TOOL_ALIASES`), its flag lines with it.
+ */
 export function normalizeSubject(subject: string): string {
-  return subject.trim().replace(/\s+/g, " ");
+  const spelled = subject.trim().replace(/\s+/g, " ");
+  const at = spelled.indexOf(" ");
+  const first = at < 0 ? spelled : spelled.slice(0, at);
+  const now = TOOL_ALIASES[first];
+  return now === undefined ? spelled : now + (at < 0 ? "" : spelled.slice(at));
 }
 
 /**
@@ -506,6 +513,8 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
       error("a subject cannot be empty");
       continue;
     }
+    const was = rawSubject.trim().split(/\s+/)[0] ?? "";
+    if (Object.hasOwn(TOOL_ALIASES, was)) warn(`'${was}' is now '${TOOL_ALIASES[was]}' — the line is read as '${subject}'`);
     if (subject === PERMISSION_SET_ICON_KEY) {
       if (typeof value !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(value.trim())) error(`'${PERMISSION_SET_ICON_KEY}' names the set's icon — a short glyph name like "hammer", in lower case`);
       continue;
