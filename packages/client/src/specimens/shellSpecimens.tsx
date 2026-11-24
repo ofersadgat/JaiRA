@@ -1,6 +1,6 @@
 import { useEffect, useState, type ComponentType, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { GALLERY_DOCUMENT, GALLERY_SURFACES, remoteProjectKey, type JairaBridge, type MachinesView, type PendingInteraction, type TaskChangeLog } from "@jaira/shared/browser";
+import { GALLERY_DOCUMENT, GALLERY_SURFACES, parseComponentConfig, remoteProjectKey, type JairaBridge, type MachinesView, type PendingInteraction, type TaskChangeLog } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { reportLooseError } from "@jaira/ui/crashReport";
 import { initialState, interactionOf, parsedDoc } from "@jaira/ui/galleryModel";
@@ -133,7 +133,51 @@ const settled = (id: string, value: JsonValue): ShellSpecimen => {
   };
 };
 
+/**
+ * A `choose_option` with a Markdown `body` under its short question — what `improve/lesson` asks before
+ * it applies a change: in a state's panel (`plain`, whose heading is the small upper-case one) or an
+ * inline gate's.
+ */
+const LESSON_BODY = [
+  "**Lesson:** Say what changed before asking to commit.",
+  "",
+  "**Lever:** instructions — the conversation asked without saying what it would commit.",
+  "",
+  "Adds one line to the project's instructions.",
+  "",
+  "`.jaira/instructions.md`",
+  "",
+  "```",
+  "Before asking to commit, list the files the commit would hold.",
+  "```",
+  "",
+  "**It no longer needed the correction:** it listed the three files first.",
+].join("\n");
+const withBody = (plain: boolean): ShellSpecimen => {
+  const config = parseComponentConfig("choose_option", {
+    prompt: "Apply this change to instructions?",
+    body: LESSON_BODY,
+    options: [
+      { value: "apply", label: "Apply", description: "Write these files; the workflow changes from its next use." },
+      { value: "revise", label: "Revise", description: "Send it back with your comment." },
+      { value: "discard", label: "Discard", description: "Change nothing." },
+    ],
+    comments: true,
+  });
+  const pending: PendingInteraction = { ...gateOf("choose_option/comments"), component: "choose_option", config };
+  return {
+    width: 560,
+    rn: () => (
+      <View flexDirection="column">
+        <GateSurface pending={pending} onSubmit={NOOP} plain={plain} />
+      </View>
+    ),
+  };
+};
+
 export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
+  "gate-body": withBody(true),
+  "gate-body-inline": withBody(false),
   "toast-error": {
     width: 520,
     rn: () => (

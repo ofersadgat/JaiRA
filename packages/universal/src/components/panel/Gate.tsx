@@ -19,6 +19,7 @@ import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
 import { JsonSource } from "./ValueView";
+import { Markdown } from "../Markdown";
 
 /** One question, picked from its options alone: what this file's `ChooseOption` draws. */
 const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 1 && choices[0]!.freeText === undefined && choices[0]!.multiple !== true && choices[0]!.requireConfirm !== true;
@@ -32,6 +33,8 @@ const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 
  *                              12 above
  *   the heading                700, --size-app × 17/12.5, line 1.35, --text, 8 under; the glyph 16,
  *                              --dim, 4 right, 2 below the baseline, then a space
+ *   the body                   a `choose_option`'s `body`: Markdown at the body's 13/12.5, line 1.5,
+ *                              no padding, its last block's margin trimmed; 8 under (`GateBody`)
  *   the resumes line           --size-app × 11/12.5, --dim, 4 above (collapses into the heading's 8)
  *   the question               14 above; its options a row, wrapping, gap 8, 12 above (collapses into
  *                              the question's 14 — except in a state's panel, a flex column whose items
@@ -104,6 +107,7 @@ export function GateSurface({
     <FieldFrame.Provider value={!plain}>
       {/* The heading and its glyph, placed as Chromium places an inline one (`floats/GateTitle`). */}
       {plain ? <PlainTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</PlainTitle> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
+      <GateBody pending={pending} />
       {/* The resumes line: 4 above, which collapses into the heading's 8 except in a flex column. */}
       {pending.resumes ? (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} marginTop={flat ? 4 : 0}>
@@ -228,6 +232,7 @@ function SettledGateSurface({ pending, settled, error, plain, services }: { pend
   return (
     <>
       {plain ? <PlainTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</PlainTitle> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
+      <GateBody pending={pending} />
       {never ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5, italic: true, color: "dim" }} marginBottom={10}>
           Never answered.
@@ -266,6 +271,22 @@ function PlainTitle({ icon, children }: { icon?: IconName; children: string }): 
       <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 700, ls: 0.09, upper: true, color: "dim" }} flexShrink={1} textAlign="right">
         {children}
       </Txt>
+    </View>
+  );
+}
+
+/**
+ * A `choose_option`'s `body` — what the decision is about, in Markdown — under the heading: the body's
+ * 13/12.5 on 1.5, no padding of its own, its last block's margin trimmed, 8 under. The heading stays the
+ * short question; a proposal written into `prompt` was drawn as the heading (upper case and set to the
+ * right in a state's panel) with its Markdown unread.
+ */
+function GateBody({ pending }: { pending: PendingInteraction }): JSX.Element | null {
+  const config = pending.config;
+  if (config?.component !== "choose_option" || config.body === undefined) return null;
+  return (
+    <View marginBottom={8} minWidth={0}>
+      <Markdown text={config.body} scale={13 / 12.5} lineHeight={1.5} trimEnd padding={[0, 0, 0, 0]} />
     </View>
   );
 }

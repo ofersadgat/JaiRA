@@ -73,8 +73,10 @@ export default async function improve(
     }
     if (approval === "propose") {
       const trial = describeTried(tried, verdict);
+      // The prompt is the gate's heading, so it stays the question; the proposal is the Markdown body.
       const review = await choose_option({
-        prompt: describe(plan) + (trial.length > 0 ? "\n\n" + trial : ""),
+        prompt: "Apply this change to " + plan.target + "?",
+        body: describe(plan) + (trial.length > 0 ? "\n\n" + trial : ""),
         options: [
           { value: "apply", label: "Apply", description: "Write these files; the workflow changes from its next use." },
           { value: "revise", label: "Revise", description: "Send it back with your comment." },

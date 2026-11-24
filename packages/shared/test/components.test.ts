@@ -388,6 +388,15 @@ describe("an answer of your own (custom)", () => {
   });
 });
 
+describe("a choose_option's body", () => {
+  it("keeps the Markdown under the heading apart from the prompt, on either spelling", () => {
+    expect(parse("choose_option", { prompt: "Apply it?", body: "**Lesson:** say less", options: ["apply", "discard"] })).toMatchObject({ prompt: "Apply it?", body: "**Lesson:** say less" });
+    expect(parse("choose_option", { prompt: "Which?", body: "## Why", questions: [{ name: "q", question: "Pick", options: ["a"] }] })).toMatchObject({ body: "## Why" });
+    expect(parse("choose_option", { options: ["a"] })).not.toHaveProperty("body");
+    expect(() => parse("choose_option", { options: ["a"], body: "" })).toThrow(/choose_option\.body must be a non-empty string/);
+  });
+});
+
 describe("a multi-part choose_option (questions)", () => {
   const raw = {
     prompt: "The product questions.",

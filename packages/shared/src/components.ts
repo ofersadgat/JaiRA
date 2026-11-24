@@ -405,6 +405,12 @@ export interface ChoiceQuestion {
 export interface ChooseOptionConfig {
   component: "choose_option";
   prompt: string;
+  /**
+   * What the decision is about, in Markdown, drawn between the heading and the options. `prompt` is
+   * the heading — a question, drawn as a title (in a state's panel, a small upper-case one) — so a
+   * proposal, a diff or a trial's result goes here, never into it.
+   */
+  body?: string;
   /** The choices. EMPTY when `questions` carries them instead — the two spellings are exclusive. */
   options: ComponentOption[];
   /** Offer a free-text comment alongside the choice. */
@@ -767,6 +773,7 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         };
         if (config["follow_up"] === true) parsed.followUp = true;
         if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
+        if (config["body"] !== undefined) parsed.body = str(config["body"], "choose_option.body");
         return parsed;
       }
       if (config["follow_up"] !== undefined) {
@@ -786,6 +793,7 @@ export function parseComponentConfig(component: ComponentName, raw: unknown): Co
         parsed.custom = true;
       }
       if (config["icon"] !== undefined) parsed.icon = str(config["icon"], "choose_option.icon");
+      if (config["body"] !== undefined) parsed.body = str(config["body"], "choose_option.body");
       return parsed;
     }
     case "review_artifact": {

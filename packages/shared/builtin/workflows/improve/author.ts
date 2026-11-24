@@ -63,7 +63,8 @@ export function brief(lesson: string, digest: unknown, source: unknown, known: u
 }
 
 export function describe(plan: Plan): string {
-  const files = plan.files.map((f) => "### " + f.path + "\n\n```\n" + f.content + "\n```").join("\n\n");
+  // A path as code, not a `###`: an h3 is the app's upper-case section heading, and a path is not one.
+  const files = plan.files.map((f) => "`" + f.path + "`\n\n```\n" + f.content + "\n```").join("\n\n");
   return "**Lesson:** " + plan.rule + "\n\n**Lever:** " + plan.lever + " — " + plan.why + "\n\n" + plan.summary + "\n\n" + files;
 }
 

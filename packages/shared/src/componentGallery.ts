@@ -253,6 +253,7 @@ const CONFIG_SCHEMAS: Record<ComponentName, { hint: string; document: SchemaDoc;
   choose_option: {
     hint: "a decision with named outcomes — `choose_option`'s args",
     document: configSchema("choose_option", "one decision, taken from a named set — or several, asked in steps", {
+      body: str("body", "what the decision is about, in Markdown, between the heading and the options — keep prompt the short question"),
       options: OPTIONS,
       comments: bool("comments", "offer a free-text note alongside the choice"),
       multiple: bool("multiple", "several options may be chosen; the answer is then a list"),
