@@ -562,7 +562,10 @@ export function StackPanel({
   } else if (nav.view === "board") {
     left =
       board.board !== undefined ? (
+        // Keyed by its order: the board seeds what it folds and whether the source sets show from the
+        // order it opened in, so the shield's board must not carry over when the tools segment is pressed.
         <PermissionBoard
+          key={nav.order ?? "shield"}
           board={board.board}
           order={nav.order ?? "shield"}
           onToggle={board.onToggle}
