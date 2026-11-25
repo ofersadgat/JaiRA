@@ -39,6 +39,7 @@ export * from "./repositoryIdentity";
 // (SPEC §7.5.5).
 export * from "./userModules";
 export * from "./workflowScripts";
+export * from "./scriptEdits";
 export * from "./workflowSync";
 export * from "./descriptions";
 export * from "./blobStore";

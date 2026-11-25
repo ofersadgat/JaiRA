@@ -19,6 +19,7 @@ import { initialRunValues, runValuesOf, settledMarkOf, type RunValues } from "./
 import type { RunSurface } from "./runPanelTypes";
 import type { RerunSurface } from "./panelViewsModel";
 import { pathOf } from "./panelViewsModel";
+import { isWorkflowScriptPath } from "./filesModel";
 import type { JsonValue } from "@declarative-ai/json";
 
 /** The rooms that have a side panel, and the fold each remembers — see `uiState.ts`'s `FOLD`. */
@@ -149,7 +150,8 @@ export const convoEntryOf = (taskId: string, project: string | undefined): Panel
  * this; everything else in the stack was pushed by a link inside the panel.
  *
  *  - Files: a run on the trail — its context beside its conversation, or the task beside its board;
- *    a state file — the state (Run · Checks; its configuration is the editor); a plain file or a
+ *    a state file — the state (Run · Checks; its configuration is the editor); a workflow script's
+ *    file — the state it compiles to, on its Configuration (its code is the editor); a plain file or a
  *    folder — nothing: the panel closes, and what there is to say is the ⓘ on the address.
  *  - Tasks: the same for a run walked into; a column — its state; a card — its task.
  *  - Chat: the conversation's context (folded until asked for).
@@ -180,8 +182,12 @@ export function panelRuleOf(
     return conversationInMain ? convoEntryOf(detail.taskId, selectedProject) : taskEntryOf(detail.taskId, selectedProject);
   }
   if (at === "files") {
-    return state.stateId !== null && state.doc?.stateId !== undefined
-      ? { kind: "state", key: `state:${state.at ?? ""}:${state.stateId}`, stateId: state.stateId, project: state.at, tab: "run" }
+    if (state.stateId === null || state.doc === null) return null;
+    if (state.doc.stateId !== undefined) return { kind: "state", key: `state:${state.at ?? ""}:${state.stateId}`, stateId: state.stateId, project: state.at, tab: "run" };
+    // A workflow SCRIPT's file: the main view is its code, so the panel is the state it compiles to —
+    // open on its Configuration, which is what the code view does not show (the person, 2026-11-24).
+    return isWorkflowScriptPath(state.doc.path)
+      ? { kind: "state", key: `state:${state.at ?? ""}:${state.stateId}`, stateId: state.stateId, project: state.at, tab: "configuration" }
       : null;
   }
   if (state.taskWorkflow !== null && state.inspect !== "workflow") {

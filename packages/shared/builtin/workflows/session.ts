@@ -17,6 +17,8 @@
  */
 import { llm, input, renderUI } from "@declarative-ai/hw/script";
 import { conversation_digest, start_task } from "$REGISTRY";
+// What the composer chose for a message: JaiRA's own type, generated from `@jaira/shared` (2026-11-24).
+import type { ChatSettings } from "$SYSTEM/types/chat";
 
 export const meta = {
   name: "Session",
@@ -46,10 +48,12 @@ export default async function session(
   // `improve/conversation`: "propose" always asks the person; "auto" asks only when it is unclear —
   // applies a change its trial showed to hold, and asks about any other; "accept" applies the changes
   // without asking.
-  approval: "propose" | "auto" | "accept" = "propose",
-  // What the composer chose for the FIRST message (its model, its reasoning); every later message's
-  // arrive with it through `input()`. A message's tools reach the run through its permission set.
-  settings: unknown = null,
+  approval: "propose" | "auto" | "accept" = "accept",
+  // What the composer chose for the FIRST message; every later message's arrive with it through
+  // `input()`. This program reads the model and the reasoning; the tools and their permissions reach the
+  // run through the service. As a default — `{ "model": "…", "reasoning": { "effort": "high" } }` — what
+  // every conversation starts with; `{}` chooses nothing.
+  settings: ChatSettings = {},
 ): Promise<{ turns: number; lessons: number }> {
   let text: string | null = message;
   let chosen: unknown = settings;
@@ -61,7 +65,7 @@ export default async function session(
   // review of the whole conversation, which can see whether it was one.
   let maybes: Array<{ lesson: string; quote: string }> = [];
   while (text !== null) {
-    const picked = (chosen ?? {}) as { model?: string; reasoning?: object };
+    const picked = (chosen ?? {}) as ChatSettings;
     let replied = false;
     try {
       // Typed here, not inferred: `conv` feeds this call and is assigned from it, which in a loop is a

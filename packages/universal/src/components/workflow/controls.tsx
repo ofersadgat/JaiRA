@@ -2,7 +2,7 @@ import { createContext, useContext, useRef, useState, type JSX, type ReactNode }
 import { PixelRatio, TextInput as RNTextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { MenuItem } from "@jaira/ui/menuTypes";
-import { useReadOnly } from "@jaira/ui/reading";
+import { ReadOnlyContext, useReadOnly } from "@jaira/ui/reading";
 import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
@@ -81,6 +81,19 @@ const InReading = createContext(false);
 /** What makes a reading of the form's body — the body alone, so the tab bar above it stays live. */
 export function ReadingBody({ on, children }: { on: boolean; children: ReactNode }): JSX.Element {
   return <InReading.Provider value={on}>{children}</InReading.Provider>;
+}
+
+/**
+ * A control kept LIVE inside a reading, when `on` — what a workflow script's configuration leaves
+ * changeable (`ScriptFormContext`): its label, its description, an input's default.
+ */
+export function Live({ on, children }: { on: boolean; children: ReactNode }): JSX.Element {
+  if (!on) return <>{children}</>;
+  return (
+    <ReadOnlyContext.Provider value={false}>
+      <InReading.Provider value={false}>{children}</InReading.Provider>
+    </ReadOnlyContext.Provider>
+  );
 }
 
 /** A plain `input`: one line, the font of where it stands. */

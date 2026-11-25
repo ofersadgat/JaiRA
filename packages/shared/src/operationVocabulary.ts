@@ -16,7 +16,7 @@
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
 import type { PermissionSetChoice } from "./permissionSetBuckets";
-import type { PermissionSetDecl } from "./permissionSets";
+import type { ChatPermissionSetDecl } from "./permissionSets";
 
 /**
  * The simple fields — one authored key, one text box.
@@ -544,7 +544,7 @@ export interface ChatSettings {
    * read — where a tool may act is a place map on its line; the three fields above are what a state's
    * lowered block still arrives as.
    */
-  permissionSet?: PermissionSetDecl;
+  permissionSet?: ChatPermissionSetDecl;
 }
 
 /** Whose implementation runs — see {@link ChatSettings.implementations}. */

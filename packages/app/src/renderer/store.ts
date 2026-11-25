@@ -119,7 +119,7 @@ import {
   type ExecutorTarget,
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
-import { unlistedOpen, withListing, type FileSelection } from "./filesModel";
+import { isWorkflowScriptPath, unlistedOpen, withListing, type FileSelection } from "./filesModel";
 import type { EditorTab } from "./stateEditorModel";
 import {
   instanceAt,
@@ -4071,7 +4071,12 @@ export function useApp() {
        */
       selectFile: (node: FileNode) => {
         patch({ stateId: node.stateId ?? null, inspect: "path", doc: null, dir: null, sync: clearedSync(ref.current.sync) });
-        void refreshState(node.stateId ?? null).then((view) => focusStateRun(view));
+        // A workflow SCRIPT opens as its code, and no run of it: the Files view shows the code, not a
+        // board, so a run opened on the path would only put that run's panel beside it — a chat's
+        // conversation and steps, for `session.ts` (the person, 2026-11-24). The side panel shows the
+        // state itself instead (`panelEntryOf`).
+        const script = node.stateId !== undefined && isWorkflowScriptPath(node.path);
+        void refreshState(node.stateId ?? null).then((view) => focusStateRun(script ? null : view));
         if (isTextMime(node.mime)) return void refreshDoc(node.layer, node.path, node.project);
         // A PNG or the database: `file:read` would refuse it, and a refusal here would leave the
         // panel empty with nothing to explain it. Open it as a document with no contents instead —
@@ -5131,12 +5136,46 @@ export function useApp() {
             stateId: source.stateId,
             layer: source.layer,
             text,
+            // A script's configuration is written into its code (`WriteWorkflowRequest.compiled`).
+            ...(source.script !== undefined ? { compiled: true } : {}),
             ...inLayer(source.layer),
           });
           patch({ busy: false });
           await Promise.all([refreshTree(), refreshState(ref.current.stateId)]);
         } catch (e) {
           fail(e);
+        }
+      },
+
+      /**
+       * Copy-on-edit from the side panel (the person, 2026-11-24): copy a built-in state into the layer
+       * the first change's question chose, with the change written into the copy. Saved rather than
+       * left as a draft, because the panel holds no draft that would follow the copy. A script's change
+       * goes into its code (`WriteWorkflowRequest.compiled`); one its code cannot take is refused, and
+       * the copy is left as it shipped.
+       */
+      copyStateTo: async (source: WorkflowSource, toLayer: WritableLayer, text: string): Promise<boolean> => {
+        patch({ busy: true, error: null });
+        try {
+          const moved = await invoke("workflow:move", { stateId: source.stateId, layer: source.layer, to: source.stateId, toLayer, copy: true, ...inLayer(source.layer) });
+          if (!moved.applied) {
+            patch({ busy: false });
+            return false;
+          }
+          await invoke("workflow:write", {
+            stateId: source.stateId,
+            layer: toLayer,
+            text,
+            ...(source.script !== undefined ? { compiled: true } : {}),
+            ...inLayer(toLayer),
+          });
+          patch({ busy: false });
+          await Promise.all([refreshTree(), refreshState(ref.current.stateId)]);
+          return true;
+        } catch (e) {
+          fail(e);
+          await refreshTree();
+          return false;
         }
       },
 

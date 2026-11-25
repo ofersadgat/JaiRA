@@ -156,3 +156,27 @@ describe("a slot that lists its values (2026-11-24)", () => {
     expect(enumValuesOf(plain)).toBeUndefined();
   });
 });
+
+describe("a script's inputs in the form (2026-11-24)", () => {
+  // `improve: boolean = true` and `settings: Settings = {}`, as session.ts compiles them.
+  const form = formOf({
+    inputs: {
+      improve: { schema: { type: "boolean" }, optional: true, default: true },
+      settings: { schema: { type: "object", properties: { model: { type: "string" }, reasoning: { type: "object" }, tools: { type: "array" }, permissions: {} }, additionalProperties: false }, optional: true, default: {} },
+    },
+  }) as FormModel;
+
+  it("offers a yes-or-no default as true or false", () => {
+    const improve = form.inputs.find((row) => row.name === "improve")!;
+    expect(enumValuesOf(improve)).toEqual(["true", "false"]);
+    // A script's parameter keeps a default: it is removed in the code, not offered here.
+    expect(defaultChoicesOf(["true", "false"], improve.default, false).map((c) => c.value)).toEqual(["true", "false"]);
+  });
+
+  it("says an object type by its fields, and a type of several shapes as them", () => {
+    const settings = form.inputs.find((row) => row.name === "settings")!;
+    expect(summarizeSchema(settings.schemaText)).toBe("object { model, reasoning, tools, … }");
+    expect(summarizeSchema(JSON.stringify({ anyOf: [{ type: "null" }, { type: "string" }] }))).toBe("null | string");
+    expect(enumValuesOf(settings)).toBeUndefined();
+  });
+});

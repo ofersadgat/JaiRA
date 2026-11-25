@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
-import type { ExecutorInfo, FileTree, StateSlots, ValidateSchemaResult, WorkflowLayer, WorkflowSource } from "@jaira/shared/browser";
+import type { ExecutorInfo, FileTree, StateSlots, ValidateSchemaResult, WorkflowLayer, WorkflowSource, WritableLayer } from "@jaira/shared/browser";
 import { useStateSource } from "@jaira/ui/configPanelModel";
 import type { UiSurface } from "@jaira/ui/fileTypes";
 import { PLAIN_SCROLLER, scrollbarProps } from "../../primitives";
@@ -33,10 +33,12 @@ export function StatePanel({
   ui,
   readFile,
   onOpenState,
+  copyTo,
+  hasProject = false,
 }: {
   stateId: string;
   read: (stateId: string) => Promise<WorkflowSource | null>;
-  save: (source: WorkflowSource, text: string) => void;
+  save: (source: WorkflowSource, text: string) => void | Promise<void>;
   tree: FileTree | null;
   executors: ExecutorInfo[];
   busy: boolean;
@@ -47,9 +49,17 @@ export function StatePanel({
   ui?: UiSurface | undefined;
   readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
   onOpenState?: ((stateId: string) => void) | undefined;
+  /**
+   * Copy-on-edit (the person, 2026-11-24): a built-in state's first change asks where its copy goes, and
+   * this makes the copy there with the change written in. Absent: a built-in is read-only here.
+   */
+  copyTo?: ((source: WorkflowSource, toLayer: WritableLayer, text: string) => Promise<boolean>) | undefined;
+  hasProject?: boolean;
 }): JSX.Element {
   const t = useTokens();
-  const source = useStateSource(stateId, read);
+  // Read again after a save or a copy, so the form shows what was written and where.
+  const [reads, reread] = useState(0);
+  const source = useStateSource(stateId, read, reads);
   // The panel's width, for its content's: every child at least 460 wide, the padding either side of it.
   const [room, setRoom] = useState(0);
   if (source === null) return <Empty>Reading {stateId}…</Empty>;
@@ -82,7 +92,16 @@ export function StatePanel({
           onWrapJson={onWrapJson}
           ui={ui}
           {...(readFile !== undefined ? { readFile } : {})}
-          onSave={(_stateId, _layer, text) => save(source, text)}
+          {...(copyTo !== undefined
+            ? {
+                layerActions: {
+                  hasProject,
+                  onOverride: (toLayer: WritableLayer) => void copyTo(source, toLayer, source.text).then(() => reread((n) => n + 1)),
+                  onEditCopy: (toLayer: WritableLayer, text: () => string) => void copyTo(source, toLayer, text()).then(() => reread((n) => n + 1)),
+                },
+              }
+            : {})}
+          onSave={(_stateId, _layer, text) => void Promise.resolve(save(source, text)).then(() => reread((n) => n + 1))}
         />
       </View>
     </ScrollView>

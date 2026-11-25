@@ -463,11 +463,11 @@ export interface FileSurfaceContext {
         hasProject: boolean;
         onOverride: (stateId: string, toLayer: WritableLayer) => void;
         /**
-         * EDIT a shipped state: copy it into Shared (`~/.jaira`), open the copy, and carry the edit
-         * over as its unsaved draft (the person's ruling, 2026-09-24). `text` is read once the copy
-         * exists.
+         * EDIT a shipped state: copy it into the layer the first change's question chose
+         * (`copyChoicesOf`), open the copy, and carry the edit over as its unsaved draft (the person's
+         * rulings, 2026-09-24 and 2026-11-24). `text` is read once the copy exists.
          */
-        onEditCopy?: ((stateId: string, text: () => string) => void) | undefined;
+        onEditCopy?: ((stateId: string, toLayer: WritableLayer, text: () => string) => void) | undefined;
         /**
          * The same for a shipped file that is NOT a state: copy it unchanged into Shared and open the
          * copy, moving the draft typed on the shipped file across with it.

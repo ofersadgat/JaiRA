@@ -11,8 +11,9 @@ import {
   type ValidateSchemaResult,
   type WorkflowLayer,
   type WorkflowSource,
+  type WritableLayer,
 } from "@jaira/shared/browser";
-import { layerActionLabel, layerBarOf, type LayerBarAction, type LayerBarModel } from "@jaira/ui/builtInModel";
+import { layerActionLabel, layerBarOf, type CopyChoice, type LayerBarAction, type LayerBarModel } from "@jaira/ui/builtInModel";
 import { childKeyOptions, childStateOptions } from "@jaira/ui/completions";
 import type { EditorTab } from "@jaira/ui/stateEditorModel";
 import type { UiSurface } from "@jaira/ui/fileTypes";
@@ -20,7 +21,7 @@ import { fieldClass, type FormIssues } from "@jaira/ui/issues";
 import { LinkReaderProvider } from "@jaira/ui/linkModel";
 import { REF_HINT } from "@jaira/ui/operationFieldsModel";
 import { EMPTY_OPERATION_FIELDS } from "@jaira/ui/operationForm";
-import { ReadOnlyContext, useRunReading } from "@jaira/ui/reading";
+import { ReadOnlyContext, ScriptFormContext, useRunReading } from "@jaira/ui/reading";
 import {
   ENVIRONMENT_KINDS,
   MOUNT_KINDS,
@@ -51,7 +52,7 @@ import { useTokens } from "../../tokens";
 import { CodeArea, IslandBand, useEditorAppearance } from "../files/CodeEdit";
 import { EditorActions, Sub as ActionsSub } from "../files/EditorActions";
 import { SchemaJsonEditor } from "../files/SchemaEdit";
-import { Area, Box, Details, Empty, FieldName, LinkButton, ListsProvider, Pick, ROW, ReadingBody, Reason, SlotOpt, SlotOptWords, SlotsHead, SmallButton, Sub, markOf, useLists, useReadOnly, type Lists } from "./controls";
+import { Area, Box, Details, Empty, FieldName, LinkButton, ListsProvider, Live, Pick, ROW, ReadingBody, Reason, SlotOpt, SlotOptWords, SlotsHead, SmallButton, Sub, markOf, useLists, useReadOnly, type Lists } from "./controls";
 import { LinkInput, LinkPreview, ReadValue } from "./Links";
 import { Field, OperationFieldsEditor } from "./OperationFields";
 import { Grid, Hung, RowControls, SlotGroup, SlotTable } from "./SlotTable";
@@ -376,8 +377,8 @@ export function Chip({ tone = "plain", title, children }: { tone?: "plain" | "wa
 
 /**
  * Which layer supplied the file — a chip — and the buttons that act on that: its links, then — for what
- * ships — `Elsewhere…`, a menu titled `Edit a copy` of the settings' four newer layers (decision 0023,
- * amended 2026-11-18), disabled where it cannot be had.
+ * ships — `Copy to…`, a menu titled `Copy it to` of every layer a person owns (decision 0023, amended
+ * 2026-11-18 and 2026-11-24), disabled where it cannot be had. Short, so the tab toggle beside it stays.
  */
 function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel | null; busy: boolean; comparing: boolean; onAction: (id: LayerBarAction["id"]) => void }): JSX.Element | null {
   const box = useRef<RNView | null>(null);
@@ -389,11 +390,11 @@ function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel |
       setMenu({
         x,
         y: y + h + 4,
-        title: "Edit a copy",
-        // Under that title, each says only where, in the words the Files view's roots use: `for just
-        // you`, `on this machine`. No folder note beside it: the menu's width is the label's.
+        title: "Copy it to",
+        // Under that title, each says only where: `Shared`, `Just you`. No folder note beside it: the
+        // menu's width is the label's, and the item's title names the folder.
         items: more.map((action) => ({
-          label: action.label.replace(/^Edit a copy /, ""),
+          label: action.label,
           ...(busy || action.disabled === true ? { disabled: true } : {}),
           onSelect: () => onAction(action.id),
         })),
@@ -413,13 +414,39 @@ function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel |
         ))}
       {more.length > 0 ? (
         <RNView ref={box} collapsable={false}>
-          <LinkButton title="Edit a copy in one of your other layers — for you in this project, for just you, in this project on this machine, on this machine" disabled={busy} onPress={open}>
-            Elsewhere…
+          <LinkButton title="Copy it into one of your layers — Shared, this project, just you… — and open the copy" disabled={busy} onPress={open}>
+            Copy to…
           </LinkButton>
         </RNView>
       ) : null}
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </>
+  );
+}
+
+/**
+ * Copy-on-edit's question, at the first change to a built-in (the person, 2026-11-24: copy on change
+ * "prompts me when I make a change for where I want this change to be made and makes a copy there"):
+ * where the copy goes — a link per layer a person owns, one already holding a copy disabled — or no copy.
+ *
+ *   the question        a row that wraps, centred, gap 4 10, padding 6 9, radius 6, --panel-2, a 1px
+ *                       --accent 40% line
+ *   its words           app 12/12.5, 600
+ */
+function CopyQuestion({ choices, onPick, onDiscard }: { choices: readonly CopyChoice[]; onPick: (layer: WritableLayer) => void; onDiscard: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={10} rowGap={4} paddingVertical={6} paddingHorizontal={9} borderRadius={6} backgroundColor={t.v("panel-2") as never} flexShrink={0} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, t.tint("accent", 40)) as object)}>
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600 }}>This ships with JaiRA — where should the change go?</Txt>
+      {choices.map((choice) => (
+        <LinkButton key={choice.layer} title={choice.title} disabled={choice.disabled === true} onPress={() => onPick(choice.layer)}>
+          {choice.label}
+        </LinkButton>
+      ))}
+      <LinkButton title="Drop the change and keep the built-in as it is" spec={{ color: "dim" }} onPress={onDiscard}>
+        Discard
+      </LinkButton>
+    </View>
   );
 }
 
@@ -474,7 +501,7 @@ function FilePath({ path, title }: { path: string; title: string }): JSX.Element
   const t = useTokens();
   const style = font(t, { voice: "app", scale: 11 / 12.5, color: "dim" });
   return (
-    <View flexGrow={1} flexShrink={1} flexBasis="auto" minWidth={0} {...(isWeb ? { title } : {})}>
+    <View flexGrow={1} flexShrink={1} flexBasis={0} minWidth={80} {...(isWeb ? { title } : {})}>
       <RNText
         numberOfLines={1}
         ellipsizeMode="head"
@@ -560,6 +587,10 @@ export function WorkflowEditor({
     outerReadOnly: useReadOnly(),
   });
   const { tab, form, marks, targets, readOnly, editForm } = e;
+  // A workflow script that may be changed: its form is a reading but for what its code spells as a value
+  // — the label, the description, each input's default (`ScriptFormContext`, `Live`).
+  const scriptForm = !readOnly && source.script !== undefined;
+  const formRead = readOnly || scriptForm;
   const kind = kindMarksOf(form, marks);
   // The form's completion lists (`Lists`), each built once here for every box that names it.
   const lists: Lists = {
@@ -605,18 +636,24 @@ export function WorkflowEditor({
       if (e.parseError !== null) return <Reason flexShrink={0}>This file is not valid JSON ({e.parseError}) — fix it on the JSON tab to use the form.</Reason>;
       const content = (
         <ListsProvider value={lists}>
-        <ReadingBody on={readOnly}>
+        <ReadOnlyContext.Provider value={formRead}>
+        <ScriptFormContext.Provider value={scriptForm}>
+        <ReadingBody on={formRead}>
           <View flexDirection="column" gap={8}>
             {/* The state's own prose, labels beside the boxes. A reading shows what the state SAYS. */}
             <View flexDirection="column" gap={5}>
               {readOnly && form.label.length === 0 ? null : (
                 <InlineField name="Label">
-                  <Box value={form.label} onChange={(label) => editForm({ label })} placeholder="a short name — what the board shows" />
+                  <Live on={scriptForm}>
+                    <Box value={form.label} onChange={(label) => editForm({ label })} placeholder="a short name — what the board shows" />
+                  </Live>
                 </InlineField>
               )}
               {readOnly && form.description.length === 0 ? null : (
                 <InlineField name="Description">
-                  <Area value={form.description} onChange={(description) => editForm({ description })} rows={2} placeholder="an author's note — also useful prompt context" />
+                  <Live on={scriptForm}>
+                    <Area value={form.description} onChange={(description) => editForm({ description })} rows={2} placeholder="an author's note — also useful prompt context" />
+                  </Live>
                 </InlineField>
               )}
               {/* The switch (decision 0021): the same field as the JSON tab's `"disabled": true`. */}
@@ -736,6 +773,8 @@ export function WorkflowEditor({
             )}
           </View>
         </ReadingBody>
+        </ScriptFormContext.Provider>
+        </ReadOnlyContext.Provider>
         </ListsProvider>
       );
       if (!fill || readOnly) return content;
@@ -750,7 +789,9 @@ export function WorkflowEditor({
       );
     }
     // The JSON tab.
-    // A reading's document: at least 340 tall, scrolling in itself.
+    // A reading's document: at least 340 tall, scrolling in itself. A script's is edited like any other:
+    // a changed default (or label, or description) is written into its code on save; a change to
+    // anything its code does is refused with where to make it.
     if (readOnly)
       return (
         <View minHeight={340} flexGrow={1} flexShrink={1} flexBasis="auto" flexDirection="column">
@@ -787,14 +828,16 @@ export function WorkflowEditor({
         {/* Nothing here asks for a layer: on the Graph tab the pane's text is greyscale because it is
             painted after a scroller, which is how the reference pictures have it. */}
         <View flexDirection="column" gap={8} minHeight={0} {...(fill ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 } : {})}>
-          <View flexDirection="row" alignItems="center" gap={8} flexShrink={0} minWidth={0}>
+          {/* Wraps rather than overflows: a narrow column puts the tab toggle on a line of its own, at the
+              end, instead of pushing it out of sight (the person, 2026-11-24). */}
+          <View flexDirection="row" flexWrap="wrap" alignItems="center" columnGap={8} rowGap={4} flexShrink={0} minWidth={0}>
             <FilePath path={editorPathOf(source, e.shipped)} title={source.file} />
             <LayerBar model={layerBarOf(source, layerActions?.hasProject === true, e.copyOnEdit)} busy={busy} comparing={e.comparing} onAction={e.onLayerAction} />
-            <SegTabs tabs={tabs} value={tab} words={TAB_WORDS} titles={TAB_TITLES} onPick={e.setTab} />
+            <View marginLeft="auto" flexShrink={0}>
+              <SegTabs tabs={tabs} value={tab} words={TAB_WORDS} titles={TAB_TITLES} onPick={e.setTab} />
+            </View>
           </View>
-          {source.script !== undefined && source.script.error === undefined ? (
-            <Sub flexShrink={0}>the state this script compiles to — change it in the script</Sub>
-          ) : null}
+          {e.askingWhere ? <CopyQuestion choices={e.copyChoices} onPick={e.copyTo} onDiscard={e.discardCopy} /> : null}
           {body()}
           {!savesOf(readOnly, e.shipped) ? null : (
             <EditorActions

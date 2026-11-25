@@ -30,6 +30,8 @@ The rulings that followed, the same day:
 4. **Approval is a parameter.** "Propose, I approve should be the default, but should be changeable."
    Its values (the person, 2026-11-24): "propose: always ask the user auto: ask the user when unclear
    accept: automatically add the changes" — and `return` for a caller that approves it itself.
+   The Chat view's `session` defaults to `accept` (the person, 2026-11-24: "change the default of
+   approval to accept"); `improve/lesson` and `improve/conversation` keep `propose` for whoever else starts them.
 5. **Instructions are JaiRA's own file**, given to every runtime, never CLAUDE.md or AGENTS.md.
 6. **Skills have to be built.** "we may need to implement skills in our harness as well".
 7. **A workflow is a program, and a conversation is one.** "what we would consider a conversation
@@ -510,6 +512,16 @@ and teach the loop to route to it.
 - **A script's own code is approved by content hash, like a module.** A file a person wrote and
   approved runs as before. A file whose hash nobody approved asks before it runs, and that includes
   one the improver just edited. `approval: "auto"` or `"accept"` writes the edit; it never runs unapproved code.
+- **JaiRA's own types reach a script by import** (2026-11-24). The person: "shouldnt the Settings type
+  be imported from somewhere instead of duplicated?" A script cannot import JaiRA's packages, so
+  `packages/shared/scripts/scriptTypes.mjs` writes what a script is handed — today `ChatSettings` and
+  every type it names — from `@jaira/shared` into `builtin/types/chat.ts`, and a script writes
+  `import type { ChatSettings } from "$SYSTEM/types/chat"`. `npm run typecheck` and a test fail when the
+  file is stale. Two hw changes made the real type usable as an input: a map (`Record<string, T>`, an
+  index signature) compiles to an open object of `T`s rather than a closed empty one, and a schema is
+  wired to an identical copy of itself even when it holds a union (`@declarative-ai/validate`). The type
+  itself was corrected: a conversation's `permissionSet` is a reference or a stack
+  (`ChatPermissionSetDecl`), not the followed map it was cast to.
 
 ### 2. A conversation is a loop over `input()`
 

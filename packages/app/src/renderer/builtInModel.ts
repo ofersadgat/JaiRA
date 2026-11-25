@@ -13,18 +13,20 @@ export interface LayerBarAction {
   title: string;
   disabled?: boolean;
   /**
-   * Offered behind the bar's `Elsewhere…` rather than as a link of its own: the settings' four
-   * newer layers (decision 0023, amended 2026-11-18), after the two the bar has always offered.
+   * Offered behind the bar's `Copy to…` menu rather than as a link of its own — every copy a built-in
+   * offers is (2026-11-24: one menu, so the bar stays short enough for the tab toggle beside it).
    */
   more?: true;
 }
 
-/** The settings' four newer layers, as the bar offers a copy into them — most specific first. */
-const MORE_LAYERS: ReadonlyArray<{ layer: WritableLayer; label: string; dir: string; project: boolean }> = [
-  { layer: "projectYou", label: "Edit a copy for you in this project", dir: "~/.jaira/projects/…", project: true },
-  { layer: "you", label: "Edit a copy for just you", dir: "~/.jaira/personal", project: false },
-  { layer: "projectMachine", label: "Edit a copy in this project on this machine", dir: ".jaira/local", project: true },
-  { layer: "machine", label: "Edit a copy on this machine", dir: "~/.jaira/machine", project: false },
+/** Every layer a person owns, as the bar's `Copy to…` menu offers a copy into it — Shared and this project first. */
+const COPY_LAYERS: ReadonlyArray<{ layer: WritableLayer; label: string; dir: string; project: boolean }> = [
+  { layer: "base", label: "Shared", dir: "the shared root (~/.jaira)", project: false },
+  { layer: "project", label: "This project", dir: "this project's .jaira/", project: true },
+  { layer: "projectYou", label: "You in this project", dir: "~/.jaira/projects/…", project: true },
+  { layer: "you", label: "Just you", dir: "~/.jaira/personal", project: false },
+  { layer: "projectMachine", label: "This project on this machine", dir: ".jaira/local", project: true },
+  { layer: "machine", label: "This machine", dir: "~/.jaira/machine", project: false },
 ];
 
 /** The top bar's layer half: one chip, and the actions beside it. */
@@ -39,9 +41,9 @@ export interface LayerBarModel {
  *
  * Three readings, in the order they are tested:
  *
- *  1. A SHIPPED file. Read-only, with the two places it can be overridden. A layer that already has
- *     its copy is offered disabled rather than hidden: "Override here" greyed out with "this project
- *     already overrides it" answers the question the button's absence would raise.
+ *  1. A SHIPPED file. "built in", and a copy into each layer a person owns behind one menu. A layer
+ *     that already has its copy is offered disabled rather than hidden: "This project" greyed out with
+ *     "that layer already has a copy" answers the question the item's absence would raise.
  *  2. A person's file whose id also ships. It "overrides built in", and what it overrides is one
  *     click away.
  *  3. A shared file of an id that does not ship: the warning the bar has always carried.
@@ -55,55 +57,32 @@ export function layerBarOf(
   const standing = source.builtIn;
   if (source.layer === "system") {
     const has = (layer: WorkflowLayer): boolean => standing?.layers.includes(layer) === true;
+    // Short on purpose (the person, 2026-11-24: the bar was "overly verbose, unreadable, and when the
+    // column shrinks, it completely hides the form/json/graph toggle"): the chip says only "built in", its
+    // title says the rest, and every copy is one menu — `Copy to…` — rather than a row of links.
     return {
-      chip: copyOnEdit
-        ? {
-            text: "built in · an edit copies it to Shared",
-            tone: "plain",
-            title: "This file ships with JaiRA. The first change you make copies it into ~/.jaira with the change in it, and the copy is what runs.",
-          }
-        : {
-            text: "built in · read-only",
-            tone: "plain",
-            title: has("base")
-              ? "Shared already has a copy of this state, and it is the one that runs — edit that."
-              : "This file ships with JaiRA and cannot be edited. Override it to change what runs.",
-          },
-      actions: [
-        {
-          id: "override-base",
-          // Editing a built-in is making a copy in Shared (the panel rulings, 2026-09-24): the verb
-          // says what the person wants, and the title says what it does.
-          label: "Edit a copy in Shared",
-          title: has("base")
-            ? "The shared root already has a copy of this state, and it is the one that loads"
-            : "Copy this file into the shared root (~/.jaira) and open the copy",
-          ...(has("base") ? { disabled: true } : {}),
-        },
-        {
-          id: "override-project",
-          label: "Override here",
-          title: !hasProject
-            ? "Open a project to override this state for it alone"
-            : has("project")
-              ? "This project already has a copy of this state, and it is the one that loads"
-              : "Copy this file into this project's .jaira/ and open the copy",
-          ...(!hasProject || has("project") ? { disabled: true } : {}),
-        },
-        // The same rules: a layer that already has its copy is offered disabled, and a project's with none open.
-        ...MORE_LAYERS.map(({ layer, label, dir, project }): LayerBarAction => ({
-          id: `override-${layer}`,
-          label,
-          title:
-            project && !hasProject
-              ? "Open a project to copy this state into one of its layers"
-              : has(layer)
-                ? "That layer already has a copy of this state"
-                : `Copy this file into ${dir} and open the copy`,
-          ...((project && !hasProject) || has(layer) ? { disabled: true } : {}),
-          more: true,
-        })),
-      ],
+      chip: {
+        text: "built in",
+        tone: "plain",
+        title: copyOnEdit
+          ? "This ships with JaiRA. Your first change asks where to copy it — Shared, this project, just you… — and that copy, with the change in it, is what runs there."
+          : has("base")
+            ? "Shared already has a copy of this state, and it is the one that runs — edit that."
+            : "This ships with JaiRA and cannot be edited here. Copy it to change what runs.",
+      },
+      // The same rules for each: a layer that already has its copy is offered disabled, and a project's with none open.
+      actions: COPY_LAYERS.map(({ layer, label, dir, project }): LayerBarAction => ({
+        id: `override-${layer}`,
+        label,
+        title:
+          project && !hasProject
+            ? "Open a project to copy this state into one of its layers"
+            : has(layer)
+              ? "That layer already has a copy of this state, and it is the one that loads there"
+              : `Copy this file into ${dir} and open the copy`,
+        ...((project && !hasProject) || has(layer) ? { disabled: true } : {}),
+        more: true,
+      })),
     };
   }
   if (standing !== undefined) {
@@ -166,4 +145,41 @@ export function overrideTarget(id: LayerBarAction["id"]): WritableLayer | null {
 /** What an action's button says: the compare button reads as the way back while the comparison is up. */
 export function layerActionLabel(action: LayerBarAction, comparing: boolean): string {
   return action.id === "compare" && comparing ? "Back to the file" : action.label;
+}
+
+/** One place a change to a built-in can be copied to, as copy-on-edit asks: the layer, and why not. */
+export interface CopyChoice {
+  layer: WritableLayer;
+  label: string;
+  title: string;
+  disabled?: boolean;
+}
+
+/** Where each layer is, in the words copy-on-edit's question offers it. */
+const COPY_WORDS: ReadonlyArray<{ layer: WritableLayer; label: string; dir: string; project: boolean }> = [
+  { layer: "base", label: "Shared", dir: "~/.jaira — every project that has not overridden it", project: false },
+  { layer: "project", label: "This project", dir: "this project's .jaira/", project: true },
+  { layer: "projectYou", label: "You in this project", dir: "~/.jaira/projects/…", project: true },
+  { layer: "you", label: "Just you", dir: "~/.jaira/personal", project: false },
+  { layer: "projectMachine", label: "This project on this machine", dir: ".jaira/local", project: true },
+  { layer: "machine", label: "This machine", dir: "~/.jaira/machine", project: false },
+];
+
+/**
+ * Where COPY-ON-EDIT may put a built-in's copy (the person, 2026-11-24: copy on change "prompts me when I
+ * make a change for where I want this change to be made and makes a copy there"): every layer a person
+ * owns, by the rules the bar's override buttons follow — a layer that already has its copy is offered
+ * disabled, and so is a project's with none open.
+ */
+export function copyChoicesOf(source: { builtIn?: BuiltInStanding | undefined }, hasProject: boolean): CopyChoice[] {
+  const has = (layer: WorkflowLayer): boolean => source.builtIn?.layers.includes(layer) === true;
+  return COPY_WORDS.map(({ layer, label, dir, project }) => ({
+    layer,
+    label,
+    ...(project && !hasProject
+      ? { title: "Open a project to copy this state into one of its layers", disabled: true }
+      : has(layer)
+        ? { title: "That layer already has a copy of this state, and it is the one that loads there", disabled: true }
+        : { title: `Copy it into ${dir}, with this change in it` }),
+  }));
 }

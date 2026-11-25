@@ -751,6 +751,12 @@ export interface WriteWorkflowRequest {
   machine?: string;
   /** The full file contents. Must parse as JSON; the workflow is re-linted after the write. */
   text: string;
+  /**
+   * `text` is a state's configuration as a form left it — what `ReadWorkflowRequest.compiled` read. For
+   * a workflow SCRIPT it is written into the code (`scriptWithEdits`): the label, the description and
+   * the inputs' defaults, and an edit to anything else is refused. A state file takes it as it is.
+   */
+  compiled?: boolean;
 }
 
 /**

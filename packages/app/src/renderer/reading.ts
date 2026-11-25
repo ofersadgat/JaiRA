@@ -62,6 +62,19 @@ export function useReadOnly(): boolean {
   return useContext(ReadOnlyContext);
 }
 
+/**
+ * True where the form is a workflow SCRIPT's configuration (`WorkflowSource.script`) that may be changed:
+ * the form is a reading but for what the script's code spells as a value — its label, its description and
+ * each input's default (the person, 2026-11-24: "the form should be able to change the default value of a
+ * parameter to the function at the root level") — which stay live (`scriptWithEdits` writes them back).
+ */
+export const ScriptFormContext = createContext(false);
+
+/** See {@link ScriptFormContext}. */
+export function useScriptForm(): boolean {
+  return useContext(ScriptFormContext);
+}
+
 /** The values one run put through this state, or null where the form is not about a run. */
 export function useRunReading(): RunReading | null {
   return useContext(RunReadingContext);

@@ -214,6 +214,30 @@ export type PermissionSetEntryDecl = PermissionModeDecl | { mode: PermissionMode
 /** A permission set as AUTHORED, references already followed: subject → entry. */
 export type PermissionSetDecl = Record<string, PermissionSetEntryDecl>;
 
+/**
+ * A conversation's permission set as its SETTINGS keep it (`ChatSettings.permissionSet`, decision 0023
+ * §2.6, decision 0034): a reference to one set, or its STACK — the layers by reference (`layers`, oldest
+ * first; the bottom one may come as `$ref`), its unsaved layers' lines by key (`$unsaved`), and the tools
+ * layer's own lines beside them. References not yet followed — the service follows them
+ * (`resolveChatPermissionStack`) before a turn runs, into a {@link PermissionSetDecl}.
+ *
+ * Spelled out (2026-11-24) because a workflow script is handed this type (`builtin/types/chat.ts`) and
+ * its run checks a value against it: typed as the followed map, a stack's `layers` was refused.
+ */
+export type ChatPermissionSetDecl = string | ChatPermissionStackDecl;
+
+/** {@link ChatPermissionSetDecl}'s stack. */
+export interface ChatPermissionStackDecl {
+  /** The layers by reference, oldest first: `layers[0]` the bottom — usually a preset. */
+  layers?: string[];
+  /** The bottom layer, as a set starts from another. */
+  $ref?: string;
+  /** The unsaved layers' lines, by the key `layers` names them by (`$unsaved/<key>`). */
+  $unsaved?: Record<string, PermissionSetDecl>;
+  /** The tools layer's own lines, by subject. */
+  [subject: string]: PermissionSetEntryDecl | string[] | Record<string, PermissionSetDecl> | undefined;
+}
+
 /** One authored entry as its parts — what {@link entryOfDecl} and {@link parsePermissionSet} read. */
 export interface EntryParts {
   /** The line's own decision: a plain decision, or a place map's `**`. Absent for `unavailable`, and for a map with no `**`. */

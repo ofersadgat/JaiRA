@@ -1,6 +1,6 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { delimiterOf, mimeOfPath, parseDelimited, parseStructured, parseUnifiedDiff, schemaById, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
+import { delimiterOf, mimeOfPath, parseDelimited, parseStructured, parseUnifiedDiff, schemaById, type StructuredFormat, type WorkflowSource, type WritableLayer } from "@jaira/shared/browser";
 import { patchSidesMore, patchSidesOf, schemaFormatOf, useSchemaChoice } from "@jaira/ui/fileEditModel";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { ReadOnlyContext } from "@jaira/ui/reading";
@@ -196,7 +196,7 @@ function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Ele
             layerActions: {
               hasProject: context.builtInActions.hasProject,
               onOverride: (toLayer) => context.builtInActions?.onOverride(source.stateId, toLayer),
-              ...(context.builtInActions.onEditCopy !== undefined ? { onEditCopy: (text: () => string) => context.builtInActions?.onEditCopy?.(source.stateId, text) } : {}),
+              ...(context.builtInActions.onEditCopy !== undefined ? { onEditCopy: (toLayer: WritableLayer, text: () => string) => context.builtInActions?.onEditCopy?.(source.stateId, toLayer, text) } : {}),
             },
           }
         : {})}

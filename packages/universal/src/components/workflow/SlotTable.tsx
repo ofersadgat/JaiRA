@@ -2,7 +2,7 @@ import { Children, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
 import { DEFAULT_MEDIA_TYPE, SLOT_TYPES, type SlotType, type SlotTypeName } from "@jaira/shared/browser";
 import { NO_ISSUES, type FormIssues } from "@jaira/ui/issues";
-import { slotValueOf, useRunReading } from "@jaira/ui/reading";
+import { slotValueOf, useRunReading, useScriptForm } from "@jaira/ui/reading";
 import { emptySlotRow, type SlotRow } from "@jaira/ui/slotForm";
 import {
   DEFAULT_PLACEHOLDER,
@@ -33,7 +33,7 @@ import {
 } from "@jaira/ui/slotTableModel";
 import { Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { Box, Details, FieldName, Pick, ROW, SlotOpt, SlotOptWords, SlotsHead, SmallButton, Sub, markOf, useLists, useReadOnly, useReading, type Mark } from "./controls";
+import { Box, Details, FieldName, Live, Pick, ROW, SlotOpt, SlotOptWords, SlotsHead, SmallButton, Sub, markOf, useLists, useReadOnly, useReading, type Mark } from "./controls";
 import { LinkInput, LinkPreview, LinkToggle, ReadValue } from "./Links";
 
 /**
@@ -231,6 +231,9 @@ export function SlotTable({
   const readOnly = useReadOnly();
   const reading = useRunReading();
   const lists = useLists();
+  // A workflow script's inputs (`ScriptFormContext`): a reading, but each default stays live — it is
+  // the default of the parameter the input compiles from, and is written back there.
+  const defaultsLive = useScriptForm() && optional;
   const edit = (index: number, patch: Partial<SlotRow>): void => onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   // A table with nothing in it would be a heading over the word "none": a form needs that (it is where
   // the first row is added), a reading is better off not mentioning the table.
@@ -262,19 +265,21 @@ export function SlotTable({
             const rowPath = slotPathOf(path, row);
             const { typeMark, bindingMark } = slotMarksOf(issues, rowPath);
             const value = slotValueOf(reading, path, row.name, row.binding);
-            const more = slotMoreShown(readOnly, row.default.length > 0, row.description.length > 0, value);
-            // A slot that lists its values offers them as its default's choices.
+            const more = defaultsLive || slotMoreShown(readOnly, row.default.length > 0, row.description.length > 0, value);
+            // A slot that lists its values — or a yes-or-no one — offers them as its default's choices.
             const values = enumValuesOf(row);
             const controls = (
               <RowControls fields={[value !== undefined, readOnly, readOnly]}>
                 {value !== undefined ? <ReadValue value={value} /> : null}
-                {readOnly && row.default.length === 0 ? null : (
+                {readOnly && row.default.length === 0 && !defaultsLive ? null : (
                   <Boxed readOnly={readOnly} label="default">
-                    {values !== undefined ? (
-                      <Pick value={row.default} options={defaultChoicesOf(values, row.default)} onChange={(d) => edit(i, { default: d })} title="the default — one of the values this slot allows" />
-                    ) : (
-                      <Box value={row.default} onChange={(d) => edit(i, { default: d })} placeholder={DEFAULT_PLACEHOLDER} title={DEFAULT_TITLE} />
-                    )}
+                    <Live on={defaultsLive}>
+                      {values !== undefined ? (
+                        <Pick value={row.default} options={defaultChoicesOf(values, row.default, !(defaultsLive && row.default.length > 0))} onChange={(d) => edit(i, { default: d })} title="the default — one of the values this slot allows" />
+                      ) : (
+                        <Box value={row.default} onChange={(d) => edit(i, { default: d })} placeholder={DEFAULT_PLACEHOLDER} title={DEFAULT_TITLE} />
+                      )}
+                    </Live>
                   </Boxed>
                 )}
                 {readOnly && row.description.length === 0 ? null : (

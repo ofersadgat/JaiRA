@@ -98,6 +98,20 @@ is edited where it is shown.
 - **States.** A shipped state is mounted live. Its first change copies it into Shared (`~/.jaira`) and
   opens the copy. Every keystroke up to then becomes the copy's unsaved draft (`moveWorkflow`'s
   `draft`).
+  - **Amended 2026-11-24.** The person: copy on change "prompts me when I make a change for where I
+    want this change to be made and makes a copy there". The first change asks which of the person's
+    layers the copy goes into — Shared, this project, you in this project, just you, this project on
+    this machine, this machine (`copyChoicesOf`); a layer that already has a copy is offered disabled,
+    and Discard drops the change. The editor's bar says only "built in" (its title says the rest), with every
+    copy behind one `Copy to…` menu, and it wraps rather than hiding the Form/JSON/Graph toggle.
+  - **A workflow script's file in the Files view** opens as its code and no run of it; the side panel
+    beside it is the state it compiles to, open on Configuration — not the newest run's chat.
+  - **In the side panel's Configuration** the same question is asked, and the copy is made with the
+    change saved into it (`copyStateTo`): the panel holds no draft that would follow the copy.
+  - **A workflow script** (decision 0029 §2) is edited this way too. Its Configuration is the state it
+    compiles to, and what a form can change of it — the label, the description, an input's default — is
+    written into its code (`scriptWithEdits`, `workflow:write { compiled }`); an edit to what the code
+    does is refused, with where to change it.
 - **Any other shipped file** (a prompt, a permission set, the README) is mounted live in its own editor
   (`FilePanel`'s `shippedProps`). Its first draft writes the untouched file into Shared at the same
   path and opens that copy, and the draft moves over to it (`editBuiltInFile`).

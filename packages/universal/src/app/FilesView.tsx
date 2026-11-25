@@ -47,7 +47,7 @@ export function useFileSurfaces(): FileSurfaceContext {
     builtInActions: {
       hasProject: state.at !== null,
       onOverride: (stateId, toLayer) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer, copy: true }),
-      onEditCopy: (stateId, text) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer: "base", copy: true, draft: text }),
+      onEditCopy: (stateId, toLayer, text) => void actions.moveWorkflow({ stateId, layer: "system", to: stateId, toLayer, copy: true, draft: text }),
       onEditFileCopy: (path, original) => void actions.editBuiltInFile(path, original),
     },
     drafts: state.drafts,

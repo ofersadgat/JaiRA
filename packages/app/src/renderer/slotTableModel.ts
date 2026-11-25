@@ -14,7 +14,9 @@ import type { SlotRow } from "./slotForm";
  * whose schema lists none, or is not inline.
  */
 export function enumValuesOf(row: SlotRow): string[] | undefined {
-  if (row.type !== null || row.typeRef !== undefined || row.spread === true) return undefined;
+  if (row.typeRef !== undefined || row.spread === true) return undefined;
+  // A yes-or-no slot has two values too (`improve: boolean = true`).
+  if (row.type !== null) return row.type.name === "boolean" && !row.type.list ? ["true", "false"] : undefined;
   try {
     const listed = (JSON.parse(row.schemaText) as Record<string, unknown>)["enum"];
     return Array.isArray(listed) && listed.length > 0 ? listed.map((value) => jsonTextOf(value)) : undefined;
@@ -28,9 +30,10 @@ export function enumValuesOf(row: SlotRow): string[] | undefined {
  * parameter a dropdown with the different default value options"): no default, then each value — and a
  * default that is none of them kept as its own choice, said to be off the list, so choosing nothing loses it.
  */
-export function defaultChoicesOf(values: readonly string[], current: string): Array<{ value: string; label: string }> {
+export function defaultChoicesOf(values: readonly string[], current: string, noDefault = true): Array<{ value: string; label: string }> {
   const off = current.length > 0 && !values.includes(current) ? [{ value: current, label: `${current} — not one of the values` }] : [];
-  return [{ value: "", label: "no default" }, ...values.map((value) => ({ value, label: value })), ...off];
+  // `noDefault: false` — a script's parameter, whose default is removed in its code, not here.
+  return [...(noDefault ? [{ value: "", label: "no default" }] : []), ...values.map((value) => ({ value, label: value })), ...off];
 }
 
 /** A one-glance label for a schema the picker does not model. The full document is the tooltip. */
@@ -40,6 +43,12 @@ export function summarizeSchema(text: string): string {
     // A list of values reads as the choice it is: `propose | auto`.
     const listed = schema["enum"];
     if (Array.isArray(listed) && listed.length > 0) return listed.map((value) => jsonTextOf(value)).join(" | ");
+    // One of several shapes reads as them: `null | object { model, … }`.
+    const either = schema["anyOf"] ?? schema["oneOf"];
+    if (Array.isArray(either) && either.length > 0) return either.map((member) => summarizeSchema(JSON.stringify(member))).join(" | ");
+    // An object with its fields declared reads as them (a script's `settings: Settings`): `object { model, reasoning, … }`.
+    const fields = schema["type"] === "object" && schema["properties"] !== null && typeof schema["properties"] === "object" ? Object.keys(schema["properties"] as object) : [];
+    if (fields.length > 0) return `object { ${fields.slice(0, 3).join(", ")}${fields.length > 3 ? ", …" : ""} }`;
     const type = typeof schema["type"] === "string" ? (schema["type"] as string) : "schema";
     const named = typeof schema["x-type"] === "string" ? ` ${schema["x-type"] as string}` : "";
     const extra = Object.keys(schema).filter((k) => !OWNED_KEYWORDS.includes(k));

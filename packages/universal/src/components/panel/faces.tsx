@@ -115,7 +115,11 @@ export interface FaceHost {
     wrapJson?: boolean | undefined;
     onWrapJson?: ((wrap: boolean) => void) | undefined;
     readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
-    saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
+    saveState?: ((source: WorkflowSource, text: string) => void | Promise<void>) | undefined;
+    /** Copy-on-edit: copy a built-in into the layer chosen, with the change written in. Absent: a built-in is read-only here. */
+    copyStateTo?: ((source: WorkflowSource, toLayer: WritableLayer, text: string) => Promise<boolean>) | undefined;
+    /** Whether a project is open — what a copy into one of its layers needs. */
+    hasProject?: boolean | undefined;
     ui?: UiSurface | undefined;
   };
   /** The events task's automations — Settings' Automations editor, for the task's project (or Shared's). */
@@ -284,6 +288,8 @@ function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JS
       stateId={stateId}
       read={readState}
       save={saveState ?? (() => undefined)}
+      {...(host.config.copyStateTo !== undefined ? { copyTo: host.config.copyStateTo } : {})}
+      hasProject={host.config.hasProject === true}
       tree={host.config.tree}
       executors={host.config.executors}
       busy={host.config.busy}

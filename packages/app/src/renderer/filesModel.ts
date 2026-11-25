@@ -1282,3 +1282,12 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
   ];
   return { itemsFor, rootItems };
 }
+
+/**
+ * Whether a path is a workflow SCRIPT's file (decision 0029 §2) — `.ts`/`.js`, never a declaration file —
+ * asked of a tree row that names a state (`FileNode.stateId`): such a row is code the Files view shows as
+ * code, with the state it compiles to in the side panel (`panelEntryOf`) rather than a run of it.
+ */
+export function isWorkflowScriptPath(path: string): boolean {
+  return /\.(ts|js)$/i.test(path) && !/\.d\.ts$/i.test(path);
+}

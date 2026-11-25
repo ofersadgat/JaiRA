@@ -20,7 +20,7 @@ import {
   type WritableLayer,
 } from "@jaira/shared/browser";
 import { applyForm, EMPTY_FORM, formOf, type BindingRow, type ChildRow, type FormModel, type TransitionRow } from "./stateForm";
-import { overrideTarget, type LayerBarAction } from "./builtInModel";
+import { copyChoicesOf, overrideTarget, type LayerBarAction } from "./builtInModel";
 import { fieldClass, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
 import type { UiSurface } from "./fileTypes";
 import type { LinkReader } from "./linkModel";
@@ -112,8 +112,11 @@ export type LayerActions =
       hasProject: boolean;
       /** Copy this shipped file up into a layer a person owns, and open the copy. */
       onOverride: (toLayer: WritableLayer) => void;
-      /** Copy-on-edit: the first change copies the file into Shared with the change as its draft. */
-      onEditCopy?: ((text: () => string) => void) | undefined;
+      /**
+       * Copy-on-edit: the first change asks where (`copyChoicesOf`), and this copies the file into the
+       * layer chosen, with the change in it. `text` is read once the copy exists, so later changes are in it.
+       */
+      onEditCopy?: ((toLayer: WritableLayer, text: () => string) => void) | undefined;
     }
   | undefined;
 
@@ -162,19 +165,21 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
   const shipped = !isWritableLayer(source.layer);
   /**
    * COPY-ON-EDIT (the person's ruling, 2026-09-24): a shipped state is edited where it is shown, and
-   * the first change is a copy into Shared carrying that change — so the form is live, not a reading.
-   * Not when Shared already has a copy: that copy is the one that loads, and editing the built-in
-   * would write a second one over it. The bar says to open the copy instead.
+   * the first change is a copy carrying that change — so the form is live, not a reading. The first
+   * change ASKS where the copy goes (the person, 2026-11-24: copy on change "prompts me when I make a
+   * change for where I want this change to be made and makes a copy there") — `askingWhere`,
+   * `copyTo`, `discardCopy`. Not when Shared already has a copy: that copy is the one that loads, and
+   * editing the built-in would write a second one over it. The bar says to open the copy instead.
+   *
+   * A workflow SCRIPT's configuration (`WorkflowSource.script`) is edited the same way: what a form
+   * can change of it — the label, the description, an input's default — is written into its code.
    */
-  /**
-   * A workflow SCRIPT's configuration is the document its code compiles to (`WorkflowSource.script`):
-   * a reading always, because a form cannot write back into code — the script is changed as code.
-   */
-  const scripted = source.script !== undefined;
-  const copyOnEdit = !scripted && shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
-  const readOnly = input.outerReadOnly || scripted || (shipped && !copyOnEdit);
-  /** The newest text while the copy is being written, and whether it has been asked for. */
+  const copyOnEdit = shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
+  const readOnly = input.outerReadOnly || (shipped && !copyOnEdit);
+  /** The newest text while the copy is being asked about or written. */
   const copying = useRef<{ file: string; text: string } | null>(null);
+  /** The first change was made and where its copy goes has not been chosen yet. */
+  const [askingWhere, setAskingWhere] = useState(false);
   /** Redraws the form while the copy is being written — the text lives in the ref above. */
   const [, redraw] = useState(0);
   /**
@@ -200,10 +205,11 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
   /** Write the document. A draft equal to the file is not a draft — see `drafts.ts`. */
   const setText = (next: string): void => {
     if (copyOnEdit) {
-      // The copy is asked for once; every keystroke until it opens lands in what it will carry.
+      // Where the copy goes is asked once, at the first change; every change until the copy opens
+      // lands in what it will carry.
       const started = copying.current !== null && copying.current.file === source.file;
       copying.current = { file: source.file, text: next };
-      if (!started) layerActions?.onEditCopy?.(() => copying.current?.text ?? next);
+      if (!started) setAskingWhere(true);
       redraw((n) => n + 1);
       return;
     }
@@ -398,6 +404,21 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
     if (parseError === null) setText(JSON.stringify(applyForm(parsed, next), null, 2));
   };
 
+  /** Copy-on-edit's question: where the copy may go. */
+  const copyChoices = copyOnEdit ? copyChoicesOf(source, layerActions?.hasProject === true) : [];
+  /** The answer: copy into `layer`, carrying the change and every one made until the copy opens. */
+  const copyTo = (layer: WritableLayer): void => {
+    setAskingWhere(false);
+    layerActions?.onEditCopy?.(layer, () => copying.current?.text ?? text);
+  };
+  /** No copy after all: the change is dropped, and the form shows the built-in again. */
+  const discardCopy = (): void => {
+    copying.current = null;
+    setAskingWhere(false);
+    loadForm(onDisk);
+    redraw((n) => n + 1);
+  };
+
   /**
    * Seeded rows go into the FORM only — never into `text`.
    *
@@ -438,6 +459,10 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
     setTab,
     shipped,
     copyOnEdit,
+    askingWhere,
+    copyChoices,
+    copyTo,
+    discardCopy,
     readOnly,
     onDisk,
     text,

@@ -238,6 +238,7 @@ import {
   isScriptFile,
   scriptContextOf,
   scriptStateText,
+  scriptWithEdits,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -14352,6 +14353,25 @@ export class AppService {
   writeWorkflow(request: WriteWorkflowRequest): WorkflowSource {
     this.writable(request.layer, request.project);
     const file = this.workflowFile(request.stateId, request.layer, request.project);
+    // A script's CONFIGURATION, as a form left it: written into the script's code, where the code spells
+    // it as a value (`scriptWithEdits`) — and refused, with why, where it does not.
+    if (request.compiled === true && existsSync(file) && isScriptFile(file)) {
+      let after: unknown;
+      try {
+        after = JSON.parse(request.text);
+      } catch (e) {
+        throw this.refusal("file", `not valid JSON: ${(e as Error).message}`);
+      }
+      const before = this.readWorkflow({ stateId: request.stateId, layer: request.layer, compiled: true, ...(request.project !== undefined ? { project: request.project } : {}) });
+      if (before.script?.error !== undefined) throw this.refusal("file", `the script does not compile: ${before.script.error}`);
+      const code = readFileSync(file, "utf8");
+      const edited = scriptWithEdits(file, code, JSON.parse(before.text), after);
+      if (edited.error !== undefined) throw this.refusal("file", edited.error);
+      writeFileSync(file, edited.text, "utf8");
+      this.publish({ type: "store:invalidate", scope: "workflows" });
+      this.noteSyncWrite(request.layer, `workflows/${request.stateId}${extname(file)}`);
+      return this.readWorkflow({ stateId: request.stateId, layer: request.layer, compiled: true, ...(request.project !== undefined ? { project: request.project } : {}) });
+    }
     // A JSON state is parsed first; a script is code, and the lint says what is wrong with it.
     if (file.endsWith(".json")) {
       try {

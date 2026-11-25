@@ -26,7 +26,8 @@ import { initProject, resetUserModules, userModules } from "@jaira/persistence";
 import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
-import { layerBarOf, overrideTarget } from "../src/renderer/builtInModel";
+import { Ajv } from "ajv";
+import { copyChoicesOf, layerBarOf, overrideTarget } from "../src/renderer/builtInModel";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
 /** A state JaiRA ships as a JSON file — what overriding one is shown with. */
@@ -220,30 +221,37 @@ describe("the state editor on the three kinds of file", () => {
   // copy-on-edit, which is off once Shared has its own copy — is decided inside `useWorkflowEditor`,
   // which is a hook, so these cases hand the bar that decision rather than reach it.
 
-  it("with copy-on-edit, says of a built-in that its first change copies it to Shared", () => {
+  it("with copy-on-edit, says of a built-in that its first change asks where to copy it", () => {
     const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true, true);
-    expect(bar?.chip.text).toBe("built in · an edit copies it to Shared");
-    expect(bar?.chip.text).not.toContain("read-only");
+    // Short (the person, 2026-11-24: the bar was "overly verbose"): the chip says "built in", its title the rest.
+    expect(bar?.chip.text).toBe("built in");
+    expect(bar?.chip.title).toMatch(/Your first change asks where to copy it/);
+  });
+
+  // The person, 2026-11-24: copy on change "prompts me when I make a change for where I want this
+  // change to be made and makes a copy there".
+  it("asks, at the first change, which of a person's layers the copy goes into", () => {
+    const open = copyChoicesOf({ builtIn: { layers: ["projectYou", "system"] } }, true);
+    expect(open.map((c) => c.label)).toEqual(["Shared", "This project", "You in this project", "Just you", "This project on this machine", "This machine"]);
+    // A layer that has its copy already is offered disabled.
+    expect(open.filter((c) => c.disabled === true).map((c) => c.layer)).toEqual(["projectYou"]);
+    // With no project open, none of a project's layers can take it.
+    expect(copyChoicesOf({ builtIn: { layers: ["system"] } }, false).filter((c) => c.disabled === true).map((c) => c.layer)).toEqual(["project", "projectYou", "projectMachine"]);
   });
 
   it("stays read-only when Shared already has a copy — that copy is the one that runs", () => {
     const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system", "base"] } }, true);
-    expect(bar?.chip.text).toBe("built in · read-only");
+    expect(bar?.chip.text).toBe("built in");
     expect(bar?.chip.title).toBe("Shared already has a copy of this state, and it is the one that runs — edit that.");
   });
 
-  it("says a built-in is read-only, with the two overrides and no Save", () => {
+  it("says a built-in is read-only, with a copy into each layer behind one menu and no Save", () => {
     const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true);
-    expect(bar?.chip.text).toBe("built in · read-only");
-    // The two it has always offered as links, then the settings' four newer layers behind `Elsewhere…`
-    // (decision 0023, amended 2026-11-18) — the tree's menu's six.
-    expect(bar?.actions.filter((a) => a.more !== true).map((a) => a.label)).toEqual(["Edit a copy in Shared", "Override here"]);
-    expect(bar?.actions.filter((a) => a.more === true).map((a) => a.label)).toEqual([
-      "Edit a copy for you in this project",
-      "Edit a copy for just you",
-      "Edit a copy in this project on this machine",
-      "Edit a copy on this machine",
-    ]);
+    expect(bar?.chip.text).toBe("built in");
+    expect(bar?.chip.title).toMatch(/cannot be edited here/);
+    // Every copy behind `Copy to…` (2026-11-24) — no links of their own, so the bar stays short.
+    expect(bar?.actions.filter((a) => a.more !== true)).toEqual([]);
+    expect(bar?.actions.map((a) => a.label)).toEqual(["Shared", "This project", "You in this project", "Just you", "This project on this machine", "This machine"]);
     // The bar that holds Save and Revert is not drawn for what ships, whether the form over it is a
     // reading or, with copy-on-edit, live.
     expect(savesOf(true, true)).toBe(false);
@@ -470,11 +478,42 @@ describe("what ships, laid over a workspace's tree", () => {
     expect(configuration.file.endsWith(`${CHAT_SESSION}.ts`)).toBe(true);
     expect(JSON.parse(configuration.text)).toMatchObject({ label: "Session" });
     // `approval` declares the values it takes, so the form can offer them (2026-11-24).
-    expect(JSON.parse(configuration.text).inputs.approval).toMatchObject({ schema: { type: "string", enum: ["propose", "auto", "accept"] }, default: "propose" });
+    expect(JSON.parse(configuration.text).inputs.approval).toMatchObject({ schema: { type: "string", enum: ["propose", "auto", "accept"] }, default: "accept" });
+    // `settings` is JaiRA's own ChatSettings, imported from `$SYSTEM/types/chat` (generated from
+    // @jaira/shared) — and its schema takes what the composer really sends (2026-11-24).
+    const settings = JSON.parse(configuration.text).inputs.settings.schema;
+    expect(settings).toMatchObject({ type: "object", properties: { model: { type: "string" }, permissionSet: expect.anything() } });
+    const accepts = new Ajv({ strict: false }).compile(settings);
+    for (const sent of [
+      {},
+      { model: "opus", reasoning: { effort: "high" }, tools: ["read_file"] },
+      { permissionSet: "$/permission-sets/full" },
+      { permissionSet: { layers: ["$/permission-sets/ask-first", "$unsaved/a"], $unsaved: { a: { write_file: "allow", $name: "mine" } }, glob: "unavailable", read_file: { "**": "allow", "docs/product": "deny" }, shell: { mode: "ask", implementation: "native" } } },
+      { implementations: { read_file: "native" } },
+    ]) expect(accepts(sent), JSON.stringify(accepts.errors)).toBe(true);
+    expect(accepts({ reasoning: { effort: "extreme" } })).toBe(false);
     // A second override of the same layer is refused rather than clobbering the first.
     expect(() =>
       service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true }),
     ).toThrow(/already exists/);
+  });
+
+  // The person, 2026-11-24: a script's configuration "should be in copy on change mode … makes a copy
+  // there". The copy's configuration, changed in the form, is written into its code.
+  it("writes a change to a copied script's configuration into the script, and refuses what its code owns", () => {
+    service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true });
+    const before = service.readWorkflow({ stateId: CHAT_SESSION, layer: "project", compiled: true });
+    const doc = JSON.parse(before.text);
+    doc.inputs.approval.default = "auto";
+    const after = service.writeWorkflow({ stateId: CHAT_SESSION, layer: "project", text: JSON.stringify(doc), compiled: true });
+    expect(JSON.parse(after.text).inputs.approval.default).toBe("auto");
+    const code = readFileSync(after.file, "utf8");
+    expect(code).toContain(`approval: "propose" | "auto" | "accept" = "auto",`);
+    expect(code.replace(`= "auto",`, `= "accept",`)).toBe(shippedText(CHAT_SESSION));
+    // What the code does is the code's: refused, and the script left as it was.
+    doc.operation = { function: "something/else" };
+    expect(() => service.writeWorkflow({ stateId: CHAT_SESSION, layer: "project", text: JSON.stringify(doc), compiled: true })).toThrow(/comes from what the script's code does/);
+    expect(readFileSync(after.file, "utf8")).toBe(code);
   });
 });
 

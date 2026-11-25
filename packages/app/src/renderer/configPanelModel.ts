@@ -70,18 +70,21 @@ export const readingTitleOf = (state: Pick<EffectiveState, "rootId">): string | 
  * One state's file, fetched for a side panel that outlives whatever opened it (`StatePanel.tsx`).
  * `null` while reading, `"missing"` when nothing under either root defines it.
  */
-export function useStateSource(stateId: string, read: (stateId: string) => Promise<WorkflowSource | null>): WorkflowSource | null | "missing" {
+export function useStateSource(stateId: string, read: (stateId: string) => Promise<WorkflowSource | null>, reads = 0): WorkflowSource | null | "missing" {
   const [source, setSource] = useState<WorkflowSource | null | "missing">(null);
+  // `reads`: bumped after a save or a copy, to read the state again — the one already shown stays up
+  // meanwhile, so the form does not blink to "Reading…".
+  const first = reads === 0;
   useEffect(() => {
     let live = true;
-    setSource(null);
+    if (first) setSource(null);
     void read(stateId).then((found) => {
       if (live) setSource(found ?? "missing");
     });
     return () => {
       live = false;
     };
-  }, [stateId, read]);
+  }, [stateId, read, reads, first]);
   return source;
 }
 

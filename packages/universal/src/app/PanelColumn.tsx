@@ -315,6 +315,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       },
       readState: actions.readState,
       saveState: actions.saveState,
+      copyStateTo: actions.copyStateTo,
+      hasProject: state.at !== null,
       ui: {
         pane: (id, fallback) => ui.panes[id] ?? fallback,
         setPane: actions.setPane,
