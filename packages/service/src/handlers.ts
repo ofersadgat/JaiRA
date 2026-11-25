@@ -335,6 +335,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "executor:signIn": ((request: { name: string }) => service.signInExecutor(request.name)) as Handler,
     "executor:cancelSignIn": ((request: { name: string }) => service.cancelSignIn(request.name)) as Handler,
     "executor:signOut": ((request: { name: string }) => service.signOutExecutor(request.name)) as Handler,
+    "executor:setUpToken": ((request: { name: string }) => service.setUpAgentToken(request.name)) as Handler,
+    "executor:saveToken": ((request: { name: string; token: string }) => service.saveAgentToken(request.name, request.token)) as Handler,
     "executor:install": ((request: { name: string } & AgentInstallRequest) => service.installExecutor(request.name, installRequestOf(request))) as Handler,
     "executor:cancelInstall": ((request: { name: string }) => service.cancelInstall(request.name)) as Handler,
     "gitCli:install": ((request: { name: GitCliName } & AgentInstallRequest) => service.installGitCli(request.name, installRequestOf(request))) as Handler,

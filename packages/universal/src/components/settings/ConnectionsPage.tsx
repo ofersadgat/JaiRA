@@ -54,6 +54,8 @@ export function ConnectionsPage(): JSX.Element {
     onSignIn: (name) => void actions.signIn(name),
     onCancelSignIn: (name) => void actions.cancelSignIn(name),
     onSignOut: (name) => void actions.signOut(name),
+    onSetUpToken: (name) => void actions.setUpToken(name),
+    onSaveToken: (name, token) => actions.saveToken(name, token),
     installing: new Set(state.installing),
     installLogs: installLogsOf(state.installLogs, "agent"),
     onInstall: (name, method) => void actions.installAgent(name, method),

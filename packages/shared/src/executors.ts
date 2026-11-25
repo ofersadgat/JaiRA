@@ -393,6 +393,15 @@ export function downAgentsOf(probes: readonly ProbeResult[]): Record<string, str
 /** What a sign-in or sign-out came to: done, or the binary's own words for why not. */
 export type SignInOutcome = { ok: true } | { ok: false; reason: string };
 
+/**
+ * The `method` of a claude sign-in that is the long-lived token JaiRA keeps (`claude setup-token`)
+ * rather than the CLI's own login — the one Log out removes from JaiRA's keychain, and the one a
+ * refusal is fixed by making anew.
+ */
+export const CLAUDE_TOKEN_METHOD = "setup-token";
+/** What that sign-in is called where claude names no account for it. */
+export const CLAUDE_TOKEN_LABEL = "Long-lived token";
+
 /** One sign-in an agent holds — never a secret, only what the agent itself prints about it. */
 export interface AgentAccount {
   /** Who: the account's email, or the kind of sign-in when the agent names no one ("ChatGPT"). */

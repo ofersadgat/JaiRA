@@ -50,6 +50,10 @@ export interface ProvidersPaneProps {
   onSignIn: (name: string) => void;
   onCancelSignIn: (name: string) => void;
   onSignOut: (name: string) => void;
+  /** Make an agent a long-lived token with its own `claude setup-token` — claude only. Waits as Sign in does. */
+  onSetUpToken?: (name: string) => void;
+  /** Keep a long-lived token pasted in; resolves true once kept. */
+  onSaveToken?: (name: string, token: string) => Promise<boolean>;
   /** Agents whose install or update is running. */
   installing: ReadonlySet<string>;
   /** What each agent's install or update pressed here printed, by agent — until its row's Hide. */

@@ -23,6 +23,7 @@
  * its credentials in its own database, whose `auth import` never replaces one it has.
  */
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
@@ -37,6 +38,12 @@ export interface AgentLoginStore {
   where?(): string | undefined;
   /** What it holds now and when it was last written; undefined when it is signed out. */
   read(): { value: string; at: number } | undefined;
+  /**
+   * A cheap word that changes whenever what it holds does — a file's time and size — so a watch need
+   * not read it to see that nothing changed. Absent, or undefined, where only a read can tell (the
+   * keychain, WSL).
+   */
+  stamp?(): string | undefined;
   write(value: string): void;
   remove(): void;
 }
@@ -117,6 +124,15 @@ export function fileLogin(agent: string, file: () => string, because?: () => str
         return value.trim() === "" ? undefined : { value, at: statSync(path).mtimeMs };
       } catch {
         return undefined;
+      }
+    },
+    stamp: () => {
+      const path = file();
+      try {
+        const stats = statSync(path);
+        return `${path}|${stats.mtimeMs}|${stats.size}`;
+      } catch {
+        return `${path}|absent`;
       }
     },
     write: (value) => {
@@ -252,6 +268,8 @@ function hereOrInWsl(native: AgentLoginStore, inWsl: AgentLoginStore, wsl: () =>
     unavailable: () => pick().unavailable(),
     where: () => pick().where?.(),
     read: () => pick().read(),
+    // Only where the store picked has one: a WSL distro's file is told only by reading it.
+    stamp: () => pick().stamp?.(),
     write: (value) => pick().write(value),
     remove: () => pick().remove(),
   };
@@ -281,4 +299,77 @@ export function nativeAgentLogins(options: AgentLoginOptions = {}): AgentLoginSt
     hereOrInWsl(claude, wslFileLogin("claude-cli", wsl, "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/.credentials.json", run), wsl),
     hereOrInWsl(codex, wslFileLogin("codex-cli", wsl, "${CODEX_HOME:-$HOME/.codex}/auth.json", run), wsl),
   ];
+}
+
+/** An agent's sign-in here changed under JaiRA: whether what it holds now could sign the agent in. */
+export interface LoginChange {
+  agent: string;
+  usable: boolean;
+}
+
+export interface LoginWatchOptions {
+  /** How often a store with a {@link AgentLoginStore.stamp} is looked at. */
+  everyMs?: number;
+  /** How often a store that must be read to tell is looked at: each look runs `security` or `wsl.exe`. */
+  slowMs?: number;
+}
+
+/**
+ * Watch this machine's agent sign-ins for a change made outside JaiRA — the person running
+ * `claude auth login` in a terminal, an agent renewing its token, or one wiping it after a refused
+ * renewal — so the engine checks the agent again rather than holding on to "sign in again" (or "signed
+ * in") until a restart or a Re-check.
+ *
+ * Polled, not `fs.watch`ed: agents replace the file whole, which a watch on it does not survive, and the
+ * keychain and a WSL distro have nothing to watch. A file costs a `stat` a look; it is read only when
+ * that changed. The first look remembers what is there and reports nothing — the engine checks every
+ * agent when it starts anyway.
+ */
+export function watchAgentLogins(
+  stores: () => readonly AgentLoginStore[],
+  onChange: (change: LoginChange) => void,
+  options: LoginWatchOptions = {},
+): { check(now?: number): void; dispose(): void } {
+  const everyMs = options.everyMs ?? 10_000;
+  const slowMs = options.slowMs ?? 60_000;
+  const seen = new Map<string, string>();
+  const lookedAt = new Map<string, number>();
+  const readHeld = (store: AgentLoginStore): { value: string } | undefined => {
+    try {
+      return store.read();
+    } catch {
+      return undefined;
+    }
+  };
+  const check = (now: number = Date.now()): void => {
+    for (const store of stores()) {
+      if (store.unavailable() !== undefined) continue;
+      let mark: string | undefined;
+      try {
+        mark = store.stamp?.();
+      } catch {
+        mark = undefined;
+      }
+      // Kept under its place too, so agents moving into or out of WSL is a change.
+      const where = store.where?.() ?? "";
+      let held: { value: string } | undefined;
+      let fingerprint: string;
+      if (mark !== undefined) {
+        fingerprint = `${where}|${mark}`;
+      } else {
+        if (now - (lookedAt.get(store.agent) ?? -Infinity) < slowMs) continue;
+        lookedAt.set(store.agent, now);
+        held = readHeld(store);
+        fingerprint = `${where}|${held === undefined ? "signed out" : createHash("sha256").update(held.value).digest("hex")}`;
+      }
+      const before = seen.get(store.agent);
+      seen.set(store.agent, fingerprint);
+      if (before === undefined || before === fingerprint) continue;
+      if (mark !== undefined) held = readHeld(store);
+      onChange({ agent: store.agent, usable: held !== undefined && loginStateOf(store.agent, held.value).usable });
+    }
+  };
+  const timer = setInterval(() => check(), everyMs);
+  timer.unref?.();
+  return { check, dispose: () => clearInterval(timer) };
 }

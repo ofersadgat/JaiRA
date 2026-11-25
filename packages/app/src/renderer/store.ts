@@ -4440,6 +4440,39 @@ export function useApp() {
           patch({ busy: false });
         }
       },
+      /**
+       * Make claude a long-lived token with its own `claude setup-token`: the browser, as Sign in, and the
+       * card waits as it does (Cancel is Sign in's). Main keeps the token and has re-checked by the time
+       * it answers.
+       */
+      setUpToken: async (name: string) => {
+        if (ref.current.signingIn.includes(name)) return;
+        patch({ signingIn: [...ref.current.signingIn, name], error: null });
+        try {
+          const outcome = await invoke("executor:setUpToken", { name });
+          if (!outcome.ok && !/cancelled$/.test(outcome.reason)) patch({ error: outcome.reason });
+          applyAvailability(patch, await invoke("availability:read", undefined));
+        } catch (e) {
+          fail(e);
+        } finally {
+          patch({ signingIn: ref.current.signingIn.filter((waiting) => waiting !== name) });
+        }
+      },
+      /** Keep a token made with `claude setup-token` in a terminal. Whether it was kept, so the entry can close. */
+      saveToken: async (name: string, token: string): Promise<boolean> => {
+        patch({ busy: true, error: null });
+        try {
+          const outcome = await invoke("executor:saveToken", { name, token });
+          if (!outcome.ok) patch({ error: outcome.reason });
+          applyAvailability(patch, await invoke("availability:read", undefined));
+          return outcome.ok;
+        } catch (e) {
+          fail(e);
+          return false;
+        } finally {
+          patch({ busy: false });
+        }
+      },
 
       /**
        * Install an agent the way named — or by a path through its install menu, step by step — or (none

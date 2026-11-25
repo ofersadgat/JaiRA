@@ -270,6 +270,7 @@ import {
   failureMessage,
   enabledGenericAgents,
   withCodexKey,
+  withClaudeToken,
   listExecutors,
   probeExecutor,
   withSignInRefusal,
@@ -283,6 +284,9 @@ import {
   signInAgent,
   parseEnvFile,
   signOutAgent,
+  setUpClaudeToken,
+  claudeTokenIn,
+  CLAUDE_TOKEN_VARIABLE,
   signInCommand,
   isSignInRefused,
   type AgentOutcomeObserver,
@@ -582,6 +586,7 @@ import {
   READ_ONLY_PERMISSION_SET,
   FORGE_LABELS,
   SECRET_SOURCE_LABELS,
+  type SecretOrigin,
   resultOfSettlement,
   REVIEW_NOTE_ARTIFACT,
   handleOfRow,
@@ -916,7 +921,7 @@ import { WorkspaceMaker } from "./workspaces";
 import { setupToolPort } from "./setupTools";
 import { Replicator } from "./replicator";
 import { SettingsSync, type SettingsSyncPorts, type SyncSecretStore } from "./settingsSync";
-import { loginStateOf, nativeAgentLogins, type AgentLoginStore } from "./agentLogins";
+import { loginStateOf, nativeAgentLogins, watchAgentLogins, type AgentLoginStore } from "./agentLogins";
 import { machineTags } from "./machine";
 import { candidatesOf, Placement, queuedView, waitsForWords, workspaceKey, type HeldStart, type MachineCapacity, type PlacementRules, type PlacementThresholds, type QueuedTask } from "./placement";
 import { ResourceSampler } from "./resources";
@@ -1773,6 +1778,9 @@ export class AppService {
         },
       });
     this.settingsSync = new SettingsSync({ baseDir: this.baseDir, fleet: this.fleet, ports: this.settingsSyncPorts(), ...(options.settingsSyncTimings ?? {}) });
+    // A sign-in changed outside JaiRA — 'claude auth login' in a terminal, an agent renewing or wiping
+    // its own — is checked again now, not at the next restart or Re-check.
+    this.loginWatch = watchAgentLogins(() => this.agentLogins, (change) => this.agentLoginChanged(change.agent, change.usable));
     this.resources = new ResourceSampler();
     this.placement = new Placement({
       baseDir: this.baseDir,
@@ -2198,6 +2206,9 @@ export class AppService {
         // The human's answer is the audit entry policy alone could not produce.
         const session = this.sessions.get(key);
         const run = session?.approvalRun.get(requestId);
+        // The person's answer is a turn of the task's: the ring counts its work from here.
+        const asker = run?.taskId ?? session?.approvalsSeen.get(requestId)?.taskId;
+        if (by === "person" && session !== undefined && asker !== undefined) session.answeredAt.set(asker, Date.now());
         session?.approvalRun.delete(requestId);
         this.requestOwner.delete(requestId);
         // An ask whose call ended without it was refused by nobody, and is no line in the audit.
@@ -2206,9 +2217,6 @@ export class AppService {
           session.project.commands.record({
             taskId: run.taskId,
             tool: request?.tool ?? "unknown",
-        // The person's answer is a turn of the task's: the ring counts its work from here.
-        const asker = run?.taskId ?? session?.approvalsSeen.get(requestId)?.taskId;
-        if (by === "person" && session !== undefined && asker !== undefined) session.answeredAt.set(asker, Date.now());
             ...(request?.command !== undefined ? { command: request.command } : {}),
             decision: decision.decision === "allow" ? "approved" : "denied",
             // Answered by the stack changing under it: the policy's, not the person's.
@@ -3029,6 +3037,8 @@ export class AppService {
   /** Settings that follow the person across the fleet (decision 0026). */
   readonly settingsSync: SettingsSync;
   private readonly agentLogins: AgentLoginStore[];
+  /** Watches {@link agentLogins} for a change made outside JaiRA ({@link agentLoginChanged}). */
+  private readonly loginWatch: { dispose(): void };
   /** Copies of other machines' workspaces, opened to be read while their machine is offline — by remote key. */
   private readonly replicaSessions = new Map<string, ProjectSession>();
 
@@ -4690,6 +4700,7 @@ export class AppService {
     this.resources.close();
     this.replicator.close();
     this.settingsSync.close();
+    this.loginWatch.dispose();
     for (const replica of this.replicaSessions.values()) replica.project.close();
     this.replicaSessions.clear();
     this.fleet.close();
@@ -6770,6 +6781,8 @@ export class AppService {
         ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
         // Codex's key, looked up as each codex process starts — the chain the probe reads.
         ...withCodexKey(config.agents, (name) => this.secretResolver(open).lookup(name)?.value),
+        // And claude's long-lived sign-in, when JaiRA keeps one.
+        ...withClaudeToken((name) => this.secretResolver(open).lookup(name)?.value),
         mcpServers: this.mcpServersFor(config, this.secretResolver(open)),
       });
       // Non-Claude CLIs the project configured (DESIGN §8.1). Nothing is registered
@@ -7274,6 +7287,8 @@ export class AppService {
         onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
         // A line starts where the task's shell stands, its `$VARS` as that shell has them (decision 0030).
         shellAt: () => this.shellAt(taskId, config.execEnvironment),
+        // An agent's own shell tool reads its `$env:X` in the environment the agent was started with.
+        agentEnv: () => this.agentEnvAt(config.execEnvironment),
         // What the machine knows about this task's processes and windows, and its name (decision 0023 §3.1).
         machine: new MachineFactsCache({ processes: this.processesOf(taskId, open, config), name: this.fleet.identity().label }),
       }),
@@ -7302,8 +7317,6 @@ export class AppService {
     this.dropRecoveredAsks(open, (r) => r.taskId === taskId);
     if (opts.loaded !== undefined) {
       open.grantsRestored.delete(taskId);
-        // An agent's own shell tool reads its `$env:X` in the environment the agent was started with.
-        agentEnv: () => this.agentEnvAt(config.execEnvironment),
       this.restoreGrants(open, taskId);
     }
     // Which state each instance is, so a permission function is told the state its call belongs to —
@@ -8875,7 +8888,17 @@ export class AppService {
     return {
       ...(session?.cwd !== undefined ? { cwd: session.cwd } : {}),
       ...(env !== undefined ? { expand: (word: string) => expandShellWord(word, (name) => env[name]) } : {}),
+      // What a line's variables are read through when it does not set them (decision 0007 §4, amended 2026-11-25).
+      ...(env !== undefined ? { env: environmentLookupOf(env, process.platform === "win32") } : {}),
     };
+  }
+
+  /**
+   * The environment an agent's own shell tool (Claude's `Bash`, `PowerShell`) runs its lines in: the one
+   * this engine started the agent with. In WSL or a container it is not this engine's, so nothing is read.
+   */
+  private agentEnvAt(execEnv: JairaConfigOf["execEnvironment"]): EnvironmentLookup | undefined {
+    return !isWslEnv(execEnv) && !isContainerEnv(execEnv) ? environmentLookupOf(process.env, process.platform === "win32") : undefined;
   }
 
   /**
@@ -8903,19 +8926,9 @@ export class AppService {
       }
     }
   }
-      // What a line's variables are read through when it does not set them (decision 0007 §4, amended 2026-11-25).
-      ...(env !== undefined ? { env: environmentLookupOf(env, process.platform === "win32") } : {}),
 
   /** How a permission set reference is followed in this project — the reader a state's `tools` is followed with. */
   private permissionSetReaderOf(paths: JairaPaths): PermissionSetReader {
-  /**
-   * The environment an agent's own shell tool (Claude's `Bash`, `PowerShell`) runs its lines in: the one
-   * this engine started the agent with. In WSL or a container it is not this engine's, so nothing is read.
-   */
-  private agentEnvAt(execEnv: JairaConfigOf["execEnvironment"]): EnvironmentLookup | undefined {
-    return !isWslEnv(execEnv) && !isContainerEnv(execEnv) ? environmentLookupOf(process.env, process.platform === "win32") : undefined;
-  }
-
     return permissionSetReader(workflowLoadOptions(paths, { tolerant: true }));
   }
 
@@ -11734,9 +11747,12 @@ export class AppService {
       this.answerRecoveredAsk(owner, recovered, { kind: "question", ...(answers !== undefined ? { answers } : {}) });
       return { requestId };
     }
+    const asker = owner?.questions.list().find((r) => r.requestId === requestId)?.taskId;
     if (owner === undefined || !owner.questions.answer(requestId, answers)) {
       throw this.refusal("run", `no pending question '${requestId}'`);
     }
+    // The person's answer is a turn of the task's: the ring counts its work from here.
+    if (asker !== undefined) owner.answeredAt.set(asker, Date.now());
     return { requestId };
   }
 
@@ -11747,12 +11763,9 @@ export class AppService {
    * did not travel with the list would be a card that silently refused to be picked up.
    */
   pendingUserEvents(): PendingUserEvent[] {
-    const asker = owner?.questions.list().find((r) => r.requestId === requestId)?.taskId;
     return [
       ...[...this.sessions.entries()].flatMap(([key, s]) => s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) }))),
       ...(this.federation.pendingOf("userEvent") as unknown as PendingUserEvent[]),
-    // The person's answer is a turn of the task's: the ring counts its work from here.
-    if (asker !== undefined) owner.answeredAt.set(asker, Date.now());
     ];
   }
 
@@ -11993,6 +12006,10 @@ export class AppService {
     // answer takes the move it holds.
     if (isMoveQuestion(requestId)) return this.answerMoveQuestion(requestId, value);
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    // The person's answer is a turn of the task's: the ring counts its work from here.
+    const parked = owner?.hub.list().find((r) => r.requestId === requestId);
+    const asker = parked !== undefined ? (parked.taskId ?? owner!.requestTask.get(requestId)) : undefined;
+    if (owner !== undefined && asker !== undefined) owner.answeredAt.set(asker, Date.now());
     // A multi-part chooser's answer is EVERY round's answers, and the loop's own bookkeeping stays
     // out of what the engine gets — see `followUp.ts`. Whether a round follows is the STATE's
     // `follow_up`, never the person's; a chooser without it is the plain case: its own answers,
@@ -12006,10 +12023,6 @@ export class AppService {
       }
       // A RECOVERED gate has no live park to hold, so a follow-up state's answer settles as it is:
       // the loop needs a run to re-park on, and the resumed run gets these answers seeded.
-    // The person's answer is a turn of the task's: the ring counts its work from here.
-    const parked = owner?.hub.list().find((r) => r.requestId === requestId);
-    const asker = parked !== undefined ? (parked.taskId ?? owner!.requestTask.get(requestId)) : undefined;
-    if (owner !== undefined && asker !== undefined) owner.answeredAt.set(asker, Date.now());
       settled = settledFollowUp(answers);
     }
     if (owner !== undefined && owner.hub.submit(requestId, settled)) return { requestId };
@@ -13433,6 +13446,18 @@ export class AppService {
     };
   }
 
+  /**
+   * An agent's sign-in here changed outside JaiRA (`watchAgentLogins`). One that could work is a new
+   * sign-in — the person signed in again in a terminal, or the agent renewed its token — so a refusal a
+   * run saw was about the one it replaced; either way the agent is checked again, which also notices a
+   * sign-in the agent wiped after a refused renewal (and asks the other machines for theirs).
+   */
+  private agentLoginChanged(agent: string, usable: boolean): void {
+    if (this.closed) return;
+    if (usable && this.signInRefusals.delete(agent)) this.log({ level: "info", source: "config", message: `${agent}'s sign-in changed here: checking it again` });
+    if (this.options.probeOnStart === true) this.kickAvailability();
+  }
+
   /** When each agent's sign-in was last asked of the other machines (`recoverSignIn`). */
   private readonly signInRecoveries = new Map<string, number>();
 
@@ -13500,9 +13525,85 @@ export class AppService {
     this.signIns.get(name)?.abort();
   }
 
+  /** The agent, refused unless it takes a long-lived token (claude's `claude setup-token`). */
+  private agentWithToken(name: string): ExecutorInfo {
+    const info = this.agentWithSignIn(name);
+    if (info.kind !== "cli") throw this.refusal("config", `'${name}' takes no long-lived token — sign it in instead`);
+    return info;
+  }
+
+  /**
+   * Make an agent a long-lived sign-in with its own `claude setup-token` — Anthropic's flow, in the
+   * browser — and keep the token it prints ({@link saveAgentToken}). One at a time per agent, beside
+   * Sign in, and Cancel gives up on either.
+   *
+   * A token is never renewed, so nothing wipes it: the sign-in file `claude` renews in place can be
+   * emptied by any process whose renewal is refused, and two machines sharing it spend each other's.
+   */
+  async setUpAgentToken(name: string): Promise<SignInOutcome> {
+    const info = this.agentWithToken(name);
+    if (this.options.keychain?.available() !== true) return { ok: false, reason: this.secretCapabilities().keychainReason ?? "there is no encrypted store here to keep a token in" };
+    if (this.signIns.has(name)) return { ok: false, reason: `${name} is already waiting on a sign-in in the browser` };
+    const config = this.effectiveConfig();
+    const controller = new AbortController();
+    this.signIns.set(name, controller);
+    try {
+      const made = await setUpClaudeToken(info, {
+        exec: new NodeExec({ execEnv: config.execEnvironment }),
+        execEnv: config.execEnvironment,
+        abortSignal: controller.signal,
+      });
+      if (!made.ok) return made;
+      return await this.saveAgentToken(name, made.token);
+    } finally {
+      this.signIns.delete(name);
+    }
+  }
+
+  /**
+   * Keep a long-lived token for an agent — one made here, or pasted from `claude setup-token` run in a
+   * terminal — in the keychain, under the variable `claude` reads it from: every claude JaiRA starts is
+   * handed it, and it follows the person to their other machines (decision 0026). An empty token
+   * removes it, and claude goes back to its own sign-in.
+   */
+  async saveAgentToken(name: string, token: string): Promise<SignInOutcome> {
+    this.agentWithToken(name);
+    const value = token.trim();
+    if (value !== "" && claudeTokenIn(value) !== value) {
+      return { ok: false, reason: "that is not a token 'claude setup-token' makes — one starts with sk-ant-oat" };
+    }
+    try {
+      this.writeSecret({ name: CLAUDE_TOKEN_VARIABLE, value, target: "keychain" });
+    } catch (e) {
+      return { ok: false, reason: (e as Error).message };
+    }
+    // A refusal a run saw was about the sign-in this one replaces.
+    this.signInRefusals.delete(name);
+    if (value !== "") this.limits.signedIn(accountOfRoute(name));
+    this.log({ level: "info", source: "config", message: value !== "" ? `${name} runs on a long-lived token from here on` : `${name}'s long-lived token was removed: it runs on its own sign-in` });
+    await this.refreshAvailability().catch(() => undefined);
+    return { ok: true };
+  }
+
+  /**
+   * Where the long-lived token claude would be handed comes from, when there is one — the keychain, a
+   * `.env` file, the environment JaiRA was started in.
+   */
+  private agentTokenOrigin(name: string): SecretOrigin | undefined {
+    const info = this.listExecutors().find((candidate) => candidate.name === name);
+    return info?.kind === "cli" ? this.secretResolver().describe(CLAUDE_TOKEN_VARIABLE) : undefined;
+  }
+
   /** Sign an agent out — machine-wide: its terminal sessions lose the login too — and re-check. */
   async signOutExecutor(name: string): Promise<SignInOutcome> {
     const info = this.agentWithSignIn(name);
+    // A long-lived token is the sign-in claude uses while there is one, so it is the one logged out of:
+    // removed from the keychain, and the CLI's own login — if any — is what claude runs on next.
+    const token = this.agentTokenOrigin(name);
+    if (token?.source === "keychain") return this.saveAgentToken(name, "");
+    if (token !== undefined) {
+      return { ok: false, reason: `its long-lived token comes from ${SECRET_SOURCE_LABELS[token.source]}${token.file !== undefined ? ` (${token.file})` : ""} — remove ${CLAUDE_TOKEN_VARIABLE} there` };
+    }
     const config = this.effectiveConfig();
     try {
       const outcome = await signOutAgent(info, { exec: new NodeExec({ execEnv: config.execEnvironment }), execEnv: config.execEnvironment });

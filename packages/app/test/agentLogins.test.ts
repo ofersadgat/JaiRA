@@ -4,11 +4,11 @@
  * so a sign-in can follow the person to their other machines.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { CLAUDE_KEYCHAIN_SERVICE, loginStateOf, macKeychainLogin, nativeAgentLogins, type WslRun } from "@jaira/service";
+import { CLAUDE_KEYCHAIN_SERVICE, loginStateOf, macKeychainLogin, nativeAgentLogins, watchAgentLogins, type AgentLoginStore, type LoginChange, type WslRun } from "@jaira/service";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -170,5 +170,85 @@ describe("Claude Code's sign-in in the macOS keychain", () => {
     const refused = macKeychainLogin("claude-cli", CLAUDE_KEYCHAIN_SERVICE, "me", undefined, fake({ status: 51 }).run);
     expect(refused.read()).toBeUndefined();
     expect(refused.unavailable()).toMatch(/keychain did not let JaiRA read/);
+  });
+});
+
+describe("a sign-in changed outside JaiRA", () => {
+  const live = JSON.stringify({ claudeAiOauth: { accessToken: "a", refreshToken: "r", expiresAt: 1, accountUuid: "acct" } });
+  // What Claude Code leaves after a refused renewal: both tokens emptied, the account kept.
+  const wiped = JSON.stringify({ claudeAiOauth: { accessToken: "", refreshToken: "", expiresAt: 0, accountUuid: "acct" } });
+
+  it("is reported when the file is wiped or signed in again, and not on the first look or while it stays the same", () => {
+    const dir = home();
+    const [claude] = nativeAgentLogins({ platform: "linux", home: dir, env: {} });
+    claude!.write(live);
+    const changes: LoginChange[] = [];
+    const watch = watchAgentLogins(() => [claude!], (change) => changes.push(change), { everyMs: 60_000 });
+    try {
+      watch.check();
+      watch.check();
+      expect(changes).toEqual([]);
+      // Written a little later, so the time on the file moves even where it is coarse.
+      const file = join(dir, ".claude", ".credentials.json");
+      claude!.write(wiped);
+      utimesSync(file, new Date(Date.now() + 5_000), new Date(Date.now() + 5_000));
+      watch.check();
+      expect(changes).toEqual([{ agent: "claude-cli", usable: false }]);
+      // `claude auth login` in a terminal.
+      claude!.write(live);
+      utimesSync(file, new Date(Date.now() + 10_000), new Date(Date.now() + 10_000));
+      watch.check();
+      expect(changes).toEqual([
+        { agent: "claude-cli", usable: false },
+        { agent: "claude-cli", usable: true },
+      ]);
+      // Signed out entirely.
+      claude!.remove();
+      watch.check();
+      expect(changes.at(-1)).toEqual({ agent: "claude-cli", usable: false });
+    } finally {
+      watch.dispose();
+    }
+  });
+
+  it("reads a store with no stamp (the keychain, WSL) only now and then", () => {
+    let value: string | undefined = live;
+    let reads = 0;
+    const store: AgentLoginStore = {
+      agent: "claude-cli",
+      unavailable: () => undefined,
+      read: () => {
+        reads += 1;
+        return value === undefined ? undefined : { value, at: 0 };
+      },
+      write: (next) => {
+        value = next;
+      },
+      remove: () => {
+        value = undefined;
+      },
+    };
+    const changes: LoginChange[] = [];
+    const watch = watchAgentLogins(() => [store], (change) => changes.push(change), { everyMs: 60_000, slowMs: 60_000 });
+    try {
+      watch.check(0);
+      value = wiped;
+      watch.check(10_000);
+      expect(reads).toBe(1);
+      expect(changes).toEqual([]);
+      watch.check(60_000);
+      expect(changes).toEqual([{ agent: "claude-cli", usable: false }]);
+    } finally {
+      watch.dispose();
+    }
+  });
+
+  it("does not look at a store that cannot be followed here", () => {
+    let reads = 0;
+    const store: AgentLoginStore = { agent: "claude-cli", unavailable: () => "the keychain said no", read: () => ((reads += 1), undefined), write: () => undefined, remove: () => undefined };
+    const watch = watchAgentLogins(() => [store], () => undefined);
+    watch.check(0);
+    watch.dispose();
+    expect(reads).toBe(0);
   });
 });

@@ -143,6 +143,7 @@ import {
   enabledAdapters,
   enabledGenericAgents,
   withCodexKey,
+  withClaudeToken,
   registerAgentRuntimes,
   sdkCredential,
   registerChangesetFunctions,
@@ -695,6 +696,7 @@ function buildRunEnvironment(
     ...(config.agents.codex?.command !== undefined ? { codexCommand: config.agents.codex.command } : {}),
     ...(config.agents.codex?.sandbox !== undefined ? { codexSandbox: config.agents.codex.sandbox } : {}),
     ...withCodexKey(config.agents, (name) => secrets.lookup(name)?.value),
+    ...withClaudeToken((name) => secrets.lookup(name)?.value),
   });
   registerGenericAgents(registry, {
     execEnv: config.execEnvironment,

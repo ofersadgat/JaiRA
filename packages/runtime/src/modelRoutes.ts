@@ -52,7 +52,7 @@ import {
   type SecretOrigin,
   type WeightsFileCheck,
 } from "@jaira/shared";
-import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CODEX_KEY_VARIABLES, agentSpawn, spawnWithKey, type AgentKey } from "./agents";
+import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CLAUDE_TOKEN_VARIABLE, CODEX_KEY_VARIABLES, agentSpawn, spawnWithKey, type AgentKey } from "./agents";
 import { sdkCredential, sdkQueryOnKey, type SdkCredential } from "./sdkCredential";
 import { observeAgentRoute, type AgentOutcomeObserver } from "./agentOutcome";
 import type { NativeBackgroundListener } from "./nativeBackground";
@@ -271,7 +271,8 @@ export function agentPromptRoutes(agents: JairaAgentConfig = {}, options: AgentR
       withAgentPermissionSet(
         CLAUDE_TOOLS,
         new AgentCliExecutor({
-          spawn,
+          // The long-lived sign-in JaiRA keeps for claude, when there is one — looked up at each start.
+          spawn: spawnWithKey(spawn, claudeTokenOf(options.secret)),
           ...(agents.claudeCli?.command !== undefined ? { command: agents.claudeCli.command } : {}),
           ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
           ...(query !== undefined ? { query } : {}),
@@ -770,6 +771,21 @@ export function codexKeyOf(agents: JairaAgentConfig, secret: ((name: string) => 
 export function withCodexKey(agents: JairaAgentConfig, secret: ((name: string) => string | undefined) | undefined): { codexKey?: AgentKey } {
   const key = codexKeyOf(agents, secret);
   return key !== undefined ? { codexKey: key } : {};
+}
+
+/**
+ * The long-lived sign-in claude runs on, as {@link spawnWithKey} hands it over: whatever the secret
+ * chain holds under {@link CLAUDE_TOKEN_VARIABLE}, looked up at each start. None when nothing can look
+ * one up — then claude reads its own sign-in file, or whatever its environment holds.
+ */
+export function claudeTokenOf(secret: ((name: string) => string | undefined) | undefined): AgentKey | undefined {
+  return secret === undefined ? undefined : { name: CLAUDE_TOKEN_VARIABLE, lookup: secret };
+}
+
+/** {@link claudeTokenOf} as `registerAgentRuntimes`' option: `{ claudeCliKey }`, or nothing. */
+export function withClaudeToken(secret: ((name: string) => string | undefined) | undefined): { claudeCliKey?: AgentKey } {
+  const key = claudeTokenOf(secret);
+  return key !== undefined ? { claudeCliKey: key } : {};
 }
 
 /** The agent route NAMES, without building the executors — the cheap half of {@link agentPromptRoutes}. */

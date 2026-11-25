@@ -28,7 +28,7 @@ import { SettingsGroup } from "../SettingsPage";
 import { ActionSlot, CheckAgain, LabelledBoxes, RowLine, RunsAs, SettingsFold } from "./Closed";
 import { InstallLogBox } from "./InstallLog";
 import { ShellChoice } from "./ShellChoice";
-import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, KeyShelfCard, KeyTile, LoginCards, ProviderForm, UpdateAfter, useShownSpecs } from "./ProviderRows";
+import { AddAgentForm, InstallPanel, KeyBoxes, KeyEntry, KeyShelfCard, KeyTile, LoginCards, ProviderForm, TokenEntry, UpdateAfter, useShownSpecs } from "./ProviderRows";
 import { Chevron, ConnRow, ConnRows, RowHead, Say, Version, Wide } from "./Row";
 import { AnotherTile, InstallButton, InstallTile, Shelf, ShelfCard } from "./Shelf";
 
@@ -107,11 +107,24 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
   }, [running]);
   // The key's store form, across the opened row — from its + box, or from the closed row's Add a key.
   const [keyOpen, setKeyOpen] = useState(false);
+  // Claude's long-lived token's entry (`claude setup-token`), and whether the browser is open for one.
+  const { onSetUpToken, onSaveToken } = props;
+  const takesToken = spec.id === "claude-cli" && onSetUpToken !== undefined && onSaveToken !== undefined;
+  const [tokenOpen, setTokenOpen] = useState(false);
+  const [makingToken, setMakingToken] = useState(false);
   const row = useProviderRow(props);
   const { merged, locked, enabled, state, write } = row;
   // How the agent got here and what installs or updates it — while it is on.
   const install = state !== "off" ? probe?.install : undefined;
   const signing = signingIn.has(spec.id);
+  useEffect(() => {
+    if (!signing) setMakingToken(false);
+  }, [signing]);
+  const setUpToken = (): void => {
+    setMakingToken(true);
+    setTokenOpen(false);
+    onSetUpToken?.(spec.id);
+  };
   const panel = installPanelOf(install);
   const update = updateOf(install);
   const line = agentLineOf(probe, state, install);
@@ -150,6 +163,9 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
           onCancel: () => onCancelSignIn(spec.id),
           onSignOut: () => onSignOut(spec.id),
           ...(spec.credential !== "none" && !keyOpen ? { onAddKey: () => setKeyOpen(true) } : {}),
+          ...(takesToken && !tokenOpen ? { onAddToken: () => setTokenOpen(true) } : {}),
+          ...(takesToken ? { onSetUpToken: setUpToken } : {}),
+          makingToken: makingToken && signing,
         })
       : []),
     ...KeyBoxes({ spec, probe, merged, busy: locked, open: keyOpen || agentLogins, warn: state === "needs-sign-in", onOpen: () => setKeyOpen(true) }),
@@ -190,6 +206,19 @@ function AgentRow(props: RowProps & { first: boolean }): JSX.Element {
         keyOpen && !unreached ? (
           <Wide key="key">
             <KeyEntry spec={spec} merged={merged} layer={layer} busy={locked} secrets={secrets} hasProject={config !== null && config.projectFile.length > 0} onSave={onSaveCredential} onClose={() => setKeyOpen(false)} />
+          </Wide>
+        ) : null,
+        tokenOpen && takesToken && !unreached ? (
+          <Wide key="token">
+            <TokenEntry
+              agent={spec.id}
+              command={typeof merged["command"] === "string" ? merged["command"] : undefined}
+              busy={busy}
+              signingIn={signing}
+              onSetUp={setUpToken}
+              onSave={(token) => onSaveToken!(spec.id, token)}
+              onClose={() => setTokenOpen(false)}
+            />
           </Wide>
         ) : null,
         // The shell its commands run in (decision 0030): emulated, or a live zsh, bash or sh.

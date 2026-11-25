@@ -23,6 +23,8 @@ import { createRequire } from "node:module";
 import { join, posix, win32 } from "node:path";
 import {
   BUILTIN_EXECUTORS,
+  CLAUDE_TOKEN_LABEL,
+  CLAUDE_TOKEN_METHOD,
   EXECUTOR_KINDS,
   type AgentAccount,
   type AgentInstall,
@@ -38,7 +40,7 @@ import {
   type ProbeStatus,
   type SecretOrigin,
 } from "@jaira/shared";
-import { AGENT_CLI, AGENT_CODEX, AGENT_SDK } from "./agents";
+import { AGENT_CLI, AGENT_CODEX, AGENT_SDK, CLAUDE_TOKEN_VARIABLE } from "./agents";
 import { agentInstallOf, agentPackageOf, agentTitleOf, installChoicesFor } from "./agentInstall";
 import { gatherInstallFacts, inGuest, installOriginOf, type AgentPackage, type InstallDeps, type InstallFacts, type InstallLookup } from "./install";
 import { SIGN_IN_COMMANDS, signInCommand } from "./agentOutcome";
@@ -359,8 +361,12 @@ export async function probeExecutor(info: ExecutorInfo, given: ProbeOptions): Pr
   const signIn = SIGN_IN[info.kind];
   let accounts: AgentAccount[] | undefined;
   if (signIn !== undefined && info.credential === undefined) {
-    const read = await checkSignIn(info.command, signIn, options);
-    accounts = read?.accounts;
+    // A long-lived sign-in JaiRA keeps for claude is what its runs are handed, so it is what is asked
+    // about: claude reads it before its own file, and names it as a sign-in of its own.
+    const token = info.kind === "cli" ? options.secrets?.lookup(CLAUDE_TOKEN_VARIABLE)?.value : undefined;
+    const held = token !== undefined && token.length > 0 ? token : undefined;
+    const read = await checkSignIn(info.command, signIn, options, held !== undefined ? { [CLAUDE_TOKEN_VARIABLE]: held } : undefined);
+    accounts = read?.accounts.map((account) => (held !== undefined && account.method === "oauth_token" ? { ...account, label: CLAUDE_TOKEN_LABEL, method: CLAUDE_TOKEN_METHOD } : account));
     // A warning, not a failure: the binary runs, and the logins under it say who is missing. The detail
     // says what was asked and what it answered — "'claude' responded" beside "not signed in" read as a
     // contradiction. Whether the sign-in on file stopped working (`lapsed`) the engine lays over this,
@@ -478,10 +484,11 @@ const SIGN_IN: Partial<Record<ExecutorKind, SignInCheck>> = {
  * have the subcommand, a hang, output in a shape not recognized — is `undefined`, never a verdict:
  * failing a working executor on an unreadable answer is as wrong as passing a signed-out one.
  */
-async function checkSignIn(command: string, check: SignInCheck, options: ProbeOptions): Promise<SignInRead | undefined> {
+async function checkSignIn(command: string, check: SignInCheck, options: ProbeOptions, env?: Record<string, string>): Promise<SignInRead | undefined> {
   try {
     const result = await options.exec.run(command, check.status, {
       ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      ...(env !== undefined ? { env } : {}),
       timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     });
     return result.timedOut ? undefined : check.read(result);
@@ -567,6 +574,84 @@ export async function signInAgent(info: ExecutorInfo, options: SignInOptions): P
 /** Sign an agent out: its logout command. Machine-wide — the CLI's terminal sessions are signed out too. */
 export async function signOutAgent(info: ExecutorInfo, options: SignInOptions): Promise<SignInOutcome> {
   return runSignInCommand(info, SIGN_IN_COMMANDS[info.name]?.logout, "sign out", options);
+}
+
+/** How long `claude setup-token` is left running once its token has been seen: the rest of a wrapped line. */
+const TOKEN_SEEN_GRACE_MS = 1_500;
+
+/** What `claude setup-token` came to: the token it printed, or why there is none. */
+export type ClaudeTokenOutcome = { ok: true; token: string } | { ok: false; reason: string };
+
+/**
+ * Make a long-lived sign-in for claude with its own `claude setup-token`: Anthropic's flow, in the
+ * browser, for the person's own subscription — the token it prints at the end is the outcome. JaiRA
+ * keeps it; nothing here stores it.
+ *
+ * The command shows its token on a screen it may hold open for a key, so it is stopped once the token
+ * has been seen (and a moment more, for a line still being written). No timeout, only the abort: the
+ * browser can take minutes.
+ */
+export async function setUpClaudeToken(info: ExecutorInfo, given: SignInOptions): Promise<ClaudeTokenOutcome> {
+  if (info.kind !== "cli") return { ok: false, reason: `${info.name} has no long-lived token of its own` };
+  const options = onMachine(given);
+  const command = info.command ?? SIGN_IN_COMMANDS[AGENT_CLI]!.command;
+  const stop = new AbortController();
+  const cancelled = (): void => stop.abort();
+  given.abortSignal?.addEventListener("abort", cancelled);
+  if (given.abortSignal?.aborted === true) stop.abort();
+  let seen = "";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await options.exec.run(command, ["setup-token"], {
+      ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
+      abortSignal: stop.signal,
+      onOutput: (_stream, chunk) => {
+        seen += chunk;
+        if (timer === undefined && claudeTokenIn(seen) !== undefined) timer = setTimeout(() => stop.abort(), TOKEN_SEEN_GRACE_MS);
+      },
+    });
+    const token = claudeTokenIn(`${seen}\n${result.stdout}\n${result.stderr}`);
+    if (token !== undefined) return { ok: true, token };
+    if (given.abortSignal?.aborted === true) return { ok: false, reason: "the sign-in was cancelled" };
+    const said = (result.stderr || result.stdout).replace(ANSI, "").trim().split(/\r?\n/).filter(Boolean).pop() ?? "";
+    return { ok: false, reason: `'${command} setup-token' ${result.code !== null ? `exited ${result.code}` : "stopped"} without a token${said ? `: ${said}` : ""}` };
+  } catch (e) {
+    return { ok: false, reason: `'${command}' could not be started: ${(e as Error).message}` };
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    given.abortSignal?.removeEventListener("abort", cancelled);
+  }
+}
+
+/** A terminal's escapes — colour, cursor moves, a title — which a screen's output is full of. */
+const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b\\)|\u001b[@-Z\\-_]/g;
+/** What a token is made of, and what a screen draws around a line: spaces and box edges. */
+const TOKEN_RUN = /^[A-Za-z0-9_-]+/;
+const DECORATION = /^[\s─-╿]*$/;
+
+/**
+ * The long-lived token in what `claude setup-token` printed, or undefined. A screen narrower than the
+ * token wraps it, so a line whose token runs to its edge is continued by the next line when that line
+ * is nothing but token — "Store this token securely" is not, and ends it.
+ */
+export function claudeTokenIn(output: string): string | undefined {
+  const lines = output.replace(ANSI, "").replace(/\r(?!\n)/g, "\n").split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const at = line.search(/sk-ant-oat\d+-/);
+    if (at < 0) continue;
+    let token = TOKEN_RUN.exec(line.slice(at))![0];
+    let rest = line.slice(at + token.length);
+    for (let next = i + 1; next < lines.length && DECORATION.test(rest); next++) {
+      const more = lines[next]!.replace(/^[\s─-╿]+/, "");
+      const run = TOKEN_RUN.exec(more)?.[0];
+      if (run === undefined || !DECORATION.test(more.slice(run.length))) break;
+      token += run;
+      rest = more.slice(run.length);
+    }
+    if (token.length >= 40) return token;
+  }
+  return undefined;
 }
 
 async function runSignInCommand(info: ExecutorInfo, args: readonly string[] | undefined, verb: string, given: SignInOptions): Promise<SignInOutcome> {

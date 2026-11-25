@@ -4,6 +4,7 @@ import type { FloatRect } from "@jaira/ui/floatPlace";
 import { View } from "@tamagui/core";
 import {
   BUILTIN_GENERIC_AGENTS,
+  CLAUDE_TOKEN_METHOD,
   SECRET_SOURCE_LABELS,
   SECRET_TARGET_LABELS,
   type AgentAccount,
@@ -185,6 +186,9 @@ export function LoginCards({
   onCancel,
   onSignOut,
   onAddKey,
+  onAddToken,
+  onSetUpToken,
+  makingToken = false,
 }: {
   agent: string;
   command: string | undefined;
@@ -199,13 +203,19 @@ export function LoginCards({
   onCancel: () => void;
   onSignOut: () => void;
   onAddKey?: (() => void) | undefined;
+  /** Claude: open the long-lived token's entry — the + box's other way in. */
+  onAddToken?: (() => void) | undefined;
+  /** Claude: make a long-lived token anew — what a refused token is fixed by. */
+  onSetUpToken?: (() => void) | undefined;
+  /** The browser is open for a long-lived token, not for a sign-in. */
+  makingToken?: boolean;
 }): JSX.Element[] {
   const several = accounts.length > 1;
   const { binary, login } = loginCommandOf(agent, command);
   const add = loginAddWords(accounts, lapsed);
   const renewing = accounts.some((account) => account.refused !== undefined);
   const boxes = accounts.map((account, i) => (
-    <LoginCard key={`${account.label}:${i}`} agent={agent} account={account} binary={binary} tagged={several && account.active} signingIn={signingIn} busy={busy} onSignIn={onSignIn} onCancel={onCancel} onSignOut={onSignOut} />
+    <LoginCard key={`${account.label}:${i}`} agent={agent} account={account} binary={binary} tagged={several && account.active} signingIn={signingIn} busy={busy} onSignIn={onSignIn} onCancel={onCancel} onSignOut={onSignOut} {...(onSetUpToken !== undefined ? { onSetUpToken } : {})} />
   ));
   if (!renewing) {
     boxes.push(
@@ -214,9 +224,15 @@ export function LoginCards({
           key="add"
           title="Finish in your browser"
           sub={
-            <>
-              Nothing opened? Run <Code spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.3, color: "dim" }}>{login}</Code>.
-            </>
+            makingToken ? (
+              <>
+                Nothing opened? Run <Code spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.3, color: "dim" }}>{binary} setup-token</Code> and paste its token.
+              </>
+            ) : (
+              <>
+                Nothing opened? Run <Code spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.3, color: "dim" }}>{login}</Code>.
+              </>
+            )
           }
           onCancel={onCancel}
         />
@@ -226,7 +242,7 @@ export function LoginCards({
           warn={warn}
           disabled={busy}
           main={{ title: add.title, onPress: onSignIn }}
-          {...(onAddKey !== undefined ? { link: { text: "or an API key", onPress: onAddKey } } : { sub: add.sub })}
+          {...(onAddKey !== undefined ? { link: { text: "or an API key", onPress: onAddKey } } : onAddToken !== undefined ? { link: { text: "or a long-lived token", onPress: onAddToken } } : { sub: add.sub })}
         />
       ),
     );
@@ -244,6 +260,7 @@ function LoginCard({
   onSignIn,
   onCancel,
   onSignOut,
+  onSetUpToken,
 }: {
   agent: string;
   account: AgentAccount;
@@ -254,7 +271,10 @@ function LoginCard({
   onSignIn: () => void;
   onCancel: () => void;
   onSignOut: () => void;
+  onSetUpToken?: (() => void) | undefined;
 }): JSX.Element {
+  // A long-lived token JaiRA keeps: logging out of it removes it from JaiRA, and a refused one is made anew.
+  const token = account.method === CLAUDE_TOKEN_METHOD;
   // Logging out is the CLI's own, so it is machine-wide — asked once, in place, rather than in a dialog.
   const [confirming, setConfirming] = useState(false);
   const refused = account.refused !== undefined;
@@ -267,14 +287,22 @@ function LoginCard({
         <LoginMark initial={account.label.charAt(0).toUpperCase()} />
         <Who grow>{account.label}</Who>
         {refused ? <Tag tone="warn">refused</Tag> : tagged ? <Tag tone="accent">in use</Tag> : null}
-        {signingIn || confirming ? null : <LogoutButton title={`Log out — signs ${binary} out on this computer`} disabled={busy} onPress={() => setConfirming(true)} />}
+        {signingIn || confirming ? null : <LogoutButton title={token ? `Remove — JaiRA stops handing ${binary} this token` : `Log out — signs ${binary} out on this computer`} disabled={busy} onPress={() => setConfirming(true)} />}
       </View>
       <AccountAllowance account={allowance} plan={loginFacts(account).join(" · ")} />
       {refused ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }}>{`The last run's call was refused: ${account.refused}`}</Txt> : null}
       {confirming ? (
         <View flexDirection="column" gap={2} marginTop="auto" paddingTop={8}>
           <Txt spec={{ voice: "app", scale: 11 / 12.5 }}>
-            Sign <Code spec={{ voice: "data", scale: 11 / 12, color: "text" }}>{binary}</Code> out on this computer? Its terminal sessions lose this login too.
+            {token ? (
+              <>
+                Remove this token? <Code spec={{ voice: "data", scale: 11 / 12, color: "text" }}>{binary}</Code> goes back to its own sign-in, here and on your other machines.
+              </>
+            ) : (
+              <>
+                Sign <Code spec={{ voice: "data", scale: 11 / 12, color: "text" }}>{binary}</Code> out on this computer? Its terminal sessions lose this login too.
+              </>
+            )}
           </Txt>
           <CardActions>
             <SmallButton
@@ -285,7 +313,7 @@ function LoginCard({
                 onSignOut();
               }}
             >
-              Log out
+              {token ? "Remove" : "Log out"}
             </SmallButton>
             <SmallButton kind="ghost" onPress={() => setConfirming(false)}>
               Keep
@@ -304,6 +332,10 @@ function LoginCard({
                 Cancel
               </SmallButton>
             </>
+          ) : refused && token && onSetUpToken !== undefined ? (
+            <SmallButton kind="primary" disabled={busy} onPress={onSetUpToken}>
+              Make a new token
+            </SmallButton>
           ) : refused ? (
             <SmallButton kind="primary" disabled={busy} onPress={onSignIn}>
               Sign in again
@@ -618,6 +650,72 @@ export function KeyBoxes({ spec, probe, merged, busy, open, warn, onOpen }: { sp
 function RouteKeyUsage({ route }: { route: string }): JSX.Element | null {
   const limits = useLimits();
   return <KeyUsage account={accountFor(limits, route)} />;
+}
+
+/**
+ * Claude's long-lived token (`claude setup-token`): made here in the browser, or pasted from a terminal.
+ * Kept in the keychain — there is no other store to pick: it is a sign-in, and follows the person.
+ */
+export function TokenEntry({
+  agent,
+  command,
+  busy,
+  signingIn,
+  onSetUp,
+  onSave,
+  onClose,
+}: {
+  agent: string;
+  command: string | undefined;
+  busy: boolean;
+  signingIn: boolean;
+  onSetUp: () => void;
+  onSave: (token: string) => Promise<boolean>;
+  onClose: () => void;
+}): JSX.Element {
+  const { binary } = loginCommandOf(agent, command);
+  const [value, setValue] = useState("");
+  const code = { voice: "data", scale: 11 / 12, lineHeight: 1.4, color: "dim" } as const;
+  return (
+    <EntryBox>
+      <Hint>
+        A token from <Code spec={code}>{binary} setup-token</Code> signs {binary} in for a year and is never renewed, so nothing can wipe it. JaiRA keeps it in the keychain, hands it to every{" "}
+        {binary} it starts, and takes it to your other machines.
+      </Hint>
+      <PaneActions>
+        <Button disabled={busy || signingIn} onPress={onSetUp}>
+          Make one in the browser
+        </Button>
+      </PaneActions>
+      <Hint>
+        Or run <Code spec={code}>{binary} setup-token</Code> in a terminal and paste the token it prints:
+      </Hint>
+      <TextField value={value} mono secure width="100%" placeholder="sk-ant-oat01-…" onChange={setValue} />
+      <PaneActions>
+        <Button
+          disabled={busy || value.trim().length === 0}
+          onPress={() => {
+            void onSave(value).then((kept) => {
+              if (!kept) return;
+              setValue("");
+              onClose();
+            });
+          }}
+        >
+          Keep the token
+        </Button>
+        <Button
+          kind="ghost"
+          onPress={() => {
+            setValue("");
+            onClose();
+          }}
+        >
+          Cancel
+        </Button>
+      </PaneActions>
+    </EntryBox>
+  );
 }
 
 /** Store a provider's key: its name (when nothing names one), its value, and the store it goes to. */

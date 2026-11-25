@@ -137,6 +137,15 @@ export function envIntoWsl(env: NodeJS.ProcessEnv, asked: NodeJS.ProcessEnv | un
  */
 export const CODEX_KEY_VARIABLES: readonly string[] = ["CODEX_API_KEY"];
 
+/**
+ * The variable `claude` takes a long-lived sign-in from — what `claude setup-token` makes, through
+ * Anthropic's own flow, for the person's own subscription. Read before the sign-in file, and never
+ * renewed: nothing rotates it, so no process can wipe it and no two machines spend each other's
+ * renewal. JaiRA keeps one under this name (Settings → Connections → Agents) and hands it to each
+ * `claude` it starts.
+ */
+export const CLAUDE_TOKEN_VARIABLE = "CLAUDE_CODE_OAUTH_TOKEN";
+
 /** A key config names for an agent: what it is filed under, the variables its binary reads, and how it is looked up. */
 export interface AgentKey {
   name: string;
@@ -324,6 +333,8 @@ export interface AgentRuntimeOptions {
    * process ({@link spawnWithKey}). Absent ⇒ codex runs on its own sign-in, or whatever its environment holds.
    */
   codexKey?: AgentKey;
+  /** The long-lived sign-in `claude-cli` runs on ({@link CLAUDE_TOKEN_VARIABLE}), when one is kept. */
+  claudeCliKey?: AgentKey;
   /** Hears every agent call's outcome — how a refused sign-in reaches the settings screen. */
   onOutcome?: AgentOutcomeObserver;
   /**
@@ -421,7 +432,7 @@ export function registerAgentRuntimes(
             ...claudeWrapper(AGENT_CLI),
             ...(options.cliCommand !== undefined ? { command: options.cliCommand } : {}),
             ...(options.startBridge !== undefined ? { startBridge: options.startBridge } : {}),
-            spawn,
+            spawn: spawnWithKey(spawn, options.claudeCliKey),
           });
     registry.functions.set(
       AGENT_CLI,

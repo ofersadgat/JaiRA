@@ -2437,6 +2437,14 @@ export interface IpcContract {
   /** Sign an agent out (`claude auth logout`, `codex logout`) — machine-wide, the agent's terminal included. */
   "executor:signOut": { request: { name: string }; response: SignInOutcome };
   /**
+   * Make claude a long-lived sign-in with its own `claude setup-token` (the browser, as Sign in) and keep
+   * the token in the keychain, where every claude JaiRA starts is handed it. Never renewed, so nothing
+   * wipes it. Cancelled with `executor:cancelSignIn`; a fresh availability check follows.
+   */
+  "executor:setUpToken": { request: { name: string }; response: SignInOutcome };
+  /** Keep a long-lived token made with `claude setup-token` in a terminal; an empty one removes it. */
+  "executor:saveToken": { request: { name: string; token: string }; response: SignInOutcome };
+  /**
    * Install an agent JaiRA knows how to install (claude, codex, gemini, agy, muse, opencode) the way named — one of its probe's
    * `install.install` — or by the path of keys `choice` names through its probe's `install.choices`,
    * each step in turn (Node.js, then npm's install of the agent); with neither, update it the way it was
@@ -3099,6 +3107,8 @@ export const IPC_CHANNELS = [
   "executor:signIn",
   "executor:cancelSignIn",
   "executor:signOut",
+  "executor:setUpToken",
+  "executor:saveToken",
   "executor:install",
   "executor:cancelInstall",
   "gitCli:install",
