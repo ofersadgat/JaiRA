@@ -68,6 +68,16 @@ describe("a process's state", () => {
     expect(processDisplayName('"C:\\Program Files\\nodejs\\node.exe" server.js --port 3')).toBe("node server.js");
     expect(processDisplayName("cmd /c \"npx serve dist -l 5050\"")).toBe("serve dist");
   });
+
+  it("names a line of several commands by the one that does the work, as its shell reads it", () => {
+    // The line that was called `tdshots"; Program Files` (2026-11-25).
+    const line = String.raw`$d="$env:TEMP\tdshots"; $e="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; foreach($n in 1..6){ & $e --headless --window-size=489,1300 "http://127.0.0.1:8142/?hero=$n" 2>$null | Out-Null }; Start-Sleep 2`;
+    expect(processDisplayName(line, "powershell")).toBe("msedge --headless");
+    expect(processDisplayName("cd app && npx one dev --port 8145", "posix")).toBe("one dev");
+    expect(processDisplayName("Start-Sleep 5; npm run storybook", "powershell")).toBe("storybook");
+    // One command: the words as written name it, as they always did.
+    expect(processDisplayName("npx tsc --noEmit", "posix")).toBe("tsc --noEmit");
+  });
 });
 
 describe("a sample", () => {

@@ -251,16 +251,16 @@ class Parser {
         continue;
       }
       if (c === ")" || c === "}" || c === "]") throw new Syntax(`unexpected '${c}'`);
-      const background = this.statement();
+      const separated = this.statement();
       this.blanks();
       const after = this.text[this.i];
-      if (!background && after !== undefined && after !== "\n" && after !== ";" && after !== close) throw new Syntax(`unexpected '${after}'`);
+      if (!separated && after !== undefined && after !== "\n" && after !== ";" && after !== close) throw new Syntax(`unexpected '${after}'`);
     }
   }
 
   /**
    * One statement. True when what ended it also separates it from the next: a keyword's statement
-   * (`if (…) { … } b` is two), or PowerShell 7's background `&`.
+   * (`if (…) { … } b` is two).
    */
   private statement(): boolean {
     this.blanks();
@@ -306,7 +306,7 @@ class Parser {
     return word;
   }
 
-  /** Pipelines joined by `&&` and `||` (PowerShell 7). True when PowerShell 7's background `&` ends it. */
+  /** Pipelines joined by `&&` and `||` (PowerShell 7). A lone `&` after them is refused. */
   private chain(): boolean {
     this.pipeline();
     for (;;) {
@@ -318,10 +318,11 @@ class Parser {
         this.pipeline();
         continue;
       }
-      if (this.text[this.i] === "&") {
-        this.i++;
-        return true;
-      }
+      // PowerShell 7 runs what is before a lone `&` in the background; Windows PowerShell — the one
+      // JaiRA's own shell runs, and the only one a Windows machine is sure to have — refuses the line
+      // and runs none of it. It is nearly always a URL's `&` left unquoted (`?a=1&b=2`), so the line is
+      // unparsed: read as PowerShell 7 would, it is commands that never ran (2026-11-25).
+      if (this.text[this.i] === "&") throw new Syntax("'&' is not allowed here: Windows PowerShell refuses the line, and PowerShell 7 would run what is before it in the background");
       return false;
     }
   }

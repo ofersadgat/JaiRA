@@ -26,9 +26,8 @@ describe("PowerShell statements", () => {
   it.each<[string, string[]]>([
     ["git status; git log\nnpm test", ["command «git status»", "command «git log»", "command «npm test»"]],
     ["Get-Content a.txt | Select-String foo | Out-File b.txt", ["command «Get-Content a.txt»", "command «Select-String foo»", "command «Out-File b.txt»"]],
-    // PowerShell 7's chains and background `&`.
+    // PowerShell 7's chains.
     ["npm test && git push || echo failed", ["command «npm test»", "command «git push»", "command «echo failed»"]],
-    ["npm start & git status", ["command «npm start»", "command «git status»"]],
     // An expression first, then commands down the pipeline.
     [`"text" | Out-File a.txt`, ["command «Out-File a.txt»"]],
     ["1..3 | % { Remove-Item \"f$_\" }", [`command «% { Remove-Item "f$_" }»`, `command «Remove-Item "f$_"»`]],
@@ -98,6 +97,10 @@ describe("PowerShell words", () => {
     [`git commit -m"msg"`, ["git", "commit", "-mmsg"]],
     // Arrays: one argument of several words.
     ["Remove-Item a.txt, b.txt,c.txt", ["Remove-Item", "a.txt", "b.txt{element}", "c.txt{element}"]],
+    // …but a program PowerShell does not run itself is handed an array written with no blank around its
+    // commas as ONE argument, and one written `a, b` as two (Windows PowerShell 5.1, 2026-11-25).
+    [`msedge --window-size=489,1300 a, b "q",r`, ["msedge", "--window-size=489,1300", "a", "b{element}", "q,r"]],
+    ["git add a.txt,b.txt", ["git", "add", "a.txt,b.txt"]],
     // Variables and what follows them, splats.
     ["Write-Output $env:PATH ${a b} $x.Name @params $using:y", ["Write-Output", "$env:PATH{dynamic}", "${a b}{dynamic}", "$x.Name{dynamic}", "@params{dynamic}", "$using:y{dynamic}"]],
     // A splat is the whole word; a word that goes on past the name is a word (PowerShell's own tokenizer, `Generic`).
@@ -195,7 +198,7 @@ describe("PowerShell embedders", () => {
     // `-File` runs a file: nothing is opened.
     ["powershell -File build.ps1 -Release", ["command «powershell -File build.ps1 -Release»"]],
     // cmd runs the rest of the line, in its own language: `&` runs one command after another, `'` is a character.
-    [`cmd /c "del x.txt & rd /s /q build" & git status`, ["command «del x.txt»", "command «rd /s /q build»", "command «git status»"]],
+    [`cmd /c "del x.txt & rd /s /q build"; git status`, ["command «del x.txt»", "command «rd /s /q build»", "command «git status»"]],
     [`cmd /c "echo it's %PATH%"`, ["command «echo it's %PATH%»"]],
     [`iex 'git status; Remove-Item x'`, ["command «git status»", "command «Remove-Item x»"]],
     // Start-Process starts the program it names with the words it hands it.
@@ -213,6 +216,15 @@ describe("PowerShell embedders", () => {
     ["wsl -d Ubuntu rm -rf build", ["command «wsl -d Ubuntu rm -rf build»", "command «rm -rf build»"]],
   ])("%j", (line, expected) => {
     expect(pieces(line)).toEqual(expected);
+  });
+
+  it("refuses a lone `&`, as Windows PowerShell does: PowerShell 7's background operator, nearly always a URL's", () => {
+    // The last is the line that ran on 2026-11-25: `\"` is no escape in PowerShell, so the URL's `&` was bare.
+    for (const line of ["npm start & git status", "npm start &", "curl http://x/?a=1&b=2", String.raw`cmd /c "\"C:\x.exe\" \"http://h/?a=5&b=1\""`]) {
+      expect(takeApart(line, "powershell"), line).toMatchObject({ unparsed: true, requests: [] });
+    }
+    // Quoted, it is a character of the word; doubled, a chain; first, the call operator.
+    expect(takeApart(`curl "http://x/?a=1&b=2" && & git status`, "powershell").unparsed).toBe(false);
   });
 
   it("cannot read what is encoded, read from the input, or decided as the line runs", () => {

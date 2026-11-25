@@ -17,7 +17,7 @@ import { usePhone } from "../../app/phone";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
-import { Following, IconButton, ScreenLine, WRAP_WEB } from "../terminal/TermParts";
+import { CopyButton, Following, ScreenLine, WRAP_WEB } from "../terminal/TermParts";
 import { MoreButton, StopButton, TerminalView, pressedAt } from "../terminal/TerminalView";
 import { PortChip, StatsLine, StatusText, TellClaude, useSampling } from "./ProcessParts";
 
@@ -349,7 +349,7 @@ function ProcessFollowCard({ process, project, fill, bare, onFold }: { process: 
           <TellClaude process={process} project={project} />
           <View flex={1} />
           {live ? <Following on={following} onPress={() => setFollowing((v) => !v)} /> : null}
-          <IconButton icon="copy" label="Copy what it printed" onPress={() => void copyText(plain())} />
+          <CopyButton label="Copy what it printed" text={plain} />
         </View>
         <View backgroundColor={TERM_INK.ground} minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
           {fill ? (

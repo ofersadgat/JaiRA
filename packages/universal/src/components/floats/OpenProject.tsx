@@ -47,8 +47,7 @@ import { Icon } from "../panel/Icon";
 import { MachineIcon } from "../MachineIcon";
 import { Column, ColumnBrowser, Crumbs, FolderCell, FolderColumn, FolderDetail, ForgeGlyph, HEAD, MachinePlaces, PlaceRow, joinPath, lastOf, parentOf, type FolderFocus } from "./FolderColumns";
 import { TermLog, plainOf } from "../terminal/TermLog";
-import { IconButton } from "../terminal/TermParts";
-import { copyText } from "../../clipboard";
+import { CopyButton } from "../terminal/TermParts";
 
 type Source = ChosenSource;
 type Place = { kind: "machine"; id: string; label: string } | { kind: "forge"; host: string; label: string };
@@ -1288,7 +1287,7 @@ function GoStep({ job, onCancel }: { job: WorkspaceJob | undefined; onCancel: ()
         <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} flexGrow={1} flexShrink={1} minWidth={0} ellip>
           {done === undefined ? `Making ${job.label}` : done.ok ? `${job.label} is ready` : `${job.label} stopped`}
         </Txt>
-        <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(blocks.map((b) => [...(b.command !== undefined ? [`$ ${b.command}`] : []), plainOf(b.text)].join("\n").replace(/\n+$/, "")).join("\n"))} />
+        <CopyButton label="Copy the output" text={() => (blocks.map((b) => [...(b.command !== undefined ? [`$ ${b.command}`] : []), plainOf(b.text)].join("\n").replace(/\n+$/, "")).join("\n"))} />
         {done === undefined ? (
           <Button kind="danger" onPress={onCancel}>
             Stop

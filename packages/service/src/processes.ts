@@ -30,7 +30,9 @@ import {
   processKey,
   processTaskIdOf,
   processTaskStatus,
+  takeApart,
   type BoardCard,
+  type CommandDialect,
   type BoardView,
   type ProcessOrigin,
   type ProcessOutputSource,
@@ -169,7 +171,9 @@ const RUNNERS = /^(?:(?:npx|bunx|pnpx)\s+(?:-y\s+|--yes\s+)?|(?:npm|pnpm|yarn|bu
  * an option, a path said by its last part — `npx one dev --port 8145` is `one dev`, `npx tsc --noEmit` is
  * `tsc --noEmit`, `node C:/x/devserver.cjs` is `node devserver.cjs`.
  */
-export function processDisplayName(command: string): string {
+export function processDisplayName(command: string, dialect?: CommandDialect): string {
+  const named = dialect !== undefined ? nameOfLine(command, dialect) : undefined;
+  if (named !== undefined) return named;
   let line = command.trim().replace(/^"([^"]*)"$|^'([^']*)'$/, "$1$2");
   for (let i = 0; i < 3; i++) {
     const next = unquoted(line.replace(RUNNERS, ""));
@@ -185,6 +189,29 @@ export function processDisplayName(command: string): string {
   }
   if (plain.length === 1 && words[1] !== undefined) plain.push(lastPart(words[1]));
   return plain.join(" ").slice(0, 60);
+}
+
+/** Commands that set the stage rather than do the work: a line's name is never one of them. */
+const STAGING = new Set(["cd", "pushd", "popd", "set-location", "push-location", "pop-location", "start-sleep", "sleep", "out-null", "export", "set"]);
+
+/**
+ * A line of several commands, named by the one that does the work, as the shell reads it — `$d="…"; $e="…\msedge.exe";
+ * foreach($n in 1..6){ & $e --headless … }` is `msedge --headless`, never its words split on blanks. `undefined` for a
+ * line of one command, or one that cannot be read: the words as written name it.
+ */
+function nameOfLine(command: string, dialect: CommandDialect): string | undefined {
+  let commands;
+  try {
+    commands = takeApart(command, dialect).requests.flatMap((r) => (r.kind === "command" && r.opened === undefined ? [r.command] : []));
+  } catch {
+    return undefined;
+  }
+  if (commands.length < 2) return undefined;
+  const main = commands.find((c) => !STAGING.has(c.program)) ?? commands[0]!;
+  const words = main.tokens.slice(main.programIndex ?? 0).filter((w) => w.length > 0);
+  if (words.length === 0) return undefined;
+  // Its words as the program is handed them, quoted where a blank is in one, named as a one-command line is.
+  return processDisplayName(words.map((w) => (/\s/.test(w) && !/"/.test(w) ? `"${w}"` : w)).join(" "));
 }
 
 /** A line whose first word is a quoted command (`cmd /c "npx serve dist"`), the quotes off; a quoted path stays one word. */
@@ -366,7 +393,7 @@ export class ProcessHub {
         pid: t.pid!,
         startedAt: t.startedAt,
         command: t.command,
-        name: processDisplayName(t.command),
+        name: processDisplayName(t.command, t.dialect),
         ...(t.cwd !== undefined ? { cwd: t.cwd } : {}),
         origin: "this-turn",
         by: t.by,

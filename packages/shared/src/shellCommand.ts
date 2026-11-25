@@ -682,6 +682,17 @@ function managerValuedFlags(program: string): ReadonlySet<string> {
   return new Set(runner === undefined ? [] : [...(runner.workspace ?? []), ...(runner.prefix ?? []), ...(runner.quietValued ?? [])]);
 }
 
+/**
+ * Whether a word decided at run time leaves what the command is a request for undecided: only when
+ * what is written before its first value could still begin a subcommand — `$(cat x)`, `re$x` — not when
+ * it is already none (`http://h/?n=$n`, `C:\x\$d`), which is the command's argument whatever it becomes.
+ */
+function undecidedSubcommand(word: Token): boolean {
+  if (word.dynamic !== true) return false;
+  const written = /^[^$%`(@{]*/.exec(word.value)![0];
+  return /^[A-Za-z0-9_-]*$/.test(written);
+}
+
 /** One `ParsedCommand` from a run of words, with no embedder opened. */
 function commandOf(words: Token[], start: number, via: string[], dialect: CommandDialect): ParsedCommand {
   const { program, alias } = commandNameOf(words[start]!.value, dialect);
@@ -713,7 +724,7 @@ function commandOf(words: Token[], start: number, via: string[], dialect: Comman
   });
   const subcommand = at >= 0 ? nonFlags[at] : undefined;
   const args = nonFlags.filter((_, i) => i !== at);
-  const dynamic = words[start]!.dynamic === true || subcommand?.dynamic === true;
+  const dynamic = words[start]!.dynamic === true || (subcommand !== undefined && undecidedSubcommand(subcommand));
   // Every word before the program was skipped as an assignment (`argv`), so each one names a variable.
   const sets = words.slice(0, start).map((t) => variableOf(t.value));
   return {
@@ -1046,8 +1057,37 @@ function merge(into: Walk, from: Walk): void {
   if (from.unparsed !== undefined && into.unparsed === undefined) into.unparsed = from.unparsed;
 }
 
+/** A PowerShell command name that is a cmdlet's, `Verb-Noun` — as an alias reads too (`rm` → `remove-item`). */
+const isCmdlet = (program: string): boolean => /^[a-z]+-[a-z]/i.test(program);
+
+/**
+ * A native program's words as it is handed them. An array written with no blank around its commas
+ * (`--window-size=489,1300`, `"a",b`) reaches a program PowerShell does not run itself as ONE argument,
+ * joined by them; written `a, b`, it is two. A cmdlet is handed the array, element by element. Checked
+ * against Windows PowerShell 5.1 (2026-11-25): `node -- --s=1,2 a, b "q",r` receives `--s=1,2`, `a`, `b`, `q,r`.
+ */
+function nativeArguments(words: Token[]): Token[] {
+  const head = words[0];
+  if (head === undefined || head.dynamic === true || isCmdlet(commandNameOf(head.value, "powershell").program)) return words;
+  const out: Token[] = [];
+  for (const word of words) {
+    const before = out[out.length - 1];
+    if (word.element === true && before !== undefined && word.start === before.end + 1) {
+      out[out.length - 1] = {
+        ...before,
+        value: `${before.value},${word.value}`,
+        end: word.end,
+        map: [...before.map, before.end, ...word.map],
+        ...(word.dynamic === true ? { dynamic: true } : {}),
+      };
+    } else out.push(word);
+  }
+  return out;
+}
+
 /** A run of words that is one ARGV — a segment of a line, or what `sudo`/`xargs`/`-exec` runs. */
-function argv(words: Token[], dialect: CommandDialect, via: string[], depth: number): Walk {
+function argv(given: Token[], dialect: CommandDialect, via: string[], depth: number): Walk {
+  const words = dialect === "powershell" ? nativeArguments(given) : given;
   // Skip leading `VAR=value` assignments (`FOO=1 git push`). PowerShell and cmd have none: `FOO=1` is
   // the name of a command there.
   let start = 0;

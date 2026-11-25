@@ -1,10 +1,11 @@
-import { useMemo, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { Platform } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { CommandDialect } from "@jaira/shared/browser";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { TERM_INK, type TermLine, type TermSpan } from "@jaira/ui/terminalModel";
 import { takenApartOf } from "@jaira/ui/transcript";
+import { copyText } from "../../clipboard";
 import { Press, Txt, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
@@ -99,11 +100,35 @@ export function Following({ on, onPress }: { on: boolean; onPress: () => void })
   );
 }
 
-export function IconButton({ icon, label, onPress }: { icon: "copy"; label: string; onPress: () => void }): JSX.Element {
+/**
+ * Copy, for a terminal's text: what `text` gives when pressed. Off (--tok-hint, no press) when there is
+ * nothing to copy — pressing it then would put an empty string over what the clipboard held. Once the
+ * clipboard took it, a --ok check for 1.4s, as the message rail's Copy does; a refused write shows nothing.
+ */
+export function CopyButton({ label, text }: { label: string; text: () => string }): JSX.Element {
   const t = useTokens();
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1400);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  const empty = text().trim().length === 0;
+  const said = empty ? `${label} — there is nothing to copy` : copied ? "Copied" : label;
   return (
-    <Press onPress={onPress} label={label} title={label} width={26} height={24} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered }) => (hovered ? { backgroundColor: t.v("fill-ghost-hover") } : {})}>
-      {({ hovered }: { hovered: boolean }) => <Icon name={icon} size={13} color={String(t.v(hovered ? "text" : "dim"))} />}
+    <Press
+      onPress={() => void copyText(text()).then((took) => took && setCopied(true))}
+      disabled={empty}
+      label={said}
+      title={said}
+      width={26}
+      height={24}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={5}
+      box={({ hovered }) => (hovered && !empty ? { backgroundColor: t.v("fill-ghost-hover") } : {})}
+    >
+      {({ hovered }: { hovered: boolean }) => <Icon name={copied ? "check" : "copy"} size={13} color={String(t.v(copied ? "ok" : empty ? "tok-hint" : hovered ? "text" : "dim"))} />}
     </Press>
   );
 }

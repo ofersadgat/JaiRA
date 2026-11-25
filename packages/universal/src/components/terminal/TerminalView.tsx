@@ -35,7 +35,7 @@ import { colorOf } from "../Sidebar";
 import { Icon } from "../panel/Icon";
 import { PlaceButtons } from "../panel/PlaceButtons";
 import { PortChip, StatsLine, StatusText, TellClaude, useSampling } from "../process/ProcessParts";
-import { CommandLine, Following, IconButton, ScreenLine, WRAP_WEB } from "./TermParts";
+import { CommandLine, CopyButton, Following, ScreenLine, WRAP_WEB } from "./TermParts";
 import { useTerminal } from "./useTerminal";
 
 /**
@@ -49,12 +49,14 @@ import { useTerminal } from "./useTerminal";
  *                    tone), a spacer, Stop while running, the place buttons, …
  *   the reading row  row, centred, gap 6, padding 0 8 8 10 (fill: 7 10, a --line under): the readings
  *                    as one joined switch (Terminal | Text | Command), a spacer, then (fill) the status,
- *                    Stop, the places and …, then Following while it runs, and Copy
+ *                    Stop, the places and …, then Following while it runs, and Copy: what the reading shows
+ *                    (the line on Command; `❯` and the line, then what it printed, on Terminal and Text)
  *   the screen       on the terminal's ground (#0f1120), padding 8 14 10, data 11.5/12 on 19px: the
  *                    command line taken apart as the approval takes it (each request on its hue at 22%,
  *                    what joins them dim), then what it printed, in its colours; the person's typing
  *                    marked. A card shows the last 12 lines, more a press away; a filled one scrolls,
- *                    following the end while Following is on
+ *                    following the end while Following is on. Text: the same, plain and selectable —
+ *                    `❯` and the line as written, then what it printed; italic --dim when it printed nothing
  *   the choices      while it waits and its prompt names answers: a key per answer, its meaning beside
  *   the input line   while it runs: `›`, a field that sends a line to its stdin, Ctrl-C; while it
  *                    waits, when its time limit ends
@@ -86,6 +88,11 @@ export interface TerminalViewProps {
 }
 
 type Reading = "terminal" | "text" | "command";
+
+/** A command and what it printed, as the Text reading shows them and Copy takes them: `❯ line`, then the output. */
+function shownText(command: string, output: string): string {
+  return output.trim().length > 0 ? `❯ ${command}\n${output}` : `❯ ${command}`;
+}
 
 const CARD_LINES = 12;
 const MORE_LINES = 400;
@@ -231,17 +238,22 @@ pid ${process.pid}` : commandLinesOf(command, dialect) } : {}) as object)}>
         {process !== undefined ? <TellClaude process={process} project={project ?? process.project} /> : null}
         <View flex={1} />
         {running ? <Following on={following} onPress={() => setFollowing((v) => !v)} /> : null}
-        <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(plain())} />
+        <CopyButton label={reading === "command" ? "Copy the command" : "Copy the command and what it printed"} text={() => (reading === "command" ? command : shownText(command, plain()))} />
       </View>
 
       <View backgroundColor={TERM_INK.ground} paddingTop={8} paddingBottom={10} paddingHorizontal={14} minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
         {reading === "command" ? (
           <CommandRows command={command} dialect={dialect} />
         ) : reading === "text" ? (
+          // The command as it was written, then what it printed, as plain text to select — and a line
+          // that says so when it printed nothing, so a quiet command is not read as a broken tab.
           <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0}>
             <Text {...(font(t, { voice: "data", scale: 11.5 / 12, lineHeight: { px: 19 } }) as object)} color={TERM_INK.text} {...(isWeb ? { style: { ...WRAP_WEB, userSelect: "text" } } : { selectable: true })}>
-              {kept?.plain() ?? ""}
+              {shownText(command, kept?.plain() ?? "")}
             </Text>
+            {kept === undefined || kept.plain().length === 0 ? (
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, italic: true, color: TERM_INK.dim }}>{kept === undefined ? (running ? "starting…" : "The engine no longer keeps this command's output.") : running ? "Nothing printed yet." : "It printed nothing."}</Txt>
+            ) : null}
           </Scroller>
         ) : (
           <Scroller fill={fill} follow={following && running} signal={copy?.version ?? 0} capped={!fill && more}>

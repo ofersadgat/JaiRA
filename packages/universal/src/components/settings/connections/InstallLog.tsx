@@ -2,10 +2,9 @@ import type { JSX } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { CommandDialect } from "@jaira/shared/browser";
 import { installLogHeadOf, installLogPlain, type InstallLog } from "@jaira/ui/installLog";
-import { copyText } from "../../../clipboard";
 import { Txt } from "../../../primitives";
 import { TermLog, plainOf } from "../../terminal/TermLog";
-import { IconButton } from "../../terminal/TermParts";
+import { CopyButton } from "../../terminal/TermParts";
 import { SmallButton, Spin } from "./Row";
 
 /**
@@ -46,7 +45,7 @@ export function InstallLogBox({ log, dialect = "posix", onCancel, onHide }: { lo
           </SmallButton>
         )}
         <View flex={1} />
-        <IconButton icon="copy" label="Copy the output" onPress={() => void copyText(installLogPlain(log, plainOf))} />
+        <CopyButton label="Copy the output" text={() => installLogPlain(log, plainOf)} />
       </View>
       <TermLog blocks={log.blocks} dialect={dialect} reset={log.blocks.length === 0} maxHeight={260} />
     </View>
