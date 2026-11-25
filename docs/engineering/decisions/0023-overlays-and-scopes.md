@@ -2,7 +2,7 @@
 id: engineering/decisions/0023-overlays-and-scopes
 type: decision
 status: built
-updated: 2026-11-18
+updated: 2026-11-24
 decides_for: [engineering/units/tool-policy, ui/components/permissionSet-card, ui/components/composer-setting-chip, ui/components/command-approval, ui/surfaces/settings-tools]
 ---
 
@@ -714,3 +714,42 @@ line, copying into a layer, switching off by following, the Files view's roots a
 project and from Shared), `app/test/federation.test.ts` (a paired machine's workflow read, written and
 deleted there), the events tests unchanged. Seen in the window: `shots/settings-layers.mts`.
 
+
+## Amended 2026-11-24: the Files view is one root per workspace, the layers laid over it
+
+The person, of a project's tree that ended in four empty roots (`{project} on this machine`, `You in
+{project}`, `Just you`, `This machine`, each "not created yet — adding a state here will create it"):
+"this makes no sense. the file view should have a root per workspace (unless there is only one workspace
+in which case you dont need to show a root). the built in / override stuff should simply appear like a
+filesystem overlay. i.e. it should show a virtual file." Asked how copies from several layers should
+show, they chose to keep every copy: "we can have the overlay files from all the sources. we can have an
+extra 'shadow' file for a version of that file from another source".
+
+This replaces "draws every layer as a root of its own" under *Shadowing* above.
+
+- **A root per workspace.** Each open project's checkout, or Shared when the shell stands in it. Headed
+  only when there is more than one.
+- **The layers are an overlay.** `overlaidRoot` (`persistence/stateViews.ts`) lays the `workflows/`,
+  `prompts/`, `functions/`, `permission-sets/` and `skills/` of every other layer (the four newer ones,
+  Shared and what ships; a replica, what ships alone) over the workspace's `.jaira/`. A folder is one row
+  whichever layers have it, `virtual` where only other layers do. A file is one row per layer that holds
+  it: the copy the search path reads first, then every other copy, `shadowed` by it. Settings files are
+  not laid over: they merge key by key, and no one copy of them is "the one read".
+- **A row is its own layer's file.** An overlay row keeps its layer and its path under that layer's root,
+  and says where that root is (`FileNode.layerDir`), so opening, saving, renaming, deleting, copying and
+  revealing act on it where it lives; what ships is read and overridden only, its first edit copied into
+  Shared as before (decision 0006). What a row's menu makes new (a file beside it, a child state) is made
+  in the workspace, in the folder the row is drawn in.
+- **The chip says whose.** A row from another layer carries its layer's name (`built in`, `just you`); a
+  shadowed copy carries whose it is, and its title says whose copy runs. The `shadowed · {layer}` and
+  `overridden` chips are gone.
+- **What is no longer in the tree:** the parts of a layer root that are not laid over — what ships'
+  `README.md`, `settings.json` and `artifact-types/`, and the files the newer layers keep beside their
+  folders. Shared's are still there, standing in it.
+
+Verified: `app/test/settingsLayerFiles.test.ts` (one root; a row per layer's copy, in search order, with
+its `layerDir`; a virtual folder; the same standing in Shared), `app/test/builtInStates.test.ts` (what
+ships drawn in a project's and Shared's `.jaira/`, shadowed by a person's copy of a state and of a file,
+each of several projects with its own marks), `app/test/fileTreePanel.test.ts` (an overlay row's menu acts
+where the file lives and makes new things in the workspace; its chip; a folder listing it; its unsaved dot
+on the folder; a virtual folder's menu).

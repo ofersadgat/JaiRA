@@ -2,7 +2,7 @@
 id: ui/components/file-tree
 type: ui-component
 status: shipped
-updated: 2026-11-18
+updated: 2026-11-24
 realizes: [ux/patterns/filter-in-place, ux/patterns/name-it-where-it-will-live, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/the-window-remembers-its-arrangement, ux/patterns/verbs-on-the-thing-itself, ux/patterns/absence-is-stated, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/share-processes-across-projects, product/all-projects-in-one-place]
 surfaces: [ui/surfaces/sidebar, ui/surfaces/files-view]
@@ -23,25 +23,26 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 
 **Do not use when.** One directory's contents fill the middle column: that is [folder-view](folder-view.md). The nesting is a run's states rather than folders: that is [state-rail](state-rail.md).
 
-## The standing checkout reads first, then each other root under its own name
+## One root per workspace, every other layer laid over its .jaira/
 
-- **Roots.** The checkout the drawer hangs under, or every open project at the root of the address, or `~/.jaira` when that is where the person stands; then `Built in`, the states and files JaiRA ships, last in every tree. The root the drawer hangs under has no heading; each other root starts with its name in `.data-secondary`, uppercased in `--dim` with wide tracking, and a `+` at its end.
-- **Built in.** Always headed. In place of the `+` its heading ends with a hairline `read-only` chip in the app face at its own case. Its folders have no `+`.
+- **Roots.** One per workspace: the checkout the drawer hangs under, or every open project at the root of the address, or `~/.jaira` when that is where the person stands. With one root there is no heading; with more, each starts with its name in `.data-secondary`, uppercased in `--dim` with wide tracking, and a `+` at its end. The person, 2026-11-24: "the file view should have a root per workspace (unless there is only one workspace in which case you dont need to show a root)".
+- **The overlay.** The other layers are not roots. The `workflows/`, `prompts/`, `functions/`, `permission-sets/` and `skills/` of Shared, the settings' newer layers (decision 0023) and what ships are laid over the workspace's own `.jaira/`, "like a filesystem overlay". A folder is one row whichever layers have it, `--dim` when only other layers do; making something in it makes it. A file is one row per layer that has it: the copy the search path reads first, then each other copy struck through after it — "an extra 'shadow' file for a version of that file from another source". Settings files are merged key by key, not read from one copy, so they are not laid over.
+- **Source chip.** A row from another layer ends with a hairline chip naming its layer (`built in`, `shared`, `just you`, `this machine`, `you in this project`, `this project on this machine`); a shadowed copy of the workspace's own says `this project`. Each row opens, saves and acts on its file where it lives. A row from what ships is read and overridden only, and its first edit copies it into Shared (decision 0006).
 - **Row.** 3px by 6px padding, 5px radius, 5px gaps. One 13px guide per level: the innermost a `--rule` hairline, the ancestors `--line`. Then a 13px glyph column in `--dim`: `▸` or `▾` for a folder, `◻` a state file, `◈` a prompt, `✦` a skill, `⚙` settings, `·` anything else. Then the name in the data face at 11.5/12 of its base, one line.
-- **End of row.** In order: an `--accent` dot for unsaved edits, a `--bad` or `--warn` dot for problems, one outlined pill chip in the app face, a `shadowed`, `overridden` or `override` chip, and on a folder a 16px `+` that shows only under the pointer or on focus but keeps its width.
+- **End of row.** In order: an `--accent` dot for unsaved edits, a `--bad` or `--warn` dot for problems, one outlined pill chip in the app face, the source chip, an `override` chip, and on a folder a 16px `+` that shows only under the pointer or on focus but keeps its width.
 - **Folding.** Every folder starts shut, and opening one shows only its own entries. What is open is kept for the person and restored next time.
 
 ## Every mark sits on the row it is about and rolls up onto its folders
 
 | State | Rendered as | Mockup |
 | --- | --- | --- |
-| empty | Before a tree has been read the drawer reads `Open a project to browse its files.` A root with nothing to show reads `empty`; a root not on disk reads `not created yet — adding a state here will create it`, in `--dim` under its heading. | [empty.html](../assets/file-tree/empty.html) |
+| empty | Before a tree has been read the drawer reads `Open a project to browse its files.` A root with nothing to show reads `empty`; Shared not on disk reads `not created yet — adding a state here will create it`, in `--dim` under its heading. | [empty.html](../assets/file-tree/empty.html) |
 | loading | Cannot occur as a look of its own: until the tree arrives the drawer shows the first empty line. | |
 | partial | Cannot occur: an open folder lists all of its entries. | |
 | error | Cannot occur as a look of its own: a file that cannot be read or parsed is one of the marks below. | |
 | success | Guides, glyphs and names; the open file on `--fill-ghost-selected` at weight 600, matched by project, root and path, so a state of the same id elsewhere stays plain. A file that is not text is `--dim` with a plain cursor and still opens. | [success.html](../assets/file-tree/success.html) |
-| marked | Unsaved edits: an `--accent` dot on the file and on every folder above it. Errors: name in `--bad`, a `--bad` dot and a chip with the count. Warnings only: the same in `--warn`. A file that cannot be read or parsed: a `!` chip, its tooltip the error. A state no workflow root reaches: name italic at 60%. A file a nearer layer overrides — a shared file this project overrides, a project file Just you overrides: row at 55%, name struck through, a `shadowed · {layer}` chip naming the layer whose copy runs (`shadowed · just you`), its title saying so. A folder carries the totals below it, so a fault shows with the branch shut. | [marked.html](../assets/file-tree/marked.html) |
-| built in | The last root. A shipped state that a project or shared file overrides: row at 55%, name struck through, an `overridden` chip. The file that overrides it, in its own root: an `override` chip after the name. A shipped state nothing overrides carries neither. | [built-in.html](../assets/file-tree/built-in.html) |
+| marked | Unsaved edits: an `--accent` dot on the file and on every folder above it. Errors: name in `--bad`, a `--bad` dot and a chip with the count. Warnings only: the same in `--warn`. A file that cannot be read or parsed: a `!` chip, its tooltip the error. A state no workflow root reaches: name italic at 60%. A copy a nearer layer overrides — Shared's under this project's, this project's under Just you's: drawn right after the copy that is read, row at 55%, name struck through, its source chip naming whose copy it is and its title whose copy runs (`Not read here: just you's copy is the one used`). A folder carries the totals below it, so a fault shows with the branch shut. | [marked.html](../assets/file-tree/marked.html) |
+| built in | Laid over `.jaira/` with the other layers. A shipped file nothing overrides: a plain row with a `built in` chip. One a person's copy overrides: that copy leads with an `override` chip, and the shipped row follows it at 55%, struck through. | [built-in.html](../assets/file-tree/built-in.html) |
 | filtering | The find field over the list takes focus. Typing flattens every root to the files whose path contains the text, ignoring case: no folders, no guides, root headings kept. | [filtering.html](../assets/file-tree/filtering.html) |
 | naming | A row typed into where the new thing will be, with the glyph it will have, any folders still to be made as a dim mono lead such as `workflows/`, and a field with only an `--accent` underline. | [naming.html](../assets/file-tree/naming.html) |
 
@@ -54,9 +55,9 @@ The drawer under the open project's `FILES` row in the sidebar: a scrolling list
 | Click a file | Opens it in the Files view | Row selected; address bar, middle column and context panel follow |
 | Right-click a row | Selects a file, then opens its menu in a [context-menu](context-menu.md) | Menu at the pointer |
 | Right-click a root heading or the space under a root | Opens the root's menu | Menu at the pointer |
-| Right-click a row under `Built in` | Opens the read-only menu: Open, the two overrides, `Edit a copy elsewhere…`, and the copy and reveal items; a folder or a file that is not a state gets only the last two | Menu at the pointer |
+| Right-click a `built in` row | Opens the read-only menu: Open, the two overrides, `Edit a copy elsewhere…`, and the copy and reveal items; a folder or a file that is not a state gets only the last two | Menu at the pointer |
 | `Edit a copy elsewhere…` or `Copy elsewhere…` in a state's menu | Opens a second menu in the first one's place, titled `Edit a copy` or `Copy`, of the settings' other layers, each saying only where (decision 0023, amended 2026-11-18) — six lines of verb, place and folder do not read whole at a menu's 232px | Menu at the same point |
-| Override for all projects, Override here, and the four newer layers | Copies the shipped state into `~/.jaira`, the project's `.jaira/`, or — decision 0023, amended 2026-11-18 — `~/.jaira/projects/<key>`, `~/.jaira/personal`, `.jaira/local` or `~/.jaira/machine` under the same id and opens the copy; refused when that layer already has one | The copy selected in its root; the shipped row gains `overridden · {layer}`. A refusal shows in the error notice |
+| Override for all projects, Override here, and the four newer layers | Copies the shipped state into `~/.jaira`, the project's `.jaira/`, or — decision 0023, amended 2026-11-18 — `~/.jaira/projects/<key>`, `~/.jaira/personal`, `.jaira/local` or `~/.jaira/machine` under the same id and opens the copy; refused when that layer already has one | The copy selected; it leads, and the shipped row follows it struck through. A refusal shows in the error notice |
 | `+` on a folder or root, or `+` on the `FILES` row | Offers New file…, New folder…, and New state… or New workflow… where one belongs | Menu under the button |
 | Pick a New item | Opens the folders on the way and starts a row to name it in, under the deepest one that exists | Field focused |
 | Enter, or leaving the field | Creates the file, folder or state from the trimmed name; an empty name creates nothing | The typed row is replaced by the new entry; a new state opens |
@@ -76,18 +77,19 @@ A state's name drops a typed `.json`, `.jsonc`, `.yaml` or `.yml` and any leadin
 | --- | --- |
 | Find field | placeholder `Filter…` |
 | No tree | `Open a project to browse its files.` |
-| Root empty | `empty` · `not created yet — adding a state here will create it` · under `Built in`: `nothing ships with this build` |
-| Built in heading | `Built in` · chip `read-only`, tooltip `What ships with JaiRA. Read it here; change it by overriding it.` |
+| Root empty | `empty` · `not created yet — adding a state here will create it` |
+| Source chip | `built in` · `shared` · `just you` · `this machine` · `you in this project` · `this project on this machine` · `this project`; title `{Layer}'s copy, and the one read here. Editing it edits that file: {path}` · `Ships with JaiRA, and nothing nearer has this file, so this is the copy read. Editing it copies it into Shared. {path}` · `Not read here: {layer}'s copy is the one used. This is {layer}'s, at {path}` |
 | `+` | tooltip `new file, folder or workflow in {name}`; label `New in {name}` |
 | Dots | tooltip `unsaved edits` · `unsaved edits below here` |
 | Row tooltip | `{n} errors, {n} warnings`, with ` below here` on a folder · `not validated — no workflow root reaches this state` · `{read or parse error}` · `{path}` |
-| Chips | `!` · `{errors}` · `{warnings}` · `shadowed` · `overridden` · `override`, tooltip `Overrides built in: JaiRA ships a state with this id, and this file runs instead of it` |
+| Chips | `!` · `{errors}` · `{warnings}` · the source chip · `override`, tooltip `Overrides built in: JaiRA ships a state with this id, and this file runs instead of it` |
 | Name field | placeholder `folder name` · `state id` · `file name`; label `new state id` · `new file name` · `new directory name` |
 | New items | `New file…` · `New folder…` · `New state…`, note `{id prefix}` · `New workflow…`, note `.jaira/workflows` or `workflows` |
 | Folder or file menu | the New items for its folder, then `Rename…` · `Delete` · `Copy path` · `Reveal in file explorer` |
 | State menu | `Open` · `New child state…`, note `{id}/` · `Duplicate…` · `Rename…` · `Override in this project` or `Copy to shared root`, disabled when shadowed or with no project open · `Copy state id` · `Copy path` · `Reveal in file explorer` · `Delete` |
-| Root menu | the New items, then `Copy path` · `Reveal in file explorer`, disabled when the root is not on disk; under `Built in` the last two only |
-| Built in state menu | `Open`, note `read-only` · `Edit a copy in Shared`, note `~/.jaira` · `Override here`, note `.jaira`, disabled with no project open · `Edit a copy elsewhere…` · `Copy state id` · `Copy path` · `Reveal in file explorer` |
+| Root menu | the New items, then `Copy path` · `Reveal in file explorer`, disabled when the root is not on disk |
+| Folder only another layer has | the New items only |
+| `built in` state menu | `Open`, note `read-only` · `Edit a copy in Shared`, note `~/.jaira` · `Override here`, note `.jaira`, disabled with no project open · `Edit a copy elsewhere…` · `Copy state id` · `Copy path` · `Reveal in file explorer` |
 | `Edit a copy elsewhere…` menu | title `Edit a copy`; `for you in this project` · `for just you` · `in this project on this machine` · `on this machine`, no folder beside them, a project's disabled with none open — the words of the workflow editor's `Elsewhere…` |
 | A state's copy items | `Override in this project` (a shared state), note `.jaira`, or `Copy to shared root` (any other), note `~/.jaira`, then `Copy elsewhere…` |
 | `Copy elsewhere…` menu | title `Copy`; `for you in this project` · `for just you` · `in this project on this machine` · `on this machine` · `in this project` · `in Shared`, less the row's own layer and the first item's, no folder beside them, a project's disabled with none open |
@@ -113,6 +115,7 @@ A state's name drops a typed `.json`, `.jsonc`, `.yaml` or `.yml` and any leadin
 ## The tree marks some data the way app words are marked
 
 - A root heading uppercases a project name or `~/.jaira`, which are data.
+- A folder only another layer has is `--dim` rather than italic: it is a place, not a missing file.
 - A shadowed row and an unchecked name are quietened with opacity instead of the `--tok-hint` register.
 - The selected file is shown with the ghost fill and weight, not the `--tint-accent` ground a selected nav row takes.
 - Count chips set their numbers, and the find field its path text, in the app face.

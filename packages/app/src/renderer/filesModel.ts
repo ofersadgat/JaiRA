@@ -254,6 +254,45 @@ export function anchorIn(
   };
 }
 
+/**
+ * Where a row is DRAWN in its workspace's tree, root-relative. A file of the workspace's own layer is
+ * drawn at its path; one another layer supplies ({@link FileNode.layerDir}) has a path relative to its
+ * own layer root and is drawn inside the workspace's layer folder, `prefix`.
+ */
+export function drawnPath(node: Pick<FileNode, "path" | "layerDir">, root: Pick<FileRoot, "prefix">): string {
+  return node.layerDir === undefined || root.prefix === "" ? node.path : `${root.prefix}/${node.path}`;
+}
+
+/** The folder a row is drawn in — where "New file…" beside it makes the new one. */
+function drawnDir(node: Pick<FileNode, "path" | "layerDir">, root: Pick<FileRoot, "prefix">): string {
+  const at = drawnPath(node, root);
+  return at.includes("/") ? at.slice(0, at.lastIndexOf("/")) : "";
+}
+
+/** The file on disk a row stands for, absolute — in its own layer, wherever it is drawn. */
+export function absPathOf(node: Pick<FileNode, "path" | "layerDir">, root: Pick<FileRoot, "dir">): string {
+  return `${node.layerDir ?? root.dir}/${node.path}`;
+}
+
+/**
+ * The chip naming where a row's file comes from, in a workspace's overlaid tree, or `null` for one of
+ * the workspace's own that is the copy read. A row from another layer says which (`built in`,
+ * `shared`, `just you`); a shadowed copy says whose it is and, in its tooltip, whose copy is read.
+ */
+export function sourceChipOf(node: FileNode, root: Pick<FileRoot, "layer" | "dir">): { text: string; title: string } | null {
+  const whose = LAYER_LABEL[node.layer];
+  const at = absPathOf(node, root);
+  if (node.shadowed === true) {
+    const by = node.shadowedBy !== undefined ? `${LAYER_LABEL[node.shadowedBy]}'s copy` : "a nearer copy";
+    return { text: whose, title: `Not read here: ${by} is the one used. This is ${whose}'s, at ${at}` };
+  }
+  if (node.layerDir === undefined && node.layer === root.layer) return null;
+  if (node.layer === "system") {
+    return { text: whose, title: `Ships with JaiRA, and nothing nearer has this file, so this is the copy read. Editing it copies it into Shared. ${at}` };
+  }
+  return { text: whose, title: `${whose[0]!.toUpperCase()}${whose.slice(1)}'s copy, and the one read here. Editing it edits that file: ${at}` };
+}
+
 /** The root half of a draft — the three fields that say which tree it belongs to. */
 const draftRoot = (root: FileRoot): Pick<TreeDraft, "rootDir" | "layer" | "project"> => ({
   rootDir: root.dir,
@@ -292,7 +331,7 @@ export function childStateDraft(root: FileRoot, node: FileNode, stateId: string)
     ...draftRoot(root),
     dir: `${workflowsDirOf(root.prefix)}/${stateId}`,
     // The parent's own row, one indent in — where `feature/` will draw its rows once it is there.
-    anchor: { key: `${node.layer}:${node.path}`, depth: node.path.split("/").length },
+    anchor: { key: `${node.layer}:${node.path}`, depth: drawnPath(node, root).split("/").length },
     target: { kind: "state", prefix: `${stateId}/` },
     // Its anchor is a row that is already visible, so there is nothing to open.
     reveal: [],
@@ -521,14 +560,28 @@ export interface CrumbInput {
  */
 export function entriesUnder(tree: FileTree | null, layer: WorkflowLayer, dir: string): FileNode[] {
   const out: FileNode[] = [];
+  const seen = new Set<string>();
+  const add = (node: FileNode): void => {
+    const key = `${node.layer}:${node.path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(node);
+  };
+  // What a folder holds is what the tree draws in it — another layer's files too, laid over the
+  // workspace's `.jaira/` — and, for a folder of a layer drawn only as an overlay, the files of that
+  // layer whose own path is in it.
   const walk = (nodes: readonly FileNode[]): void => {
     for (const node of nodes) {
+      if (node.kind === "directory" && node.layer === layer && node.path === dir) (node.children ?? []).forEach(add);
       const parent = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
-      if (parent === dir) out.push(node);
+      if (node.layer === layer && parent === dir) add(node);
       if (node.children) walk(node.children);
     }
   };
-  for (const root of tree?.roots ?? []) if (root.layer === layer) walk(root.nodes);
+  for (const root of tree?.roots ?? []) {
+    if (dir === "" && root.layer === layer) root.nodes.forEach(add);
+    walk(root.nodes);
+  }
   return out.sort((a, b) =>
     a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === "directory" ? -1 : 1,
   );
@@ -696,8 +749,10 @@ export function treeRowOf(
   // the state that forgot to wire a child is four levels down.
   // Unsaved edits: this file, or — with the branch folded — anything below it. A draft is invisible
   // until it is saved or the window closes, so the tree is where it has to be announced.
+  // A folder of an overlaid tree holds other layers' files, whose keys are not under its own.
+  const below = (list: readonly FileNode[]): boolean => list.some((child) => dirty.has(`${child.layer}:${child.path}`) || below(child.children ?? []));
   const unsaved =
-    dirty.size === 0 ? false : isDir ? [...dirty].some((k) => k.startsWith(`${key}/`)) : dirty.has(key);
+    dirty.size === 0 ? false : isDir ? [...dirty].some((k) => k.startsWith(`${key}/`)) || below(node.children ?? []) : dirty.has(key);
   const lint = node.lint;
   const tone =
     node.error !== undefined || (lint?.errors ?? 0) > 0
@@ -1084,10 +1139,12 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
    * thing next to where you want the new one is how people actually reach for this.
    */
   const itemsFor = (node: FileNode, root: FileRoot): MenuItem[] => {
-    const abs = `${root.dir}/${node.path}`;
+    // A row another layer supplies is that layer's file: what acts on the FILE acts there. What makes
+    // something new beside it makes it in the workspace, in the folder the row is drawn in.
+    const abs = absPathOf(node, root);
     // What ships is read and overridden, and nothing else (decision 0006) — see {@link builtInItems}.
-    if (!isWritableLayer(root.layer)) {
-      return builtInItems(node, root, {
+    if (!isWritableLayer(node.layer)) {
+      return builtInItems(node, { ...root, layer: node.layer, dir: node.layerDir ?? root.dir }, {
         hasProject,
         onOpen,
         onOverride: (id, toLayer) => void move({ stateId: id, layer: "system", to: id, toLayer, copy: true }, "Override"),
@@ -1097,19 +1154,21 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
         more,
       });
     }
-    const parentDir = node.path.includes("/") ? node.path.slice(0, node.path.lastIndexOf("/")) : "";
+    const parentDir = drawnDir(node, root);
     const reveal: MenuItem[] = [
       { label: "Copy path", onSelect: () => copyText(abs), separator: true },
       { label: "Reveal in file explorer", onSelect: () => onReveal(abs) },
     ];
 
     if (node.kind === "directory") {
+      // A folder only another layer has is not on disk here: something can be made in it, and that is all.
+      if (node.virtual === true) return newItems(root, node.path, startDraft);
       return [...newItems(root, node.path, startDraft), ...pathItems(node, abs), ...reveal];
     }
 
     // A project file can be asked about: a new conversation, the file mentioned in its first message
     // (the sidebar mockups, board 43). Only the project's own, which is what a conversation reads.
-    const ask: MenuItem[] = verbs.onAsk !== undefined && root.layer === "project" ? [{ label: "Ask about it in a new chat", onSelect: () => verbs.onAsk!(node.path) }] : [];
+    const ask: MenuItem[] = verbs.onAsk !== undefined && node.layer === "project" && node.layerDir === undefined ? [{ label: "Ask about it in a new chat", onSelect: () => verbs.onAsk!(node.path) }] : [];
 
     if (node.stateId === undefined) {
       // A prompt, a skill, or config: real files, but not states. No state-id verbs — but the same

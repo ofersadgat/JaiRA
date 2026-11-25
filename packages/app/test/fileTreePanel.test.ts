@@ -15,14 +15,20 @@ import type { FileNode, FileRoot, FileTree } from "@jaira/shared";
 import {
   anchorIn,
   childStateDraft,
+  drawnPath,
+  entriesUnder,
   fileDraft,
   inLayerOf,
   newItems,
   revealKeys,
+  sourceChipOf,
   rootNeedsName,
   standingRoot,
   stateDraft,
   statePrefixOf,
+  treeMenus,
+  treeRowOf,
+  type TreeDraft,
   unlistedOpen,
   withListing,
   workflowsDirOf,
@@ -280,5 +286,73 @@ describe("unlisted folders", () => {
     expect(listed.roots[0]!.nodes[0]).toBe(tree.roots[0]!.nodes[0]);
     // Nothing more to ask for once listed — what the store's effect relies on not to ask again.
     expect(unlistedOpen(listed, new Set(["project:src/gen"]), null)).toEqual([]);
+  });
+});
+
+/**
+ * A workspace's `.jaira/` with the other layers laid over it (the person, 2026-11-24): a row another
+ * layer supplies is that layer's file — its menu acts there — and drawn among the workspace's own.
+ */
+describe("a row another layer supplies", () => {
+  const root: FileRoot = { layer: "project", project: "/w/atlas", label: "atlas", dir: "/w/atlas", prefix: ".jaira", exists: true, nodes: [] };
+  const mine: FileNode = { path: "workflows/review.json", name: "review.json", kind: "workflow", mime: "application/json", layer: "you", stateId: "review", layerDir: "/home/me/.jaira/personal" };
+  const shipped: FileNode = { path: "workflows/review.json", name: "review.json", kind: "workflow", mime: "application/json", layer: "system", stateId: "review", layerDir: "/app/builtin", shadowed: true, shadowedBy: "you" };
+  const own: FileNode = { path: ".jaira/workflows/plan.json", name: "plan.json", kind: "workflow", mime: "application/json", layer: "project", project: "/w/atlas", stateId: "plan" };
+  const folder: FileNode = { path: ".jaira/workflows", name: "workflows", kind: "directory", mime: "inode/directory", layer: "project", project: "/w/atlas", children: [own, mine, shipped] };
+  root.nodes = [{ path: ".jaira", name: ".jaira", kind: "directory", mime: "inode/directory", layer: "project", project: "/w/atlas", children: [folder] }];
+  const tree: FileTree = { roots: [root] };
+
+  const menu = (node: FileNode): { labels: string[]; copied: string[]; drafts: TreeDraft[] } => {
+    const copied: string[] = [];
+    const drafts: TreeDraft[] = [];
+    const { itemsFor } = treeMenus({
+      hasProject: true,
+      onOpen: () => undefined,
+      onMove: async () => null,
+      onDelete: async () => null,
+      onRenameFile: async () => null,
+      onDeleteFile: async () => null,
+      onReveal: () => undefined,
+      copy: (text) => copied.push(text),
+      setAsk: () => undefined,
+      startDraft: (draft) => drafts.push(draft),
+      more: () => undefined,
+    });
+    const items = itemsFor(node, root);
+    items.find((item) => item.label === "Copy path")?.onSelect();
+    items.find((item) => item.label === "New child state…")?.onSelect();
+    return { labels: items.map((item) => item.label), copied, drafts };
+  };
+
+  it("acts on the file where it lives, and makes a child in the workspace, under the row", () => {
+    const { copied, drafts } = menu(mine);
+    expect(copied).toEqual(["/home/me/.jaira/personal/workflows/review.json"]);
+    expect(drafts[0]).toMatchObject({ rootDir: "/w/atlas", layer: "project", dir: ".jaira/workflows/review", anchor: { key: "you:workflows/review.json", depth: 3 } });
+  });
+
+  it("is read and overridden only, when what ships supplies it — wherever it is drawn", () => {
+    const { labels, copied } = menu(shipped);
+    expect(labels).toContain("Edit a copy in Shared");
+    expect(labels).not.toContain("Delete");
+    expect(copied).toEqual(["/app/builtin/workflows/review.json"]);
+    expect(drawnPath(shipped, root)).toBe(".jaira/workflows/review.json");
+  });
+
+  it("says where it comes from, and a shadowed copy says whose copy is read", () => {
+    expect(sourceChipOf(own, root)).toBeNull();
+    expect(sourceChipOf(mine, root)?.text).toBe("just you");
+    expect(sourceChipOf(shipped, root)).toMatchObject({ text: "built in", title: expect.stringMatching(/^Not read here: just you's copy is the one used/) });
+  });
+
+  it("is listed in the folder it is drawn in, and its unsaved edits mark that folder", () => {
+    expect(entriesUnder(tree, "project", ".jaira/workflows").map((node) => `${node.layer}:${node.path}`)).toEqual(
+      expect.arrayContaining(["project:.jaira/workflows/plan.json", "you:workflows/review.json", "system:workflows/review.json"]),
+    );
+    expect(treeRowOf(folder, null, new Set(["you:workflows/review.json"]), new Set()).unsaved).toBe(true);
+  });
+
+  it("leaves a folder only another layer has with nothing to rename or delete", () => {
+    const virtual: FileNode = { path: ".jaira/prompts", name: "prompts", kind: "directory", mime: "inode/directory", layer: "project", project: "/w/atlas", virtual: true, children: [] };
+    expect(menu(virtual).labels).toEqual(["New file…", "New folder…", "New workflow…"]);
   });
 });

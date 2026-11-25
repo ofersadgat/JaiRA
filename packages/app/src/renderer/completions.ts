@@ -156,21 +156,25 @@ export function resolveRef(tree: FileTree | null, ref: string): { layer: Workflo
   const dir = trimmed.slice(0, cut + 1);
   const parts = trimmed.slice(cut + 1).split(".");
   const found = new Map<string, { layer: WorkflowLayer; path: string }>();
-  const walk = (layer: WorkflowLayer, nodes: FileNode[]): void => {
+  // Every file by its OWN layer — another layer's files are drawn inside a workspace's tree.
+  const files: FileNode[] = [];
+  const walk = (nodes: FileNode[]): void => {
     for (const node of nodes) {
       if (node.kind === "directory") {
-        if (node.children) walk(layer, node.children);
+        if (node.children) walk(node.children);
         continue;
       }
-      const spelling = refForPath(node.path);
-      // First writer wins per spelling, and the roots are walked project-first below.
-      if (!found.has(spelling)) found.set(spelling, { layer, path: node.path });
+      files.push(node);
     }
   };
-  // In the order the loader searches: the settings' six, most specific first, then what ships (decision 0023, amended 2026-11-18).
+  for (const root of tree.roots) walk(root.nodes);
+  // In the order the loader searches: the settings' six, most specific first, then what ships (decision 0023,
+  // amended 2026-11-18). First writer wins per spelling.
   const order: readonly WorkflowLayer[] = ["projectYou", "you", "projectMachine", "machine", "project", "base", "system"];
-  const roots = [...tree.roots].sort((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer));
-  for (const root of roots) walk(root.layer, root.nodes);
+  for (const node of files.sort((a, b) => order.indexOf(a.layer) - order.indexOf(b.layer))) {
+    const spelling = refForPath(node.path);
+    if (!found.has(spelling)) found.set(spelling, { layer: node.layer, path: node.path });
+  }
   for (let take = parts.length; take >= 1; take--) {
     const at = found.get(`${dir}${parts.slice(0, take).join(".")}`);
     if (at !== undefined) return at;

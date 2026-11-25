@@ -788,6 +788,19 @@ export interface FileNode {
   /** The state this file defines, when `kind` is `workflow`. */
   stateId?: string;
   /**
+   * The absolute root of this file's own layer, when the tree draws it inside ANOTHER layer's tree: a
+   * workspace's `.jaira/` is drawn as an overlay of every layer (the person, 2026-11-24), so a file
+   * Shared, Just you or what ships supplies sits among the project's own. Its `path` stays relative
+   * to its own layer root, so reading, writing and every verb address it where it lives. Absent on a
+   * file of the tree's own layer.
+   */
+  layerDir?: string;
+  /**
+   * A folder the tree draws because another layer has it, while its own root has nothing there yet:
+   * creating something in it makes it.
+   */
+  virtual?: true;
+  /**
    * Set on a file a layer AHEAD of it shadows: a base file the project overrides, a project file Just
    * you overrides, or a built-in one any of the others does (see {@link WorkflowFileEntry}).
    */
@@ -824,31 +837,19 @@ export interface FileNode {
 }
 
 /**
- * Both roots, in search-path order: the project's `.jaira/` first, the shared root second.
+ * One root per WORKSPACE: each open project's checkout, or Shared (`~/.jaira`) when that is where the
+ * shell stands. The person, 2026-11-24: "the file view should have a root per workspace … the built in
+ * / override stuff should simply appear like a filesystem overlay".
  *
- * Showing them as two trees rather than one merged list is what removes the layer picker — which
- * copy of a state you are editing is its position on screen, not a mode you have to remember.
+ * The other layers are not roots of their own. Each one's `workflows/`, `prompts/`, `functions/`,
+ * `permission-sets/` and `skills/` are laid over the workspace's own `.jaira/` (`overlaidRoot`): a
+ * file another layer supplies is a row there with that layer's {@link FileNode.layerDir}, the copy the
+ * search path reads first leads, and every other copy of it follows struck through as `shadowed` — so
+ * the copy you are editing is still a row of its own, and a folder only another layer has is drawn
+ * {@link FileNode.virtual}.
  *
- * A root is listed whether or not it exists on disk. The shared root is a place you can put things
- * before it is a directory, and hiding it until someone has already used it would mean the one
- * affordance for "share this across projects" only appears once you have found another way to do
- * it. `exists` is false in that case, so the tree can say so rather than showing a bare "empty".
- */
-/**
- * Both layer roots — and, since the window holds several projects, one `project` root per open
- * project with the shared one listed ONCE beside them (SHELL.md §2.2).
- *
- * Once beside rather than under each: `~/.jaira` is machine-global, so repeating it per project
- * would draw the same directory three times and invite somebody to wonder which copy they were
- * editing. The projects are the tree's top level and the shared root is their sibling.
- *
- * The LAST root is always what ships (`layer: "system"`, decision 0006): read-only, listed once, and
- * the one root every tree has whatever the shell is standing in — it is behind all of them.
- *
- * Between them, the settings' newer layers (decision 0023, amended 2026-11-18), each a root of its own:
- * per project shown, the project on this machine (`.jaira/local/`) and you in the project
- * (`~/.jaira/projects/<key>/`); once, Just you (`~/.jaira/personal/`) and this machine
- * (`~/.jaira/machine/`).
+ * A root is listed whether or not it exists on disk: Shared is a place you can put things before it
+ * is a directory. `exists` is false then, so the tree can say so rather than showing a bare "empty".
  */
 export interface FileTree {
   roots: FileRoot[];

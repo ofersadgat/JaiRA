@@ -9,13 +9,12 @@ import {
   anchorIn,
   newItems,
   rootEmptyText,
-  rootNeedsName,
+  sourceChipOf,
   treeMatches,
   treeMenus,
   treeRowOf,
   type FileSelection,
   type TreeDraft,
-  LAYER_LABEL,
 } from "@jaira/ui/filesModel";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -174,7 +173,9 @@ export function FileTreePanel({
         ) : (
           tree.roots.map((root) => {
             const writable = isWritableLayer(root.layer);
-            const named = !writable || rootNeedsName(root, project);
+            // A root per workspace, headed only when there is more than one (the person, 2026-11-24): the
+            // other layers are not roots, they are laid over each workspace's `.jaira/`.
+            const named = !writable || tree.roots.length > 1;
             return (
               // The root's own menu hangs off the whole list, not only its heading row: a root with no
               // heading (the one stood in) still offers "new file here" from the space under its rows.
@@ -192,6 +193,7 @@ export function FileTreePanel({
                   <TreeNode
                     key={`${node.project ?? node.layer}:${node.path}`}
                     node={node}
+                    root={root}
                     depth={0}
                     selected={selected}
                     dirty={dirty}
@@ -319,6 +321,7 @@ function Guides({ depth, t }: { depth: number; t: Tokens }): JSX.Element {
 
 function TreeNode({
   node,
+  root,
   depth,
   selected,
   dirty,
@@ -330,6 +333,8 @@ function TreeNode({
   draftUnder,
 }: {
   node: FileNode;
+  /** The workspace it is drawn in — what says whether its file is the workspace's own. */
+  root: FileRoot;
   depth: number;
   selected: FileSelection | null;
   dirty: ReadonlySet<string>;
@@ -345,8 +350,10 @@ function TreeNode({
   const lint = node.lint;
   const weight = row.isSelected ? 600 : 400;
   // A disabled state's name dims, beside its chip (decision 0021).
-  const nameInk = row.tone === " has-error" ? "bad" : row.tone === " has-warning" ? "warn" : row.inert || node.disabled === true ? "dim" : "text";
+  const nameInk = row.tone === " has-error" ? "bad" : row.tone === " has-warning" ? "warn" : row.inert || node.disabled === true || node.virtual === true ? "dim" : "text";
   const dotInk = row.tone === " has-error" ? "bad" : "warn";
+  // Where the file comes from, in the workspace's overlaid tree — none on one of its own that is read.
+  const source = sourceChipOf(node, root);
   return (
     <>
       <Press
@@ -396,9 +403,9 @@ function TreeNode({
             {node.error !== undefined ? <Chip tone="bad" spec={{ weight }}>!</Chip> : null}
             {node.error === undefined && lint !== undefined && lint.errors > 0 ? <Chip tone="bad" spec={{ weight }}>{lint.errors}</Chip> : null}
             {node.error === undefined && lint !== undefined && lint.errors === 0 && lint.warnings > 0 ? <Chip tone="warn" spec={{ weight }}>{lint.warnings}</Chip> : null}
-            {node.shadowed === true ? (
-              <Chip spec={{ weight }} {...(node.shadowedBy !== undefined ? { title: `Not read here: ${LAYER_LABEL[node.shadowedBy]}'s copy of this state is the one that runs` } : {})}>
-                {`${node.layer === "system" ? "overridden" : "shadowed"}${node.shadowedBy !== undefined ? ` · ${LAYER_LABEL[node.shadowedBy]}` : ""}`}
+            {source !== null ? (
+              <Chip spec={{ weight }} title={source.title}>
+                {source.text}
               </Chip>
             ) : null}
             {node.overridesBuiltIn === true ? (
@@ -431,6 +438,7 @@ function TreeNode({
             <TreeNode
               key={`${child.layer}:${child.path}`}
               node={child}
+              root={root}
               depth={depth + 1}
               selected={selected}
               dirty={dirty}

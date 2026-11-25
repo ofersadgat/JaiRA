@@ -667,6 +667,119 @@ export function builtInRoot(browser?: WorkflowBrowser, hidden?: HiddenRules, bas
   return { layer: "system", label: BUILT_IN_LABEL, dir, prefix: "", exists: existsSync(dir), nodes };
 }
 
+/**
+ * The folders of a layer root that resolve along the layers — what {@link overlaidRoot} lays over a
+ * workspace. Not the settings files: those are merged key by key, not read from one copy, and a
+ * struck-through `settings.json` would say something false.
+ */
+const OVERLAID: ReadonlySet<string> = new Set(["workflows", "prompts", "functions", "permission-sets", "skills"]);
+
+/** The search order: the copy of a path the nearest of these has is the one read (decision 0023). */
+const PRECEDENCE: readonly WorkflowLayer[] = ["projectYou", "you", "projectMachine", "machine", "project", "base", "system"];
+
+/** What makes two layers' files the same file: a state by its id, anything else by its name. */
+const overlayKey = (node: FileNode): string => (node.kind === "directory" ? `d:${node.name}` : node.stateId !== undefined ? `s:${node.stateId}` : `f:${node.name}`);
+
+/**
+ * One workspace's tree with every other layer laid over its `.jaira/` — the person, 2026-11-24: "the
+ * built in / override stuff should simply appear like a filesystem overlay. i.e. it should show a
+ * virtual file", and "we can have an extra 'shadow' file for a version of that file from another source".
+ *
+ * Each of the other roots' {@link OVERLAID} folders is merged into the workspace's layer folder (its
+ * `prefix`). A folder is one row whichever layers have it — the workspace's own, or a `virtual` one
+ * when only others do. A file is a row per layer that has it: the copy {@link PRECEDENCE} reads first,
+ * then the others, `shadowed` by it. A row from another layer keeps its own `layer` and `path` and
+ * says where its layer lives (`layerDir`), so opening, saving and every verb act on it where it is.
+ *
+ * Directory lint is summed again afterwards, so a folder carries the faults of every layer's files in it.
+ */
+export function overlaidRoot(workspace: FileRoot, over: readonly FileRoot[]): FileRoot {
+  const rank = (node: FileNode): number => PRECEDENCE.indexOf(node.layer);
+  const stamp = (node: FileNode, layerDir: string): FileNode => ({ ...node, layerDir });
+
+  /** One folder: the workspace's own entries at `path`, and each other layer's at the same place. */
+  const merge = (path: string, own: readonly FileNode[], others: ReadonlyArray<{ root: FileRoot; nodes: readonly FileNode[] }>): FileNode[] => {
+    const groups = new Map<string, { own?: FileNode; theirs: Array<{ root: FileRoot; node: FileNode }> }>();
+    const group = (key: string): { own?: FileNode; theirs: Array<{ root: FileRoot; node: FileNode }> } => {
+      const found = groups.get(key) ?? { theirs: [] };
+      groups.set(key, found);
+      return found;
+    };
+    for (const node of own) group(overlayKey(node)).own = node;
+    for (const other of others) for (const node of other.nodes) group(overlayKey(node)).theirs.push({ root: other.root, node });
+
+    const dirs: FileNode[] = [];
+    const files: FileNode[][] = [];
+    for (const [key, { own: mine, theirs }] of groups) {
+      if (key.startsWith("d:")) {
+        const first = mine ?? theirs[0]!.node;
+        const at = path === "" ? first.name : `${path}/${first.name}`;
+        const children = merge(at, mine?.children ?? [], theirs.map(({ root, node }) => ({ root, nodes: node.children ?? [] })));
+        dirs.push(
+          mine !== undefined
+            ? { ...mine, children }
+            : {
+                path: at,
+                name: first.name,
+                kind: "directory",
+                mime: first.mime,
+                layer: workspace.layer,
+                ...(workspace.project !== undefined ? { project: workspace.project } : {}),
+                virtual: true,
+                children,
+              },
+        );
+        continue;
+      }
+      const copies = [...(mine !== undefined ? [mine] : []), ...theirs.map(({ root, node }) => stamp(node, root.dir))].sort((a, b) => rank(a) - rank(b));
+      const winner = copies.find((copy) => copy.shadowed !== true) ?? copies[0]!;
+      files.push([
+        winner,
+        ...copies
+          .filter((copy) => copy !== winner)
+          .map((copy): FileNode => {
+            // A shadowed copy is inert: what lint says of the id belongs to the copy that is read.
+            const { lint: _inert, ...rest } = copy;
+            return { ...rest, shadowed: true, shadowedBy: copy.shadowedBy ?? winner.layer };
+          }),
+      ]);
+    }
+    dirs.sort((a, b) => a.name.localeCompare(b.name));
+    files.sort((a, b) => a[0]!.name.localeCompare(b[0]!.name));
+    return [...dirs, ...files.flat()];
+  };
+
+  const layers = over
+    .filter((root) => root.layer !== workspace.layer)
+    .map((root) => ({ root, nodes: root.nodes.filter((node) => node.kind === "directory" && OVERLAID.has(node.name)) }));
+
+  /** Down the workspace to its layer folder (`prefix`), making any folder on the way that is not there. */
+  const descend = (nodes: readonly FileNode[], steps: readonly string[], at: string): FileNode[] => {
+    if (steps.length === 0) return merge(at, nodes, layers);
+    const [step, ...rest] = steps;
+    const path = at === "" ? step! : `${at}/${step}`;
+    const found = nodes.find((node) => node.kind === "directory" && node.name === step);
+    const inside = descend(found?.children ?? [], rest, path);
+    const dir: FileNode = found !== undefined
+      ? { ...found, children: inside }
+      : { path, name: step!, kind: "directory", mime: mimeOfPath(path, true), layer: workspace.layer, ...(workspace.project !== undefined ? { project: workspace.project } : {}), virtual: true, children: inside };
+    const others = nodes.filter((node) => node !== found);
+    return [...others, dir].sort((a, b) => ((a.kind === "directory") !== (b.kind === "directory") ? (a.kind === "directory" ? -1 : 1) : a.name.localeCompare(b.name)));
+  };
+
+  const nodes = descend(workspace.nodes, workspace.prefix === "" ? [] : workspace.prefix.split("/"), "");
+  const clear = (list: FileNode[]): void => {
+    for (const node of list) {
+      if (node.kind !== "directory") continue;
+      delete node.lint;
+      if (node.children !== undefined) clear(node.children);
+    }
+  };
+  clear(nodes);
+  rollUpLint(nodes);
+  return { ...workspace, nodes };
+}
+
 // --- declared inputs ---------------------------------------------------------
 
 /** The extensions a state file may carry, in the order a reference probes them. */

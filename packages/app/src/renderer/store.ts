@@ -1808,8 +1808,8 @@ export function useApp() {
         }
         return null;
       };
-      const root = ref.current.tree?.roots.find((r) => r.layer === at);
-      const node = root ? find(root.nodes) : null;
+      // Every root: another layer's files are drawn inside a workspace's tree, not in roots of their own.
+      const node = (ref.current.tree?.roots ?? []).reduce<FileNode | null>((hit, root) => hit ?? find(root.nodes), null);
       return { layer: at, path: node?.path ?? `workflows/${stateId}.json` };
     },
     [],

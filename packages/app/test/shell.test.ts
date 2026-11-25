@@ -44,12 +44,10 @@ describe("the Files view's surfaces", () => {
   it("lists the project's own root, with the workflow files carrying their state ids", async () => {
     const tree = (await service.filesTree());
 
-    // The project's own folder first, then the settings' layers over it that are not in the checkout
-    // (decision 0023, amended 2026-11-18) — the project on this machine, you in it, Just you, this
-    // machine — each a root of its own, listed even while empty. `~/.jaira` (Shared) is a layer this
-    // project resolves against and is browsed by standing in it, not by appearing inside every
-    // checkout. What SHIPS closes the list (decision 0006): read-only, with no sidebar row to stand in.
-    expect(tree.roots.map((r) => r.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "system"]);
+    // One root, the project's own folder (the person, 2026-11-24): the other layers — the settings' newer
+    // ones (decision 0023, amended 2026-11-18), Shared, what ships (decision 0006) — are laid over its
+    // `.jaira/` as rows of their own, not drawn as roots beside it.
+    expect(tree.roots.map((r) => r.layer)).toEqual(["project"]);
 
     // The tree nests the way the filesystem does — and the filesystem puts the layer inside the
     // checkout, so `.jaira/workflows/feature/plan.json` is three levels down rather than a flat id
@@ -145,8 +143,8 @@ describe("with no project open", () => {
       // Not `{roots: []}`: `~/.jaira` exists independently of any checkout, and it is where you put
       // a workflow that should outlive this one. Hiding it with no project open would hide it
       // exactly when someone is looking for a place to start.
-      // With it, the person's and the machine's layers, which no project is needed for either.
-      expect(tree.roots.map((r) => r.layer)).toEqual(["base", "you", "machine", "system"]);
+      // The person's and the machine's layers, and what ships, are laid over it rather than beside it.
+      expect(tree.roots.map((r) => r.layer)).toEqual(["base"]);
       expect(tree.roots[0]).toMatchObject({ layer: "base", exists: false });
     } finally {
       await bare.close();
@@ -220,7 +218,7 @@ describe("authoring into the shared root", () => {
       // a shared workflow is reached by going to where it lives.
       const tree = (await svc.filesTree({ project: SHARED_SESSION }));
       expect(tree.roots.find((r) => r.layer === "base")?.exists).toBe(true);
-      expect((await svc.filesTree({ project: other })).roots.map((r) => r.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "system"]);
+      expect((await svc.filesTree({ project: other })).roots.map((r) => r.layer)).toEqual(["project"]);
     } finally {
       await svc.close();
       rmSync(home, { recursive: true, force: true });

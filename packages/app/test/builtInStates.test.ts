@@ -303,84 +303,100 @@ describe("the state editor on the three kinds of file", () => {
   });
 });
 
-describe("the tree's third root", () => {
-  const find = (nodes: FileNode[], stateId: string): FileNode | undefined => {
-    for (const node of nodes) {
-      if (node.stateId === stateId) return node;
-      const hit = node.children ? find(node.children, stateId) : undefined;
-      if (hit) return hit;
-    }
-    return undefined;
-  };
+describe("what ships, laid over a workspace's tree", () => {
+  const all = (nodes: FileNode[]): FileNode[] => nodes.flatMap((node) => [node, ...all(node.children ?? [])]);
+  /** Every row of one state, in the order the tree draws them: the copy read first, then its shadows. */
+  const copies = (nodes: FileNode[], stateId: string): FileNode[] => all(nodes).filter((node) => node.stateId === stateId);
+  const find = (nodes: FileNode[], stateId: string): FileNode | undefined => copies(nodes, stateId)[0];
 
-  it("closes a project's tree with a read-only Built in root", async () => {
-    const tree = (await service.filesTree({ project: dir }));
-    // The project's checkout and the settings' newer layers over it (decision 0023, amended 2026-11-18), then what ships.
-    expect(tree.roots.map((root) => root.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "system"]);
-    const shipped = tree.roots.at(-1)!;
-    expect(shipped.label).toBe("Built in");
-    expect(shipped.dir).toBe(jairaBuiltInPaths().dir);
-    expect(shipped.project).toBeUndefined();
-    const node = find(shipped.nodes, SHIPPED_STATE);
-    expect(node?.layer).toBe("system");
+  it("is no root of its own: a project's tree is the project, what ships drawn in its .jaira/", async () => {
+    const tree = await service.filesTree({ project: dir });
+    // One root per workspace (the person, 2026-11-24) — the other layers are laid over it, not beside it.
+    expect(tree.roots.map((root) => root.layer)).toEqual(["project"]);
+    const node = find(tree.roots[0]!.nodes, SHIPPED_STATE);
+    expect(node).toMatchObject({ layer: "system", layerDir: jairaBuiltInPaths().dir, path: `workflows/${SHIPPED_STATE}.json` });
     expect(node?.shadowed).toBeUndefined();
+    // Drawn where it would be in the project: a folder chain under `.jaira/workflows`, virtual where the project has none.
+    const jaira = tree.roots[0]!.nodes.find((n) => n.name === ".jaira")!;
+    const workflows = jaira.children!.find((n) => n.name === "workflows")!;
+    expect(workflows.layer).toBe("project");
+    const debug = workflows.children!.find((n) => n.name === "debug")!;
+    expect(debug).toMatchObject({ layer: "project", path: ".jaira/workflows/debug", virtual: true });
   });
 
   it("marks a workflow SCRIPT as a state — the shipped conversation, and a project's copy overriding it", async () => {
-    const shipped = (await service.filesTree({ project: dir })).roots.at(-1)!;
-    expect(find(shipped.nodes, CHAT_SESSION)).toMatchObject({ kind: "workflow", layer: "system", name: `${CHAT_SESSION}.ts` });
+    const before = (await service.filesTree({ project: dir })).roots[0]!;
+    expect(find(before.nodes, CHAT_SESSION)).toMatchObject({ kind: "workflow", layer: "system", name: `${CHAT_SESSION}.ts` });
     service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true });
     // A helper beside it, which declares no `meta`, is code and not a state.
     writeFileSync(join(dir, ".jaira", "workflows", "helper.ts"), "export function twice(n: number) { return n * 2; }\n", "utf8");
     const tree = await service.filesTree({ project: dir });
-    expect(find(tree.roots[0]!.nodes, CHAT_SESSION)).toMatchObject({ kind: "workflow", layer: "project", overridesBuiltIn: true });
-    expect(find(tree.roots.at(-1)!.nodes, CHAT_SESSION)).toMatchObject({ shadowed: true, shadowedBy: "project" });
-    const helper = tree.roots[0]!.nodes.flatMap(function all(n: FileNode): FileNode[] { return [n, ...(n.children ?? []).flatMap(all)]; }).find((n) => n.name === "helper.ts");
+    // The project's copy is read, and leads; what ships follows it, struck through.
+    const rows = copies(tree.roots[0]!.nodes, CHAT_SESSION);
+    expect(rows.map((row) => row.layer)).toEqual(["project", "system"]);
+    expect(rows[0]).toMatchObject({ kind: "workflow", overridesBuiltIn: true });
+    expect(rows[1]).toMatchObject({ shadowed: true, shadowedBy: "project" });
+    const helper = all(tree.roots[0]!.nodes).find((n) => n.name === "helper.ts");
     expect(helper?.kind).not.toBe("workflow");
     expect(helper?.stateId).toBeUndefined();
   });
 
-  it("marks a shipped FILE a person has a copy of as overridden, as it marks a state", async () => {
-    const readme = (roots: FileRoot[]): FileNode | undefined => roots.find((root) => root.layer === "system")?.nodes.find((node) => node.path === "README.md");
-    expect(readme((await service.filesTree({ project: dir })).roots)?.shadowed).toBeUndefined();
-    service.writeFile({ layer: "base", path: "README.md", text: "mine" });
-    expect(readme((await service.filesTree({ project: dir })).roots)?.shadowed).toBe(true);
-    expect(readme((await service.filesTree({ project: SHARED_SESSION })).roots)?.shadowed).toBe(true);
+  it("marks a shipped FILE a person has a copy of as shadowed, as it marks a state", async () => {
+    const path = "permission-sets/ask-first.json";
+    const rows = (roots: FileRoot[]): FileNode[] => all(roots[0]!.nodes).filter((node) => node.path === path);
+    expect(rows((await service.filesTree({ project: dir })).roots).map((row) => [row.layer, row.shadowed])).toEqual([["system", undefined]]);
+    service.writeFile({ layer: "base", path, text: "{}" });
+    for (const project of [dir, SHARED_SESSION]) {
+      const drawn = rows((await service.filesTree({ project })).roots);
+      expect(drawn.map((row) => [row.layer, row.shadowed === true])).toEqual([["base", false], ["system", true]]);
+      expect(drawn[1]?.shadowedBy).toBe("base");
+    }
   });
 
-  it("closes the shared root's tree, and an empty window's, with it too", async () => {
-    expect((await service.filesTree({ project: SHARED_SESSION })).roots.map((root) => root.layer)).toEqual(["base", "you", "machine", "system"]);
+  it("is laid over the shared root's tree too, when that is where the shell stands", async () => {
+    const tree = await service.filesTree({ project: SHARED_SESSION });
+    expect(tree.roots.map((root) => root.layer)).toEqual(["base"]);
+    expect(find(tree.roots[0]!.nodes, SHIPPED_STATE)?.layer).toBe("system");
   });
 
-  it("lists it ONCE beside several projects", async () => {
+  it("is laid over each of several projects, each with its own marks", async () => {
     const other = mkdtempSync(join(tmpdir(), "jaira-shipped-other-"));
     // Removed in `afterEach`, once the service has let go of its database.
     extraDirs.push(other);
     initProject(other, testHome());
     await service.open(other);
-    // Each project with its own two layers; Just you and this machine once, as what ships is.
-    expect((await service.filesTree()).roots.map((root) => root.layer)).toEqual(["project", "projectMachine", "projectYou", "project", "projectMachine", "projectYou", "you", "machine", "system"]);
+    const file = join(dir, ".jaira", "workflows", `${SHIPPED_STATE}.json`);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify({ label: "Here" }), "utf8");
+    const tree = await service.filesTree();
+    expect(tree.roots.map((root) => root.layer)).toEqual(["project", "project"]);
+    const mine = tree.roots.find((root) => root.dir === dir)!;
+    const theirs = tree.roots.find((root) => root.dir !== dir)!;
+    expect(copies(mine.nodes, SHIPPED_STATE).map((row) => [row.layer, row.shadowed === true])).toEqual([["project", false], ["system", true]]);
+    expect(copies(theirs.nodes, SHIPPED_STATE).map((row) => [row.layer, row.shadowed === true])).toEqual([["system", false]]);
   });
 
-  it("marks which layer supplied a state: the shipped row overridden, the person's row overriding", async () => {
+  it("marks which layer supplied a state: the shipped row shadowed, the person's row overriding", async () => {
     const file = join(dir, ".jaira", "workflows", `${SHIPPED_STATE}.json`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({ label: "Here" }), "utf8");
 
-    const tree = (await service.filesTree({ project: dir }));
-    const shippedRoot = tree.roots.find((root) => root.layer === "system")!;
-    expect(find(tree.roots[0]!.nodes, SHIPPED_STATE)).toMatchObject({ layer: "project", overridesBuiltIn: true });
-    expect(find(shippedRoot.nodes, SHIPPED_STATE)).toMatchObject({ layer: "system", shadowed: true, shadowedBy: "project" });
+    const tree = await service.filesTree({ project: dir });
+    const [mine, shipped] = copies(tree.roots[0]!.nodes, SHIPPED_STATE);
+    expect(mine).toMatchObject({ layer: "project", overridesBuiltIn: true });
+    expect(shipped).toMatchObject({ layer: "system", shadowed: true, shadowedBy: "project" });
     // A shipped state nobody overrode is marked as neither.
-    const untouched = find(shippedRoot.nodes, SELF_TEST_ROOT)!;
+    const untouched = find(tree.roots[0]!.nodes, SELF_TEST_ROOT)!;
+    expect(untouched.layer).toBe("system");
     expect(untouched.shadowed).toBeUndefined();
     expect(untouched.overridesBuiltIn).toBeUndefined();
 
     // The same from the shared root's side.
     installInShared(SELF_TEST_ROOT, JSON.stringify({ label: "Shared" }));
-    const shared = (await service.filesTree({ project: SHARED_SESSION }));
-    expect(find(shared.roots[0]!.nodes, SELF_TEST_ROOT)).toMatchObject({ layer: "base", overridesBuiltIn: true });
-    expect(find(shared.roots.find((root) => root.layer === "system")!.nodes, SELF_TEST_ROOT)).toMatchObject({ shadowed: true });
+    const shared = await service.filesTree({ project: SHARED_SESSION });
+    const [sharedCopy, shippedCopy] = copies(shared.roots[0]!.nodes, SELF_TEST_ROOT);
+    expect(sharedCopy).toMatchObject({ layer: "base", overridesBuiltIn: true });
+    expect(shippedCopy).toMatchObject({ layer: "system", shadowed: true });
   });
 
   it("offers reading and overriding on that root, and nothing that writes to it", () => {

@@ -113,6 +113,7 @@ import {
   conversationView,
   ensureWorkspace,
   fileTree,
+  overlaidRoot,
   listDirectory,
   hashText,
   initBase,
@@ -1371,43 +1372,12 @@ function shortRoot(dir: string): string {
 }
 
 /**
- * The shared root's nodes, with `shadowed` reduced across every open project's view of it.
- *
- * `shadowed` means "this copy is not the one that loads", which is a fact about ONE project — and
- * the shared root is listed once, beside all of them (SHELL.md §2.2). So it survives only where
- * EVERY open project overrides the state: that is the one reading still true of a row belonging to
- * no project. A file two of three projects override is left unmarked, because in the third it is
- * exactly the file that runs.
- *
- * Shape is taken from the first tree — the roots are the same directory walked the same way, so they
- * differ only in these marks.
- *
- * The same reduction serves the built-in root (decision 0006), which is likewise listed once beside
- * every open project: a shipped state reads as overridden only where every project overrides it.
- */
-/**
  * The layers a description is synced with its workflows in: the project's and Shared's. The settings'
  * newer layers (decision 0023, amended 2026-11-18) hold workflows, but a description of one is not
  * synced yet.
  */
 const SYNCED_LAYERS: ReadonlySet<WorkflowLayer> = new Set(["project", "base"]);
 const NOT_SYNCED = "a description is synced with its workflows in a project or in Shared — not yet in this machine's or your own layers";
-
-function layerShadows(trees: readonly FileTree[], layer: WorkflowLayer): FileNode[] {
-  const bases = trees.map((tree) => tree.roots.find((root) => root.layer === layer)?.nodes ?? []);
-  const merge = (lists: FileNode[][]): FileNode[] =>
-    (lists[0] ?? []).map((node, index) => {
-      const everywhere = node.shadowed === true && lists.every((list) => list[index]?.shadowed === true);
-      const out: FileNode = { ...node };
-      if (!everywhere) {
-        delete out.shadowed;
-        delete out.shadowedBy;
-      }
-      if (node.children !== undefined) out.children = merge(lists.map((list) => list[index]?.children ?? []));
-      return out;
-    });
-  return merge(bases);
-}
 
 /**
  * A question as the renderer sees it (the hub's request, minus the session key).
@@ -5713,11 +5683,13 @@ export class AppService {
       // Linted against the shared project's own tasks when it is open, so a state a run is pinned to
       // reports drift here the same way it would in a checkout.
       const shared = this.sharedIfPresent();
-      if (shared !== undefined) return baseFileTree(baseDir, browseBaseWorkflows(baseDir, {}, shared.project), hidden);
       // Linted with no project open, exactly as a project's tree is. The shared root is where a
       // workflow meant to outlive one checkout gets authored, so leaving it unvalidated meant the one
       // mode people write shared workflows in was the one mode that never said anything was wrong.
-      return baseFileTree(baseDir, browseBaseWorkflows(baseDir), hidden);
+      const tree = baseFileTree(baseDir, shared !== undefined ? browseBaseWorkflows(baseDir, {}, shared.project) : browseBaseWorkflows(baseDir), hidden);
+      // Shared is the workspace here: Just you, this machine and what ships are laid over it (`overlaidRoot`).
+      const own = tree.roots.find((root) => root.layer === "base");
+      return own === undefined ? tree : { roots: [overlaidRoot(own, tree.roots.filter((root) => root.layer !== "base"))] };
     };
 
     if (open.length === 0) return baseTree();
@@ -5742,29 +5714,18 @@ export class AppService {
     const still = asked.filter(({ session }) => this.sessions.get(session.key) === session);
     if (still.length === 0) return baseTree();
     const trees = still.map(({ session, ignored }) => fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config), ignored));
-    // What ships closes every tree (decision 0006): it is behind all of them, it has no sidebar row
-    // to be reached by, and it is where an override starts. Listed ONCE, with its `shadowed` marks
-    // reduced across the projects shown, as the shared root's were when it was listed here.
-    const shipped = trees[0]?.roots.find((root) => root.layer === "system");
-    // The settings' newer layers (decision 0023, amended 2026-11-18): each project's own two after it —
-    // the project on this machine, you in the project — and Just you and this machine once, their marks
-    // reduced across the projects shown as what ships' are. A replica's are its owner's, not here.
-    const local = trees.filter((_, i) => parseRemoteProjectKey(still[i]!.session.key) === undefined);
-    const once = (layer: WorkflowLayer): FileRoot[] => {
-      const root = local[0]?.roots.find((one) => one.layer === layer);
-      return root === undefined ? [] : [{ ...root, nodes: layerShadows(local, layer) }];
-    };
+    // One root per project, every other layer laid over its `.jaira/` (`overlaidRoot`, the person,
+    // 2026-11-24): what ships, Shared and the settings' newer layers (decision 0023, amended 2026-11-18)
+    // are rows among the project's own files rather than roots of their own — each project with its own
+    // shadow marks, since which copy is read is a fact about one project. A replica's own layers are its
+    // owner's, not this machine's, so it is laid over with what ships alone.
     return {
-      roots: [
-        ...trees.flatMap((tree, i) =>
-          (["project", "projectMachine", "projectYou"] as const).flatMap((layer) =>
-            tree.roots.filter((root) => root.layer === layer && (layer === "project" || parseRemoteProjectKey(still[i]!.session.key) === undefined)),
-          ),
-        ),
-        ...once("you"),
-        ...once("machine"),
-        ...(shipped !== undefined ? [{ ...shipped, nodes: layerShadows(trees, "system") }] : []),
-      ],
+      roots: trees.flatMap((tree, i) => {
+        const own = tree.roots.find((root) => root.layer === "project");
+        if (own === undefined) return [];
+        const remote = parseRemoteProjectKey(still[i]!.session.key) !== undefined;
+        return [overlaidRoot(own, tree.roots.filter((root) => root.layer !== "project" && (!remote || root.layer === "system")))];
+      }),
     };
   }
 

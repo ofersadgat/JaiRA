@@ -1,8 +1,8 @@
 /**
  * Workflows in the settings' six layers (decision 0023, amended 2026-11-18), through the service: a state
  * written, read, copied, switched off and taken away in any of them by the ordinary workflow channels; the
- * most specific copy is the one a run, the browser and a task start read; the Files view draws each
- * layer as a root of its own and marks a copy a nearer layer overrides with the layer that wins; and a
+ * most specific copy is the one a run, the browser and a task start read; the Files view lays each
+ * layer over the workspace's .jaira/, a row per copy, and marks a copy a nearer layer overrides with the layer that wins; and a
  * stack saved as a set into any of them.
  */
 import { execFileSync } from "node:child_process";
@@ -114,31 +114,27 @@ describe("a stack saved as a set", () => {
   });
 });
 
-describe("the Files view draws every layer as a root of its own", () => {
-  it("lists the project, its layers on this machine and for you, Just you, this machine and what ships — `.jaira/local/` out of the checkout", async () => {
+describe("the Files view lays every layer over the workspace's .jaira/", () => {
+  it("draws one root for the project, each other layer's copies as rows of its own in .jaira/ — `.jaira/local/` not walked as a folder of the checkout", async () => {
     execFileSync("git", ["init", "-q", dir], { windowsHide: true });
     service.writeWorkflow({ stateId: STATE, layer: "projectMachine", project: dir, text: says("here") });
     service.writeWorkflow({ stateId: STATE, layer: "you", project: dir, text: says("mine") });
     const tree = await service.filesTree({ project: dir });
-    expect(tree.roots.map((root) => [root.layer, root.label, root.project !== undefined])).toEqual([
-      ["project", expect.any(String), true],
-      ["projectMachine", expect.stringMatching(/ on this machine$/), true],
-      ["projectYou", expect.stringMatching(/^You in /), true],
-      ["you", "Just you", false],
-      ["machine", "This machine", false],
-      ["system", "Built in", false],
-    ]);
-    // `.jaira/local/` is its own root now, not a folder of the checkout.
+    // A root per workspace (the person, 2026-11-24): the layers are not roots of their own.
+    expect(tree.roots.map((root) => root.layer)).toEqual(["project"]);
     expect(walk(tree.roots[0]!.nodes).some((node) => node.path === ".jaira/local")).toBe(false);
-    // Its rows are states of its own layer, addressed under its root.
-    const local = walk(tree.roots[1]!.nodes).find((node) => node.stateId === STATE);
-    expect(local).toMatchObject({ layer: "projectMachine", path: "workflows/review/quick.json", project: dir });
-    // Just you's copy is read; the project on this machine's is shadowed by it, and says by whom.
-    expect(local).toMatchObject({ shadowed: true, shadowedBy: "you" });
-    const mine = walk(tree.roots[3]!.nodes).find((node) => node.stateId === STATE);
-    expect(mine).toMatchObject({ layer: "you", path: "workflows/review/quick.json" });
-    expect(mine?.shadowed).toBeUndefined();
-    // A file in a layer root opens as that layer's file.
+    // One row per layer that has the file, in the order the search path reads them: Just you's leads.
+    const rows = walk(tree.roots[0]!.nodes).filter((node) => node.stateId === STATE);
+    expect(rows.map((row) => [row.layer, row.shadowed === true])).toEqual([
+      ["you", false],
+      ["projectMachine", true],
+    ]);
+    // Each is addressed under its own layer root, and says where that is.
+    expect(rows[0]).toMatchObject({ path: "workflows/review/quick.json", layerDir: join(testHome(), "personal") });
+    expect(rows[1]).toMatchObject({ path: "workflows/review/quick.json", project: dir, shadowedBy: "you", layerDir: join(dir, ".jaira", "local") });
+    // Drawn in the project's own `.jaira/workflows/review`, which only other layers have: a virtual folder.
+    expect(walk(tree.roots[0]!.nodes).find((node) => node.path === ".jaira/workflows/review")).toMatchObject({ layer: "project", virtual: true });
+    // A file in a layer opens as that layer's file.
     expect(service.readFile({ layer: "you", path: "workflows/review/quick.json" }).file).toBe(join(testHome(), "personal", "workflows", "review", "quick.json"));
     expect(service.readFile({ layer: "projectMachine", project: dir, path: "workflows/review/quick.json" }).file).toBe(join(dir, ".jaira", "local", "workflows", "review", "quick.json"));
   });
@@ -154,12 +150,19 @@ describe("the Files view draws every layer as a root of its own", () => {
       ["you", false, undefined],
     ]);
     const tree = await service.filesTree({ project: dir });
-    expect(walk(tree.roots[0]!.nodes).find((node) => node.stateId === STATE)).toMatchObject({ layer: "project", shadowed: true, shadowedBy: "you" });
-    // Standing in Shared, Just you's root stands over Shared's too.
+    expect(walk(tree.roots[0]!.nodes).filter((node) => node.stateId === STATE).map((row) => [row.layer, row.shadowed === true, row.shadowedBy])).toEqual([
+      ["you", false, undefined],
+      ["project", true, "you"],
+      ["base", true, "you"],
+    ]);
+    // Standing in Shared, Just you's copy stands over Shared's too, in Shared's one root.
     const shared = await service.filesTree({ project: SHARED_SESSION });
-    expect(shared.roots.map((root) => root.layer)).toEqual(["base", "you", "machine", "system"]);
-    expect(walk(shared.roots[0]!.nodes).find((node) => node.stateId === STATE)).toMatchObject({ shadowed: true, shadowedBy: "you" });
-    // …and Just you's folder is not also drawn inside Shared's.
+    expect(shared.roots.map((root) => root.layer)).toEqual(["base"]);
+    expect(walk(shared.roots[0]!.nodes).filter((node) => node.stateId === STATE).map((row) => [row.layer, row.shadowed === true])).toEqual([
+      ["you", false],
+      ["base", true],
+    ]);
+    // …and Just you's folder is not also drawn as a folder of Shared's.
     expect(walk(shared.roots[0]!.nodes).some((node) => node.path === "personal")).toBe(false);
   });
 

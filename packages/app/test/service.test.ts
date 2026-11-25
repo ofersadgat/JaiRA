@@ -380,10 +380,8 @@ describe("sessions — one process, several projects", () => {
     try {
       await service.open(other);
       const tree = (await service.filesTree({ project: other }));
-      // That project with its own two layers over it, Just you and this machine (decision 0023, amended
-      // 2026-11-18), and what ships behind it (decision 0006) — the last three belong to no project.
-      expect(tree.roots.map((r) => r.project)).toEqual([other, other, other, undefined, undefined, undefined]);
-      expect(tree.roots.map((r) => r.layer)).toEqual(["project", "projectMachine", "projectYou", "you", "machine", "system"]);
+      // That project alone: the other layers are laid over its `.jaira/`, not roots of their own (the person, 2026-11-24).
+      expect(tree.roots.map((r) => [r.layer, r.project])).toEqual([["project", other]]);
     } finally {
       await service.close();
       rmSync(other, { recursive: true, force: true });
