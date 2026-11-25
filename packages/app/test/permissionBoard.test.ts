@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PermissionStackView } from "@jaira/shared/browser";
-import { answerOf, boardOf, flatOf, modeDeclOfFlat, moveOf, RESULT, withLinesEdited, type Board } from "../src/renderer/permissionBoard";
+import { addOf, answerOf, boardOf, flatOf, lineTreeOf, modeDeclOfFlat, moveOf, RESULT, withLinesEdited, type Board } from "../src/renderer/permissionBoard";
 
 /** A stack as `permissionSets:stack` answers it: a built-in root, a project set, the run's answers and the conversation's lines. */
 function viewOf(conversation: Record<string, unknown> = {}): Pick<PermissionStackView, "layers" | "runtime"> {
@@ -234,5 +234,69 @@ describe("the Tools view", () => {
     expect(row(board, "cat:files.glob").cells[RESULT]!.map((chip) => chip.place)).toContain("credentials/**");
     expect(row(board, "cat:system.stop_process").cells["1:app/build"]!.map((chip) => chip.place)).toContain("owner=session");
     expect(board.rows.filter((each) => each.label === "everything not listed")).toHaveLength(1);
+  });
+});
+
+describe("a line's row, opened on the lines under it", () => {
+  const withCommands = (): Pick<PermissionStackView, "layers" | "runtime"> => ({
+    layers: [
+      { id: "auto", scope: "built in", role: "bottom", icon: "layers", lines: 3, own: { shell: "ask", git: "allow", "git push": "deny", set_env: "ask", other: "ask" } },
+      { id: "runtime", scope: "runtime", role: "runtime", icon: "history", lines: 0 },
+      { id: "tools", scope: "this conversation", role: "own", icon: "chat", lines: 0, own: {} },
+    ],
+    runtime: {},
+  });
+  const tree = lineTreeOf(["shell", "git", "git push", "git push --force", "set_env", "read_file", "npm run dev"]);
+
+  it("puts a program under the shell, a subcommand under its program, a flag line under its tool", () => {
+    expect(tree.children.get("shell")).toEqual(expect.arrayContaining(["git", "npm", "shell --run_in_background"]));
+    expect(tree.children.get("git")).toEqual(expect.arrayContaining(["git push", "git status"]));
+    expect(tree.children.get("git push")).toEqual(["git push --force"]);
+    // `npm run dev` stands under `npm run`, the longest line its words start with.
+    expect(tree.children.get("npm run")).toEqual(["npm run dev"]);
+    expect(tree.children.get("set_env")).toContain("set_env PATH");
+    expect(tree.roots).toEqual(expect.arrayContaining(["shell", "set_env", "read_file"]));
+    expect(tree.roots).not.toContain("git");
+  });
+
+  it("lists the lines a layer writes first", () => {
+    expect(tree.children.get("git")![0]).toBe("git push");
+  });
+
+  it("draws a program in the Tools view only under its open tool, a subcommand empty where it answers as its program", () => {
+    const closed = boardOf({ view: withCommands(), by: "tools", open: open(["cat:execution"]) });
+    expect(closed.rows.find((each) => each.label === "git")).toBeUndefined();
+    const shell = row(closed, "cat:execution.shell");
+    expect(shell).toMatchObject({ opens: true, open: false, ref: { level: 4, key: "cat:execution.shell" }, subject: "shell" });
+
+    const lines = new Set(["cat:execution.shell", "cat:execution.shell>git"]);
+    const board = boardOf({ view: withCommands(), by: "tools", open: { ...open(["cat:execution"]), lines } });
+    const git = row(board, "cat:execution.shell>git");
+    expect(git).toMatchObject({ level: 3, depth: 1, opens: true, open: true, subject: "git" });
+    expect(git.cells[RESULT]!.map((chip) => chip.answer)).toEqual(["allow"]);
+    // Pushing is denied: it says so. Status answers as git does: an empty row, there to be given a line.
+    expect(row(board, "cat:execution.shell>git>git push").cells[RESULT]!.map((chip) => chip.answer)).toEqual(["deny"]);
+    const status = row(board, "cat:execution.shell>git>git status");
+    expect(status).toMatchObject({ depth: 2, subject: "git status", opens: false });
+    expect(Object.values(status.cells).flat()).toHaveLength(0);
+    // npm is named by no layer: empty, and it opens on its usual subcommands.
+    expect(row(board, "cat:execution.shell>npm")).toMatchObject({ opens: true, cells: {} });
+  });
+
+  it("opens a tool's row in the Resources view too", () => {
+    const view = withCommands();
+    const closed = boardOf({ view, open: open(["programs"], ["programs.run"]) });
+    const shell = closed.rows.find((each) => each.subject === "shell" && each.level === 3)!;
+    expect(shell.opens).toBe(true);
+    const board = boardOf({ view, open: { ...open(["programs"], ["programs.run"]), lines: new Set([shell.key]) } });
+    expect(board.rows.map((each) => each.key)).toContain(`${shell.key}>git`);
+  });
+
+  it("gives a line an answer of its own from an empty cell — the Result's in the conversation's lines", () => {
+    const board = boardOf({ view: withCommands(), by: "tools", open: open([]) });
+    const move = addOf(board, "git status", { column: RESULT, answer: "ask" });
+    expect(move).toMatchObject({ ok: true, edits: [{ layer: "2:tools", subject: "git status", place: "**", decision: "ask" }] });
+    expect(addOf(board, "git status", { column: RESULT, answer: "off" }).ok).toBe(false);
+    expect(addOf(board, "read_file", { column: RESULT, answer: "off" }).ok).toBe(true);
   });
 });

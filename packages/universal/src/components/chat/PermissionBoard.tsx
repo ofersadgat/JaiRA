@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type DragEvent as ReactDragEvent, type JS
 import { ScrollView, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import {
+  addOf,
   BOARD_ANSWERS,
   moveOf,
   RESULT,
@@ -193,6 +194,14 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
     if (move.ask !== undefined) return setPending({ says: move.says, ask: move.ask, edits: move.edits });
     commit(move.edits, move.says);
   };
+  /** An empty cell pressed: the row's line given that answer of its own, in that column's layer. */
+  const addLine = (subject: string, to: { group: string; answer: BoardAnswer }): void => {
+    const move = addOf(board, subject, { column: to.group, answer: to.answer });
+    if (!move.ok) return setNotice(move.says);
+    setInspected(undefined);
+    if (move.ask !== undefined) return setPending({ says: move.says, ask: move.ask, edits: move.edits });
+    commit(move.edits, move.says);
+  };
   const commit = (edits: LineEdit[], says: string): void => {
     setPending(undefined);
     setBusy(true);
@@ -365,6 +374,7 @@ export function PermissionBoard({ board, order, onToggle, onCommit, onLayers, on
       onInspect={(held) => setInspected((was) => (was !== undefined && was.row === held.row && was.column === held.column && was.chip.id === held.chip.id ? undefined : held))}
       onOver={setOver}
       onDrop={tryMove}
+      onAdd={busy ? undefined : addLine}
     />
   );
   const rows: JSX.Element[] = [];
@@ -484,6 +494,7 @@ function Row({
   onInspect,
   onOver,
   onDrop,
+  onAdd,
   stickTop,
   onHeight,
 }: {
@@ -502,6 +513,8 @@ function Row({
   onInspect: (held: Held) => void;
   onOver: (key: string | undefined) => void;
   onDrop: (from: Held, to: { group: string; answer: BoardAnswer | "*" }) => void;
+  /** An empty cell of a line's row pressed: that line given the column's answer of its own. */
+  onAdd?: ((subject: string, to: { group: string; answer: BoardAnswer }) => void) | undefined;
   /** Open, its section's row stays this far from the top while the section scrolls past (web). */
   stickTop?: number;
   onHeight?: (height: number) => void;
@@ -524,7 +537,7 @@ function Row({
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
-        paddingLeft: row.level === 1 ? 16 : row.level === 2 ? 46 : 74,
+        paddingLeft: row.level === 1 ? 16 : row.level === 2 ? 46 : 74 + (row.depth ?? 0) * 16,
         paddingRight: 10,
         backgroundColor: ground,
         ...(row.level === 1 ? { borderLeftWidth: 5, borderLeftColor: hue } : {}),
@@ -539,7 +552,7 @@ function Row({
           <View position="absolute" left={54} top="50%" width={10} height={1.5} backgroundColor={thread as never} />
         </>
       ) : null}
-      {row.opens ? <Icon name="chevron" size={10} color={String(t.v("tok-hint"))} box={row.open ? undefined : { transform: [{ rotate: "-90deg" }] }} /> : row.level === 2 ? <View width={10} /> : null}
+      {row.opens ? <Icon name="chevron" size={10} color={String(t.v("tok-hint"))} box={row.open ? undefined : { transform: [{ rotate: "-90deg" }] }} /> : row.level >= 2 ? <View width={10} /> : null}
       {row.level === 1 ? (
         <View width={28} height={28} borderRadius={8} backgroundColor={hue as never} alignItems="center" justifyContent="center">
           <Icon name={icon(row.icon)} size={15} color={String(t.v("panel"))} />
@@ -553,7 +566,7 @@ function Row({
           </Txt>
         </View>
       ) : null}
-      {row.level === 3 ? <Icon name="tool" size={11} color={String(t.v("tok-hint"))} /> : null}
+      {row.level === 3 ? <Icon name={icon(row.icon)} size={11} color={String(t.v("tok-hint"))} /> : null}
       <View flexDirection="column" minWidth={0} flexShrink={1}>
         {row.level === 1 ? <Txt spec={{ voice: "app", scale: 14.5 / 12.5, weight: 700 }}>{row.label}</Txt> : null}
         {row.level === 3 ? (
@@ -625,6 +638,9 @@ function Row({
             {...(web as object)}
             {...(isWeb && column.stick !== undefined ? { style: { position: "sticky", [column.stick.side]: column.stick.at, zIndex: 2 } } : {})}
           >
+            {chips.length === 0 && row.subject !== undefined && column.answer !== "*" && onAdd !== undefined ? (
+              <AddSpot t={t} subject={row.subject} answer={column.answer} layer={column.result ? "this conversation" : (board.layers.find((layer) => layer.key === column.group)?.label ?? column.group)} onPress={() => onAdd(row.subject!, { group: column.group, answer: column.answer as BoardAnswer })} />
+            ) : null}
             {chips.map((chip) => {
               const held: Held = { row: row.key, rowLabel: row.label, column: column.group, chip };
               const open = inspected !== undefined && inspected.row === row.key && inspected.column === column.group && inspected.chip.id === chip.id;
@@ -634,6 +650,26 @@ function Row({
         );
       })}
     </View>
+  );
+}
+
+/**
+ * An empty cell of a line's row: nothing until hovered, then a + — pressed, the line gets this answer of
+ * its own everywhere (`addOf`). How a subcommand that answers as its program does is given one.
+ */
+function AddSpot({ t, subject, answer, layer, onPress }: { t: Tokens; subject: string; answer: BoardAnswer; layer: string; onPress: () => void }): JSX.Element {
+  return (
+    <Press
+      onPress={onPress}
+      label={`give ${subject} its own ${ANSWER_WORD[answer].toLowerCase()}`}
+      title={`Give ${subject} its own answer here: ${ANSWER_WORD[answer].toLowerCase()} everywhere, in ${layer}`}
+      width="100%"
+      alignSelf="stretch"
+      grow
+      box={({ hovered }) => ({ minHeight: 18, borderRadius: 6, alignItems: "center", justifyContent: "center", borderWidth: 1, borderStyle: "dashed", borderColor: hovered ? t.tint(ANSWER_HUE[answer], 55) : "transparent", backgroundColor: hovered ? t.tint(ANSWER_HUE[answer], 8) : "transparent" })}
+    >
+      {({ hovered }) => (hovered ? <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: ANSWER_HUE[answer] }}>+</Txt> : null)}
+    </Press>
   );
 }
 

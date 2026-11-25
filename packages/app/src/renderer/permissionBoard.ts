@@ -17,6 +17,7 @@
  * takes the newer layer's answer at the same place, and a map over `unavailable` replaces it.
  */
 import {
+  CONTROLLING_VARIABLES,
   normalizeSubject,
   OTHER_SUBJECT,
   PLACE_KINDS,
@@ -24,6 +25,9 @@ import {
   RESOURCES,
   RUNTIME_LAYER,
   SCOPE_OF_LAYER,
+  SET_ENV_SUBJECT,
+  SHELL_TOOL,
+  subjectKindOf,
   TOOL_CATEGORIES,
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
@@ -36,6 +40,7 @@ import {
   type PlaceKind,
   type SetLayer,
 } from "@jaira/shared/browser";
+import { COMMON_SUBCOMMANDS } from "./composerPermissionSet";
 
 // --- answers ------------------------------------------------------------------------------------
 
@@ -304,7 +309,9 @@ function linesByLayer(view: Pick<PermissionStackView, "layers" | "runtime">, lay
 export type BoardRowRef =
   | { level: 1; resource: string }
   | { level: 2; resource: string; access: string }
-  | { level: 3; resource: string; access: string; subject: string };
+  | { level: 3; resource: string; access: string; subject: string }
+  /** A line's row — a tool, a program, a subcommand, a flag line — opened on the lines under it, by its row's key. */
+  | { level: 4; key: string };
 
 export interface BoardRow {
   key: string;
@@ -323,6 +330,10 @@ export interface BoardRow {
   also: string[];
   /** The last row under its parent — where the thread stops. */
   last: boolean;
+  /** The one line a row stands for — a tool's, a program's, a subcommand's — where it stands for one: what an empty cell's press writes. */
+  subject?: string;
+  /** How far under its tool's row a line's row is: a program 1, its subcommand 2. */
+  depth?: number;
 }
 
 /** A place in a cell. */
@@ -369,8 +380,8 @@ export interface BoardInput {
   view: Pick<PermissionStackView, "layers" | "runtime">;
   /** `permissions.resources` as the settings come to. */
   mapping?: Readonly<Record<string, readonly string[]>>;
-  /** Opened resources and accesses (`files`, `files.read`). */
-  open: { resources: ReadonlySet<string>; accesses: ReadonlySet<string> };
+  /** Opened resources and accesses (`files`, `files.read`), and the line rows opened on the lines under them, by key. */
+  open: { resources: ReadonlySet<string>; accesses: ReadonlySet<string>; lines?: ReadonlySet<string> };
   /** The place sets a cell draws as one chip (`placeSetsOf`). */
   placeSets?: readonly PlaceSet[];
   /** Rows by resource (the default), or by tool, under the app's tool categories. */
@@ -453,19 +464,75 @@ function subjectsOf(lines: Map<string, Map<string, unknown>>): string[] {
   return [...out];
 }
 
+/**
+ * The lines a line's row opens on (2026-11-25: "it should show you everything … you still should be
+ * able to manually expand the row to see its children and have it be empty, so you can configure that
+ * subcommand"). A line's parent is the longest line its words start with — `git push --force` under
+ * `git push`, `git push` under `git`, `shell --run_in_background` under `shell`, `set_env PATH` under
+ * `set_env` — and a program no line names a start of is the shell's, whose line answers for any command
+ * no other names. Beside the lines the layers write stand the ones worth reaching by name: the programs
+ * people name most and their usual subcommands, each tool's flags, and the variables that change what
+ * runs. Only `roots` are rows of their own; the rest are under them.
+ */
+export function lineTreeOf(subjects: readonly string[]): { roots: string[]; children: Map<string, string[]> } {
+  const nodes = new Set(subjects);
+  if (nodes.has(SHELL_TOOL))
+    for (const [program, subs] of Object.entries(COMMON_SUBCOMMANDS)) {
+      nodes.add(program);
+      for (const sub of subs) nodes.add(`${program} ${sub}`);
+    }
+  for (const spec of TOOL_SPECS) {
+    if (!nodes.has(spec.name)) continue;
+    for (const [name, flag] of Object.entries(spec.flags ?? {})) {
+      if (flag.type === "boolean") nodes.add(`${spec.name} --${name}`);
+      else if (flag.type === "choice") for (const value of flag.values) nodes.add(`${spec.name} --${name}=${value}`);
+    }
+  }
+  if (nodes.has(SET_ENV_SUBJECT)) for (const name of CONTROLLING_VARIABLES) if (!name.endsWith("*")) nodes.add(`${SET_ENV_SUBJECT} ${name}`);
+
+  const parentOf = (subject: string): string | undefined => {
+    const words = subject.split(" ");
+    for (let at = words.length - 1; at >= 1; at -= 1) {
+      const prefix = words.slice(0, at).join(" ");
+      if (nodes.has(prefix)) return prefix;
+    }
+    if (subject !== SHELL_TOOL && subject !== SET_ENV_SUBJECT && nodes.has(SHELL_TOOL) && subjectKindOf(subject) === "command") return SHELL_TOOL;
+    return undefined;
+  };
+  const written = new Set(subjects);
+  const roots: string[] = [];
+  const children = new Map<string, string[]>();
+  for (const subject of nodes) {
+    const parent = parentOf(subject);
+    if (parent === undefined) roots.push(subject);
+    else (children.get(parent) ?? children.set(parent, []).get(parent)!).push(subject);
+  }
+  // The lines a layer writes first, then the rest, each alphabetically.
+  for (const list of children.values()) list.sort((a, b) => Number(written.has(b)) - Number(written.has(a)) || a.localeCompare(b));
+  return { roots, children };
+}
+
+/** Kinds of line whose everywhere answer can be off: a tool's, a flag line's and an MCP tool's — never a command, `script`, a runner or `other` (decision 0023). */
+const OFF_KINDS = new Set(["tool", "tool-flag", "mcp", "unknown-tool"]);
+
 /** Build the board. */
 export function boardOf(input: BoardInput): Board {
   const layers = boardLayersOf(input.view);
   const lines = linesByLayer(input.view, layers);
   const mapping = input.mapping ?? {};
-  const subjects = subjectsOf(lines);
-  const resourcesOf = new Map(subjects.map((subject) => [subject, toolResourcesOf(subject, mapping)]));
+  const all = subjectsOf(lines);
+  // Rows stand for the tools and the lines no other line is under; a program, a subcommand and a flag
+  // line are under their line's row (`lineTreeOf`).
+  const tree = lineTreeOf(all);
+  const subjects = tree.roots.filter((subject) => all.includes(subject));
+  const written = new Set([...lines.values()].flatMap((layer) => [...layer.keys()]));
+  const resourcesOf = new Map(all.map((subject) => [subject, toolResourcesOf(subject, mapping)]));
 
   // What each subject comes to, and the `other` line under the ones no layer names.
   const valuesOf = (subject: string): Array<{ layer: string; value: unknown }> => layers.map((layer) => ({ layer: layer.key, value: lines.get(layer.key)?.get(subject) }));
   const otherFold = foldOf(valuesOf(OTHER_SUBJECT));
   const resultOf = new Map<string, { flat: Record<string, string>; from: Record<string, string | undefined> }>();
-  for (const subject of [...subjects, OTHER_SUBJECT]) {
+  for (const subject of [...all, OTHER_SUBJECT]) {
     const fold = foldOf(valuesOf(subject));
     if (fold !== undefined) resultOf.set(subject, fold);
     else if (otherFold !== undefined) resultOf.set(subject, { flat: { [EVERYWHERE]: otherFold.flat[EVERYWHERE] ?? "ask" }, from: { [EVERYWHERE]: otherFold.from[EVERYWHERE] } });
@@ -545,6 +612,45 @@ export function boardOf(input: BoardInput): Board {
     return cells;
   };
 
+  /**
+   * The rows under an open line's row: a row per line under it, empty where no layer writes it — it
+   * answers as its parent does, and the parent's row says so — and otherwise saying only where it
+   * differs from its parent. `parent` is what the parent comes to (its own cells, or what it inherits).
+   */
+  const lineRows = (of: string, ofKey: string, parent: Readonly<Record<string, BoardChip[]>>, resource: string | undefined, hue: string, depth: number): Board["rows"] => {
+    const out: Board["rows"] = [];
+    const under = tree.children.get(of) ?? [];
+    under.forEach((subject, index) => {
+      const key = `${ofKey}>${subject}`;
+      const own = written.has(subject) ? cellsFor([subject], resource) : undefined;
+      const opens = (tree.children.get(subject)?.length ?? 0) > 0;
+      const open = opens && input.open.lines?.has(key) === true;
+      out.push({
+        key,
+        ref: { level: 4, key },
+        level: 3,
+        depth,
+        label: subject,
+        sub: "",
+        icon: subjectKindOf(subject) === "command" ? "terminal" : "tool",
+        resource: hue,
+        opens,
+        open,
+        also: [],
+        last: index === under.length - 1,
+        cells: own !== undefined ? without(own, parent) : {},
+        subject,
+      });
+      if (open) out.push(...lineRows(subject, key, own ?? parent, resource, hue, depth + 1));
+    });
+    return out;
+  };
+  /** A tool's row opens when lines are under it. */
+  const opensOf = (subject: string, key: string): { opens: boolean; open: boolean } => {
+    const opens = (tree.children.get(subject)?.length ?? 0) > 0;
+    return { opens, open: opens && input.open.lines?.has(key) === true };
+  };
+
   /** A resource's row, closed: each access's chips, grouped by place and answer, tagged with the accesses. */
   const condensed = (accesses: ReadonlyArray<{ id: string; label: string; icon: string; group: string[] }>, resource: string): Record<string, BoardChip[]> => {
     const cells: Record<string, BoardChip[]> = {};
@@ -596,20 +702,23 @@ export function boardOf(input: BoardInput): Board {
           const spec = RESOURCE_BY_ID.get(resource!);
           return `${spec?.label ?? resource} · ${spec?.accesses.find((each) => each.id === access)?.label ?? access}`;
         });
+        const rowKey = `${key}.${subject}`;
+        const fold = opensOf(subject, rowKey);
         rows.push({
-          key: `${key}.${subject}`,
-          ref: { level: 2, resource: key, access: subject },
+          key: rowKey,
+          ref: fold.opens ? { level: 4, key: rowKey } : { level: 2, resource: key, access: subject },
           level: 2,
           label: subject === OTHER_SUBJECT ? "everything not listed" : subject,
           sub: names.length > 0 ? names.join(", ") : "no resource",
           icon: "tool",
           resource: key,
-          opens: false,
-          open: false,
+          ...fold,
           also: [],
           last: index === group.length - 1,
           cells: without(toolCells[index]!, shared),
+          ...(subject !== OTHER_SUBJECT ? { subject } : {}),
         });
+        if (fold.open) rows.push(...lineRows(subject, rowKey, toolCells[index]!, undefined, key, 1));
       });
     }
     return { layers, rows: withAllSets(rows) };
@@ -644,7 +753,8 @@ export function boardOf(input: BoardInput): Board {
     accesses.forEach((access, at) => {
       const name = `${resource.id}.${access.id}`;
       const accessOpen = input.open.accesses.has(name);
-      let toolCells = accessOpen ? access.group.map((subject) => cellsFor([subject], resource.id)) : [];
+      const fullCells = accessOpen ? access.group.map((subject) => cellsFor([subject], resource.id)) : [];
+      let toolCells = fullCells;
       let cells = without(accessCells[at]!, hoisted);
       if (accessOpen) {
         const shared = commonOf(toolCells, access.group.map((subject) => new Set(kindsOfSubject(subject))));
@@ -668,20 +778,23 @@ export function boardOf(input: BoardInput): Board {
       if (!accessOpen) return;
       access.group.forEach((subject, index) => {
         const also = (resourcesOf.get(subject) ?? []).map((each) => each.split(".")[0]!).filter((each, i, all) => each !== resource.id && all.indexOf(each) === i).map((each) => RESOURCE_BY_ID.get(each)?.label ?? each);
+        const rowKey = `${name}@${subject}`;
+        const fold = opensOf(subject, rowKey);
         rows.push({
-          key: `${name}@${subject}`,
-          ref: { level: 3, resource: resource.id, access: access.id, subject },
+          key: rowKey,
+          ref: fold.opens ? { level: 4, key: rowKey } : { level: 3, resource: resource.id, access: access.id, subject },
           level: 3,
           label: subject,
           sub: "",
           icon: "tool",
           resource: resource.id,
-          opens: false,
-          open: false,
+          ...fold,
           also,
           last: index === access.group.length - 1,
           cells: toolCells[index]!,
+          subject,
         });
+        if (fold.open) rows.push(...lineRows(subject, rowKey, fullCells[index]!, resource.id, resource.id, 1));
       });
     });
   }
@@ -705,20 +818,24 @@ export function boardOf(input: BoardInput): Board {
   });
   if (otherOpen)
     loose.forEach((subject, index) => {
+      const rowKey = `other.${subject}`;
+      const fold = opensOf(subject, rowKey);
+      const own = cellsFor([subject], undefined);
       rows.push({
-        key: `other.${subject}`,
-        ref: { level: 2, resource: "other", access: subject },
+        key: rowKey,
+        ref: fold.opens ? { level: 4, key: rowKey } : { level: 2, resource: "other", access: subject },
         level: 2,
         label: subject === OTHER_SUBJECT ? "everything not listed" : subject,
         sub: "",
         icon: "tool",
         resource: "other",
-        opens: false,
-        open: false,
+        ...fold,
         also: [],
         last: index === loose.length - 1,
-        cells: cellsFor([subject], undefined),
+        cells: own,
+        ...(subject !== OTHER_SUBJECT ? { subject } : {}),
       });
+      if (fold.open) rows.push(...lineRows(subject, rowKey, own, undefined, "other", 1));
     });
   return { layers, rows: withAllSets(rows) };
 }
@@ -859,6 +976,17 @@ export function moveOf(board: Pick<Board, "layers">, chip: Pick<BoardChip, "line
   const says = moving ? `${what} → ${decision}, ${source.writes === "none" ? "copied" : "moved"} from ${source.label} to ${where}.` : `${what} → ${decision}, in ${where}.`;
   const sets = [...new Set(edits.map((edit) => board.layers.find((layer) => layer.key === edit.layer)).filter((layer) => layer?.writes === "set").map((layer) => layer!.label))];
   return { ok: true, edits, says, ...(sets.length > 0 ? { ask: `This changes ${sets.join(" and ")} for every conversation that uses ${sets.length === 1 ? "it" : "them"}.` } : {}) };
+}
+
+/**
+ * An empty cell pressed: the row's line given an answer of its own everywhere, in that column's layer —
+ * the Result's is the conversation's own, as a drop there is. How a subcommand that answers as its
+ * program does gets a line of its own (2026-11-25). Off is a tool's alone: a command, `script`, a runner
+ * and `other` cannot be.
+ */
+export function addOf(board: Pick<Board, "layers">, subject: string, to: { column: string; answer: BoardAnswer }): BoardMove {
+  if (to.answer === "off" && !OFF_KINDS.has(subjectKindOf(subject))) return { ok: false, says: `${subject} can't be off — only a tool can. Deny it instead.` };
+  return moveOf(board, { lines: [{ subject, place: EVERYWHERE }], decision: decisionFor(to.answer), label: EVERYWHERE, place: EVERYWHERE }, "", to);
 }
 
 /** A layer's lines with some places written or taken out. A line left with nothing is dropped. */

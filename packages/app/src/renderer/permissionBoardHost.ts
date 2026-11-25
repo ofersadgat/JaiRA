@@ -85,10 +85,12 @@ export function usePermissionBoardHost({ stack, host }: { stack: ComposerStack; 
   const [resources, setResources] = useState<ReadonlySet<string>>(() => new Set(["files", "cat:files"]));
   const [by, setBy] = useState<"resources" | "tools">("resources");
   const [accesses, setAccesses] = useState<ReadonlySet<string>>(() => new Set());
+  // A line row opened on the lines under it: a tool on its programs or flags, a program on its subcommands.
+  const [lines, setLines] = useState<ReadonlySet<string>>(() => new Set());
   const records = useView("permissionSets:read", project !== undefined ? { project } : {}).value;
   const sets = useMemo((): SetChoice[] => (records?.records ?? []).map((record) => ({ id: record.id, reference: permissionSetReference(record.id), where: record.files[0] !== undefined ? PERMISSION_SET_LAYER_LABELS[record.files[0].layer] : "" })), [records]);
   const saveTo = useMemo(() => (records?.layers ?? []).filter(isWritableSetLayer).map((layer) => ({ layer, label: PERMISSION_SET_LAYER_LABELS[layer] })), [records]);
-  const board = useMemo(() => (stack.view !== null ? boardOf({ view: stack.view, mapping, placeSets, by, open: { resources, accesses } }) : undefined), [stack.view, mapping, placeSets, by, resources, accesses]);
+  const board = useMemo(() => (stack.view !== null ? boardOf({ view: stack.view, mapping, placeSets, by, open: { resources, accesses, lines } }) : undefined), [stack.view, mapping, placeSets, by, resources, accesses, lines]);
 
   const flip = (set: ReadonlySet<string>, key: string): Set<string> => {
     const next = new Set(set);
@@ -104,6 +106,7 @@ export function usePermissionBoardHost({ stack, host }: { stack: ComposerStack; 
     onToggle: (ref) => {
       if (ref.level === 1) setResources((was) => flip(was, ref.resource));
       else if (ref.level === 2) setAccesses((was) => flip(was, `${ref.resource}.${ref.access}`));
+      else if (ref.level === 4) setLines((was) => flip(was, ref.key));
     },
     onCommit: async (edits) => {
       if (board === undefined) return;
