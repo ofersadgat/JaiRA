@@ -985,3 +985,12 @@ The person, 2026-11-25: "some environments use variables for parts of the comman
 - **The approval draws both.** `CommandApproval.variables` holds each reference read through, with its span. The line is drawn as written; each row is the part as it runs, the value where its reference was. Reference and value are highlighted alike in the part's hue — underlined where the entry matched — and say, pointed at, what they stand for (`$e = …`, `… ← $e`). Gallery: *Approve a command* › *Read through its variables*.
 
 Tests: `shellVariables` (the three dialects, what is and is not certain, payloads, secrets), `approvalModel` (the rows and the line for the person's own line).
+
+### Amended 2026-11-25 (later): an assignment reaches a program by the environment, not by its case
+
+The person, 2026-11-25, asked why `E=/usr/bin/foo; $E` asked where `e=/usr/bin/foo; $e` did not: "why are we treating upper case differently than lower case?", then "yes, use the environment instead of case". A POSIX assignment that is not exported (`E=x`, `read E`, `local E=x`) changes what a program after it is handed only when the name is in the environment already. Without the environment, the parser had guessed that from the case — a program's variables upper case, a shell's own lower case — which asked for a scratch `E` and let `http_proxy=…; curl …` through.
+
+- **The environment decides** (`reachesPrograms`): such an assignment is not vouched for when the environment the line runs in (the amendment above: the task shell's, or the agent's) holds the name, whatever its case — and is a shell's own otherwise. Where no environment is given (WSL, a container, the transcript), the case is still the guess, and the lower-case proxies (`http_proxy`, `https_proxy`, `ftp_proxy`, `all_proxy`, `no_proxy`, `rsync_proxy`) count as the environment's.
+- **`export E` is an export** as `export E=x` is: `e=/x; export e; git status` sets `e` for git, and asks.
+
+Tests: `shellVariables` (statements of assignments, with and without an environment), `policy` (the setting builtins).

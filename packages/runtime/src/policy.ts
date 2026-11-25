@@ -1107,7 +1107,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   const started: Array<{ command?: ParsedCommand; where: PartPlaces }> = [];
   for (const request of taken.requests) {
     if (unlooked.some((span) => inside(request.span, span))) continue;
-    const classified = classifyRequest(request, dialect);
+    const classified = classifyRequest(request, dialect, options.env);
     if (classified === undefined) continue;
     const opened = request.kind === "command" ? request.opened : undefined;
     // `npm run lint` is what its script runs: read where — and, unless a command line naming it

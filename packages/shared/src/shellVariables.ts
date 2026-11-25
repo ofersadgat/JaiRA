@@ -25,6 +25,7 @@
  * was written and each part as it runs (`CommandApproval.variables`).
  */
 import type { ResolvedVariable } from "./commandParts";
+import { isShellLocalName } from "./shellTables";
 
 /** The environment a line runs in, by name — the host's to give; absent, only the line's own values are read. */
 export type EnvironmentLookup = (name: string) => string | undefined;
@@ -41,6 +42,21 @@ export function environmentLookupOf(env: Readonly<Record<string, string | undefi
     for (const key of Object.keys(env)) if (key.toLowerCase() === lower) return env[key];
     return undefined;
   };
+}
+
+/** Lower-case names programs read from the environment all the same: the proxies curl, git and wget obey. */
+const LOWER_CASE_ENVIRONMENT = ["http_proxy", "https_proxy", "ftp_proxy", "all_proxy", "no_proxy", "rsync_proxy"];
+
+/**
+ * Whether a POSIX assignment of `name` that is NOT exported (`E=x`, `read E`, `local E=x`) reaches the
+ * programs the line runs after it: only when `name` is in the environment already — the shell then
+ * hands them its new value (decision 0007 §4, amended 2026-11-25 (later)). Without the environment,
+ * guessed from the convention that a program's variables are upper case (`PATH`, `GIT_DIR`) and a
+ * shell's own are not (`line`, `f`) — the proxies excepted.
+ */
+export function reachesPrograms(name: string, env: EnvironmentLookup | undefined): boolean {
+  if (env !== undefined) return env(name) !== undefined;
+  return !isShellLocalName(name) || LOWER_CASE_ENVIRONMENT.includes(name);
 }
 
 export type VariableDialect = "posix" | "powershell" | "cmd";

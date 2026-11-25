@@ -56,9 +56,10 @@ import {
   CONFIGURING_OPTIONS,
   PACKAGE_SCRIPT_RUNNERS,
   isHarmlessVariable,
-  isShellLocalName,
+  reachesPrograms,
   type PackageScriptRunner,
   type UtilitySpec,
+  type EnvironmentLookup,
 } from "@jaira/shared";
 import { processTargetsOf, stopActionsOf, type ProcessTargets } from "./processTargets";
 import { systemResourceOf } from "./systemTargets";
@@ -241,34 +242,38 @@ function powershellUnmodelled(command: ParsedCommand, paths: readonly string[]):
 }
 
 /** The variables a variable-setting builtin sets that are not harmless (`export PATH=…`, `read GIT_DIR`) — see {@link VARIABLE_SETTERS}. */
-function unsafeSetsOf(command: ParsedCommand): string[] {
+function unsafeSetsOf(command: ParsedCommand, env: EnvironmentLookup | undefined): string[] {
   const spec = Object.hasOwn(VARIABLE_SETTERS, command.program) ? VARIABLE_SETTERS[command.program]! : undefined;
   if (spec === undefined) return [];
   const words = command.words ?? [];
   const after = words.slice((command.programIndex ?? 0) + 1).map((w) => w.value);
-  let names: string[];
+  let names: string[] = [];
   if ("flag" in spec) {
     const at = after.indexOf(spec.flag);
     if (at < 0) return [];
     if (spec.always === true) return [after[at + 1] ?? spec.flag];
     names = after[at + 1] !== undefined ? [after[at + 1]!] : [];
-  } else {
-    const operands = after.filter((w) => !isFlag(w));
-    names = spec.names === "operands" ? operands : operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(w)).map(variableOf);
   }
-  // What is exported reaches every program after it, whatever its name. What is not reaches one only
-  // if it was in the environment already — and those are upper case (`PATH`, `GIT_DIR`), where a
-  // loop's `read -r line` is not.
+  // What is exported reaches every program after it, whatever its name — `export E` as much as
+  // `export E=x`, since `E` may have been set a statement before. What is not reaches one only if it
+  // was in the environment already (`reachesPrograms`).
   const exported = command.program === "export" || ((command.program === "declare" || command.program === "typeset") && after.some((w) => /^-[a-zA-Z]*x/.test(w)));
-  return names.filter((name) => !isHarmlessVariable(name) && (exported || !isShellLocalName(name)));
+  if (!("flag" in spec)) {
+    const operands = after.filter((w) => !isFlag(w));
+    names =
+      spec.names === "operands" ? operands
+      : exported ? operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*(\+?=|$)/.test(w)).map((w) => (w.includes("=") ? variableOf(w) : w))
+      : operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(w)).map(variableOf);
+  }
+  return names.filter((name) => !isHarmlessVariable(name) && (exported || reachesPrograms(name, env)));
 }
 
 /**
  * The part a command is, before it is judged: {@link classifyCommand}, and not vouched for when it sets
  * a variable that changes what runs, or is given one of its own {@link CONFIGURING_OPTIONS}.
  */
-function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
-  const part = classifyCommand(command, span, dialect);
+function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart {
+  const part = classifyCommand(command, span, dialect, env);
   if (part.unmodelled !== undefined) return part;
   const setting = (command.sets ?? []).filter((name) => !isHarmlessVariable(name));
   const own = Object.hasOwn(CONFIGURING_OPTIONS, command.program) ? CONFIGURING_OPTIONS[command.program]! : [];
@@ -279,7 +284,7 @@ function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: Comma
   return { ...rest, unmodelled: why };
 }
 
-function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
+function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart {
   const words = command.words ?? [];
   const programWord = words[command.programIndex ?? 0];
   const programSpan = programWord !== undefined ? [{ ...programWord.span }] : [{ ...span }];
@@ -304,7 +309,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   }
 
   if (NO_REQUEST[dialect].includes(program)) {
-    const setting = dialect === "posix" ? unsafeSetsOf(command) : dialect === "cmd" ? cmdSetsOf(command) : [];
+    const setting = dialect === "posix" ? unsafeSetsOf(command, env) : dialect === "cmd" ? cmdSetsOf(command) : [];
     if (setting.length > 0) return unmodelledBy(`it sets ${setting.join(", ")}, which can change what runs after it`);
     // `ForEach-Object Delete` calls `Delete` on every object it is handed — code the line does not show.
     const member = program === "foreach-object" ? memberCalledBy(command) : undefined;
@@ -446,7 +451,8 @@ function cmdSetsOf(command: ParsedCommand): string[] {
 }
 
 /** Name what one request is for. `undefined` for a redirect to nowhere (`> /dev/null`, `> $null`). */
-export function classifyRequest(request: ShellRequest, dialect: CommandDialect): ClassifiedPart | undefined {
+/** `env`: the environment the line runs in — whether an assignment that is not exported reaches a program (`reachesPrograms`). */
+export function classifyRequest(request: ShellRequest, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart | undefined {
   if (request.kind === "unparsed") {
     return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
   }
@@ -463,7 +469,7 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect):
     const tool = request.direction === "read" ? "read_file" : "write_file";
     return { kind: "redirect", subject: tool, tool, span: request.span, matched: [{ ...request.opSpan }], paths: [request.target], widths: [tool], ...(request.via !== undefined ? { via: request.via } : {}) };
   }
-  return classifyWithSets(request.command, request.span, request.dialect ?? dialect);
+  return classifyWithSets(request.command, request.span, request.dialect ?? dialect, env);
 }
 
 /// --- the permission set, as the shell reads it ---------------------------------------

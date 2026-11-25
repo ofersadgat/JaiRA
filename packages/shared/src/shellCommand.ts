@@ -26,8 +26,8 @@
 import { isCommandRunner } from "./commandRunners";
 import type { ResolvedVariable, TextSpan } from "./commandParts";
 import { walkPowerShell } from "./powershellCommand";
-import { VariableScope, type EnvironmentLookup } from "./shellVariables";
-import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
+import { VariableScope, reachesPrograms, type EnvironmentLookup } from "./shellVariables";
+import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, isHarmlessVariable, type EmbedderSpec } from "./shellTables";
 import type { ShellToken as Token, ShellWalk as Walk } from "./shellWords";
 
 /**
@@ -1033,8 +1033,8 @@ function argv(words: Token[], dialect: CommandDialect, via: string[], depth: num
   if (dialect === "posix") while (start < words.length && isAssignment(words[start]!.value)) start++;
   if (start >= words.length) {
     // Nothing but assignments: `PATH=/tmp/x; git status` sets the variable for the rest of the line.
-    // Not exported: a shell-local name (`x=1`) reaches no program; `PATH` is in every environment already.
-    const sets = words.map((t) => variableOf(t.value)).filter((name) => !isHarmlessVariable(name) && !isShellLocalName(name));
+    // Not exported, it reaches a program only when the environment holds it already (`reachesPrograms`).
+    const sets = words.map((t) => variableOf(t.value)).filter((name) => !isHarmlessVariable(name) && reachesPrograms(name, resolution?.env));
     if (sets.length === 0) return { requests: [] };
     const reason = `it sets ${sets.join(", ")}, which can change what runs after it`;
     return { requests: [{ kind: "unvouched", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason, ...(via.length > 0 ? { via } : {}) }] };

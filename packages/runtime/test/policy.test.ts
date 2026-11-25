@@ -856,3 +856,20 @@ describe("a command runner's gate", () => {
     expect(judged("sudo git status", set({}))).toEqual({ action: "allow", parts: ["«git status» git status allowed by git status"] });
   });
 });
+
+describe("a variable a builtin sets, by the environment (decision 0007 §4, amended 2026-11-25 (later))", () => {
+  const env = (name: string): string | undefined => ({ PATH: "/usr/bin", http_proxy: "http://corp" })[name];
+  const asksWhy = (line: string): string | undefined => decideCommand(OPEN, line, "posix", { env }).parts.parts.find((p) => p.decidedBy.reason.startsWith("it sets"))?.decidedBy.reason;
+
+  it("asks when an unexported name is in the environment, whatever its case, and not otherwise", () => {
+    expect(asksWhy("read PATH; git status")).toBeDefined();
+    expect(asksWhy("read -r http_proxy; curl x")).toBeDefined();
+    expect(asksWhy("read -r LINE; echo $LINE")).toBeUndefined();
+    expect(asksWhy("local GIT_DIR=/tmp/x; git status")).toBeUndefined();
+  });
+
+  it("asks for an export, with or without a value", () => {
+    expect(asksWhy("export E=/x; git status")).toBeDefined();
+    expect(asksWhy("e=/x; export e; git status")).toBeDefined();
+  });
+});

