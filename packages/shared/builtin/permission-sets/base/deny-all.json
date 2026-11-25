@@ -49,5 +49,6 @@
   "list_skills": "deny",
   "load_skill": "deny",
   "script": "deny",
+  "set_env": "deny",
   "other": "deny"
 }

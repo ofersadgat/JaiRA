@@ -1098,7 +1098,12 @@ class Parser {
     const drive = colon > 0 ? name.slice(0, colon).toLowerCase() : undefined;
     const own = colon > 0 ? name.slice(colon + 1) : name;
     if (drive === "env") {
-      if (!isHarmlessVariable(`$env:${own}`)) this.unvouched(from, to, `it sets ${own}, which can change what runs after it`);
+      // `$env:NODE_ENV = …` is the subject `set_env NODE_ENV` (decision 0007 §4, amended 2026-11-25 (latest)).
+      if (!isHarmlessVariable(`$env:${own}`) && own.length > 0) {
+        const at = this.text.indexOf(own, from + written.indexOf(bare));
+        const nameSpan = at >= 0 && at < to ? this.span(at, at + own.length) : this.span(from, to);
+        this.requests.push(this.withVia({ kind: "env" as const, span: this.span(from, to), name: own, nameSpan, reach: "line" as const }));
+      }
     } else if (drive === "function" || drive === "alias") this.unvouched(from, to, `defines what '${own}' runs`);
     else if (own.toLowerCase() === "psdefaultparametervalues" && (drive === undefined || ["global", "script", "local", "private"].includes(drive))) {
       this.unvouched(from, to, "changes the parameters every command after it is given");

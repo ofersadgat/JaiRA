@@ -135,9 +135,9 @@ describe("PowerShell words", () => {
 });
 
 describe("PowerShell that acts without a command", () => {
-  it("treats a variable that reaches past the line as a piece nobody can vouch for", () => {
-    expect(pieces("$env:PATH = 'C:\\evil'; git status")).toEqual(["unvouched «$env:PATH»", "command «git status»"]);
-    expect(pieces("$env:Path += ';C:\\x'")).toEqual(["unvouched «$env:Path»"]);
+  it("treats a variable that reaches past the line as a piece nobody can vouch for — or, an environment variable, as `set_env`", () => {
+    expect(pieces("$env:PATH = 'C:\\evil'; git status")).toEqual(["env «$env:PATH»", "command «git status»"]);
+    expect(pieces("$env:Path += ';C:\\x'")).toEqual(["env «$env:Path»"]);
     expect(pieces("${function:git} = { Remove-Item x }; git status")).toEqual(["unvouched «${function:git}»", "command «Remove-Item x»", "command «git status»"]);
     expect(pieces("$alias:ls = 'Remove-Item'")).toEqual(["unvouched «$alias:ls»"]);
     expect(pieces("$PSDefaultParameterValues['*:Force'] = $true")).toEqual(["unvouched «$PSDefaultParameterValues['*:Force']»"]);

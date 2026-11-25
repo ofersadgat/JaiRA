@@ -49,5 +49,6 @@
   "list_skills": "allow",
   "load_skill": "allow",
   "script": "allow",
+  "set_env": "allow",
   "other": "allow"
 }

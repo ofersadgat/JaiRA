@@ -112,5 +112,6 @@
   "hold_task": "deny",
   "release_task": "deny",
   "stop_task": "deny",
+  "set_env": "deny",
   "other": "deny"
 }

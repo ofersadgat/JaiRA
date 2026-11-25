@@ -13,6 +13,7 @@ import {
   BACKGROUND_LINE,
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
+  SET_ENV_SUBJECT,
   flagLineModes,
   kindedPlace,
   resolveResource,
@@ -56,10 +57,8 @@ import {
   CONFIGURING_OPTIONS,
   PACKAGE_SCRIPT_RUNNERS,
   isHarmlessVariable,
-  reachesPrograms,
   type PackageScriptRunner,
   type UtilitySpec,
-  type EnvironmentLookup,
 } from "@jaira/shared";
 import { processTargetsOf, stopActionsOf, type ProcessTargets } from "./processTargets";
 import { systemResourceOf } from "./systemTargets";
@@ -241,50 +240,35 @@ function powershellUnmodelled(command: ParsedCommand, paths: readonly string[]):
   return undefined;
 }
 
-/** The variables a variable-setting builtin sets that are not harmless (`export PATH=…`, `read GIT_DIR`) — see {@link VARIABLE_SETTERS}. */
-function unsafeSetsOf(command: ParsedCommand, env: EnvironmentLookup | undefined): string[] {
+/**
+ * What a variable-setting builtin points elsewhere that is no variable — `hash -p /x/git git` (see
+ * {@link VARIABLE_SETTERS}' `always`). The variables they set are `set_env` parts of their own, which the
+ * parser emits beside them (decision 0007 §4, amended 2026-11-25 (latest)).
+ */
+function redirectedBy(command: ParsedCommand): string | undefined {
   const spec = Object.hasOwn(VARIABLE_SETTERS, command.program) ? VARIABLE_SETTERS[command.program]! : undefined;
-  if (spec === undefined) return [];
-  const words = command.words ?? [];
-  const after = words.slice((command.programIndex ?? 0) + 1).map((w) => w.value);
-  let names: string[] = [];
-  if ("flag" in spec) {
-    const at = after.indexOf(spec.flag);
-    if (at < 0) return [];
-    if (spec.always === true) return [after[at + 1] ?? spec.flag];
-    names = after[at + 1] !== undefined ? [after[at + 1]!] : [];
-  }
-  // What is exported reaches every program after it, whatever its name — `export E` as much as
-  // `export E=x`, since `E` may have been set a statement before. What is not reaches one only if it
-  // was in the environment already (`reachesPrograms`).
-  const exported = command.program === "export" || ((command.program === "declare" || command.program === "typeset") && after.some((w) => /^-[a-zA-Z]*x/.test(w)));
-  if (!("flag" in spec)) {
-    const operands = after.filter((w) => !isFlag(w));
-    names =
-      spec.names === "operands" ? operands
-      : exported ? operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*(\+?=|$)/.test(w)).map((w) => (w.includes("=") ? variableOf(w) : w))
-      : operands.filter((w) => /^[A-Za-z_][A-Za-z0-9_]*\+?=/.test(w)).map(variableOf);
-  }
-  return names.filter((name) => !isHarmlessVariable(name) && (exported || reachesPrograms(name, env)));
+  if (spec === undefined || !("flag" in spec) || spec.always !== true) return undefined;
+  const after = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  const at = after.indexOf(spec.flag);
+  return at < 0 ? undefined : (after[at + 1] ?? spec.flag);
 }
 
 /**
- * The part a command is, before it is judged: {@link classifyCommand}, and not vouched for when it sets
- * a variable that changes what runs, or is given one of its own {@link CONFIGURING_OPTIONS}.
+ * The part a command is, before it is judged: {@link classifyCommand}, and not vouched for when it is
+ * given one of its own {@link CONFIGURING_OPTIONS}. The variables set for it (`X=1 cmd`) are `set_env`
+ * parts beside it.
  */
-function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart {
-  const part = classifyCommand(command, span, dialect, env);
+function classifyWithSets(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
+  const part = classifyCommand(command, span, dialect);
   if (part.unmodelled !== undefined) return part;
-  const setting = (command.sets ?? []).filter((name) => !isHarmlessVariable(name));
   const own = Object.hasOwn(CONFIGURING_OPTIONS, command.program) ? CONFIGURING_OPTIONS[command.program]! : [];
   const configuring = (command.leadingFlags ?? []).filter((flag) => own.some((option) => (option.endsWith("=") ? flag.startsWith(option) : flag === option || flag.startsWith(`${option}=`))));
-  if (setting.length === 0 && configuring.length === 0) return part;
+  if (configuring.length === 0) return part;
   const { noRequest: _noRequest, ...rest } = part;
-  const why = setting.length > 0 ? `it sets ${setting.join(", ")}, which can change what it runs` : `${configuring.join(", ")} changes what ${command.program} runs`;
-  return { ...rest, unmodelled: why };
+  return { ...rest, unmodelled: `${configuring.join(", ")} changes what ${command.program} runs` };
 }
 
-function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart {
+function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: CommandDialect): ClassifiedPart {
   const words = command.words ?? [];
   const programWord = words[command.programIndex ?? 0];
   const programSpan = programWord !== undefined ? [{ ...programWord.span }] : [{ ...span }];
@@ -309,8 +293,8 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   }
 
   if (NO_REQUEST[dialect].includes(program)) {
-    const setting = dialect === "posix" ? unsafeSetsOf(command, env) : dialect === "cmd" ? cmdSetsOf(command) : [];
-    if (setting.length > 0) return unmodelledBy(`it sets ${setting.join(", ")}, which can change what runs after it`);
+    const redirected = dialect === "posix" ? redirectedBy(command) : undefined;
+    if (redirected !== undefined) return unmodelledBy(`it points ${redirected} elsewhere, which can change what runs after it`);
     // `ForEach-Object Delete` calls `Delete` on every object it is handed — code the line does not show.
     const member = program === "foreach-object" ? memberCalledBy(command) : undefined;
     if (member !== undefined) return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], widths: [SCRIPT_SUBJECT] };
@@ -392,6 +376,18 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     places = [...new Set([...places, ...byName(utility.pathParams ?? [])])];
     const urlWord = utility.url === true ? (byName(utility.urlParams ?? [])[0] ?? operands.find((w) => looksLikeUrl(w.value)) ?? operands[0]) : undefined;
     if (dialect === "powershell") {
+      // `Set-Item env:NODE_ENV x`, `Remove-Item env:X`: what the cmdlet changes is a variable — `set_env NODE_ENV`.
+      if (tool === "write_file") {
+        const set = places.flatMap((w) => {
+          const drive = POWERSHELL_DRIVE.exec(w.value);
+          return drive !== null && drive[1]!.toLowerCase() === "env" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(drive[2]!) ? [{ word: w, name: drive[2]! }] : [];
+        });
+        if (set.length === places.length && set.length === 1) {
+          const { word, name } = set[0]!;
+          if (isHarmlessVariable(`$env:${name}`)) return { ...base, kind: "command", subject: program, matched: programSpan, widths: [], noRequest: true };
+          return envPartOf(name, span, word.span, command.via);
+        }
+      }
       const why = powershellUnmodelled(command, places.map((w) => w.value));
       if (why !== undefined) return unmodelledBy(why);
       // A file cmdlet handed the registry reads or changes the machine's settings, not a file.
@@ -441,18 +437,32 @@ function memberCalledBy(command: ParsedCommand): string | undefined {
   return POWERSHELL_HARMLESS_MEMBERS.includes(member.value.toLowerCase()) ? undefined : member.value;
 }
 
-/** What cmd's `set NAME=value` sets that changes what runs after it. */
-function cmdSetsOf(command: ParsedCommand): string[] {
-  if (command.program !== "set") return [];
-  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
-  const assigned = words.find((w) => !/^\/[a-z]$/i.test(w) && w.includes("="));
-  const name = assigned?.slice(0, assigned.indexOf("=")).replace(/^"/, "");
-  return name !== undefined && name.length > 0 && !isHarmlessVariable(name.toUpperCase()) ? [name] : [];
+/**
+ * A `set_env` part (decision 0007 §4, amended 2026-11-25 (latest)): judged as `set_env NAME`, then
+ * `set_env`, then `other` — never the shell's line. It carries a command of its own, `set_env NAME`, so a
+ * line naming the variable matches it as `git commit` matches git's, and a permission function is told
+ * which variable.
+ */
+function envPartOf(name: string, span: TextSpan, nameSpan: TextSpan, via: string[] | undefined): ClassifiedPart {
+  const word = (value: string): CommandWord => ({ value, span: { ...nameSpan } });
+  const command: ParsedCommand = {
+    program: SET_ENV_SUBJECT,
+    subcommand: name.toLowerCase(),
+    flags: [],
+    args: [],
+    tokens: [SET_ENV_SUBJECT, name],
+    words: [word(SET_ENV_SUBJECT), word(name)],
+    programIndex: 0,
+    span: { ...span },
+    ...(via !== undefined ? { via } : {}),
+  };
+  const subject = `${SET_ENV_SUBJECT} ${name}`;
+  return { kind: "env", subject, span, matched: [{ ...nameSpan }], paths: [], widths: [subject, SET_ENV_SUBJECT], command, ...(via !== undefined ? { via } : {}) };
 }
 
 /** Name what one request is for. `undefined` for a redirect to nowhere (`> /dev/null`, `> $null`). */
-/** `env`: the environment the line runs in — whether an assignment that is not exported reaches a program (`reachesPrograms`). */
-export function classifyRequest(request: ShellRequest, dialect: CommandDialect, env?: EnvironmentLookup): ClassifiedPart | undefined {
+export function classifyRequest(request: ShellRequest, dialect: CommandDialect): ClassifiedPart | undefined {
+  if (request.kind === "env") return envPartOf(request.name, request.span, request.nameSpan, request.via);
   if (request.kind === "unparsed") {
     return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
   }
@@ -469,7 +479,7 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect, 
     const tool = request.direction === "read" ? "read_file" : "write_file";
     return { kind: "redirect", subject: tool, tool, span: request.span, matched: [{ ...request.opSpan }], paths: [request.target], widths: [tool], ...(request.via !== undefined ? { via: request.via } : {}) };
   }
-  return classifyWithSets(request.command, request.span, request.dialect ?? dialect, env);
+  return classifyWithSets(request.command, request.span, request.dialect ?? dialect);
 }
 
 /// --- the permission set, as the shell reads it ---------------------------------------
@@ -693,15 +703,20 @@ export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart, 
     steps.push({ key, specific, ...(mode !== undefined ? { mode } : {}), ...(places !== undefined ? { places } : {}), ...(matched !== undefined ? { matched } : {}) });
   };
   if (part.command !== undefined && part.kind !== "unparsed" && part.unmodelled === undefined) {
-    for (const named of matchCommandEntries(permissionSet, part.command)) step(named.entry.key, true, spanOfWords(named.words));
+    // A `set_env` part: only a line NAMING the variable is specific — the bare `set_env` is its subject's
+    // line, which does not lift the built-in ask on `PATH` (decision 0007 §4, amended 2026-11-25 (latest)).
+    for (const named of matchCommandEntries(permissionSet, part.command)) step(named.entry.key, part.kind !== "env" || named.entry.subs.length > 0, spanOfWords(named.words));
   }
-  const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : SHELL_SUBJECT;
+  // `set_env NODE_ENV`, then `set_env`, then `other`: setting a variable is not "any other command".
+  const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : part.kind === "env" ? SET_ENV_SUBJECT : SHELL_SUBJECT;
   step(subject, false);
   // §3.4: elsewhere, `npm run build` is `script`'s, then `shell`'s, then `other`'s. A part that is a
   // FILE TOOL is not "any other command": `cat x` is `read_file`'s, then `other`'s, as it always was.
   if (part.kind === "script") step(SHELL_SUBJECT, false);
+  // A set that writes no `set_env` line asks about one, as every line setting a variable asked before the
+  // subject was (decision 0007 §4, amended 2026-11-25 (latest)) — its `other` was written without it in mind.
   const fallback: PermissionSetAnswer =
-    permissionSet.other !== undefined ? { mode: permissionSet.other, entry: OTHER_SUBJECT, specific: false } : { mode: "ask", specific: false };
+    permissionSet.other !== undefined && part.kind !== "env" ? { mode: permissionSet.other, entry: OTHER_SUBJECT, specific: false } : { mode: "ask", specific: false };
   const answer = walkLines(steps, 0, undefined, fallback, where);
   // A command that is a tool refined by flag lines this does not read off the command (`shutdown /r` is
   // `power`, but which action?) could be any of them: it takes the strictest of what each flag line, and

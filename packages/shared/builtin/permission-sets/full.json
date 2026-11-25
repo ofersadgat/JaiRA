@@ -51,5 +51,6 @@
   "hold_task": "allow",
   "release_task": "allow",
   "stop_task": "allow",
+  "set_env": "ask",
   "other": "allow"
 }

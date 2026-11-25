@@ -135,6 +135,12 @@ export const OTHER_SUBJECT = "other";
 export const SCRIPT_SUBJECT = "script";
 /** The shell tool: its entry answers for any command no other entry names (decision 0007 §4). */
 export const SHELL_TOOL = "shell";
+/**
+ * The subject that answers for SETTING AN ENVIRONMENT VARIABLE a program after it reads (decision 0007
+ * §4, amended 2026-11-25 (latest)) — `export NODE_ENV=x`, `$env:X = …`, `X=1 cmd`, `set X=…`. Narrowed
+ * by the variable's name as a command by its subcommand: `set_env NODE_ENV`, then `set_env`.
+ */
+export const SET_ENV_SUBJECT = "set_env";
 /** The key that starts a permission set from another — the same `$ref` every other block uses. */
 export const PERMISSION_SET_REF_KEY = "$ref";
 /**
@@ -453,6 +459,8 @@ export interface PermissionSetIssue {
 export function subjectKindOf(subject: string): SubjectKind {
   if (subject === OTHER_SUBJECT) return "other";
   if (subject === SCRIPT_SUBJECT) return "script";
+  // `set_env` and `set_env NODE_ENV` are lines as `git` and `git commit` are: by the name, then any.
+  if (subject === SET_ENV_SUBJECT) return "command";
   if (isMcpSubject(subject)) return "mcp";
   if (parseRunnerSubject(subject) !== undefined) return "runner";
   if (TOOL_SPEC_BY_NAME.has(subject)) return "tool";

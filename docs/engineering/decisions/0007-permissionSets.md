@@ -994,3 +994,15 @@ The person, 2026-11-25, asked why `E=/usr/bin/foo; $E` asked where `e=/usr/bin/f
 - **`export E` is an export** as `export E=x` is: `e=/x; export e; git status` sets `e` for git, and asks.
 
 Tests: `shellVariables` (statements of assignments, with and without an environment), `policy` (the setting builtins).
+
+### Amended 2026-11-25 (latest): setting an environment variable is a subject of its own, `set_env`
+
+The person, 2026-11-25: "perhaps we should have a specific permission for 'override environment variable'? so that the permission layer can properly decide what the behavior should be?", then "yes, build it with set_env". A line that set a variable a program after it reads was a part nobody could vouch for: it asked on every line, no line of a set could answer it, nothing could be remembered, and no function was put to it.
+
+- **`set_env NAME`, then `set_env`.** Every way a line sets a variable a program reads is a part of its own (kind `env`), its span the assignment and its underline the name: `export X=…` and `export X`, `declare -x`, `X=…` and `read`/`local`/`printf -v` where the environment holds the name (the amendment before), `X=1 cmd` and `env X=1 cmd` (for that one command), PowerShell's `$env:X = …` and a cmdlet that writes `env:X`, cmd's `set X=…`. The parser emits them beside the command; a harmless name (`TZ`, `LANG`, `CI`, …) is none. It is matched as `git commit` is matched under `git`: a line naming the variable (in any case), then the bare `set_env`, and remembered at those two widths. A permission function deciding one is handed the command `set_env` with the name as its subcommand.
+- **Not "any other command".** `shell` does not answer for it, and a set that writes no `set_env` line asks about it whatever its `other` says — as every such line asked before; with no set judging the line, it asks too.
+- **What makes a program run something else asks as a built-in** (`CONTROLLING_VARIABLES`): `PATH`, `LD_PRELOAD`, `DYLD_*`, `NODE_OPTIONS`, `PYTHONPATH`, `BASH_ENV`, `GIT_*`, `EDITOR`, the proxies, and the like. A line naming the variable (`"set_env PATH": "allow"`) may answer it; the bare `set_env` may not.
+- **The shipped sets say so:** `read-only`, `read-only-scratch` and `improve/simulation` deny it, `ask-first`, `auto` and `full` ask, and each base set gives it its own mode.
+- `hash -p` points a name at another binary and is still a part nobody can vouch for, as are `$function:`/`$alias:` and `Set-Alias`.
+
+Tests: `shellVariables` (the requests each dialect emits), `policy` (the lookup, the built-in asks, the widths, a function's command), `powershellCommand`.

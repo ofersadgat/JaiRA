@@ -62,5 +62,6 @@
   "write_clipboard": "deny",
   "control_input": "deny",
   "open_app": "deny",
+  "set_env": "deny",
   "other": "deny"
 }

@@ -322,6 +322,26 @@ export function isHarmlessVariable(name: string): boolean {
 }
 
 /**
+ * Variables that make an allowed program RUN SOMETHING ELSE — load a library, read code, pick another
+ * binary, an editor, a pager, a proxy (decision 0007 §4, amended 2026-11-25 (latest)). Setting one asks
+ * as a built-in does: a `set_env NAME` line naming it exactly may still answer, the bare `set_env` may
+ * not. Compared in any case (`$env:Path` is `PATH`); a name ending in `*` is a family.
+ */
+export const CONTROLLING_VARIABLES: readonly string[] = [
+  "PATH", "PATHEXT", "COMSPEC", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_*", "BASH_ENV", "ENV", "PROMPT_COMMAND", "PS4",
+  "IFS", "SHELLOPTS", "BASHOPTS", "NODE_OPTIONS", "NODE_PATH", "PYTHONPATH", "PYTHONSTARTUP", "PYTHONHOME", "PERL5LIB", "PERL5OPT",
+  "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "_JAVA_OPTIONS", "JDK_JAVA_OPTIONS", "PSMODULEPATH", "GIT_*", "SSH_ASKPASS", "SUDO_ASKPASS",
+  "EDITOR", "VISUAL", "PAGER", "LESSOPEN", "LESSCLOSE", "BROWSER", "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY", "NO_PROXY",
+  "RSYNC_PROXY", "NPM_CONFIG_*", "CARGO_*", "RUSTC_WRAPPER", "CC", "CXX", "MAKEFLAGS",
+];
+
+/** Whether setting `name` can make an allowed program run something else — {@link CONTROLLING_VARIABLES}. */
+export function controlsWhatRuns(name: string): boolean {
+  const key = name.toUpperCase();
+  return CONTROLLING_VARIABLES.some((v) => (v.endsWith("*") ? key.startsWith(v.slice(0, -1)) : key === v));
+}
+
+/**
  * A program's own options that change what it runs — `git -c diff.external=./x diff`, `--config-env`,
  * `--exec-path=<dir>` — written before its subcommand. A part that has one is not vouched for: no line
  * about the subcommand can say what it will do. A name ending in `=` is that option with a value

@@ -51,5 +51,6 @@
   "hold_task": "ask",
   "release_task": "ask",
   "stop_task": "ask",
+  "set_env": "ask",
   "other": "ask"
 }

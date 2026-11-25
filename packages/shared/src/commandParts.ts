@@ -45,6 +45,12 @@ export type CommandPartKind =
   | "redirect"
   /** Running a file: `./x.sh`, `bash x.sh`, `npm run build`, `make all`. */
   | "script"
+  /**
+   * Setting an environment variable a program after it reads — `set_env NODE_ENV` (decision 0007 §4,
+   * amended 2026-11-25 (latest)): `export X=…`, `X=1 cmd`, `$env:X = …`, `set X=…`. Its span is the
+   * assignment, its matched words the name.
+   */
+  | "env"
   /** Anything else: the program and its subcommand (`git commit`). */
   | "command"
   /** The line, or a payload inside it, that the parser could not model. Never allowed without asking. */

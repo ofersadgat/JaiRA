@@ -49,5 +49,6 @@
   "list_skills": "smart",
   "load_skill": "smart",
   "script": "smart",
+  "set_env": "smart",
   "other": "smart"
 }

@@ -39,7 +39,7 @@
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict, ToolGate } from "@declarative-ai/permissions";
-import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type EnvironmentLookup, type ParsedCommand } from "@jaira/shared";
+import { DIRECTORY_CHANGERS, controlsWhatRuns, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type EnvironmentLookup, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
 import { blockNowOf, REVEALS, RESOURCE_JUDGES, type ResourceVerdict } from "./resourceJudges";
 import { MachineFactsCache, type MachineFactsSource, type MachineReading } from "./machineFacts";
@@ -918,7 +918,12 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
       };
     } else fromPolicy = { verdict: "denied", source: "builtin", reason: ESCAPE_REASON };
   } else if (policy.builtins !== false) {
-    if (part.command !== undefined) {
+    if (part.kind === "env") {
+      // `PATH`, `LD_PRELOAD`, `GIT_*`: a variable that makes an allowed program run something else asks —
+      // unless a `set_env` line names it (decision 0007 §4, amended 2026-11-25 (latest)).
+      const name = part.subject.slice(part.subject.indexOf(" ") + 1);
+      if (controlsWhatRuns(name)) fromPolicy = { verdict: "asks", source: "builtin", reason: `${name} can make the programs after it run something else` };
+    } else if (part.command !== undefined) {
       const builtin = builtinVerdict(part.command);
       if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
       // `shutdown`, `Restart-Computer`, `systemctl reboot`: the power tool, which always asks (decision 0019 §6).
@@ -931,7 +936,11 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
   // `cd`, `echo`, `true`: a request only when something above made it one.
   if (part.noRequest === true && (fromPolicy === undefined || fromPolicy.verdict === "allowed")) return undefined;
 
-  let composed: Composed = fromPolicy ?? { verdict: "allowed", source: "default", reason: "no built-in applies" };
+  // Setting a variable with no permission set to say so asks, as it always did (decision 0007 §4,
+  // amended 2026-11-25 (latest)); under a set its lines decide — and with none of them, ask (`lookUp`).
+  const envDefault: Composed | undefined =
+    part.kind === "env" && options.permissionSet === undefined ? { verdict: "asks", source: "default", reason: `it sets ${part.subject.slice(part.subject.indexOf(" ") + 1)}, which can change what runs after it` } : undefined;
+  let composed: Composed = fromPolicy ?? envDefault ?? { verdict: "allowed", source: "default", reason: "no built-in applies" };
 
   // (2) the permission set
   if (options.permissionSet !== undefined && part.noRequest !== true) {
@@ -1107,7 +1116,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   const started: Array<{ command?: ParsedCommand; where: PartPlaces }> = [];
   for (const request of taken.requests) {
     if (unlooked.some((span) => inside(request.span, span))) continue;
-    const classified = classifyRequest(request, dialect, options.env);
+    const classified = classifyRequest(request, dialect);
     if (classified === undefined) continue;
     const opened = request.kind === "command" ? request.opened : undefined;
     // `npm run lint` is what its script runs: read where — and, unless a command line naming it
@@ -1120,7 +1129,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     const where = partPlacesOf(classified, here, runs?.map((run) => run.dir), placeOptions, options.expand);
     // What a backgrounded line starts, for its `shell --run_in_background` part below: every request but a
     // runner that opens what it runs (that comes next, as requests of its own) and what is no request.
-    if (options.background === true && opened === undefined && classified.noRequest !== true) {
+    if (options.background === true && opened === undefined && classified.noRequest !== true && classified.kind !== "env") {
       started.push({ ...(classified.unmodelled === undefined && classified.kind !== "unparsed" && classified.command !== undefined ? { command: classified.command } : {}), where });
     }
     const gate = runnerGateFor(classified, options, where);

@@ -118,21 +118,44 @@ it("knows a secret's name", () => {
 });
 
 describe("an assignment that is not exported (decision 0007 §4, amended 2026-11-25 (later))", () => {
-  const unvouched = (line: string, env?: (name: string) => string | undefined): string[] =>
-    takeApart(line, "posix", [], env !== undefined ? { env } : {}).requests.flatMap((r) => (r.kind === "unvouched" ? [r.reason] : []));
+  /** The variables the line sets for a program after it: its `set_env` requests. */
+  const setting = (line: string, env?: (name: string) => string | undefined): string[] =>
+    takeApart(line, "posix", [], env !== undefined ? { env } : {}).requests.flatMap((r) => (r.kind === "env" ? [r.name] : []));
 
   it("reaches a program only when the environment holds the name already, whatever its case", () => {
-    expect(unvouched("E=/usr/bin/foo; $E x", ENV)).toEqual([]);
+    expect(setting("E=/usr/bin/foo; $E x", ENV)).toEqual([]);
     expect(first("E=/usr/bin/foo; $E x", "posix").program).toBe("foo");
-    expect(unvouched("EDGE=/tmp/x; git status", ENV)).toEqual(["it sets EDGE, which can change what runs after it"]);
+    expect(setting("EDGE=/tmp/x; git status", ENV)).toEqual(["EDGE"]);
     const proxied = environmentLookupOf({ http_proxy: "http://corp:8080" }, false);
-    expect(unvouched("http_proxy=http://evil:8080; curl https://x", proxied)).toEqual(["it sets http_proxy, which can change what runs after it"]);
-    expect(unvouched("http_proxy=http://evil:8080; curl https://x", ENV)).toEqual([]);
+    expect(setting("http_proxy=http://evil:8080; curl https://x", proxied)).toEqual(["http_proxy"]);
+    expect(setting("http_proxy=http://evil:8080; curl https://x", ENV)).toEqual([]);
   });
 
   it("is guessed from the convention when there is no environment to ask — the proxies too", () => {
-    expect(unvouched("E=/usr/bin/foo; $E x")).toEqual(["it sets E, which can change what runs after it"]);
-    expect(unvouched("f=/usr/bin/foo; $f x")).toEqual([]);
-    expect(unvouched("http_proxy=http://evil:8080; curl https://x")).toEqual(["it sets http_proxy, which can change what runs after it"]);
+    expect(setting("E=/usr/bin/foo; $E x")).toEqual(["E"]);
+    expect(setting("f=/usr/bin/foo; $f x")).toEqual([]);
+    expect(setting("http_proxy=http://evil:8080; curl https://x")).toEqual(["http_proxy"]);
   });
 });
+
+describe("set_env requests (decision 0007 §4, amended 2026-11-25 (latest))", () => {
+  const requests = (line: string, dialect: CommandDialect = "posix"): string[] =>
+    takeApart(line, dialect, [], { env: ENV }).requests.flatMap((r) => (r.kind === "env" ? [`${r.name}:${r.reach} «${line.slice(r.nameSpan.start, r.nameSpan.end)}»`] : []));
+
+  it("one per variable a program after it reads, from every way a line sets one", () => {
+    expect(requests("export NODE_ENV=production A=1; npm test")).toEqual(["NODE_ENV:line «NODE_ENV»", "A:line «A»"]);
+    expect(requests("e=/x; export e; git status")).toEqual(["e:line «e»"]);
+    expect(requests("NODE_ENV=test npm test")).toEqual(["NODE_ENV:command «NODE_ENV»"]);
+    expect(requests("env GIT_DIR=/x git status")).toEqual(["GIT_DIR:command «GIT_DIR»"]);
+    expect(requests("read -r HOME; ls")).toEqual(["HOME:line «HOME»"]);
+    expect(requests("printf -v TEMP x; ls")).toEqual(["TEMP:line «TEMP»"]);
+    expect(requests("$env:NODE_ENV = 'x'; npm test", "powershell")).toEqual(["NODE_ENV:line «NODE_ENV»"]);
+    expect(requests("set NODE_ENV=x & npm test", "cmd")).toEqual(["NODE_ENV:line «NODE_ENV»"]);
+  });
+
+  it("none for what changes nothing a program reads", () => {
+    expect(requests("TZ=UTC date; export LANG=C; local x=1; read -r line")).toEqual([]);
+    expect(requests("$env:CI = '1'", "powershell")).toEqual([]);
+  });
+});
+

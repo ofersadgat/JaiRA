@@ -60,5 +60,6 @@
   "hold_task": "smart",
   "release_task": "smart",
   "stop_task": "smart",
+  "set_env": "ask",
   "other": "smart"
 }

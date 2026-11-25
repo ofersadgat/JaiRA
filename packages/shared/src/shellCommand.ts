@@ -27,7 +27,7 @@ import { isCommandRunner } from "./commandRunners";
 import type { ResolvedVariable, TextSpan } from "./commandParts";
 import { walkPowerShell } from "./powershellCommand";
 import { VariableScope, reachesPrograms, type EnvironmentLookup } from "./shellVariables";
-import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, isHarmlessVariable, type EmbedderSpec } from "./shellTables";
+import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, VARIABLE_SETTERS, isHarmlessVariable, type EmbedderSpec } from "./shellTables";
 import type { ShellToken as Token, ShellWalk as Walk } from "./shellWords";
 
 /**
@@ -145,6 +145,23 @@ export type ShellRequest =
    * handed (`ForEach-Object Delete`). It is the subject `script`, as code handed to `python -c` is.
    */
   | { kind: "code"; span: TextSpan; what: string; via?: string[] }
+  /**
+   * An environment variable set for a program the line runs (decision 0007 §4, amended 2026-11-25
+   * (latest)): `export X=…`, `X=1 cmd`, `env X=1 cmd`, `$env:X = …`, cmd's `set X=…` — the subject
+   * `set_env X`. Only for a name that reaches a program and is not harmless (`shellVariables.ts`).
+   */
+  | {
+      kind: "env";
+      /** The assignment, or the word naming the variable (`read X`). */
+      span: TextSpan;
+      /** The variable as the line spells it (`NODE_ENV`, `Path`). */
+      name: string;
+      /** Where the name is written. */
+      nameSpan: TextSpan;
+      /** `command`: for the one command it is written before (`X=1 cmd`); `line`: for whatever runs after it. */
+      reach: "command" | "line";
+      via?: string[];
+    }
   /**
    * A piece read perfectly well that changes what the rest of the line does, so that nothing can be
    * said for it: a variable set for what runs after it, a function redefined. It asks as `unparsed`
@@ -864,10 +881,13 @@ function openEmbedder(spec: EmbedderSpec, words: Token[], start: number, dialect
     // (`env FOO=1 git reset --hard` must not lose `--hard`, or policy stops seeing a destructive reset).
     // The assignments it skips are set for everything it runs, so they travel with what it opens.
     const sets: string[] = [];
+    const setters: Token[] = [];
     const setting = (opened: Walk): Walk => {
       if (sets.length === 0) return opened;
       for (const request of opened.requests) if (request.kind === "command") request.command.sets = [...sets, ...(request.command.sets ?? [])];
-      return opened;
+      // `env GIT_DIR=x git status`: each one is set for what it runs — a `set_env` part of its own.
+      const env = setters.filter((t) => !isHarmlessVariable(variableOf(t.value))).map((t) => envRequestOf(t, "command", via));
+      return env.length === 0 ? opened : { ...opened, requests: [...env, ...opened.requests] };
     };
     while (at < rest.length) {
       const token = rest[at]!.value;
@@ -885,6 +905,7 @@ function openEmbedder(spec: EmbedderSpec, words: Token[], start: number, dialect
       }
       if (isAssignment(token)) {
         sets.push(variableOf(token));
+        setters.push(rest[at]!);
         at++;
         continue;
       }
@@ -1034,11 +1055,61 @@ function argv(words: Token[], dialect: CommandDialect, via: string[], depth: num
   if (start >= words.length) {
     // Nothing but assignments: `PATH=/tmp/x; git status` sets the variable for the rest of the line.
     // Not exported, it reaches a program only when the environment holds it already (`reachesPrograms`).
-    const sets = words.map((t) => variableOf(t.value)).filter((name) => !isHarmlessVariable(name) && reachesPrograms(name, resolution?.env));
-    if (sets.length === 0) return { requests: [] };
-    const reason = `it sets ${sets.join(", ")}, which can change what runs after it`;
-    return { requests: [{ kind: "unvouched", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason, ...(via.length > 0 ? { via } : {}) }] };
+    return { requests: words.filter((t) => reaches(variableOf(t.value), false)).map((t) => envRequestOf(t, "line", via)) };
   }
+  // `NODE_ENV=x npm test`: set for the one command, whatever the name — each a `set_env` part of its own.
+  const setting = [...words.slice(0, start).filter((t) => !isHarmlessVariable(variableOf(t.value))).map((t) => envRequestOf(t, "command", via)), ...settersOf(words, start, dialect, via)];
+  const walked = argvFrom(words, start, dialect, via, depth);
+  return setting.length === 0 ? walked : { ...walked, requests: [...setting, ...walked.requests] };
+}
+
+/** Whether setting `name` is a `set_env` part: not harmless, and — not exported — in the environment already. */
+function reaches(name: string, exported: boolean): boolean {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) && !isHarmlessVariable(name) && (exported || reachesPrograms(name, resolution?.env));
+}
+
+/** `NAME=value` (or a word that is only the name, `read NAME`) as the `set_env` request it is. */
+function envRequestOf(word: Token, reach: "command" | "line", via: string[], name: string = variableOf(word.value)): ShellRequest {
+  const last = word.value.startsWith(name) ? word.map[name.length - 1] : undefined;
+  const nameSpan = last !== undefined ? { start: word.map[0]!, end: last + 1 } : { start: word.start, end: word.end };
+  return { kind: "env", span: { start: word.start, end: word.end }, name, nameSpan, reach, ...(via.length > 0 ? { via } : {}) };
+}
+
+/**
+ * What a builtin that sets variables sets for the programs after it (`VARIABLE_SETTERS`): `export X=1`,
+ * `export X`, `declare -x X`, `local X=1`, `read X`, `printf -v X`, and cmd's `set X=1`. Exported, any name
+ * reaches them; set and not exported, one already in the environment does (`reachesPrograms`).
+ */
+function settersOf(words: Token[], start: number, dialect: CommandDialect, via: string[]): ShellRequest[] {
+  const program = commandNameOf(words[start]!.value, dialect).program;
+  const after = words.slice(start + 1);
+  if (dialect === "cmd") {
+    if (program !== "set") return [];
+    const word = after.find((w) => !/^\/[a-z]$/i.test(w.value) && w.value.includes("="));
+    const name = word?.value.slice(0, word.value.indexOf("=")).replace(/^"/, "");
+    return word !== undefined && name !== undefined && reaches(name, true) ? [envRequestOf(word, "line", via, name)] : [];
+  }
+  const spec = dialect === "posix" && Object.hasOwn(VARIABLE_SETTERS, program) ? VARIABLE_SETTERS[program]! : undefined;
+  // `hash -p /x/git git` points a command elsewhere: no variable — the runtime's to refuse.
+  if (spec === undefined || ("flag" in spec && spec.always === true)) return [];
+  const exported = program === "export" || ((program === "declare" || program === "typeset") && after.some((w) => /^-[a-zA-Z]*x/.test(w.value)));
+  let named: Array<{ word: Token; name: string }>;
+  if ("flag" in spec) {
+    const at = after.findIndex((w) => w.value === spec.flag);
+    named = at >= 0 && after[at + 1] !== undefined ? [{ word: after[at + 1]!, name: after[at + 1]!.value }] : [];
+  } else {
+    const operands = after.filter((w) => !isFlag(w.value));
+    named =
+      spec.names === "operands"
+        ? operands.map((word) => ({ word, name: word.value }))
+        : // `export X` exports what `X=1` set a statement before; `local X` sets nothing.
+          operands.filter((w) => w.value.includes("=") || exported).map((word) => ({ word, name: word.value.includes("=") ? variableOf(word.value) : word.value }));
+  }
+  return named.filter(({ name }) => reaches(name, exported)).map(({ word, name }) => envRequestOf(word, "line", via, name));
+}
+
+/** {@link argv} past its leading assignments: an embedder opened, or the command. */
+function argvFrom(words: Token[], start: number, dialect: CommandDialect, via: string[], depth: number): Walk {
   if (depth > MAX_DEPTH) {
     return { requests: [{ kind: "unparsed", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason: "nested too deeply to follow" }], unparsed: "nested too deeply to follow" };
   }

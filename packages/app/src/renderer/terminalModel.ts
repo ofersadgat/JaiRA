@@ -766,6 +766,7 @@ export function requestRowsOf(command: string, dialect: CommandDialect): Request
     }
     if (request.kind === "redirect") return { words, what: request.direction === "write" ? `write ${request.target}` : `read ${request.target}`, nested };
     if (request.kind === "code") return { words, what: `code: ${request.what}`, nested };
+    if (request.kind === "env") return { words, what: `set_env ${request.name}`, nested };
     return { words, what: request.reason, nested };
   });
 }
