@@ -690,8 +690,8 @@ describe("improve/lesson (decision 0029 §5)", { timeout: 60_000 }, () => {
     files,
   });
 
-  it("applies a change under approval: auto — JaiRA writes it and records the lesson", async () => {
-    const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "Always answer in French", workflow: "session", approval: "auto" } });
+  it("applies a change under approval: accept — JaiRA writes it and records the lesson", async () => {
+    const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "Always answer in French", workflow: "session", approval: "accept" } });
     await service.startTask({ taskId, fake: [{ promptIncludes: "## The lesson", output: plan([{ path: "instructions.md", content: "Answer in French.\n" }]) }] });
     await eventually(() => finished(taskId), "the improver to finish", 30_000);
     expect(readFileSync(join(dir, ".jaira", "instructions.md"), "utf8")).toBe("Answer in French.\n");
@@ -709,6 +709,20 @@ describe("improve/lesson (decision 0029 §5)", { timeout: 60_000 }, () => {
     });
     await eventually(() => finished(taskId), "the improver to finish", 30_000);
     expect(existsSync(join(dir, ".jaira", "instructions.md"))).toBe(true);
+  });
+
+  // The person, 2026-11-24: "auto: ask the user when unclear". A change never tried on the conversation
+  // was not shown to hold, so `auto` puts it to the person rather than writing it.
+  it("asks the person under approval: auto when the change was not shown to hold, and writes nothing they turn down", async () => {
+    const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "Always answer in French", workflow: "session", approval: "auto" } });
+    await service.startTask({
+      taskId,
+      fake: [{ promptIncludes: "## The lesson", output: plan([{ path: "instructions.md", content: "Answer in French.\n" }]) }],
+      interactions: { choose_option: [{ decision: "discard" }] },
+    });
+    await eventually(() => finished(taskId), "the improver to finish", 30_000);
+    expect(existsSync(join(dir, ".jaira", "instructions.md"))).toBe(false);
+    expect(service.learningMeasures().proposals).toEqual({ applied: 0, declined: 1 });
   });
 
   it("records a change turned down at the review, with what the person said, and counts it", async () => {
@@ -733,7 +747,7 @@ describe("improve/lesson (decision 0029 §5)", { timeout: 60_000 }, () => {
       return taskId;
     };
     const learn = async (context: Record<string, unknown>, content: string): Promise<void> => {
-      const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "Always answer in French", workflow: "session", context: context as JsonValue, approval: "auto" } });
+      const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "Always answer in French", workflow: "session", context: context as JsonValue, approval: "accept" } });
       await service.startTask({ taskId, fake: [{ promptIncludes: "## The lesson", output: plan([{ path: "instructions.md", content }]) }] });
       await eventually(() => finished(taskId), "the improver to finish", 30_000);
     };
@@ -753,7 +767,7 @@ describe("improve/lesson (decision 0029 §5)", { timeout: 60_000 }, () => {
   });
 
   it("refuses a path a lesson may not write, and writes nothing", async () => {
-    const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "x", workflow: "session", approval: "auto" } });
+    const { taskId } = service.createTask({ title: "Learn", workflow: "improve/lesson", inputs: { lesson: "x", workflow: "session", approval: "accept" } });
     await service.startTask({ taskId, fake: [{ promptIncludes: "## The lesson", output: plan([{ path: "../outside.txt", content: "no" }]) }] });
     await eventually(() => finished(taskId), "the improver to finish", 30_000);
     expect(existsSync(join(dir, "outside.txt"))).toBe(false);

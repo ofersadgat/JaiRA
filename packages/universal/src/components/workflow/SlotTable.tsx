@@ -16,6 +16,8 @@ import {
   bindingHeadOf,
   bindingPlaceholderOf,
   bindingTitleOf,
+  defaultChoicesOf,
+  enumValuesOf,
   linkedRows,
   linkedTypeWords,
   linkedWrapper,
@@ -261,12 +263,18 @@ export function SlotTable({
             const { typeMark, bindingMark } = slotMarksOf(issues, rowPath);
             const value = slotValueOf(reading, path, row.name, row.binding);
             const more = slotMoreShown(readOnly, row.default.length > 0, row.description.length > 0, value);
+            // A slot that lists its values offers them as its default's choices.
+            const values = enumValuesOf(row);
             const controls = (
               <RowControls fields={[value !== undefined, readOnly, readOnly]}>
                 {value !== undefined ? <ReadValue value={value} /> : null}
                 {readOnly && row.default.length === 0 ? null : (
                   <Boxed readOnly={readOnly} label="default">
-                    <Box value={row.default} onChange={(d) => edit(i, { default: d })} placeholder={DEFAULT_PLACEHOLDER} title={DEFAULT_TITLE} />
+                    {values !== undefined ? (
+                      <Pick value={row.default} options={defaultChoicesOf(values, row.default)} onChange={(d) => edit(i, { default: d })} title="the default — one of the values this slot allows" />
+                    ) : (
+                      <Box value={row.default} onChange={(d) => edit(i, { default: d })} placeholder={DEFAULT_PLACEHOLDER} title={DEFAULT_TITLE} />
+                    )}
                   </Boxed>
                 )}
                 {readOnly && row.description.length === 0 ? null : (

@@ -469,6 +469,8 @@ describe("what ships, laid over a workspace's tree", () => {
     expect(configuration.script).toEqual({});
     expect(configuration.file.endsWith(`${CHAT_SESSION}.ts`)).toBe(true);
     expect(JSON.parse(configuration.text)).toMatchObject({ label: "Session" });
+    // `approval` declares the values it takes, so the form can offer them (2026-11-24).
+    expect(JSON.parse(configuration.text).inputs.approval).toMatchObject({ schema: { type: "string", enum: ["propose", "auto", "accept"] }, default: "propose" });
     // A second override of the same layer is refused rather than clobbering the first.
     expect(() =>
       service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true }),

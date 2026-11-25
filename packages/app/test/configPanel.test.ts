@@ -22,7 +22,7 @@ import { copyWordsOf } from "../src/renderer/configPanelModel";
 import { modelKnobsSet, simpleFieldShown } from "../src/renderer/operationFieldsModel";
 import { SIMPLE_FIELDS } from "../src/renderer/operationForm";
 import { slotValueOf } from "../src/renderer/reading";
-import { slotMoreShown } from "../src/renderer/slotTableModel";
+import { defaultChoicesOf, enumValuesOf, slotMoreShown, summarizeSchema } from "../src/renderer/slotTableModel";
 import { TABS, TAB_WORDS, savesOf } from "../src/renderer/stateEditorModel";
 import { formOf, type FormModel } from "../src/renderer/stateForm";
 
@@ -129,5 +129,30 @@ describe("the state's configuration in the side panel", () => {
     expect(copyWordsOf(resolved({ from: "moved" }))).toContain("the workflow has changed since this run");
     // And with no run named, the question does not arise.
     expect(copyWordsOf(resolved({ from: "disk" }))).toBe("as it stands on disk now");
+  });
+});
+
+describe("a slot that lists its values (2026-11-24)", () => {
+  // What `approval: "propose" | "auto" = "propose"` in a workflow script compiles to.
+  const form = formOf({ inputs: { approval: { schema: { type: "string", enum: ["propose", "auto"] }, optional: true, default: "propose" } } }) as FormModel;
+  const row = form.inputs[0]!;
+
+  it("offers its values as the default's choices, after no default", () => {
+    expect(enumValuesOf(row)).toEqual(["propose", "auto"]);
+    expect(defaultChoicesOf(enumValuesOf(row)!, row.default)).toEqual([
+      { value: "", label: "no default" },
+      { value: "propose", label: "propose" },
+      { value: "auto", label: "auto" },
+    ]);
+  });
+
+  it("keeps a default that is none of them as a choice of its own", () => {
+    expect(defaultChoicesOf(["propose", "auto"], "always").at(-1)).toEqual({ value: "always", label: "always — not one of the values" });
+  });
+
+  it("says its type as the choice it is, and a slot that lists none has no choices", () => {
+    expect(summarizeSchema(row.schemaText)).toBe("propose | auto");
+    const plain = (formOf({ inputs: { message: { schema: { type: "string" } } } }) as FormModel).inputs[0]!;
+    expect(enumValuesOf(plain)).toBeUndefined();
   });
 });

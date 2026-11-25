@@ -26,7 +26,10 @@ Lessons the person's OTHER projects have learned are listed too, each naming its
 export default async function review(
   // `maybes`: what the conversation's strict check noted as possibly a correction, message by message.
   context: { task?: string; session?: { id: string }; maybes?: Array<{ lesson: string; quote: string }> } = {},
-  approval: string = "propose",
+  // How each change is applied: "propose" puts every one in one review for the person; "auto" applies
+  // those its trial showed to hold and puts the unclear ones in the review; "accept" applies them all
+  // without asking.
+  approval: "propose" | "auto" | "accept" = "propose",
   scope: string = "project",
   // Try each change on the conversation before offering it (§5 step 5).
   simulate: boolean = true,
@@ -83,13 +86,10 @@ export default async function review(
       statuses = [...statuses, "nothing"];
       continue;
     }
-    const unproven = verdict !== null && verdict.stillNeeded;
-    if (approval === "auto" && unproven) {
-      // A change the trial says does not hold is never applied without a person.
-      statuses = [...statuses, "unproven"];
-      continue;
-    }
-    if (approval === "auto") {
+    // Whether the trial showed the change holds; anything short of that — not tried, or tried and still
+    // needed — is unclear, and `auto` puts it in the review with the rest. `accept` applies it regardless.
+    const held = verdict !== null && !verdict.stillNeeded;
+    if (approval === "accept" || (approval === "auto" && held)) {
       const done = await apply_change({ files: plan.files, lesson: { rule: plan.rule, lever: plan.lever, target: plan.target, why: plan.why, quote: one.quote, task: digest.task }, scope: layer });
       statuses = [...statuses, done.ok ? "applied" : "failed"];
       continue;

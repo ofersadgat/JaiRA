@@ -5,12 +5,41 @@
  */
 import { ANY_TYPE, OWNED_KEYWORDS, SLOT_TYPES, type SlotType } from "@jaira/shared/browser";
 import { fieldClass, type FormIssues } from "./issues";
+import { jsonTextOf } from "./jsonText";
 import type { SlotRow } from "./slotForm";
+
+/**
+ * The values a slot's schema allows, when it lists them (`enum` — what a script's `"propose" | "auto"`
+ * parameter compiles to): each as its default box would hold it (`jsonTextOf`). `undefined` for a slot
+ * whose schema lists none, or is not inline.
+ */
+export function enumValuesOf(row: SlotRow): string[] | undefined {
+  if (row.type !== null || row.typeRef !== undefined || row.spread === true) return undefined;
+  try {
+    const listed = (JSON.parse(row.schemaText) as Record<string, unknown>)["enum"];
+    return Array.isArray(listed) && listed.length > 0 ? listed.map((value) => jsonTextOf(value)) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The default's choices for a slot that lists its values (the person, 2026-11-24: "make the approval
+ * parameter a dropdown with the different default value options"): no default, then each value — and a
+ * default that is none of them kept as its own choice, said to be off the list, so choosing nothing loses it.
+ */
+export function defaultChoicesOf(values: readonly string[], current: string): Array<{ value: string; label: string }> {
+  const off = current.length > 0 && !values.includes(current) ? [{ value: current, label: `${current} — not one of the values` }] : [];
+  return [{ value: "", label: "no default" }, ...values.map((value) => ({ value, label: value })), ...off];
+}
 
 /** A one-glance label for a schema the picker does not model. The full document is the tooltip. */
 export function summarizeSchema(text: string): string {
   try {
     const schema = JSON.parse(text) as Record<string, unknown>;
+    // A list of values reads as the choice it is: `propose | auto`.
+    const listed = schema["enum"];
+    if (Array.isArray(listed) && listed.length > 0) return listed.map((value) => jsonTextOf(value)).join(" | ");
     const type = typeof schema["type"] === "string" ? (schema["type"] as string) : "schema";
     const named = typeof schema["x-type"] === "string" ? ` ${schema["x-type"] as string}` : "";
     const extra = Object.keys(schema).filter((k) => !OWNED_KEYWORDS.includes(k));

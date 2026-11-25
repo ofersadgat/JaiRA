@@ -8,7 +8,7 @@
  * scope): offered alone, a state would lose what it inherits and read as changed when it is not.
  *
  * A version is offered only when it could run: it validates, and every script in it is APPROVED by its
- * content — a version an improver wrote under `approval: "auto"` waits, unoffered, until a person agrees
+ * content — a version an improver wrote under `approval: "auto"` or `"accept"` waits, unoffered, until a person agrees
  * to its code (decision 0029 §1). An offered version is pinned as a snapshot first, so a resume can lay
  * it back into the bundle (`withRunVersions`).
  */

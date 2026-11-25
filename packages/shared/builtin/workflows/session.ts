@@ -42,7 +42,11 @@ interface Verdict {
 export default async function session(
   message: string,
   improve: boolean = true,
-  approval: string = "propose",
+  // How a lesson this conversation learns is applied — handed to `improve/lesson` and
+  // `improve/conversation`: "propose" always asks the person; "auto" asks only when it is unclear —
+  // applies a change its trial showed to hold, and asks about any other; "accept" applies the changes
+  // without asking.
+  approval: "propose" | "auto" | "accept" = "propose",
   // What the composer chose for the FIRST message (its model, its reasoning); every later message's
   // arrive with it through `input()`. A message's tools reach the run through its permission set.
   settings: unknown = null,

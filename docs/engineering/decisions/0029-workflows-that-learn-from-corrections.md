@@ -28,6 +28,8 @@ The rulings that followed, the same day:
    improve things) … if its passed a null workflow, it may need to figure out which workflow it needs
    to improve by using the context information".
 4. **Approval is a parameter.** "Propose, I approve should be the default, but should be changeable."
+   Its values (the person, 2026-11-24): "propose: always ask the user auto: ask the user when unclear
+   accept: automatically add the changes" — and `return` for a caller that approves it itself.
 5. **Instructions are JaiRA's own file**, given to every runtime, never CLAUDE.md or AGENTS.md.
 6. **Skills have to be built.** "we may need to implement skills in our harness as well".
 7. **A workflow is a program, and a conversation is one.** "what we would consider a conversation
@@ -295,7 +297,8 @@ the other gaps you identified as well".
   A judge reads the two. When the person would still have had to make the correction, the change goes
   back to be written again with what the pass did; when the running conversation could not switch to it
   (it changed what the loop carries across the wait), it goes back with that. The review shows the
-  trial. Under `auto`, a change the trial says does not hold is never applied without a person.
+  trial. Under `auto`, a change the trial did not show to hold — not tried, or tried and still needed —
+  is put to the person; under `accept` it is applied all the same.
 
 - **A non-durable run reports to JaiRA** (ruling 12, built 2026-11-19). Read as the ruling words it: the
   run REPORTS — it still makes its own calls, with the keys of its own environment, and reads `input()`
@@ -506,7 +509,7 @@ and teach the loop to route to it.
   `{ value, session }`. The loop carries that position, forks it, or drops it.
 - **A script's own code is approved by content hash, like a module.** A file a person wrote and
   approved runs as before. A file whose hash nobody approved asks before it runs, and that includes
-  one the improver just edited. `approval: "auto"` writes the edit; it never runs unapproved code.
+  one the improver just edited. `approval: "auto"` or `"accept"` writes the edit; it never runs unapproved code.
 
 ### 2. A conversation is a loop over `input()`
 
@@ -611,7 +614,7 @@ ran) gets its delivery fixed instead.
 | `workflow` | The workflow to improve, or `null` to find it from `context` | — |
 | `lesson` | The correction, as text | — |
 | `context` | Where it happened: run, session, position | none |
-| `approval` | `propose`, `auto`, or `return` (hand the change back to the caller to approve); or a map by lever | `propose` |
+| `approval` | `propose` (always ask the person), `auto` (ask only when unclear: apply a change the trial showed to hold, ask about any other), `accept` (apply without asking), or `return` (hand the change back to the caller to approve); or a map by lever | `propose` |
 | `simulate` | Check the change against `context` before offering it | on when `context` names a position |
 | `scope` | The layer a new lesson lives in | `project` |
 
@@ -640,8 +643,9 @@ Steps:
    - A judge decides whether the person would still have had to say it. If yes, it goes back to
      `author`.
 6. **`approve`**: under `propose`, the changeset review gate runs (CHANGESETS.md), the same one a
-   sync proposal walks; a `comment` goes back to `author`. Under `auto`, this step is skipped. Under
-   `return`, the change goes back to the caller.
+   sync proposal walks; a `comment` goes back to `author`. Under `auto`, it runs only for a change the
+   trial did not show to hold. Under `accept`, it is skipped. Under `return`, the change goes back to
+   the caller.
 7. **`apply`**: a JaiRA function, not the model, writes the files.
    - It refuses paths outside `workflows/`, `prompts/`, `skills/`, `functions/`, `permission-sets/`,
      `lessons/` and `instructions.md`.
@@ -650,7 +654,7 @@ Steps:
    - A conversation's own version and the shared file are separate steps:
      - The running conversation switches as soon as the change is applied.
      - The shared layer file is updated in the same approval under `propose`, and once the lesson has
-       held for N passes under `auto`.
+       held for N passes under `auto` or `accept`.
 
 `improve/lesson` is an ordinary workflow, so a person can change it, and so can a lesson about it.
 

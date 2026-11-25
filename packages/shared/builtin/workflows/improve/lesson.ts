@@ -27,7 +27,10 @@ export default async function improve(
   lesson: string,
   workflow: string | null = null,
   context: { task?: string; session?: { id: string } } = {},
-  approval: string = "propose",
+  // How a change is applied: "propose" always asks the person; "auto" asks only when it is unclear —
+  // applies a change its trial showed to hold, and asks about any other; "accept" applies it without
+  // asking; "return" hands the proposal back unapplied to whoever started this.
+  approval: "propose" | "auto" | "accept" | "return" = "propose",
   scope: string = "project",
   // Try the change on the conversation before offering it — by default whenever `context` names where
   // in it the correction was made.
@@ -66,12 +69,14 @@ export default async function improve(
         }
       }
     }
-    // A change the trial says does not hold is never applied without a person.
-    const unproven = verdict !== null && verdict.stillNeeded;
-    if (approval === "return" || (approval === "auto" && unproven)) {
-      return { status: approval === "return" ? "proposed" : "unproven", rule: plan.rule, lever: plan.lever, written: [], lessonFile: "", reason: unproven ? verdict!.why : plan.summary, proposal: plan, tried: tried };
+    // Whether the trial showed the change holds: tried on the conversation, and the person would not
+    // have had to say it again. Anything short of that — not tried, or tried and still needed — is unclear.
+    const held = verdict !== null && !verdict.stillNeeded;
+    if (approval === "return") {
+      return { status: "proposed", rule: plan.rule, lever: plan.lever, written: [], lessonFile: "", reason: verdict !== null && verdict.stillNeeded ? verdict.why : plan.summary, proposal: plan, tried: tried };
     }
-    if (approval === "propose") {
+    // `propose` always asks; `auto` asks when it is unclear; `accept` never does.
+    if (approval === "propose" || (approval === "auto" && !held)) {
       const trial = describeTried(tried, verdict);
       // The prompt is the gate's heading, so it stays the question; the proposal is the Markdown body.
       const review = await choose_option({
