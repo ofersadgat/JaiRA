@@ -732,7 +732,7 @@ import {
   type LiveShell,
   type TaskShells,
 } from "@jaira/runtime";
-import { isProcessTaskId, PROCESS_WORKFLOW, type ProcessListAnswer, type ProcessListRequest, type ProcessReadAnswer, type ProcessSummary, type ProcessTreeNode, type TerminalRead, type TerminalSignal, type TerminalSummary } from "@jaira/shared";
+import { isProcessTaskId, PROCESS_WORKFLOW, withEndedProcesses,type ProcessListAnswer, type ProcessListRequest, type ProcessReadAnswer, type ProcessSummary, type ProcessTreeNode, type TerminalRead, type TerminalSignal, type TerminalSummary } from "@jaira/shared";
 import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
@@ -7992,7 +7992,7 @@ export class AppService {
     // person's message (decision 0032, ruling 8), as their own commands do (decision 0028, ruling 8).
     // Only the person's own messages: one the app sends for them is not where they would look.
     const ended = origin.by === undefined ? (this.sessionProcesses.get(request.taskId)?.takeNotes() ?? []) : [];
-    if (ended.length > 0) request = { ...request, message: `${request.message}\n\n${ended.length === 1 ? "A background process ended" : "Background processes ended"}:\n\n${ended.join("\n\n")}` };
+    if (ended.length > 0) request = { ...request, message: withEndedProcesses(request.message, ended) };
     const open = this.session(request.project);
     // In line behind the message before it — taken now, before any await (see above).
     const line = `${this.refOfSession(open)}/${request.taskId}`;

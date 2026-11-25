@@ -95,3 +95,27 @@ export const TERMINAL_OUTPUT_KEEP = 1_000_000;
 
 /** How an interrupt or a stop is asked for: Ctrl-C, or end it. */
 export type TerminalSignal = "interrupt" | "stop";
+
+/**
+ * The person's message with what ended among the task's background processes since the agent last
+ * heard (decision 0032, ruling 8): the engine adds it to the message when it delivers it, so the
+ * conversation holds the message with it.
+ */
+export function withEndedProcesses(message: string, notes: readonly string[]): string {
+  if (notes.length === 0) return message;
+  return `${message}\n\n${notes.length === 1 ? "A background process ended" : "Background processes ended"}:\n\n${notes.join("\n\n")}`;
+}
+
+/**
+ * Whether a message the conversation holds is the one that was sent — itself, or itself with the
+ * ended processes the engine added on delivery ({@link withEndedProcesses}). A window keeps what it
+ * sent pending until the conversation holds it, and comparing the two exactly left a message with a
+ * process's end added drawn twice: as the conversation holds it, and again as still pending.
+ */
+export function holdsSentMessage(held: string | undefined, sent: string): boolean {
+  if (held === undefined) return false;
+  if (held === sent) return true;
+  if (!held.startsWith(`${sent}\n\n`)) return false;
+  const rest = held.slice(sent.length + 2);
+  return rest.startsWith("A background process ended:\n\n") || rest.startsWith("Background processes ended:\n\n");
+}

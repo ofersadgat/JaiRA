@@ -19,6 +19,7 @@ import { conversationAnswering, isProgramConversation, openingRunAnswering, stil
 import { askDrawnAtItsCall } from "./approvalCall";
 import { programCallsOf, weaveProgramCalls, type ProgramCall } from "./programCalls";
 import type { OperationRecordView, QueuedMessageView } from "@jaira/shared/browser";
+import { holdsSentMessage } from "@jaira/shared/browser";
 import type { CutSide } from "./transcriptViewTypes";
 import { terminals } from "./terminalStore";
 import { yourCommandsNote } from "./terminalModel";
@@ -354,7 +355,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     const turns = thread?.session.turns ?? [];
     if (turns.length === 0) return;
     setSent((was) => {
-      const left = was.filter((m) => !turns.some((turn) => turn.role === "user" && turn.text === m));
+      const left = was.filter((m) => !turns.some((turn) => turn.role === "user" && holdsSentMessage(turn.text, m)));
       return left.length === was.length ? was : left;
     });
   }, [thread]);
@@ -462,7 +463,11 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     // The messages that never reached the conversation, said where they were sent — the failure under
     // them is `error`'s. One sent here and failing is the same message, said once.
     const unsent = (thread?.unsent ?? []).map((u) => u.message);
-    const pending = [...unsent, ...outstanding.filter((text) => !unsent.includes(text))].filter((text) => !turns.some((turn) => turn.role === "user" && turn.text === text));
+    // "Holds", not "equals": the engine adds what ended among the task's background processes to the
+    // message it delivers, so the conversation's copy can be the sent one with that after it.
+    const pending = [...unsent, ...outstanding.filter((text) => !unsent.some((u) => holdsSentMessage(u, text)))].filter(
+      (text) => !turns.some((turn) => turn.role === "user" && holdsSentMessage(turn.text, text)),
+    );
     return entriesOf(
       thread?.session ?? null,
       journalFor(surface.journal?.turns ?? [], thread?.session.stateId),
