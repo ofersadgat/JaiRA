@@ -165,7 +165,7 @@ function RunConversationOf({
           <StepsRail
             instances={detail.instances}
             here={reading}
-            {...(asking && detail.instances.some((node) => hasAsking(node)) ? { asking: askingInstanceOf(detail.instances) } : {})}
+            {...(asking && detail.instances.some((node) => hasAsking(node, true)) ? { asking: askingInstanceOf(detail.instances, true) } : {})}
             onGoTo={(node) => (hostFocus ? runFocus.set({ instance: node.instanceId, at: Date.now() }) : setOwnFocus({ instance: node.instanceId, at: Date.now() }))}
           />
         </View>

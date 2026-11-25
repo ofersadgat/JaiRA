@@ -8,7 +8,7 @@
  * it runs in and whether it waits on the person (`mergeBoards`, `markAsking`).
  */
 import { isConversation, type BoardCard } from "@jaira/shared/browser";
-import { pillKindOf, seenClockOf, type PillKind } from "./pillModel";
+import { pillFill, pillKindOf, seenClockOf, type PillKind } from "./pillModel";
 
 /** What the column head groups by: nothing, how the task stands, the workflow it runs, or where. */
 export const TASK_GROUPS = ["none", "status", "workflow", "workspace"] as const;
@@ -77,13 +77,17 @@ export function standingOf(card: Pick<BoardCard, "status" | "asking"> & { proces
  * which has its own glyph and is not read as a run) wear none.
  */
 export function unseenKindOf(
-  card: Pick<BoardCard, "taskId" | "status" | "asking" | "updatedAt" | "archived" | "type">,
+  card: Pick<BoardCard, "taskId" | "status" | "asking" | "updatedAt" | "childAt" | "archived" | "type">,
   seen: Readonly<Record<string, number>>,
 ): PillKind | null {
   if (card.type === "process" || card.archived !== undefined) return null;
-  if ((seen[card.taskId] ?? 0) >= seenClockOf(card)) return null;
+  // What it is doing is lit whether or not it has been read — "it isnt really unseen, its unseen or
+  // active" (the person, 2026-11-24): only how it ended goes out once it is opened.
   if (card.asking !== undefined) return "waiting";
-  return pillKindOf(card.status);
+  const kind = pillKindOf(card.status);
+  if (kind === null || pillFill(kind) === "active") return kind;
+  if ((seen[card.taskId] ?? 0) >= seenClockOf(card)) return null;
+  return kind;
 }
 
 /** The project's tasks among a board's cards: every card once, conversations left to the Chat tab. */

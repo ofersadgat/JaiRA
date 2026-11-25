@@ -13,7 +13,8 @@ import { clockOf } from "@jaira/ui/runActivityModel";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
-import { CallInterruptContext, type ProgramCall } from "@jaira/ui/programCalls";
+import { askingCallIdOf, CallGateContext, CallInterruptContext, type ProgramCall } from "@jaira/ui/programCalls";
+import { GateSurface } from "../panel/Gate";
 import { Composer, RouteFixes } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
 import { LiveStatusLine, LiveStatusPill, Paper } from "./Paper";
@@ -31,7 +32,7 @@ import { QueuedMessage } from "./QueuedMessage";
 import { Switch } from "../settings/controls";
 import { useChatEnvironment } from "./environment";
 import { useChildRunHost } from "./childRunHost";
-import { OutcomeHostContext } from "../panel/outcomeHost";
+import { OutcomeHostContext, StartedTaskHostContext } from "../panel/outcomeHost";
 import { SubagentHostContext } from "../panel/subagentHost";
 import { AgentHostContext } from "../panel/AgentRail";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
@@ -102,6 +103,16 @@ export function ChatThread({
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
+  // The gate a call of the conversation's own program asks, drawn under that call's row (`CallGateContext`),
+  // as the task view draws a program's (`RunTranscript`'s `ProgramRows`).
+  const gate = surface.gate;
+  const onGate = surface.onGate;
+  const instances = surface.detail?.instances;
+  const gateAt = useMemo(() => {
+    if (gate === undefined || onGate === undefined || instances === undefined) return undefined;
+    const asking = askingCallIdOf(instances);
+    return (callId: string): ReactNode | undefined => (callId === asking ? <GateSurface key={gate.requestId} pending={gate} onSubmit={(value) => onGate(gate.requestId, value)} plain /> : undefined);
+  }, [gate, onGate, instances]);
   // The sizes the person gave its pictures: kept while the conversation is open, dropped when it is left.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const pictureSizes = useMemo(() => new Map<string, number>(), [m.taskId]);
@@ -301,10 +312,12 @@ export function ChatThread({
         {/* Which day you are reading, floating over the thread (sticky, 0 tall). */}
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <OutcomeHostContext.Provider value={runs.outcomeHost}>
+        <StartedTaskHostContext.Provider value={runs.startedHost}>
         <SubagentHostContext.Provider value={runs.subagentHost}>
         <AgentHostContext.Provider value={runs.agentHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
         <CallInterruptContext.Provider value={m.interruptCall}>
+        <CallGateContext.Provider value={gateAt}>
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
             // Not started: the message it will open with, not sent until it has somewhere to run — in
@@ -389,10 +402,12 @@ export function ChatThread({
             </Paper>
           </>
         ) : null}
+        </CallGateContext.Provider>
         </CallInterruptContext.Provider>
         </ApprovalAskContext.Provider>
         </AgentHostContext.Provider>
         </SubagentHostContext.Provider>
+        </StartedTaskHostContext.Provider>
         </OutcomeHostContext.Provider>
         {/* The end the pills over the box would cover, left free while they show. */}
         {runs.pillSpace > 0 ? <View height={runs.pillSpace} flexShrink={0} /> : null}

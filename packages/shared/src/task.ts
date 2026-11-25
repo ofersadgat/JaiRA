@@ -330,3 +330,58 @@ export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
 export function isConversation(task: { workflow: string; startedBy?: TaskStartedBy | undefined }): boolean {
   return task.startedBy?.by === "chat";
 }
+
+/** What {@link parentTaskOf} and {@link drawnInsideParent} read of a task: how it was made, and what it was made for. */
+export interface ChildLink {
+  origin?: { kind?: string | undefined; taskId: string } | undefined;
+  parentTaskId?: string | undefined;
+}
+
+/**
+ * The task this one is a CHILD of, or `undefined`: the parent a fan-out element, an adoption or a
+ * started task names (`origin.kind` `task`, `adopt`, `started` — a conversation's `start_task` is the
+ * last), or, for a task with no origin, the task it was spawned for (`parentTaskId`: a sync's review
+ * round). A FORK or a split copy is not a child: its `parentTaskId` names the task it was cut from.
+ *
+ * What a parent's state is rolled up over (the person, 2026-11-23: "a parent task should not count as
+ * stopped when it has a non terminal child. the parent task should be in the waiting state which lets
+ * me know that it has something that needs to be done").
+ */
+export function parentTaskOf(task: ChildLink): string | undefined {
+  const kind = task.origin?.kind;
+  if (kind === "task" || kind === "adopt" || kind === "started") return task.origin!.taskId;
+  if (task.origin !== undefined) return undefined;
+  return task.parentTaskId;
+}
+
+/**
+ * A child that is drawn only INSIDE its parent — a mount's element, on the board of the state that
+ * mounted it; a task a conversation or the events task started, in that one's transcript or column —
+ * never as a row of its own in a project's task list (`rootsBoard`). Its state is its parent's to show:
+ * counted on its own as well, it lit the Tasks tab for a row the list could not draw.
+ */
+export function drawnInsideParent(task: ChildLink, present: (taskId: string) => boolean): boolean {
+  const kind = task.origin?.kind;
+  return kind === "task" || (kind === "started" && present(task.origin!.taskId));
+}
+
+/**
+ * Each task's ancestors, nearest first, through {@link parentTaskOf} — the tasks a child's ask or open
+ * work rolls up into. Only ancestors among `tasks` are named; a cycle (corrupt records) stops the walk.
+ */
+export function ancestorsOf<T extends ChildLink & { taskId: string }>(tasks: readonly T[]): Map<string, string[]> {
+  const byId = new Map(tasks.map((t) => [t.taskId, t] as const));
+  const out = new Map<string, string[]>();
+  for (const task of tasks) {
+    const chain: string[] = [];
+    const seen = new Set([task.taskId]);
+    let at = parentTaskOf(task);
+    while (at !== undefined && byId.has(at) && !seen.has(at)) {
+      chain.push(at);
+      seen.add(at);
+      at = parentTaskOf(byId.get(at)!);
+    }
+    if (chain.length > 0) out.set(task.taskId, chain);
+  }
+  return out;
+}

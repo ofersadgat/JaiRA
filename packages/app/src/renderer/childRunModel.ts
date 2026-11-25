@@ -163,9 +163,9 @@ export function keysTo(nodes: readonly InstanceNode[], instanceId: string): stri
   return undefined;
 }
 
-function askingNodes(node: InstanceNode): InstanceNode[] {
+function askingNodes(node: InstanceNode, gated: boolean): InstanceNode[] {
   if (node.superseded) return [];
-  return [...(isAsking(node) ? [node] : []), ...node.children.flatMap(askingNodes)];
+  return [...(isAsking(node, gated) ? [node] : []), ...node.children.flatMap((child) => askingNodes(child, gated))];
 }
 
 /** What a gate holds, in a few words: the questions of a stepped choice. */
@@ -194,7 +194,7 @@ export function waitsOf(input: {
   const runs = childRunsOf(input.instances);
   const waits: RunWait[] = [];
   for (const run of runs) {
-    for (const node of askingNodes(run)) {
+    for (const node of askingNodes(run, input.gate !== undefined)) {
       const keys = keysTo([run], node.instanceId) ?? [];
       const note = gateNote(input.gate);
       waits.push({ instanceId: node.instanceId, path: keys.slice(0, -1), step: keys[keys.length - 1] ?? node.stateId, kind: "ask", ...(note !== undefined ? { note } : {}), since: node.startedAt });

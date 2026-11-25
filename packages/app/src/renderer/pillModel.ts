@@ -184,19 +184,21 @@ export function unseenTasks(
 }
 
 /** The least a row has to know about a task to be counted: what it is doing, and when it last did. */
-export type CountedTask = { taskId: string; status: TaskStatus; updatedAt: number; lastMessageAt?: number | undefined };
+export type CountedTask = { taskId: string; status: TaskStatus; updatedAt: number; lastMessageAt?: number | undefined; childAt?: number | undefined };
 
 /**
  * The clock a read mark is compared with, and what opening a task marks it read up to: the row's own,
- * or its conversation's newest reply where that is later. A typed turn moves no task row, so without
- * the reply a conversation that finished answering was news nobody was told about.
+ * or its conversation's newest reply where that is later — a typed turn moves no task row, so without
+ * the reply a conversation that finished answering was news nobody was told about — or the newest move
+ * of any task under it (`childAt`, at any depth): a child that moves leaves its parent, and theirs,
+ * unseen until they are looked at (the person, 2026-11-23).
  */
-export function seenClockOf(row: { updatedAt: number; lastMessageAt?: number | undefined }): number {
-  return Math.max(row.updatedAt, row.lastMessageAt ?? 0);
+export function seenClockOf(row: { updatedAt: number; lastMessageAt?: number | undefined; childAt?: number | undefined }): number {
+  return Math.max(row.updatedAt, row.lastMessageAt ?? 0, row.childAt ?? 0);
 }
 
 /** A row any list holds for a task: what {@link shownClockOf} reads a clock from. */
-export type ClockedRow = { taskId: string; updatedAt: number; lastMessageAt?: number | undefined };
+export type ClockedRow = { taskId: string; updatedAt: number; lastMessageAt?: number | undefined; childAt?: number | undefined };
 
 /**
  * How far a task on screen has been seen: the newest clock ANY list the window holds says it has
@@ -230,20 +232,29 @@ export function shownClockOf(taskId: string, lists: Iterable<readonly ClockedRow
  * Same split as `projectCounts` on what the watermark applies to: an active pill is a live fact and
  * is always true, a status pill counts only what has stopped since this person last looked.
  *
- * `waiting` is the one thing it cannot see. Whether a running task is parked on a person is counted
- * from the session's own requests and is not on the task row, so a conversation waiting on an
- * answer reads as `▶` here and is broken out only on the project row above. That is a fair trade
- * for a view row: it is a pointer to where to look, and it does point.
+ * What a task is doing is not all on its row: whether it is parked on a person, and what the tasks
+ * under it are doing — one that asks or was interrupted makes it wait, one that runs makes it run —
+ * are counted by the engine. `live` is that, read off the projects' summaries (`liveKindsOf`); a row
+ * in it counts as it says there, as the project row above counts it, so "this project less its
+ * conversations" leaves the Tasks row nothing of a conversation that waits.
  */
-export function taskCounts(rows: readonly CountedTask[], seen: Readonly<Record<string, number>> = {}): PillCounts {
+export function taskCounts(rows: readonly CountedTask[], seen: Readonly<Record<string, number>> = {}, live: ReadonlyMap<string, LiveKind> = NO_LIVE): PillCounts {
   const counts: PillCounts = {};
   for (const row of rows) {
-    const kind = pillKindOf(row.status);
+    const kind = live.get(row.taskId) ?? pillKindOf(row.status);
     if (kind === null) continue;
     if (pillFill(kind) === "status" && (seen[row.taskId] ?? 0) >= seenClockOf(row)) continue;
     counts[kind] = (counts[kind] ?? 0) + 1;
   }
   return counts;
+}
+
+type LiveKind = "running" | "waiting";
+const NO_LIVE: ReadonlyMap<string, LiveKind> = new Map();
+
+/** What the engine says each live task is doing — itself or through a task under it (`ProjectSummary.live`). */
+export function liveKindsOf(projects: ReadonlyArray<{ live?: ReadonlyArray<{ taskId: string; kind: LiveKind }> | undefined }>): Map<string, LiveKind> {
+  return new Map(projects.flatMap((p) => (p.live ?? []).map((t) => [t.taskId, t.kind] as const)));
 }
 
 /** The rows a {@link taskCounts} status pill is counting — what "mark this row seen" has to mark. */

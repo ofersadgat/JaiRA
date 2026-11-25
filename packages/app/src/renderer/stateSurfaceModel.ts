@@ -96,13 +96,18 @@ export function surfaceKindOf(node: InstanceNode): SurfaceKind | undefined {
  * request to a tree where more than one instance matches, which for one task's tree cannot happen
  * while each parked call belongs to a distinct instance.
  */
-export function isAsking(node: InstanceNode): boolean {
-  return surfaceKindOf(node) === "asked" && node.operation?.status === "running";
+export function isAsking(node: InstanceNode, gated = false): boolean {
+  if (node.operation?.status !== "running") return false;
+  const kind = surfaceKindOf(node);
+  // `gated`: the task's hub holds a gate. A PROGRAM's call (decision 0033) is a state whose function the
+  // shape cannot name before it runs — `choose_option` in `improve/lesson` is `call_6` — so the shape
+  // calls it plain; with a gate pending, the call still open is the one asking.
+  return kind === "asked" || (gated && kind === "called");
 }
 
 /** Whether this subtree holds a state that is asking right now — see {@link isAsking}. */
-export function hasAsking(node: InstanceNode): boolean {
-  return isAsking(node) || node.children.some(hasAsking);
+export function hasAsking(node: InstanceNode, gated = false): boolean {
+  return isAsking(node, gated) || node.children.some((child) => hasAsking(child, gated));
 }
 
 /**
@@ -134,10 +139,10 @@ export function runningLeafOf(nodes: readonly InstanceNode[]): string | undefine
   return undefined;
 }
 
-export function askingInstanceOf(nodes: readonly InstanceNode[]): string | undefined {
+export function askingInstanceOf(nodes: readonly InstanceNode[], gated = false): string | undefined {
   for (const node of nodes) {
-    if (isAsking(node)) return node.instanceId;
-    const inside = askingInstanceOf(node.children);
+    if (isAsking(node, gated)) return node.instanceId;
+    const inside = askingInstanceOf(node.children, gated);
     if (inside !== undefined) return inside;
   }
   return undefined;

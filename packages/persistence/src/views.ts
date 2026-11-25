@@ -7,7 +7,7 @@
  * from the same code. Anything that *runs* a workflow lives above this.
  */
 import { createLogger } from "@declarative-ai/log";
-import { ANSWERED_EVENT, isTaskId, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent, type TaskArchived, type TaskStatus } from "@jaira/shared";
+import { ANSWERED_EVENT, isTaskId, isTerminalStatus, parentTaskOf, refusal, SUPPLIED_EVENT, type AnsweredEvent, type SuppliedEvent, type TaskArchived, type TaskStatus } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import type { EngineEvent, StateDef, WorkflowBundle } from "@declarative-ai/hw";
 import { loadWorkflowBundle } from "./permissionSets";
@@ -66,7 +66,8 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
   const simulations = new Set<string>();
   // Who stands under whom: a task filed beneath another, adopted by it, or made by its fan-out.
   const under = new Map<string, number>();
-  for (const meta of project.tasks.list()) {
+  const metas = project.tasks.list();
+  for (const meta of metas) {
     if (meta.simulation !== undefined) {
       simulations.add(meta.id);
       continue;
@@ -97,10 +98,12 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
   const waitsForMessage = new Set(
     (project.db.prepare(`SELECT DISTINCT task_id FROM pending_interactions WHERE component = 'input'`).all() as Array<{ task_id: string }>).map((r) => r.task_id),
   );
+  const open = openParentsOf(project, rows, { waits: waitsForMessage, answering, metas });
   const shownStatus = (row: { taskId: string; status: TaskStatus }): TaskStatus =>
-    idleStatusOf(project, row, { waits: waitsForMessage.has(row.taskId), answering: answering.has(row.taskId) });
+    idleStatusOf(project, row, { waits: waitsForMessage.has(row.taskId), answering: answering.has(row.taskId), openChild: open.has(row.taskId) });
   const listed = only === undefined ? rows : rows.filter((row) => only.has(row.taskId));
   const lastMessage = lastMessageTimes(project, listed.map((row) => row.taskId));
+  const childAt = newestUnderOf(project, rows, metas);
   return listed.map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const startedBy =
@@ -135,8 +138,50 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
       ...(lastMessage.has(row.taskId) ? { lastMessageAt: lastMessage.get(row.taskId)! } : {}),
+      ...(childAt.has(row.taskId) ? { childAt: childAt.get(row.taskId)! } : {}),
     };
   });
+}
+
+/** Each task's children (`parentTaskOf`), by parent id. */
+function childrenByParent(metas: readonly TaskMeta[]): Map<string, string[]> {
+  const children = new Map<string, string[]>();
+  for (const meta of metas) {
+    const parent = parentTaskOf(meta);
+    if (parent !== undefined) children.set(parent, [...(children.get(parent) ?? []), meta.id]);
+  }
+  return children;
+}
+
+/**
+ * Each parent's newest clock UNDER it — the row's clock or newest reply of every task below it, at any
+ * depth (`TaskSummary.childAt`). A task with nothing under it, or only tasks with no row, has none.
+ */
+function newestUnderOf(project: Project, rows: ReadonlyArray<{ taskId: string; updatedAt: number }>, metas: readonly TaskMeta[]): Map<string, number> {
+  const children = childrenByParent(metas);
+  const out = new Map<string, number>();
+  if (children.size === 0) return out;
+  const rowAt = new Map(rows.map((r) => [r.taskId, r.updatedAt] as const));
+  const replies = lastMessageTimes(project, [...new Set([...children.values()].flat())].filter((id) => rowAt.has(id)));
+  const memo = new Map<string, number>();
+  const newest = (taskId: string, path: Set<string>): number => {
+    const known = memo.get(taskId);
+    if (known !== undefined) return known;
+    let at = 0;
+    for (const child of children.get(taskId) ?? []) {
+      if (path.has(child) || !rowAt.has(child)) continue; // a cycle — corrupt records — or a task with no row
+      path.add(child);
+      at = Math.max(at, rowAt.get(child)!, replies.get(child) ?? 0, newest(child, path));
+      path.delete(child);
+    }
+    memo.set(taskId, at);
+    return at;
+  };
+  for (const parent of children.keys()) {
+    const at = newest(parent, new Set([parent]));
+    if (at > 0) out.set(parent, at);
+  }
+  return out;
 }
 
 /**
@@ -889,6 +934,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
     ...(summary.undoable === true ? { undoable: true as const } : {}),
     updatedAt: summary.updatedAt,
+    ...(summary.childAt !== undefined ? { childAt: summary.childAt } : {}),
     ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
     run: taskRun(project, summary.taskId, shape),
   }));
@@ -900,10 +946,12 @@ export function boardView(project: Project, level?: string, options?: ViewOption
  * The status a task SHOWS. A program conversation waiting for its next message (decision 0029 §2) is
  * IDLE, as a conversation between messages always was: its run is live, but nothing works and nobody is
  * asked, so it reads as its last reply ended — `failed` when that call failed, else `completed` — not
- * `running`. Every other task shows its row's status. `known` is what a caller listing many tasks has
- * read already: whether the task waits at an `input()`, and whether a call of it is being answered.
+ * `running` — unless work it started is still open under it (`openParentsOf`): then it is `running`,
+ * and a child's ask is its to show. Every other task shows its row's status. `known` is what a caller
+ * listing many tasks has read already: whether the task waits at an `input()`, whether a call of it is
+ * being answered, and whether a child of it is open.
  */
-export function idleStatusOf(project: Project, row: { taskId: string; status: TaskStatus }, known?: { waits: boolean; answering: boolean }): TaskStatus {
+export function idleStatusOf(project: Project, row: { taskId: string; status: TaskStatus }, known?: { waits: boolean; answering: boolean; openChild: boolean }): TaskStatus {
   if (row.status !== "running") return row.status;
   const waits = known?.waits ?? project.db.prepare(`SELECT 1 FROM pending_interactions WHERE task_id = ? AND component = 'input' LIMIT 1`).get(row.taskId) !== undefined;
   if (!waits) return row.status;
@@ -911,6 +959,9 @@ export function idleStatusOf(project: Project, row: { taskId: string; status: Ta
     known?.answering ??
     project.db.prepare(`SELECT 1 FROM operation_records WHERE task_id = ? AND status = 'open' AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input' LIMIT 1`).get(row.taskId) !== undefined;
   if (answering) return row.status;
+  // Work it started is still open under it — a review asking the person, a task still running: the
+  // conversation has not stopped, whatever its own last reply did (`openParentsOf`).
+  if (known?.openChild ?? openParentsOf(project).has(row.taskId)) return row.status;
   // A reply the person STOPPED is no failure, though a transport that can only cancel records it failed.
   const last = project.db
     .prepare(`SELECT status, json_extract(error_json, '$.classification') AS classification FROM operation_records WHERE task_id = ? AND json_extract(request_json, '$.kind') = 'prompt' ORDER BY started_at DESC LIMIT 1`)
@@ -918,7 +969,59 @@ export function idleStatusOf(project: Project, row: { taskId: string; status: Ta
   return last?.status === "failed" && last.classification !== "canceled" ? "failed" : "completed";
 }
 
-export function archivedOf(row: { status: TaskStatus; archivedFrom?: TaskStatus; archivedAt?: number }): { archived?: TaskArchived } {
+/**
+ * The tasks with work still OPEN under them: a child (`parentTaskOf` — a mount's element, an adopted
+ * task, a task a conversation or the events task started, a sync's review round), or a child's child,
+ * that has not ended. A conversation idle at its `input()` is not open on its own — it is between
+ * messages — but is open while a child of its is (the person, 2026-11-23: "a parent task should not
+ * count as stopped when it has a non terminal child").
+ *
+ * `rows` and the two sets are what a caller listing every task has read already; absent, they are read.
+ */
+export function openParentsOf(
+  project: Project,
+  rows: ReadonlyArray<{ taskId: string; status: TaskStatus }> = project.runtime.list(),
+  known?: { waits: ReadonlySet<string>; answering: ReadonlySet<string>; metas?: readonly TaskMeta[] },
+): Set<string> {
+  const children = childrenByParent(known?.metas ?? project.tasks.list());
+  const out = new Set<string>();
+  if (children.size === 0) return out;
+  const waits =
+    known?.waits ?? new Set((project.db.prepare(`SELECT DISTINCT task_id FROM pending_interactions WHERE component = 'input'`).all() as Array<{ task_id: string }>).map((r) => r.task_id));
+  const answering =
+    known?.answering ??
+    new Set(
+      (project.db.prepare(`SELECT DISTINCT task_id FROM operation_records WHERE status = 'open' AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input'`).all() as Array<{ task_id: string }>).map(
+        (r) => r.task_id,
+      ),
+    );
+  const statusOf = new Map(rows.map((r) => [r.taskId, r.status] as const));
+  // Open on its own: not ended, and not a conversation idle between messages.
+  const selfOpen = (taskId: string): boolean => {
+    const status = statusOf.get(taskId);
+    if (status === undefined || isTerminalStatus(status)) return false;
+    return !(status === "running" && waits.has(taskId) && !answering.has(taskId));
+  };
+  const memo = new Map<string, boolean>();
+  const openUnder = (taskId: string, path: Set<string>): boolean => {
+    const known = memo.get(taskId);
+    if (known !== undefined) return known;
+    let found = false;
+    for (const child of children.get(taskId) ?? []) {
+      if (path.has(child)) continue; // a cycle — corrupt records, nothing else writes one
+      path.add(child);
+      if (selfOpen(child) || openUnder(child, path)) found = true;
+      path.delete(child);
+      if (found) break;
+    }
+    memo.set(taskId, found);
+    return found;
+  };
+  for (const parent of children.keys()) if (openUnder(parent, new Set([parent]))) out.add(parent);
+  return out;
+}
+
+export function archivedOf(row:{ status: TaskStatus; archivedFrom?: TaskStatus; archivedAt?: number }): { archived?: TaskArchived } {
   return row.status === "archived" ? { archived: { from: row.archivedFrom ?? "completed", at: row.archivedAt ?? 0 } } : {};
 }
 

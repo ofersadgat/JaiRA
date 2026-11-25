@@ -151,6 +151,61 @@ always be a state boundary … so that should always be an available point to sw
   every started child has — `origin.kind: "started"` at the call that started it, mirrored into the
   conversation's journal — so `list_tasks`, hold, release, stop and `answer_question` reach it. Never
   grafted onto the program's run. A conversation rewound to before the call takes the task back with it.
+  **Amended 2026-11-23** — the person: "a parent task should not count as stopped when it has a non
+  terminal child. the parent task should be in the waiting state which lets me know that it has something
+  that needs to be done". A task is the child of what made it (`parentTaskOf`: `origin.kind` `task`,
+  `adopt`, `started`, else the `parentTaskId` it was spawned for — never a fork's source). A conversation
+  idle at its `input()` reads `running` while a child of its is open (`openParentsOf`, `idleStatusOf`),
+  and a child's ask is its ancestors' (`listProjects`): the conversation's row, the Chat tab and the
+  project's ring say it waits, a parent card in Tasks says `task waits` (`BoardCard.asking: "child"`). A
+  child drawn only inside its parent (`drawnInsideParent`: a mount's element, a started task) is counted
+  through it and never again on its own — counted twice, a conversation's review lit the Tasks tab for a
+  row the Tasks list does not draw. And — "if a child task updates, it should also mark the parent as
+  unseen as well (recursively)" — a task's read clock (`seenClockOf`) is held to the newest move of any
+  task under it, at any depth (`TaskSummary.childAt`, `BoardCard.childAt`, the project's `ended` row), so
+  a child that moves leaves every ancestor unseen until that ancestor is opened.
+  **Amended 2026-11-24** — the person: "even if the item has been viewed, if it has something active on
+  it (or a child) the item should maintain the visual state … The main case where seeing the item causes
+  it to disappear is if it has terminated", and "the state of a nested task affecting the color of the
+  parent task ring". What a task under it is doing is every ancestor's, whatever the ancestor's own row
+  says: a child that asks or was interrupted (it waits to be resumed) makes them wait, one that runs makes
+  them run (`listProjects`' `live`, read by the Chat ring, the tab counts and the Tasks list). Working and
+  waiting stay lit when read — the Tasks list's dot as the Chat ring already did — and only how a task
+  ended goes out once it is opened. And — "I thought we made it so that sub tasks appear in the parent
+  tasks using the rail expand collapse thing" — a started task is drawn under the call that started it as
+  a run the conversation started is (`StartedTaskLine`: decision 0005's line, what it waits for, works on
+  or how it stopped, going in opens it beside the conversation), with decision 0003's nest: shut by
+  default, its own run read by its id while open (`startedTaskOf` names it from the call's answer). The
+  task view's rail does the same for its `started` and `made` lines, as it did for an adoption.
+  **How it opens** (the mockups `docs/ui/assets/chat-view/child-asks*.html`, 2026-11-24) — the person:
+  "1. if you click on the arrow or start task, it should open just that task inline by default 2. if you
+  click on "waiting for ...." it should open all tasks to reveal the dialog in question inline 3. if you
+  mouse over the waiting for ... there should be an inline open nested, open in window, open in split,
+  open in context panel which opens all tasks to reveal the dialog in the selected place 4. if you mouse
+  over the row there should be the same … but which only opens a single level", and "the buttons should
+  just cover / replace the right side of the line". A click opens in place, a hover offers decision
+  0025's places with *in place* first, and what is pointed at sets the depth: the arrow, the line and the
+  `start task` row one level; the wait — "waiting for choose option in Lesson", what anything under it
+  asks (`asksBelow`) — every task down to the question (`RevealContext`, a placed entry's `reveal`). A
+  new question opens it down to the question while it is shown nowhere else, and a nest a question
+  opened shuts once answered (`nestAfterAsks`). The nest draws the task's own gate, question and
+  approval, answered there. **Each place is a window of its own** (`placeTask`) — the person: "only
+  pressing split panel again should close the split panel if the split panel is currently open to that
+  view, otherwise the split panel should be treated as a completely separate window with its own path …
+  "open in whole window" whole window actually means the current frame, not to close the split window":
+  the main view is the frame the press was in, a split and the side panel close only when pressed again
+  while they show the task, and the nest here is opened and shut by itself. And a program's gate is drawn
+  at its call: `choose_option` called by a script is a call state the shape marks plain, so with the
+  task's gate pending, its open call is the one asking (`isAsking(node, gated)`). **A script's run is
+  drawn as the conversation view draws one, in every view** — the person: "switch it, but as we said
+  earlier, the task view should try to mirror the conversation view as much as possible, so the task
+  view should also do this". Any program run (`isProgramRun`: a conversation's, or a workflow whose call
+  states carry their script site), read whole, is its calls as rows (`ProgramRows`, decision 0033 §5's
+  registry in the task role) — in the task view, the nest, a split and the side panel alike; walked into
+  one of its states, that state's sheet. A function is a tool row, and the call asking the person has the
+  question's control under its row (`CallGateContext`), in the Chat view as in the task view — kept out
+  of the work summary's fold, and asking whatever its record says: a call the app closed under reads
+  `canceled` or `interrupted` there while the gate it parked outlives it and answering resumes the run.
 - **The Chat view reads a program as one thread**: the chain its first reply began, addressed by the
   run's root; the composer's plan is the reply's. Every message the person typed after the first is a
   point it is taken back to by an ordinary state rewind — to the `input()` that took the message, cut

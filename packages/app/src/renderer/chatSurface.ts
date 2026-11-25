@@ -8,6 +8,7 @@ import { askOfTask } from "./approvalCall";
 import { chatProjectOf, conversationStartOf, type ConversationStart } from "./chatWorkflow";
 import { parkedGateOf } from "./panelHost";
 import { askedAtOf } from "./ringModel";
+import { liveKindsOf } from "./pillModel";
 import type {
   ApprovalScope,
   ChatSettings,
@@ -110,6 +111,8 @@ export interface ChatSurface {
   unplaced: Readonly<Record<string, "placing" | "waiting">>;
   /** When each conversation asked the person — its oldest open approval or question — for the ring on its row (`ringModel.ts`). */
   asked: Readonly<Record<string, number>>;
+  /** What the engine says each live conversation is doing, itself or through a task it started (`ProjectSummary.live`). */
+  liveKinds?: Readonly<Record<string, "running" | "waiting">> | undefined;
   /** How far each conversation has been read — see `JairaUiState.seen`. */
   seen: Readonly<Record<string, number>>;
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
@@ -254,7 +257,8 @@ export function chatSurfaceOf(
     hasProject: state.at !== null,
     producing: state.producing,
     unplaced: Object.fromEntries(state.queue.map((q) => [q.taskId, q.phase])),
-    asked: askedAtOf([...state.approvals, ...state.questions]),
+    asked: askedAtOf([...state.approvals, ...state.questions], state.projects),
+    liveKinds: Object.fromEntries(liveKindsOf(state.projects)),
     seen: state.settings.ui.seen,
     onSeen: actions.markSeen,
     onOpen: actions.openConversation,

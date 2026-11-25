@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0029-workflows-that-learn-from-corrections">
+<meta name="state" content="a started task: four ways in — click the line or its wait, hover either for the four places">
+<meta name="captured" content="2026-11-24">
+<meta name="reflects" content="proposed">
+<title>Chat view · a started task · four ways in</title>
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --faint: #9aa0b4; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --tok-hint: #949cad;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --faint: #5f6779; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72; --fill-accent: #5a5fe0; --tok-hint: #5f6779;
+  --lift: 0 18px 50px rgba(0,0,0,.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 1040px; margin: 0 0 10px; }
+.lede b { color: var(--text); }
+.toc { display: grid; grid-template-columns: repeat(3, minmax(0, 330px)); gap: 4px 18px; margin: 16px 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 56px; }
+section.d header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+section.d header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 2px 7px; }
+section.d h2 { font-size: 16px; margin: 0; }
+.why { color: var(--dim); max-width: 1060px; margin: 0 0 12px; font-size: 12.5px; }
+.why b { color: var(--text); }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 340px)); gap: 6px 18px; margin: 0 0 14px; font-size: 12px; color: var(--dim); }
+.rules div b { color: var(--text); font-weight: 600; }
+.stage { display: flex; gap: 18px; align-items: stretch; }
+.win { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); width: 760px; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.win.wide { width: 1180px; flex-direction: row; }
+.win .col { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.title { padding: 9px 16px; border-bottom: 1px solid var(--panel-2); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--warn); flex: none; }
+.title .sub { color: var(--dim); font-weight: 400; font-size: 11.5px; margin-left: auto; }
+.thread { padding: 12px 22px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.user { align-self: flex-end; max-width: 70%; background: var(--panel-2); border-radius: 12px 12px 4px 12px; padding: 7px 12px; }
+.reply { max-width: 92%; }
+.row { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; padding: 2px 4px; }
+.row .nm { color: var(--text); font-weight: 600; }
+.row .at { margin-left: auto; font: 400 10.5px var(--font-data); color: var(--faint); }
+.ok { color: var(--ok); }
+svg.i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* the started line — ChildRunLine */
+.line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px; font-size: 11.5px; color: var(--dim); }
+.go { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); padding: 2px 7px; display: inline-flex; transform: rotate(-90deg); }
+.line b { color: var(--text); font-weight: 600; }
+.line .w { color: var(--warn); }
+.line .w b { color: var(--warn); font-family: var(--font-data); font-weight: 600; }
+.line .dot { color: var(--faint); }
+.tail { margin-left: auto; display: flex; align-items: center; gap: 4px; font: 400 10.5px var(--font-data); color: var(--dim); }
+.chev { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--tok-hint); }
+.chev.open svg { transform: rotate(180deg); }
+.nest { flex-basis: 100%; margin: 4px 0 8px 18px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); display: flex; flex-direction: column; gap: 4px; }
+.fold { color: var(--faint); font-size: 11px; padding: 2px 4px; }
+.fold u { text-decoration: none; border-bottom: 1px dashed var(--faint); }
+/* the question a task asks — the choose_option gate */
+.ask { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.ask .hd { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--warn); }
+.ask .hd b { font-family: var(--font-data); }
+.ask .crumb { color: var(--dim); font-size: 11px; }
+.ask .q { font-weight: 600; }
+.ask .rule { font: 400 12px var(--font-data); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; color: var(--text); }
+.ask .why2 { color: var(--dim); font-size: 12px; }
+.btns { display: flex; gap: 8px; align-items: center; }
+.b { font: 500 12px var(--font-app); border-radius: 7px; padding: 4px 11px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.b.p { background: var(--fill-accent); color: var(--on-accent); border-color: var(--fill-accent); }
+.b.q { border-color: transparent; background: transparent; color: var(--accent); }
+.ask.slim { padding: 7px 10px; gap: 6px; }
+/* the pills and the box */
+.pills { display: flex; justify-content: center; gap: 8px; padding: 0 0 8px; }
+.pill { display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); box-shadow: 0 4px 14px rgba(15,20,30,.12); font-size: 11.5px; }
+.pill .w { color: var(--warn); font-weight: 600; }
+.pill .s { color: var(--dim); font-size: 10.5px; }
+.foot { padding: 0 18px 14px; }
+.box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--faint); background: var(--panel); display: flex; align-items: center; gap: 8px; }
+.box .send { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; background: var(--panel-3); }
+.tray { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-radius: 12px; background: var(--panel); box-shadow: var(--lift); margin: 0 0 8px; overflow: hidden; }
+.tray .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--panel-2); font-size: 11.5px; }
+.tray .tab { padding: 5px 10px; border-radius: 7px 7px 0 0; color: var(--dim); }
+.tray .tab.on { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--warn) 8%, var(--panel)); box-shadow: inset 0 -2px 0 var(--warn); }
+.tray .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel { width: 420px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+.panel .ph { padding: 9px 14px; border-bottom: 1px solid var(--panel-2); display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 600; }
+.panel .ph .x { margin-left: auto; color: var(--faint); font-weight: 400; }
+.panel .pb { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.edge { border: 2px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 10px; padding: 2px; }
+.note { font-size: 11px; color: var(--accent); font-weight: 600; }
+.mark { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 999px; padding: 0 7px; }
+.after { width: 380px; display: flex; flex-direction: column; gap: 10px; }
+.after .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--dim); }
+.after .card b { color: var(--text); }
+.grow { flex: 1; }
+.after h3 { font-size: 12px; margin: 0 0 4px; color: var(--text); }
+/* the place group — PlaceButtons, with "in place" first */
+.places { display: inline-flex; gap: 1px; padding: 1px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); flex: none; }
+.pbt { width: 26px; height: 24px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); }
+.pbt svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pbt.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.pbt.hov { color: var(--text); background: var(--panel-2); }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--dim); }
+.legend b { color: var(--text); font-weight: 600; }
+.tip { position: absolute; background: var(--text); color: var(--panel); font-size: 11px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.crumbs { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.crumbs .up { color: var(--dim); font-weight: 400; }
+.split { width: 470px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+.lit { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; border-radius: 8px; }
+.anat { display: flex; gap: 28px; align-items: flex-start; }
+.anat .win { width: 760px; }
+
+/* the line's own pieces for the four ways in */
+.disc { width: 18px; height: 18px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); flex: none; }
+.disc svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; transform: rotate(-90deg); }
+.disc.open svg { transform: none; }
+.disc.hov { background: var(--panel-2); color: var(--text); }
+.wl { color: var(--warn); border-radius: 5px; padding: 0 3px; margin: 0 -3px; position: relative; display: inline-flex; align-items: center; gap: 5px; }
+.wl b { color: var(--warn); font-family: var(--font-data); font-weight: 600; }
+.wl.hov { background: color-mix(in srgb, var(--warn) 12%, var(--panel)); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--warn) 50%, transparent); text-underline-offset: 3px; }
+.pop { position: absolute; left: 0; top: calc(100% + 6px); z-index: 3; display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 4px 4px 4px 9px; box-shadow: 0 6px 18px rgba(15,20,30,.16); white-space: nowrap; color: var(--dim); font-size: 11px; text-decoration: none; }
+.line.hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); border-radius: 7px; }
+.row.hover { background: color-mix(in srgb, var(--panel-2) 70%, transparent); border-radius: 7px; }
+.cursor { width: 12px; height: 16px; display: inline-block; flex: none; margin-left: -4px; }
+.cursor svg { width: 12px; height: 16px; }
+.cap { font: 600 10.5px var(--font-data); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border-radius: 5px; padding: 1px 6px; flex: none; }
+.matrix { border-collapse: collapse; font-size: 12.5px; margin: 0 0 8px; }
+.matrix th, .matrix td { border: 1px solid var(--line); padding: 7px 12px; text-align: left; vertical-align: top; }
+.matrix th { background: var(--panel-2); font-weight: 600; }
+.matrix td.k { font-weight: 600; white-space: nowrap; }
+.matrix td { background: var(--panel); color: var(--dim); }
+.matrix td b { color: var(--text); }
+.shot { display: flex; flex-direction: column; gap: 6px; }
+.shot .lab { font-size: 11.5px; color: var(--dim); }
+.shot .lab b { color: var(--text); }
+.pair { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+.win.sm { width: 700px; }
+/* the line's group on hover: laid over its right end, never a second row */
+.line { position: relative; }
+.line.hover { flex-wrap: nowrap; }
+.line.hover > .tail { visibility: hidden; }
+.over { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; align-items: center; padding-left: 28px; background: linear-gradient(to right, transparent, color-mix(in srgb, var(--panel-2) 70%, var(--panel)) 26px); border-radius: 0 7px 7px 0; }
+.win.sm { width: 860px; }
+</style>
+</head>
+<body>
+<h1>A started task: four ways in</h1>
+<p class="lede">The window buttons of <a href="child-asks-places.html">the last round</a>, given to two targets on the line, with the person's ruling, 2026-11-24: <b>"1. if you click on the arrow or start task, it should open just that task inline by default 2. if you click on "waiting for ...." it should open all tasks to reveal the dialog in question inline 3. if you mouse over the waiting for ... there should be an inline open nested, open in window, open in split, open in context panel which opens all tasks to reveal the dialog in the selected place 4. if you mouse over the row there should be the same … but which only opens a single level."</b> So <b>a click opens in place, a hover offers the four places</b>, and what you point at decides how deep: <b>the line opens one level</b>, <b>its wait opens every task down to the question</b>.</p>
+
+<table class="matrix">
+  <tr><th></th><th>click</th><th>hover → pick a place</th></tr>
+  <tr><td class="k">the arrow, the line, the <i>start task</i> row</td><td><b>①</b> this task in place, <b>one level</b>: its own run, the tasks it started still shut</td><td><b>④</b> the group laid over the line's right end: this task in place / main view / beside / side panel, <b>one level</b></td></tr>
+  <tr><td class="k"><i>waiting for choose option</i></td><td><b>②</b> every task down to the one that asks, in place, <b>to its question</b></td><td><b>③</b> the group under the words: the same four places, <b>opened down to the question</b></td></tr>
+</table>
+<div class="toc">
+  <a href="#s0"><b>0</b>At rest</a>
+  <a href="#s1"><b>1</b>Click the arrow or the row: one level</a>
+  <a href="#s2"><b>2</b>Click the wait: down to the question</a>
+  <a href="#s3"><b>3</b>Hover the wait: a place, down to the question</a>
+  <a href="#s4"><b>4</b>Hover the line: a place, one level</a>
+  <a href="#s5"><b>5</b>The rules</a>
+</div>
+
+<section class="d" id="s0">
+  <header><span class="n">0</span><h2>At rest</h2></header>
+  <p class="why">The line as it stands: the arrow first (shut), the task's name, its wait in the warn ink — a target of its own — and the steps and time. No buttons until you point at something.</p>
+  <div class="win sm">
+    <div class="thread">
+      <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+      <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span>in Lesson</span><span class="tail">6 steps · 2 min so far</span></div>
+      <div class="reply">I've started a review of this conversation for lessons.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="s1">
+  <header><span class="n">1</span><h2>Click the arrow or the row: one level</h2></header>
+  <p class="why">The arrow, the line's words, or the <i>start task</i> row above it: <b>this task, in place, one level</b>. The review's own steps show; the Lesson it started is its line, shut, still saying it waits — one more click on <i>its</i> arrow opens it the same way. Click again to shut.</p>
+  <div class="win sm">
+    <div class="thread">
+      <div class="row hover"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span><span class="cursor"><svg viewBox="0 0 12 16"><path d="M1 1v12l3-3 2.5 5 2-1-2.5-5H10Z" fill="#fff" stroke="#111" stroke-width="1"/></svg></span></div>
+      <div class="line"><span class="disc open"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span>in Lesson</span><span class="tail">6 steps · 2 min so far</span>
+        <div class="nest">
+          <div class="row"><span class="nm">read the conversation</span>48 messages<span class="at">10:31:10</span><span class="ok">✓</span></div>
+          <div class="row"><span class="nm">find the lessons</span>1 lesson<span class="at">10:31:35</span><span class="ok">✓</span></div>
+          <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Lesson: When I hit a question I can resolve…</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span class="tail">3 steps · 1 min so far</span></div>
+        </div>
+      </div>
+      <div class="reply">I've started a review of this conversation for lessons.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="s2">
+  <header><span class="n">2</span><h2>Click the wait: down to the question</h2></header>
+  <p class="why">A click on <i>waiting for choose option</i> opens <b>every task between here and the one that asks</b>, in place, the steps before each folded, and the question drawn as its task view draws it. The same as the question opening itself when it is new.</p>
+  <div class="win sm">
+    <div class="thread">
+      <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+      <div class="line"><span class="disc open"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl hov">⏸ waiting for <b>choose option</b><span class="cursor"><svg viewBox="0 0 12 16"><path d="M1 1v12l3-3 2.5 5 2-1-2.5-5H10Z" fill="#fff" stroke="#111" stroke-width="1"/></svg></span></span><span>in Lesson</span><span class="tail">6 steps · 2 min so far</span>
+        <div class="nest">
+          <div class="fold">▸ <u>2 steps before it</u> · read the conversation · found 1 lesson</div>
+          <div class="line"><span class="disc open"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Lesson: When I hit a question I can resolve…</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span class="tail">3 steps · 1 min so far</span>
+            <div class="nest">
+              <div class="fold">▸ <u>2 steps before it</u> · drafted the change</div>
+              <div class="ask">
+                <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+                <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+                <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+                <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="reply">I've started a review of this conversation for lessons.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="s3">
+  <header><span class="n">3</span><h2>Hover the wait: a place, down to the question</h2></header>
+  <p class="why">Pointing at <i>waiting for choose option</i> brings the group up <b>under the words</b>, headed by what it does — <i>show the question</i>. Each place opens the chain down to the question <b>there</b>. Below: <b>beside</b> picked — the split holds the review with its Lesson open to the question; the line here lights <i>beside</i> and its nest stays shut.</p>
+  <div class="pair">
+    <div class="shot">
+      <div class="lab"><b>Hovered</b></div>
+      <div class="win sm" style="overflow: visible; padding-bottom: 34px">
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl hov">⏸ waiting for <b>choose option</b><span class="cursor"><svg viewBox="0 0 12 16"><path d="M1 1v12l3-3 2.5 5 2-1-2.5-5H10Z" fill="#fff" stroke="#111" stroke-width="1"/></svg></span><span class="pop">show the question <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span></span><span>in Lesson</span><span class="tail">6 steps · 2 min so far</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="shot" style="margin-top: 16px">
+    <div class="lab"><b>Beside</b> picked</div>
+    <div class="win wide" style="width: 1240px">
+      <div class="col">
+        <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span>in Lesson</span><span class="cap">beside</span><span class="tail">6 steps · 2 min so far</span></div>
+          <div class="reply">I've started a review of this conversation for lessons.</div>
+        </div>
+        <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">beside · 10:32 AM</span></span></div>
+        <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+      </div>
+      <div class="split">
+        <div class="title"><span class="ring"></span>Review a conversation for lessons<span class="sub" style="display: flex; gap: 8px; align-items: center">improve/conversation <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt on" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span></div>
+        <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 6px">
+          <div class="fold">▸ <u>2 steps before it</u> · read the conversation · found 1 lesson</div>
+          <div class="line"><span class="disc open"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Lesson: When I hit…</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span class="tail">3 steps · 1 min</span>
+            <div class="nest">
+              <div class="ask slim">
+                <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+                <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+                <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+                <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="s4">
+  <header><span class="n">4</span><h2>Hover the line: a place, one level</h2></header>
+  <p class="why">Pointing anywhere else on the line brings the group up <b>over its right end</b> — laid over the steps and time, which it hides while you point, so the line never grows a second row: <b>this task, one level</b>, in the place picked. Below: <b>side panel</b> picked — the panel holds the review's own run, its Lesson a shut line that still says it waits (and has its own arrow, wait and group).</p>
+  <div class="pair">
+    <div class="shot">
+      <div class="lab"><b>Hovered</b></div>
+      <div class="win sm">
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line hover"><span class="disc hov"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="cursor"><svg viewBox="0 0 12 16"><path d="M1 1v12l3-3 2.5 5 2-1-2.5-5H10Z" fill="#fff" stroke="#111" stroke-width="1"/></svg></span><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span>in Lesson</span><span class="tail">6 steps · 2 min so far</span><span class="over"><span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="shot" style="margin-top: 16px">
+    <div class="lab"><b>Side panel</b> picked</div>
+    <div class="win wide">
+      <div class="col">
+        <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span>in Lesson</span><span class="cap">side panel</span><span class="tail">6 steps · 2 min so far</span></div>
+          <div class="reply">I've started a review of this conversation for lessons.</div>
+        </div>
+        <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">side panel · 10:32 AM</span></span></div>
+        <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Review a conversation for lessons<span class="x" style="display: flex; gap: 8px; align-items: center"><span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt on" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span> ✕</span></div>
+        <div class="pb">
+          <div class="row"><span class="nm">read the conversation</span>48 messages<span class="at">10:31:10</span><span class="ok">✓</span></div>
+          <div class="row"><span class="nm">find the lessons</span>1 lesson<span class="at">10:31:35</span><span class="ok">✓</span></div>
+          <div class="line"><span class="disc"><svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Lesson: When I hit…</b><span class="dot">·</span><span class="wl">⏸ waiting for <b>choose option</b></span><span class="tail">3 steps · 1 min</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="s5">
+  <header><span class="n">5</span><h2>The rules</h2></header>
+  <div class="rules" style="grid-template-columns: repeat(2, minmax(0, 520px)); font-size: 12.5px">
+    <div><b>What you point at decides how deep.</b> The arrow, the line and the <i>start task</i> row: one level. The wait: every task down to the question.</div>
+    <div><b>Click is in place; hover offers the places.</b> The group is the same four everywhere — in place, main view, beside, side panel — and lights where the task is.</div>
+    <div><b>Every line on the way down works the same.</b> A Lesson inside the review, wherever the review is drawn, has its own arrow, wait and group.</div>
+    <div><b>One place at a time.</b> Placed elsewhere, the line shuts its nest and says where (<span class="cap">beside</span>); the pill says the same.</div>
+    <div><b>A new question</b> opens itself as a click on its wait would (②), when the task is shown nowhere else; already placed, it is drawn there.</div>
+    <div><b>Answered,</b> a nest the question opened shuts; what you opened or placed stays. <b>Phone:</b> no hover and no split — a long press on the line or the wait brings the group up.</div>
+  </div>
+</section>
+</body>
+</html>

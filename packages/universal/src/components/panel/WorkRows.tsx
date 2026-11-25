@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useState, type JSX, type ReactNode } fr
 import { Platform } from "react-native";
 import { Text, View } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, nativeShellDialect, processEnded, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type TerminalSummary, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, nativeShellDialect, processEnded, startedTaskOf, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type TerminalSummary, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfValue, type Answer } from "@jaira/ui/choicesModel";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
@@ -12,7 +12,7 @@ import { commandLinesOf, iconOf, takenApartOf, type ThoughtEntry, type ToolEntry
 import { isHostCall, secondsOf } from "@jaira/ui/workSummary";
 import { subagentLineOf } from "@jaira/ui/subagentModel";
 import { ApprovalAskContext, useNow } from "@jaira/ui/workSummaryContext";
-import { CallInterruptContext, programCallInstance } from "@jaira/ui/programCalls";
+import { CallGateContext, CallInterruptContext, programCallInstance } from "@jaira/ui/programCalls";
 import { askedOf, pictureOf, producedArtifact, publishedOf, shownInChain, shownOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useFilled } from "@jaira/ui/useView";
@@ -24,7 +24,7 @@ import { Pulse } from "../chat/Pulse";
 import { ChildRunLine } from "../chat/ChildRun";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
-import { OutcomeHostContext } from "./outcomeHost";
+import { OutcomeHostContext, StartedTaskHostContext } from "./outcomeHost";
 import { SubagentHostContext } from "./subagentHost";
 import { ValueView } from "./ValueView";
 import { PublishedView } from "./PublishedView";
@@ -39,6 +39,7 @@ import { terminalEntryOf } from "@jaira/ui/panelStack";
 import { PLACES } from "@jaira/ui/splitModel";
 import { moveEntry, useEntryPlaces, usePlacesHere } from "../../app/places";
 import { usePhone } from "../../app/phone";
+import { useNestHandle } from "../chat/StartedTaskLine";
 
 /**
  * The transcript's work rows: one line of work — a call, a thought, a call being written, a journal
@@ -123,6 +124,8 @@ export function Row({
   action,
   body,
   shown,
+  onPress,
+  pressed,
 }: {
   entry: WorkEntry;
   name?: string | undefined;
@@ -138,10 +141,15 @@ export function Row({
   action?: ReactNode;
   body?: ReactNode;
   shown?: ReactNode;
+  /** The line's press, in place of opening its body: a `start task` row opens the task it started (`StartedTaskLine`). */
+  onPress?: (() => void) | undefined;
+  /** With {@link onPress}: whether what it opens is open, for the chevron. */
+  pressed?: boolean | undefined;
 }): JSX.Element {
   const t = useTokens();
-  const [open, setOpen] = useState(false);
-  const canOpen = body !== undefined;
+  const [bodyOpen, setOpen] = useState(false);
+  const open = onPress !== undefined ? pressed === true : bodyOpen;
+  const canOpen = body !== undefined || onPress !== undefined;
   const ink = INK[tone];
   const markInk = tone === "bad" ? "bad" : "ok";
   const line = (
@@ -203,7 +211,7 @@ export function Row({
       <View flexDirection="row" alignItems="center" minWidth={0}>
         <View flex={1} minWidth={0}>
           {canOpen ? (
-            <Press onPress={() => setOpen((v) => !v)} {...({ "aria-expanded": open } as object)} {...box} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("accent"), 9, "transparent") : "transparent" })}>
+            <Press onPress={onPress ?? (() => setOpen((v) => !v))} {...({ "aria-expanded": open } as object)} {...box} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("accent"), 9, "transparent") : "transparent" })}>
               {line}
             </Press>
           ) : (
@@ -212,7 +220,7 @@ export function Row({
         </View>
         {action !== undefined ? <View flexShrink={0}>{action}</View> : null}
       </View>
-      {open && canOpen ? (
+      {open && body !== undefined && onPress === undefined ? (
         <View marginTop={1} marginBottom={6} marginLeft={28} paddingLeft={12} minWidth={0} {...(edge(t, { left: 1 }, "rule") as object)}>
           {body}
         </View>
@@ -313,11 +321,20 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const ask = useContext(ApprovalAskContext);
   // A host with more to say about a subagent draws it instead of the fold (`subagentHost.ts`).
   const subagentHost = useContext(SubagentHostContext);
+  const startedHost = useContext(StartedTaskHostContext);
+  // The nest of a task this call started, shared by the row and the task's line under it.
+  const nest = useNestHandle();
   const askedHere = ask?.pending.recovered === true && held.callId === ask.pending.requestId;
   // A program's call still running carries its own Interrupt (decision 0033 §6), where the thread offers one.
   const interruptCall = useContext(CallInterruptContext);
   const programState = programCallInstance(held.callId);
   const interruptible = interruptCall !== undefined && programState !== undefined && held.ok === undefined && held.result === undefined;
+  // The gate a program's call is asking, drawn under its row while it asks (`CallGateContext`).
+  const callGate = useContext(CallGateContext);
+  // Whatever its record says: a call the app closed under reads `canceled` or `interrupted` there, while
+  // the gate it parked outlives it and answering it resumes the run (`PendingInteraction.resumes`). The
+  // view asks only whether this call is the one the task's pending gate is asking (`askingInstanceOf`).
+  const asked = programState !== undefined && held.callId !== undefined ? callGate?.(held.callId) : undefined;
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   // A shell call JaiRA ran is a terminal (decision 0028): live under its row while it runs, a press away
   // once it has ended, and placeable as an artifact is.
@@ -345,6 +362,9 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const result = useFilled(unasked ? held.result : undefined);
   const entry: ToolEntry = unasked ? { ...held, ...(args !== undefined ? { args } : {}), ...(result !== undefined ? { result } : {}) } : held;
   const { running, unanswered, pathMime } = line;
+  // A task of its own the call made: its host draws the task's line, and the row's press opens it.
+  const started = startedHost !== undefined && line.shown === "outcome" ? startedTaskOf(entry.name, entry.result, artifacts?.taskId) : undefined;
+  const startedLine = started !== undefined ? startedHost!(started, nest) : undefined;
   const head = {
     entry,
     name: line.name,
@@ -353,8 +373,9 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     preview: line.preview,
     command: line.command,
     prose: line.prose,
-    tone: line.tone,
-    mark: line.mark,
+    // Asking: it waits on the person, not failed and not done.
+    tone: asked !== undefined ? ("warn" as const) : line.tone,
+    mark: asked !== undefined ? ("waiting" as const) : line.mark,
     // Who stopped a refused call, in grey before the time (2026-10-24, D+E).
     ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : {}),
     ...(interruptible ? { action: <InterruptButton onPress={() => interruptCall!(programState!)} /> } : {}),
@@ -429,6 +450,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
       );
     }
     if (line.shown === "outcome") {
+      if (startedLine !== undefined) return startedLine;
       const outcome = workflowOutcomeOf(entry.result!);
       return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
     }
@@ -473,7 +495,8 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   return (
     <Row
       {...head}
-      {...(live !== undefined ? { shown: live } : kept !== undefined ? { shown: kept } : shown !== undefined ? { shown } : {})}
+      {...(startedLine !== undefined ? { onPress: () => nest.press.current?.(), pressed: nest.state.mode !== "shut" } : {})}
+      {...(asked !== undefined ? { shown: asked } : live !== undefined ? { shown: live } : kept !== undefined ? { shown: kept } : shown !== undefined ? { shown } : {})}
       body={
         <>
           {line.command !== undefined ? <FullCommand line={line.command} tool={line.called} /> : null}

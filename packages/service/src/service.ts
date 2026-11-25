@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import { COMPONENT_NAMES, CUT_OFF_EVENT, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
+import { ancestorsOf, COMPONENT_NAMES, CUT_OFF_EVENT, drawnInsideParent, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -4933,9 +4933,17 @@ export class AppService {
     // A draft is no part of a task's summary: its change is the draft's alone (decision 0018 §9).
     const touched = new Set(changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" && !gone.has(c.taskId) ? [c.taskId] : [])));
     let tasks = touched.size === 0 ? [] : this.indexTasks(touched);
-    // A summary counts the tasks under it (`controls`), so the task one stands under changed with it.
-    const above = new Set(tasks.flatMap((t) => [t.parentTaskId, t.origin?.taskId].filter((id): id is string => id !== undefined && !touched.has(id))));
-    if (above.size > 0) tasks = [...tasks, ...this.indexTasks(above)];
+    // A summary counts the tasks under it (`controls`), and shows `running` while one under it is open
+    // (`idleStatusOf`), so every task one stands under — its parent, and theirs — changed with it.
+    const read = new Set(touched);
+    let next = tasks;
+    while (next.length > 0) {
+      const above = new Set(next.flatMap((t) => [t.parentTaskId, t.origin?.taskId].filter((id): id is string => id !== undefined && !read.has(id))));
+      if (above.size === 0) break;
+      for (const id of above) read.add(id);
+      next = this.indexTasks(above);
+      tasks = [...tasks, ...next];
+    }
     return { at, horizon, whole: false, tasks, gone: [...gone], changes };
   }
 
@@ -6284,8 +6292,6 @@ export class AppService {
       // the close — counted so, not as the `canceled` its row says (`recoveredAsks`).
       const asking = new Set([...session.recoveredAsks.values()].map((r) => r.taskId));
       const tasks = taskSummaries(session.project).map((t) => (asking.has(t.taskId) ? { ...t, status: "running" as TaskStatus } : t));
-      const statuses: Partial<Record<TaskStatus, number>> = {};
-      for (const task of tasks) statuses[task.status] = (statuses[task.status] ?? 0) + 1;
       // Which of them are parked on a person. Read off the session's own hubs rather than projected
       // out of the journal: a gate, an approval and a question are exactly what the inbox strip
       // lists, so counting them here is counting the same facts and the two cannot drift apart.
@@ -6309,6 +6315,36 @@ export class AppService {
         if (running.has(request.taskId)) parked.add(request.taskId);
       }
       for (const taskId of asking) if (running.has(taskId)) parked.add(taskId);
+      // What a task under it is doing is its parents' too, whatever their own rows say (the person,
+      // 2026-11-23: "the parent task should be in the waiting state which lets me know that it has
+      // something that needs to be done"; 2026-11-24: "the state of a nested task affecting the color
+      // of the parent task ring"). A child that asks, or that was interrupted and waits to be resumed,
+      // makes every ancestor wait; one that runs makes them run, where nothing under them waits.
+      // A gate carries no clock of its own, so a child parked at one is counted from its row's.
+      const ancestors = ancestorsOf(tasks);
+      const childRuns = new Map<string, number>();
+      for (const task of tasks) {
+        const above = ancestors.get(task.taskId) ?? [];
+        if (above.length === 0) continue;
+        const waits = parked.has(task.taskId) || task.status === "interrupted";
+        if (!waits && task.status !== "running") continue;
+        const at = waits ? (askedAt.get(task.taskId) ?? task.updatedAt) : task.updatedAt;
+        for (const id of above) {
+          if (waits) {
+            parked.add(id);
+            askedAt.set(id, Math.min(askedAt.get(id) ?? Infinity, at));
+          } else childRuns.set(id, Math.min(childRuns.get(id) ?? Infinity, at));
+        }
+      }
+      // A child drawn only inside its parent (`drawnInsideParent`: a conversation's review, a mount's
+      // element) is counted THROUGH it, not again on its own: counted twice, its ask lit the Tasks tab
+      // and the ring for a row the Tasks list does not draw.
+      const present = new Set(tasks.map((t) => t.taskId));
+      const counted = tasks.filter((t) => !drawnInsideParent(t, (id) => present.has(id)));
+      const countedRunning = counted.filter((t) => t.status === "running").length;
+      const countedParked = counted.filter((t) => parked.has(t.taskId)).length;
+      const statuses: Partial<Record<TaskStatus, number>> = {};
+      for (const task of counted) statuses[task.status] = (statuses[task.status] ?? 0) + 1;
       const identity = session.kind === "user" ? this.repositoryOf(session.dir) : undefined;
       out.push({
         ...(identity !== undefined ? { identity } : {}),
@@ -6323,25 +6359,26 @@ export class AppService {
         // happens to have one. A root pointed elsewhere still prints its own directory.
         label: session.kind === "shared" ? shortRoot(session.dir) : basename(session.dir),
         kind: session.kind,
-        tasks: tasks.length,
-        running: running.size,
+        tasks: counted.length,
+        running: countedRunning,
         statuses,
-        waiting: parked.size,
+        waiting: countedParked,
         // What a status pill could be counting — see `ProjectSummary.ended`. `queued` is not here
         // for the same reason it has no pill: it has not stopped, because it has not started.
-        ended: tasks
+        ended: counted
           .filter((t) => t.status !== "running" && t.status !== "queued")
           // The clock a read mark is held against: the row's, or its conversation's newest reply where
-          // that is later — a typed turn moves no row, and its finish is news (`seenClockOf`).
-          .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: Math.max(t.updatedAt, t.lastMessageAt ?? 0) })),
+          // that is later — a typed turn moves no row, and its finish is news — or a task under it moved (`seenClockOf`).
+          .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: Math.max(t.updatedAt, t.lastMessageAt ?? 0, t.childAt ?? 0) })),
         // A run, and a conversation answering a typed turn (`answering`: a turn moves no task status,
         // so this conversation, mid-answer, reads `completed` on its row). One that asks is `waiting`.
-        live: tasks
-          .filter((t) => t.status === "running" || t.answering === true)
+        // A task whose child runs or waits is live by it, whatever its own row says.
+        live: counted
+          .filter((t) => t.status === "running" || t.answering === true || parked.has(t.taskId) || childRuns.has(t.taskId))
           .map((t) =>
             parked.has(t.taskId) || askedAt.has(t.taskId)
               ? { taskId: t.taskId, kind: "waiting" as const, since: askedAt.get(t.taskId) ?? t.updatedAt }
-              : { taskId: t.taskId, kind: "running" as const, since: t.status === "running" ? t.updatedAt : (t.lastMessageAt ?? t.updatedAt) },
+              : { taskId: t.taskId, kind: "running" as const, since: t.status === "running" ? t.updatedAt : t.answering === true ? (t.lastMessageAt ?? t.updatedAt) : (childRuns.get(t.taskId) ?? t.updatedAt) },
           ),
       });
     }

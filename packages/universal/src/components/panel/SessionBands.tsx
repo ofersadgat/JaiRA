@@ -88,6 +88,7 @@ export function SessionBands({
   origin,
   onSelectTask,
   adopted,
+  started,
   moveQuestion,
   onOpenWorkflow,
   readingOf,
@@ -110,6 +111,8 @@ export function SessionBands({
   origin?: (TaskOrigin & { onGo?: (() => void) | undefined }) | undefined;
   onSelectTask?: ((taskId: string) => void) | undefined;
   adopted?: ((taskId: string) => ReactNode) | undefined;
+  /** A task the run started or made, drawn as its own line in place of the note (`StartedTaskLine`). */
+  started?: ((taskId: string) => ReactNode) | undefined;
   moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
   /** Describe the workflow a panel's conversation was opened by. Absent ⇒ the gutter names no workflow. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
@@ -158,7 +161,7 @@ export function SessionBands({
         const row = page.rows[item.index]!;
         if (row.kind === "agent") return agent?.sheet(row.note) ?? null;
         if (row.kind === "note" && row.note.kind === "agent") return agent?.line(row.note) ?? null;
-        if (row.kind === "note") return <NoteRow note={row.note} root={root} cuts={cuts} onSelectTask={onSelectTask} adopted={adopted} moveQuestion={moveQuestion} />;
+        if (row.kind === "note") return <NoteRow note={row.note} root={root} cuts={cuts} onSelectTask={onSelectTask} adopted={adopted} started={started} moveQuestion={moveQuestion} />;
         return <Band band={row.band} starters={page.starters} forks={page.forks} goTo={goTo} onOpenWorkflow={onOpenWorkflow} readingOf={readingOf} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />;
       }}
     />
@@ -243,6 +246,7 @@ export function NoteRow({
   cuts,
   onSelectTask,
   adopted,
+  started,
   moveQuestion,
 }: {
   note: BandNote;
@@ -250,6 +254,7 @@ export function NoteRow({
   cuts?: CutOffer | boolean | undefined;
   onSelectTask?: ((taskId: string) => void) | undefined;
   adopted?: ((taskId: string) => ReactNode) | undefined;
+  started?: ((taskId: string) => ReactNode) | undefined;
   moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
 }): JSX.Element {
   const t = useTokens();
@@ -263,7 +268,13 @@ export function NoteRow({
     note.keys !== undefined && note.keys.length > 1
       ? [pathFrom(note.path.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "", root), note.keys.join(", ")].filter((part) => part !== "").join(" → ")
       : pathFrom(note.path, root);
-  if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} adopted={adopted} />;
+  if (note.kind === "made" && note.made !== undefined) {
+    // One task the run started or made: its own line, opened and placed as a conversation's is (`StartedTaskLine`).
+    const made = note.made;
+    const others = made.runs.filter((run) => !run.self);
+    if ((made.kind === "started" || made.kind === "task") && started !== undefined && others.length === 1) return <>{started(others[0]!.taskId)}</>;
+    return <MadeRow note={note} made={made} where={where} onSelectTask={onSelectTask} adopted={adopted} />;
+  }
   if (note.kind === "asked" && note.asked !== undefined) {
     // A move's question: the question UI and nothing around it, 8 under.
     return (
@@ -344,6 +355,7 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
   const others = made.runs.filter((run) => !run.self);
   const expands = made.kind === "adopt" && adopted !== undefined && others.length === 1;
   const [open, setOpen] = useState(true);
+  const what = "what this task did before it was adopted";
   const size = Number(t.scaled("size-app", 11.5 / 12.5)) || 11.5;
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
   return (
@@ -354,7 +366,7 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
         <Press
           onPress={() => setOpen((v) => !v)}
           label={open ? `fold ${others[0]!.title}` : `unfold ${others[0]!.title}`}
-          title={open ? "fold what this task did before it was adopted" : "show what this task did before it was adopted"}
+          title={open ? `fold ${what}` : `show ${what}`}
           {...({ "aria-expanded": open } as object)}
           flexShrink={0}
           alignSelf="center"

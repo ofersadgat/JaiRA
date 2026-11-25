@@ -45,7 +45,16 @@ export type StateTab = (typeof STATE_TABS)[number];
  * person moves to, and must not depend on that room's selection to know what it is about.
  */
 export type PanelEntry =
-  | { kind: "task"; key: string; taskId: string; project?: string; tab: TaskTab; step?: string }
+  | {
+      kind: "task";
+      key: string;
+      taskId: string;
+      project?: string;
+      tab: TaskTab;
+      step?: string;
+      /** Opened down to its question: every task it started that has something asked under it opens too (`StartedTaskLine`). */
+      reveal?: true;
+    }
   | { kind: "convo"; key: string; taskId: string; project?: string; tab: ConvoTab; step?: string }
   | { kind: "chat"; key: string; taskId: string; project?: string; tab: ChatTab }
   | { kind: "state"; key: string; stateId: string; project: string | null; tab: StateTab }

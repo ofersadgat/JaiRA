@@ -149,7 +149,9 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   const whereTitle = card.endedAt !== undefined && card.archived !== undefined ? `archived ${new Date(card.archived.at).toLocaleString()}` : undefined;
   const far =
     card.asking !== undefined
-      ? { text: card.asking, title: `waiting for your answer to ${card.asking === "gate" ? "a question the workflow asks" : `the agent's ${card.asking}`}` }
+      ? card.asking === "child"
+        ? { text: "task waits", title: "a task under it waits on you — it asks, or it was interrupted" }
+        : { text: card.asking, title: `waiting for your answer to ${card.asking === "gate" ? "a question the workflow asks" : `the agent's ${card.asking}`}` }
       : card.endedAt !== undefined
       ? { text: endedLabel(card.endedAt), title: new Date(card.endedAt).toLocaleString() }
       : waitingKindOf(card) !== undefined

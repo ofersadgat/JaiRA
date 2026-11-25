@@ -691,6 +691,11 @@ export interface AppState {
    * its own project, because a row that cannot say whose task it is cannot be opened.
    */
   allConversations: ProjectTask[];
+  /**
+   * Every task the window holds, in every project — what a started task's line reads to find which
+   * task under it asks (`StartedTaskLine`, the parent links `parentTaskOf` follows).
+   */
+  allTasks: ProjectTask[];
   boards: Record<string, BoardView | null>;
   levels: Record<string, string | null>;
   /**
@@ -1024,6 +1029,7 @@ const EMPTY: AppState = {
   liveTurn: null,
   projects: [],
   allConversations: [],
+  allTasks: [],
   boards: {},
   levels: {},
   taskFocus: null,
@@ -1128,7 +1134,7 @@ function selectedViewsOf(store: SyncCache, raw: AppState, previous: SelectedView
 }
 
 /** The index and the views about no one task, as the cache holds them (decision 0018) — read, never patched. */
-type PlaceViews = Pick<AppState, "tasks" | "sharedTasks" | "allConversations" | "projects" | "boards" | "board" | "queue" | "history" | "pending" | "approvals" | "questions" | "userEvents" | "producing">;
+type PlaceViews = Pick<AppState, "tasks" | "sharedTasks" | "allConversations" | "allTasks" | "projects" | "boards" | "board" | "queue" | "history" | "pending" | "approvals" | "questions" | "userEvents" | "producing">;
 
 /** The index's answering tasks, as `producing` — the same object until the index moves. */
 const producingOf = new WeakMap<readonly ProjectTask[], Record<string, number>>();
@@ -1193,6 +1199,7 @@ function placeViewsOf(store: SyncCache, raw: AppState, previous: PlaceViews | un
     tasks: kept(previous?.tasks, raw.at === null ? NO_TASKS : filterIndex(all, `at ${raw.at}`, (t) => t.project === raw.at)),
     sharedTasks: kept(previous?.sharedTasks, shared === undefined ? NO_TASKS : filterIndex(all, `shared ${shared}`, (t) => t.project === shared)),
     allConversations: kept(previous?.allConversations, filterIndex(all, "conversations", listedConversation)),
+    allTasks: kept(previous?.allTasks, all),
     projects,
     boards,
     board: peekBoard(raw.at, raw.level),

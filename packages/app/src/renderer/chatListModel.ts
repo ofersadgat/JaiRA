@@ -44,10 +44,15 @@ export function forkTitleOf(task: TaskSummary): string | undefined {
 }
 
 /** How much work stands under a conversation that controls some (decision 0005): the count, and its tooltip. */
-export function controlsOf(task: TaskSummary): { label: string; title: string } | undefined {
+/**
+ * What a row's When says of the tasks under it, in its tooltip: "2 tasks under it". Not drawn on the row —
+ * a pill there read as the row's date (the person, 2026-11-24: "the date for a chat currently shows '2
+ * tasks' ... thats wrong").
+ */
+export function controlsOf(task: Pick<TaskSummary, "controls">): string | undefined {
   const n = task.controls ?? 0;
   if (n <= 0) return undefined;
-  return { label: `${n} ${n === 1 ? "task" : "tasks"}`, title: `${n} ${n === 1 ? "task stands" : "tasks stand"} under this conversation` };
+  return `${n} ${n === 1 ? "task" : "tasks"} under it`;
 }
 
 /** What the list says when it has no rows. */
@@ -77,14 +82,16 @@ export const CHAT_WHEN_SHORT: Record<ChatWhen, string> = { message: "Latest", cr
 export const CHAT_WHEN_MODE = "chat.list.when";
 
 /**
- * A row's moment by the chosen field. The last message is the newest call's (`TaskSummary.lastMessageAt`);
- * a conversation that has made none yet (being placed, waiting for room) has only its making, and the
- * row's own clock stands in for a summary that says neither.
+ * A row's moment by the chosen field. The last message is the newest turn anywhere in the conversation's
+ * hierarchy: its own newest call's (`TaskSummary.lastMessageAt`), or the newest of the tasks under it
+ * (`childAt`, at any depth) where that is later (the person, 2026-11-24: "it should show the timestamp of
+ * the latest message/turn within a chats hierarchy"). A conversation that has made none yet (being placed,
+ * waiting for room) has only its making, and the row's own clock stands in for a summary that says neither.
  */
-export function whenOf(row: Pick<TaskSummary, "createdAt" | "updatedAt" | "lastMessageAt">, when: ChatWhen): number {
+export function whenOf(row: Pick<TaskSummary, "createdAt" | "updatedAt" | "lastMessageAt" | "childAt">, when: ChatWhen): number {
   const created = Date.parse(row.createdAt);
   const made = Number.isFinite(created) ? created : row.updatedAt;
-  return when === "created" ? made : (row.lastMessageAt ?? made);
+  return when === "created" ? made : Math.max(row.lastMessageAt ?? made, row.childAt ?? 0);
 }
 
 /** What the list's column head groups by (the sidebar mockups, board 24): nothing, the day, how it stands, or where it runs. */

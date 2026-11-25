@@ -142,12 +142,16 @@ export function projectRingItems(summary: Pick<ProjectSummary, "ended"> & { live
  * that is unread: a reply finished is green until the conversation is opened. Read, the ring is empty.
  */
 export function chatRingItems(
-  task: Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt">,
-  facts: { seen: Readonly<Record<string, number>>; producing: Readonly<Record<string, number>>; askedAt?: number | undefined },
+  task: Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt" | "childAt">,
+  facts: { seen: Readonly<Record<string, number>>; producing: Readonly<Record<string, number>>; askedAt?: number | undefined; live?: "running" | "waiting" | undefined },
 ): RingItem[] {
   const items: RingItem[] = [];
   if (facts.askedAt !== undefined) items.push({ kind: "waiting", since: facts.askedAt });
-  const answering = task.status === "running" || (facts.producing[task.taskId] ?? 0) > 0;
+  // Its row says `running` while work it started is open under it (`idleStatusOf`): that is the
+  // conversation working only while nothing under it asks — a child that asks makes it WAIT, and it is
+  // answering on top of that only while a call of its own is in flight (`producing`). A task under it
+  // that runs makes it work whatever its own row says (`live`, the person, 2026-11-24).
+  const answering = (facts.producing[task.taskId] ?? 0) > 0 || (facts.askedAt === undefined && (task.status === "running" || facts.live === "running"));
   const clock = seenClockOf(task);
   if (answering) items.push({ kind: "running", since: task.lastMessageAt ?? task.updatedAt });
   else if ((facts.seen[task.taskId] ?? 0) < clock) {
@@ -157,11 +161,31 @@ export function chatRingItems(
   return items;
 }
 
-/** When each task asked the person: its oldest open approval or question, by task id. */
-export function askedAtOf(requests: ReadonlyArray<{ taskId?: string | undefined; at: number }>): Record<string, number> {
+/**
+ * When each task asked the person: its oldest open approval or question, by task id — and, given the
+ * projects' summaries, every task the engine counts as waiting (`ProjectSummary.live`), which is how a
+ * parent whose child asks is known: the child's ask is rolled up into it there (the person, 2026-11-23).
+ */
+export function askedAtOf(
+  requests: ReadonlyArray<{ taskId?: string | undefined; at: number }>,
+  projects: ReadonlyArray<{ live?: readonly LiveTask[] | undefined }> = [],
+): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of requests) if (r.taskId !== undefined) out[r.taskId] = Math.min(out[r.taskId] ?? Infinity, r.at);
+  for (const p of projects) for (const t of p.live ?? []) if (t.kind === "waiting") out[t.taskId] = Math.min(out[t.taskId] ?? Infinity, t.since);
   return out;
+}
+
+/**
+ * What the ring round the rail's All chats holds: every conversation's own ring (`chatRingItems`) on
+ * one, the way a project's tile holds its tasks (the person, 2026-11-24: "the pip in the chat menu should
+ * be segmented like the project level ring").
+ */
+export function chatsRingItems(
+  conversations: ReadonlyArray<Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt" | "childAt">>,
+  facts: { seen: Readonly<Record<string, number>>; producing: Readonly<Record<string, number>>; asked: Readonly<Record<string, number>>; live: Readonly<Record<string, "running" | "waiting">> },
+): RingItem[] {
+  return conversations.flatMap((task) => chatRingItems(task, { seen: facts.seen, producing: facts.producing, askedAt: facts.asked[task.taskId], live: facts.live[task.taskId] }));
 }
 
 /** The project rings summed for a group of workspaces: every member's items on the one ring. */

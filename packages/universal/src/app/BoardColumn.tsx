@@ -85,7 +85,7 @@ export function BoardColumn(): JSX.Element {
   // One board per group, its workspaces merged by column (decision 0013 §4) — kept between draws, since
   // a merge or a queued mark makes new cards, and a card is drawn again only when it is a new one.
   // And every card whose task waits on the person — a gate, an agent's approval or question — marked so.
-  const asking = useMemo(() => askingTasksOf(state.pending, state.approvals, state.questions), [state.pending, state.approvals, state.questions]);
+  const asking = useMemo(() => askingTasksOf(state.pending, state.approvals, state.questions, state.projects), [state.pending, state.approvals, state.questions, state.projects]);
   const merged = useMemo(
     () => new Map(groups.map((g) => [g.key, markAsking(markQueued(mergeBoards(g, state.boards), state.queue), asking)])),
     [groups, state.boards, state.queue, asking],

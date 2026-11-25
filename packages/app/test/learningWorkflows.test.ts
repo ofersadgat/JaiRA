@@ -442,6 +442,69 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
     const started = service.listTasks().find((t) => t.workflow === "improve/lesson")!;
     expect(started.title).toBe("Lesson: Never use emojis");
   });
+
+  // The person, 2026-11-23: "a parent task should not count as stopped when it has a non terminal child.
+  // the parent task should be in the waiting state which lets me know that it has something that needs to be done".
+  it("leaves the conversation waiting while the lesson it started asks the person, and counts the lesson through it", async () => {
+    const { taskId } = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "write a limerick" } });
+    await service.startTask({
+      taskId,
+      fake: [
+        { promptIncludes: "## The lesson", output: { lesson: true, rule: "Never use exclamation marks", lever: "instructions", target: "instructions", why: "A preference.", summary: "One line.", files: [{ path: "instructions.md", content: "No exclamation marks.\n" }] } },
+        { promptIncludes: "The person's message:", output: { verdict: "clear", lesson: "Never use exclamation marks", quote: "no exclamation marks" } },
+        { promptIncludes: "write a limerick", output: "there once was a cat!" },
+        { promptIncludes: "no exclamation marks", output: "there once was a cat." },
+      ],
+    });
+    await eventually(() => service.sessionHistory({ taskId }).length >= 1, "the first reply", 20_000);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "no exclamation marks" });
+    const lesson = () => service.listTasks().find((t) => t.workflow === "improve/lesson" && t.origin?.taskId === taskId);
+    await eventually(() => lesson() !== undefined && service.pendingInteractions().some((p) => p.taskId === lesson()!.taskId && p.component === "choose_option"), "the lesson to ask", 30_000);
+    const child = lesson()!;
+    expect(child.origin).toMatchObject({ kind: "started", taskId });
+
+    // Idle at its input(), but not stopped: the lesson under it is open, and asks.
+    await eventually(() => service.listTasks().find((t) => t.taskId === taskId)?.status === "running", "the conversation to read as running", 20_000);
+    const summary = service.listProjects().find((p) => p.kind === "user")!;
+    expect(summary.live).toContainEqual(expect.objectContaining({ taskId, kind: "waiting" }));
+    // The lesson is drawn inside the conversation, so it is counted through it — never on its own.
+    expect(summary.live?.some((t) => t.taskId === child.taskId)).toBe(false);
+    expect(summary.ended.some((t) => t.taskId === child.taskId)).toBe(false);
+    expect(summary.waiting).toBe(1);
+
+    // Answered, the lesson ends, and the conversation is idle again — its last reply's status.
+    const gate = service.pendingInteractions().find((p) => p.taskId === child.taskId && p.component === "choose_option")!;
+    service.submitInteraction(gate.requestId, { decision: "discard" });
+    await eventually(() => finished(child.taskId), "the lesson to finish", 20_000);
+    await eventually(() => service.listTasks().find((t) => t.taskId === taskId)?.status === "completed", "the conversation to read as idle", 20_000);
+    expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ waiting: 0 });
+    // The lesson moved, so the conversation is news too: its clock is held to the lesson's, here and in
+    // its project's ended row ("if a child task updates, it should also mark the parent as unseen").
+    const ended = service.listTasks().find((t) => t.taskId === child.taskId)!;
+    const talk = service.listTasks().find((t) => t.taskId === taskId)!;
+    expect(talk.childAt).toBeGreaterThanOrEqual(ended.updatedAt);
+    expect(service.listProjects().find((p) => p.kind === "user")!.ended.find((t) => t.taskId === taskId)?.updatedAt).toBeGreaterThanOrEqual(ended.updatedAt);
+    service.cancelTask(taskId);
+  });
+
+  // The person, 2026-11-24: "the state of a nested task affecting the color of the parent task ring".
+  it("leaves a task waiting while a task under it is interrupted, and working while one runs, whatever its own row says", () => {
+    const { project } = (service as unknown as { session(): { project: Project } }).session();
+    const parent = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "hi", improve: false } });
+    const child = service.createTask({ title: "Review", workflow: "improve/conversation", inputs: { context: { task: parent.taskId } } });
+    project.tasks.write({ ...project.tasks.read(child.taskId)!, origin: { kind: "started", taskId: parent.taskId } } as Parameters<typeof project.tasks.write>[0]);
+    project.runtime.setStatus(parent.taskId, "completed", 1000);
+    const summary = () => service.listProjects().find((p) => p.kind === "user")!;
+
+    project.runtime.setStatus(child.taskId, "interrupted", 2000);
+    expect(summary().live).toContainEqual({ taskId: parent.taskId, kind: "waiting", since: 2000 });
+    expect(summary().waiting).toBe(1);
+    project.runtime.setStatus(child.taskId, "running", 3000);
+    expect(summary().live).toContainEqual({ taskId: parent.taskId, kind: "running", since: 3000 });
+    project.runtime.setStatus(child.taskId, "completed", 4000);
+    expect(summary().live?.some((t) => t.taskId === parent.taskId)).toBe(false);
+    expect(summary().waiting).toBe(0);
+  });
 });
 
 describe("reviewing a conversation at its end (decision 0029 §6)", { timeout: 60_000 }, () => {

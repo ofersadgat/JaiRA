@@ -592,6 +592,8 @@ export interface TaskProjection {
   /** Set when archived: the card carries it, and the board decides whether to show it. */
   archived?: TaskArchived;
   updatedAt: number;
+  /** The newest clock among the tasks under it (`TaskSummary.childAt`). */
+  childAt?: number;
   /** When it was made, as a time (`BoardCard.createdAt`). */
   createdAt?: number;
   run: ProjectedRun;
@@ -647,6 +649,7 @@ function cardOf(
     ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
     ...(task.undoable === true ? { undoable: true as const } : {}),
     updatedAt: task.updatedAt,
+    ...(task.childAt !== undefined ? { childAt: task.childAt } : {}),
     ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
   };
 }

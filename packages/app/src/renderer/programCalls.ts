@@ -14,11 +14,13 @@
  *
  * Pure, so the rules are tested: `chatThreadModel.ts` and `RunTranscript.tsx` call it.
  */
-import { createContext } from "react";
+import { createContext, type ReactNode } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import { readCall, type InstanceNode, type OperationRecordView } from "@jaira/shared/browser";
 import { CALL_RENDERERS, functionNameOf, lookup, roleOf, visibilityOf, withOverrides, type CallRegistry, type CallView, type RendererEntry, type RendererId } from "./callRenderers";
 import type { EventEntry, MessageEntry, ToolEntry, TranscriptEntry } from "./transcript";
+import { askingInstanceOf } from "./stateSurfaceModel";
+import { nodeAt } from "./trail";
 
 /** How a script asked a call to be drawn (`renderUI`, §4) — resolved down its call path. */
 export interface CallPresentation {
@@ -419,3 +421,35 @@ export function programCallInstance(callId: string | undefined): string | undefi
  * drawing them, so a running call's row carries its own Interrupt. Absent, rows offer none.
  */
 export const CallInterruptContext = createContext<((instanceId: string) => void) | undefined>(undefined);
+
+/**
+ * The gate a program's call is asking, drawn under its row (the person, 2026-11-24: "I see the choose
+ * option tool, but no UI"): handed to the rows by the view drawing them, which knows the task's pending
+ * gate and which of its calls is the one asking (`askingInstanceOf(…, true)`). A call that is not asking
+ * — and every call while no gate is pending — is its row alone.
+ */
+export const CallGateContext = createContext<((callId: string) => ReactNode | undefined) | undefined>(undefined);
+
+/**
+ * The row a pending gate is asked at: the asking state's NEWEST call. A call the app closed under is
+ * asked again when the run next starts, on the same state, so a state can hold several records of one
+ * question — every one but the last ended with the process that asked it.
+ */
+export function askingCallIdOf(instances: readonly InstanceNode[]): string | undefined {
+  const at = askingInstanceOf(instances, true);
+  if (at === undefined) return undefined;
+  const last = nodeAt(instances, at)?.calls?.at(-1)?.operationId;
+  return `${PROGRAM_CALL_PREFIX}${at}${last !== undefined ? `#${last}` : ""}`;
+}
+
+/**
+ * Whether a run is a program's — a script whose calls are its states (decision 0033): a conversation
+ * that waits on `input()` (`TaskDetail.program`), or any script, whose call states carry the site in
+ * its code that made them (`improve/lesson`'s `call_6`).
+ */
+export function isProgramRun(detail: { program?: true | undefined; instances: readonly InstanceNode[] }): boolean {
+  const root = detail.instances[0];
+  if (root === undefined) return false;
+  if (detail.program === true || root.scriptCalls !== undefined) return true;
+  return root.children.some((child) => isOwnProgram(root, child) && (child.calls ?? []).some((call) => call.site !== undefined));
+}

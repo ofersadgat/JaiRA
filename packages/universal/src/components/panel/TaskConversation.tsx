@@ -33,7 +33,7 @@ export function TaskConversation({
   onResume: (taskId: string) => void;
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
-  const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
+  const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node, true));
   // The gate at the foot is at most 55% of the conversation's height. It stands in the box under the
   // scroller, where a percentage has nothing to resolve against, so the height is measured and handed
   // down — to the gate alone: kept as this component's state, every new height (a sheet being dragged)

@@ -376,3 +376,27 @@ export function workflowToolSummary(name: WorkflowToolName, args: unknown, title
     }
   }
 }
+
+/**
+ * The task a `start_task` call made of its own — what a PROGRAM conversation's start does (decision 0029
+ * §2): the program's call answers `task_id`, a model's tool `task`. Undefined for a call that failed, for
+ * any other tool, and for a start that ran on the caller's own task (`self`: decision 0005's run, nested
+ * by its instance instead). Reads our own object or the JSON text of it.
+ */
+export function startedTaskOf(name: string | undefined, result: unknown, self?: string | null): string | undefined {
+  if (name === undefined || workflowToolOf(name) !== "start_task") return undefined;
+  let parsed: unknown = result;
+  if (typeof result === "string") {
+    if (!result.trimStart().startsWith("{")) return undefined;
+    try {
+      parsed = JSON.parse(result) as unknown;
+    } catch {
+      return undefined;
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  const r = parsed as Record<string, unknown>;
+  if (r["ok"] === false || r["error"] !== undefined) return undefined;
+  const id = typeof r["task_id"] === "string" ? r["task_id"] : typeof r["task"] === "string" ? r["task"] : undefined;
+  return id === undefined || id === "" || id === self ? undefined : id;
+}

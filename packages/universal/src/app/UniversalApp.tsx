@@ -269,6 +269,7 @@ export function ShellInbox(): JSX.Element | null {
       pending={state.pending}
       approvals={state.approvals}
       questions={state.questions}
+      tasks={state.allTasks}
       projects={state.projects}
       hues={projectHues}
       onSelect={(taskId, project) => {

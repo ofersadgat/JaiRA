@@ -35,6 +35,8 @@ export interface ChatListSurface {
   unplaced?: Readonly<Record<string, "placing" | "waiting">> | undefined;
   /** When each conversation asked the person, for its ring — `ChatSurface.asked`. */
   asked?: Readonly<Record<string, number>> | undefined;
+  /** What each conversation is doing through the tasks under it — `ChatSurface.liveKinds`. */
+  liveKinds?: Readonly<Record<string, "running" | "waiting">> | undefined;
   seen: Readonly<Record<string, number>>;
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
@@ -101,9 +103,9 @@ function homeOf(task: ChatRow, surface: ChatListSurface): string | undefined {
  *   its ring           22 round (`StatusRing.tsx`): a segment for answering, asking, and how it
  *                      stopped while unread; the oldest ask's age, or the answer's clock, inside
  *   its title          flex 1, one line; a fork's glyph 11 square, 4 right, --accent 70% into --dim
- *   what it controls   padding 0 6, 1px --line, pill, data 600 10/12.5 line 1.6, --dim
- *   when               app 11/12.5, --dim, only while the ring is empty; else the work's clock
- *                      (data 600, --accent) when the ring's middle tells a wait, else nothing
+ *   when               app 11/12.5, --dim: the newest turn anywhere under it (`whenOf`), the tasks
+ *                      under it in its tooltip; after the work's clock (data 600, --accent) when the
+ *                      ring's middle tells a wait
  *   the rename         flex 1, padding 2 4, 1px --accent, radius 4, --bg, app 12.5/12.5
  *   empty              --dim, padding 8 0 (and a paragraph's 1em margins)
  */
@@ -244,8 +246,8 @@ function Row({
   const t = useTokens();
   const [hovered, hover] = useHover();
   const ring = useMemo(
-    () => chatRingItems(task, { seen: surface.seen, producing: surface.producing, askedAt: surface.asked?.[task.taskId] }),
-    [task, surface.seen, surface.producing, surface.asked],
+    () => chatRingItems(task, { seen: surface.seen, producing: surface.producing, askedAt: surface.asked?.[task.taskId], live: surface.liveKinds?.[task.taskId] }),
+    [task, surface.seen, surface.producing, surface.asked, surface.liveKinds],
   );
   const controls = controlsOf(task);
   const fork = forkTitleOf(task);
@@ -283,8 +285,6 @@ function Row({
       </View>
     );
   }
-  // What it controls, in its pill: the data voice at the APP size.
-  const provSize = t.scaled("size-app", 10 / 12.5);
   return (
     // A row's own actions behind a ⋯ that shows on hover, over its right end (the sidebar mockups,
     // board 28) — the menu its right-click opens, for a person who does not know to right-click. A
@@ -315,13 +315,6 @@ function Row({
         ) : null}
         {task.title}
       </Txt>
-      {controls !== undefined ? (
-        <View flexShrink={0} paddingHorizontal={6} borderRadius={999} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} {...((isWeb ? { title: controls.title } : {}) as object)}>
-          <Txt spec={{ voice: "data", scale: 1, weight: 600, color: "dim" }} fontSize={provSize} lineHeight={typeof provSize === "number" ? provSize * 1.6 : "1.6"}>
-            {controls.label}
-          </Txt>
-        </View>
-      ) : null}
       {task.project !== undefined && surface.spans !== false ? <ProjectChip label={surface.names?.[task.project] ?? projectName(task.project)} hue={surface.hues?.[task.project] ?? "var(--p0)"} /> : null}
       {task.project !== undefined && surface.spans === false && surface.places?.[task.project] !== undefined ? (
         <Txt spec={{ voice: "data", scale: 10 / 12.5, color: "dim" }} flexShrink={0} whiteSpace="nowrap">
@@ -336,13 +329,18 @@ function Row({
         <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Finding somewhere for it to run" } : {}) as object)}>
           <Spinner size={12} color={String(t.v("dim"))} />
         </View>
-      ) : ring.length > 0 ? (
-        // The ring says how long; the row's end says only the work's clock beside a wait (board 11).
-        <RowRingClock items={ring} />
       ) : (
-        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} flexShrink={0} {...((isWeb ? { title: `${CHAT_WHEN_LABELS[when]} ${new Date(whenOf(task, when)).toLocaleString()}` } : {}) as object)}>
-          {agoOf(whenOf(task, when))}
-        </Txt>
+        <>
+          {/* Beside a wait the ring tells, the work's clock (board 11); the row still ends in its When. */}
+          {ring.length > 0 ? <RowRingClock items={ring} /> : null}
+          <Txt
+            spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}
+            flexShrink={0}
+            {...((isWeb ? { title: [`${CHAT_WHEN_LABELS[when]} ${new Date(whenOf(task, when)).toLocaleString()}`, controls].filter(Boolean).join(" · ") } : {}) as object)}
+          >
+            {agoOf(whenOf(task, when))}
+          </Txt>
+        </>
       )}
     </Press>
     {hovered && isWeb ? (

@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
-import { baseAsProjectPaths, compileHidden, disabledBy, hiddenRules, isHiddenPath, isProjectWorkflowLayer, jairaBuiltInPaths, LOCAL_LAYER_DIR_NAME, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
+import { baseAsProjectPaths, compileHidden, disabledBy, drawnInsideParent, hiddenRules, isHiddenPath, isProjectWorkflowLayer, jairaBuiltInPaths, LOCAL_LAYER_DIR_NAME, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
   BoardCard,
   BoardView,
@@ -801,6 +801,7 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
       ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
+      ...(summary.childAt !== undefined ? { childAt: summary.childAt } : {}),
       ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
       run: taskRun(project, summary.taskId, shape),
     }));
@@ -998,10 +999,11 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     // files in that child's column on the parent's board — but it was a task of its OWN first, with
     // a card a person knows, so here it stays in sight: in its parent's column, marked `under` it,
     // which the board draws indented beneath the parent's card.
-    if (summary.origin?.kind === "task") continue;
     // A task the events task started as its CHILD (decision 0010 §4) is drawn the way a mount's task
-    // is: under the events task, in its automation's column — while that task is there to hold it.
-    if (summary.origin?.kind === "started" && byTaskId.has(summary.origin.taskId)) continue;
+    // is: under the events task, in its automation's column — while that task is there to hold it. So is
+    // one a conversation started (decision 0029 §2), in the conversation. `drawnInsideParent` is the rule,
+    // shared with the project's counts, which roll such a child up into its parent.
+    if (drawnInsideParent(summary, (taskId) => byTaskId.has(taskId))) continue;
     const adoptedBy = summary.origin?.kind === "adopt" && byTaskId.has(summary.origin.taskId) ? summary.origin.taskId : undefined;
     // One bundle per workflow would be cheaper, but a card at this level only needs the task's own
     // active path, and `taskRun` without a shape still yields one.
@@ -1041,6 +1043,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
       ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
+      ...(summary.childAt !== undefined ? { childAt: summary.childAt } : {}),
       ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
     };
     // Always found: the loop above made a column for every flow the summaries resolve to, whether

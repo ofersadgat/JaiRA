@@ -75,6 +75,11 @@ export interface SidebarView {
   /** What this view has waiting in the open project — see SHELL.md §4.3. */
   counts?: PillCounts;
   /**
+   * What the ring round its rail icon measures, for a room drawn as a project's tile is (All chats): in
+   * the rail it stands for {@link counts}' badge. See `ringModel.ts`.
+   */
+  ring?: RingItem[];
+  /**
    * Marking this view's share seen, which is what clears its status pills — or, for a row whose pills
    * are not a count of unseen work (Settings' warnings and errors), what a click on them opens,
    * placed against `from`.

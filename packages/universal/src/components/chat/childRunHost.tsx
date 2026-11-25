@@ -12,6 +12,7 @@ import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
 import { SubagentHostContext } from "../panel/subagentHost";
 import { Transcript } from "../panel/SessionTranscript";
 import { ChildRunLine, WaitPills, WAIT_PILLS_HEIGHT } from "./ChildRun";
+import { StartedTaskLine, type NestHandle } from "./StartedTaskLine";
 import { SubagentPage } from "./SubagentPage";
 import { SidechainConversation } from "../run/SidechainConversation";
 import { View } from "@tamagui/core";
@@ -56,6 +57,8 @@ export function useChildRunHost(
   outcomeHost: ((outcome: WorkflowOutcome) => ReactNode | undefined) | undefined;
   /** A subagent's line under the call that started it, the way a run's is drawn (`subagentHost.ts`). */
   subagentHost: ((call: string) => ReactNode | undefined) | undefined;
+  /** A task the conversation started of its own, under the call that started it (`StartedTaskLine`). */
+  startedHost: (taskId: string, nest: NestHandle) => ReactNode | undefined;
   /** An agent's lane on the rail (`AgentRail.tsx`): what it is doing, and where it can be opened. */
   agentHost: AgentHost;
   walkedIn: ReactNode | null;
@@ -219,6 +222,9 @@ export function useChildRunHost(
           );
         };
 
+  /** A task the conversation started of its own (decision 0029 §2): its line, and the task nested under it. */
+  const startedHost = (taskId: string, nest: NestHandle): ReactNode | undefined => <StartedTaskLine taskId={taskId} project={surface.project ?? undefined} nest={nest} />;
+
   // An agent on the rail: what its line says, and the three places besides in place it opens in — the
   // main view (walked into, as a substate), a pane beside this one, the side panel.
   const split = splitView.use();
@@ -364,7 +370,7 @@ export function useChildRunHost(
    * read is listed here — never `jump` or `lead`, which none of them touches.
    */
   const hosts = useMemo(
-    () => ({ outcomeHost, subagentHost, agentHost }),
+    () => ({ outcomeHost, subagentHost, agentHost, startedHost }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [surface, context, detail, runs, subagents, waits, open, now, threadSession, threadLive, split, panelOnTop],
   );

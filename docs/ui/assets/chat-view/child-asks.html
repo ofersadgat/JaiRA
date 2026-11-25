@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0029-workflows-that-learn-from-corrections">
+<meta name="state" content="a task a conversation started asks the person: where its question is drawn in the conversation · 6 versions">
+<meta name="captured" content="2026-11-24">
+<meta name="reflects" content="proposed">
+<title>Chat view · a started task asks · 6 versions</title>
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --faint: #9aa0b4; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --tok-hint: #949cad;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --faint: #5f6779; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72; --fill-accent: #5a5fe0; --tok-hint: #5f6779;
+  --lift: 0 18px 50px rgba(0,0,0,.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 1040px; margin: 0 0 10px; }
+.lede b { color: var(--text); }
+.toc { display: grid; grid-template-columns: repeat(3, minmax(0, 330px)); gap: 4px 18px; margin: 16px 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 56px; }
+section.d header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+section.d header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 2px 7px; }
+section.d h2 { font-size: 16px; margin: 0; }
+.why { color: var(--dim); max-width: 1060px; margin: 0 0 12px; font-size: 12.5px; }
+.why b { color: var(--text); }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 340px)); gap: 6px 18px; margin: 0 0 14px; font-size: 12px; color: var(--dim); }
+.rules div b { color: var(--text); font-weight: 600; }
+.stage { display: flex; gap: 18px; align-items: stretch; }
+.win { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); width: 760px; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.win.wide { width: 1180px; flex-direction: row; }
+.win .col { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.title { padding: 9px 16px; border-bottom: 1px solid var(--panel-2); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--warn); flex: none; }
+.title .sub { color: var(--dim); font-weight: 400; font-size: 11.5px; margin-left: auto; }
+.thread { padding: 12px 22px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.user { align-self: flex-end; max-width: 70%; background: var(--panel-2); border-radius: 12px 12px 4px 12px; padding: 7px 12px; }
+.reply { max-width: 92%; }
+.row { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; padding: 2px 4px; }
+.row .nm { color: var(--text); font-weight: 600; }
+.row .at { margin-left: auto; font: 400 10.5px var(--font-data); color: var(--faint); }
+.ok { color: var(--ok); }
+svg.i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* the started line — ChildRunLine */
+.line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px; font-size: 11.5px; color: var(--dim); }
+.go { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); padding: 2px 7px; display: inline-flex; transform: rotate(-90deg); }
+.line b { color: var(--text); font-weight: 600; }
+.line .w { color: var(--warn); }
+.line .w b { color: var(--warn); font-family: var(--font-data); font-weight: 600; }
+.line .dot { color: var(--faint); }
+.tail { margin-left: auto; display: flex; align-items: center; gap: 4px; font: 400 10.5px var(--font-data); color: var(--dim); }
+.chev { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--tok-hint); }
+.chev.open svg { transform: rotate(180deg); }
+.nest { flex-basis: 100%; margin: 4px 0 8px 18px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); display: flex; flex-direction: column; gap: 4px; }
+.fold { color: var(--faint); font-size: 11px; padding: 2px 4px; }
+.fold u { text-decoration: none; border-bottom: 1px dashed var(--faint); }
+/* the question a task asks — the choose_option gate */
+.ask { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.ask .hd { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--warn); }
+.ask .hd b { font-family: var(--font-data); }
+.ask .crumb { color: var(--dim); font-size: 11px; }
+.ask .q { font-weight: 600; }
+.ask .rule { font: 400 12px var(--font-data); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; color: var(--text); }
+.ask .why2 { color: var(--dim); font-size: 12px; }
+.btns { display: flex; gap: 8px; align-items: center; }
+.b { font: 500 12px var(--font-app); border-radius: 7px; padding: 4px 11px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.b.p { background: var(--fill-accent); color: var(--on-accent); border-color: var(--fill-accent); }
+.b.q { border-color: transparent; background: transparent; color: var(--accent); }
+.ask.slim { padding: 7px 10px; gap: 6px; }
+/* the pills and the box */
+.pills { display: flex; justify-content: center; gap: 8px; padding: 0 0 8px; }
+.pill { display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); box-shadow: 0 4px 14px rgba(15,20,30,.12); font-size: 11.5px; }
+.pill .w { color: var(--warn); font-weight: 600; }
+.pill .s { color: var(--dim); font-size: 10.5px; }
+.foot { padding: 0 18px 14px; }
+.box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--faint); background: var(--panel); display: flex; align-items: center; gap: 8px; }
+.box .send { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; background: var(--panel-3); }
+.tray { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-radius: 12px; background: var(--panel); box-shadow: var(--lift); margin: 0 0 8px; overflow: hidden; }
+.tray .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--panel-2); font-size: 11.5px; }
+.tray .tab { padding: 5px 10px; border-radius: 7px 7px 0 0; color: var(--dim); }
+.tray .tab.on { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--warn) 8%, var(--panel)); box-shadow: inset 0 -2px 0 var(--warn); }
+.tray .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel { width: 420px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+.panel .ph { padding: 9px 14px; border-bottom: 1px solid var(--panel-2); display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 600; }
+.panel .ph .x { margin-left: auto; color: var(--faint); font-weight: 400; }
+.panel .pb { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.edge { border: 2px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 10px; padding: 2px; }
+.note { font-size: 11px; color: var(--accent); font-weight: 600; }
+.mark { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 999px; padding: 0 7px; }
+.after { width: 380px; display: flex; flex-direction: column; gap: 10px; }
+.after .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--dim); }
+.after .card b { color: var(--text); }
+.grow { flex: 1; }
+.after h3 { font-size: 12px; margin: 0 0 4px; color: var(--text); }
+</style>
+</head>
+<body>
+<h1>A task a conversation started asks you — where its question is drawn</h1>
+<p class="lede">The person, 2026-11-24: <b>"If a sub task has a question that it needs to ask the user, the sub task should expand in the parent chat view so that the user can see the actual question / prompt / ui that the user needs to interact with."</b> Today the conversation's row and ring say it waits, and a pill over the box says <i>Waiting for answer</i>; a press walks into the task. Each version below draws the task's own question UI — here a lesson review's <code>choose_option</code> gate, asked two levels down (<i>Vercel build failure debugging</i> › <i>Review a conversation for lessons</i> › <i>Lesson</i>) — in the conversation itself. Every version answers in place; the right column says what each does with several asks, a deeper ask, and after the answer.</p>
+<div class="toc">
+  <a href="#d1"><b>1</b>The nest opens to the ask</a>
+  <a href="#d2"><b>2</b>The ask under the line, the nest shut</a>
+  <a href="#d3"><b>3</b>The ask at the live edge</a>
+  <a href="#d4"><b>4</b>The box becomes the answer</a>
+  <a href="#d5"><b>5</b>The pill opens a tray over the box</a>
+  <a href="#d6"><b>6</b>The task opens beside, at its ask</a>
+</div>
+
+<!-- shared pieces, repeated per version so each reads alone -->
+
+<section class="d" id="d1">
+  <header><span class="n">1</span><h2>The nest opens to the ask</h2></header>
+  <p class="why">Decision 0003's nest, opened <b>by the ask</b>: the line under <code>start_task</code> unfolds by itself, and inside it only what leads to the question — the steps before it folded to one line, the grandchild's own line open the same way, then the gate as the task view draws it. The pill over the box stays, as the way back to it. <b>Most literal reading of the request</b>; the question sits where the work that asks it was started, which may be far up the thread.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+      <div class="thread">
+        <div class="user">the build fails on the env check again — why?</div>
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg><span class="nm">Bash</span>vercel logs --since 1h<span class="at">10:29:51</span><span class="ok">✓</span></div>
+        <div class="reply">It reads <code>VERCEL_ENV</code> before the project is linked, so the check sees nothing. Linking first fixes it.</div>
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson · 1 question</span>
+          <span class="tail">6 steps · 2 min so far<span class="chev open"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+          <div class="nest">
+            <div class="fold">▸ <u>3 steps before it</u> · read the conversation · found 1 lesson</div>
+            <div class="line">
+              <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Lesson: When I hit a question I can resolve…</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span>
+              <span class="tail">3 steps · 1 min so far<span class="chev open"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+              <div class="nest">
+                <div class="fold">▸ <u>2 steps before it</u> · drafted the change</div>
+                <div class="ask">
+                  <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· in Review › Lesson · asked 10:32</span></div>
+                  <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+                  <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+                  <div class="why2">Writes it to <code>.jaira/instructions.md</code> (+1 line). You corrected this at 10:30: "you could have just read the logs".</div>
+                  <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span><span class="grow"></span><span class="b q">open the lesson →</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+      </div>
+      <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">in Review › Lesson · 10:32 AM</span></span></div>
+      <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+    </div>
+    <div class="after">
+      <div class="card"><h3>Several ask</h3>Each started line opens to its own ask, where it is in the thread. The pills say "2 waiting"; a press scrolls to the oldest.</div>
+      <div class="card"><h3>Deeper</h3>Every line on the way down opens — the chain is the path to the question.</div>
+      <div class="card"><h3>After the answer</h3>A nest it opened by itself shuts again, leaving the line ("· done"); one you opened stays open.</div>
+      <div class="card"><h3>Cost</h3>Wiring only: the nest exists, <code>RunTranscript nested</code> draws the gate when told to, and the fold is the Steps fold.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d2">
+  <header><span class="n">2</span><h2>The ask under the line, the nest shut</h2></header>
+  <p class="why">The line stays one line, and the question alone is drawn <b>right under it</b>, with the path it came from as a crumb — none of the run's history. The chevron still opens the whole nest for whoever wants the context. <b>Smallest footprint</b>; the question is still where the work was started.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+      <div class="thread">
+        <div class="user">the build fails on the env check again — why?</div>
+        <div class="reply">It reads <code>VERCEL_ENV</code> before the project is linked, so the check sees nothing. Linking first fixes it.</div>
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+          <span class="tail">6 steps · 2 min so far<span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+          <div class="nest" style="border-left-color: color-mix(in srgb, var(--warn) 45%, var(--line))">
+            <div class="ask">
+              <div class="hd">⏸ <b>choose option</b><span class="crumb">· Review a conversation for lessons › Lesson: When I hit a question… · asked 10:32</span></div>
+              <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+              <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+              <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span><span class="grow"></span><span class="b q">show the run ⌄</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+      </div>
+      <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">in Review › Lesson · 10:32 AM</span></span></div>
+      <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+    </div>
+    <div class="after">
+      <div class="card"><h3>Several ask</h3>A card under each line that asks; two asks of one task stack under its line, oldest first.</div>
+      <div class="card"><h3>Deeper</h3>Not drawn as nesting: the crumb names the path, and the card is the grandchild's.</div>
+      <div class="card"><h3>After the answer</h3>The card goes; the line says what was chosen for a moment ("· applied"), then where the task stands.</div>
+      <div class="card"><h3>Cost</h3>Small: a card per ask under the line, the same control the task view draws for the gate.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d3">
+  <header><span class="n">3</span><h2>The ask at the live edge</h2></header>
+  <p class="why">The question is drawn <b>at the end of the thread</b>, as if the conversation asked it, headed by who asks — so it is in front of you without scrolling. Up in the thread, the started line says it waits and points down. <b>Best when the start was long ago</b>; it reads as the conversation's turn, so the header has to make clear it is the task's.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+      <div class="thread">
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span class="mark">asked below ↓</span>
+          <span class="tail">6 steps · 2 min so far<span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+        <div class="user">ok, and can you check the preview deploys too?</div>
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M4 17l6-6-6-6"/><path d="M12 19h8"/></svg><span class="nm">Bash</span>vercel ls --environment preview<span class="at">10:34:10</span><span class="ok">✓</span></div>
+        <div class="reply">The previews link first, so they pass. Only production runs the check before linking.</div>
+        <div class="ask" style="margin-top: 6px">
+          <div class="hd">⏸ <b>Lesson</b> asks you<span class="crumb">· started by this conversation at 10:31 · Review › Lesson</span><span class="grow"></span><span class="b q" style="padding: 0">go to where it started ↑</span></div>
+          <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+          <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+          <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+        </div>
+      </div>
+      <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+    </div>
+    <div class="after">
+      <div class="card"><h3>Several ask</h3>Stacked at the edge, oldest nearest the box; each names who asks.</div>
+      <div class="card"><h3>Deeper</h3>The header names the asker and the path; the card is never nested.</div>
+      <div class="card"><h3>After the answer</h3>The card leaves the edge, and a one-line note stays in the thread where it was answered ("applied the lesson · Lesson"). The pill is not needed — the edge is where you are.</div>
+      <div class="card"><h3>Cost</h3>Medium: the thread gains a tail the conversation does not own, kept last while it waits and folded into the thread once answered.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d4">
+  <header><span class="n">4</span><h2>The box becomes the answer</h2></header>
+  <p class="why">While a task under it asks, the composer's place <b>holds the question</b>, as a command approval already docks there: the gate's control in the box's frame, "reply instead" a press away. Answered, the box comes back. <b>Hardest to miss</b>; it blocks typing until you choose, which may be too much for a lesson review.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+      <div class="thread">
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+          <span class="tail">6 steps · 2 min so far<span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+      </div>
+      <div class="foot">
+        <div class="ask" style="border-radius: 12px">
+          <div class="hd">⏸ <b>Lesson</b> asks you<span class="crumb">· Review a conversation for lessons › Lesson · 10:32</span><span class="grow"></span><span class="crumb">1 of 1</span></div>
+          <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+          <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+          <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span><span class="grow"></span><span class="b q">reply instead</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="after">
+      <div class="card"><h3>Several ask</h3>"1 of 3" with ‹ › in the header; the oldest first.</div>
+      <div class="card"><h3>Deeper</h3>The crumb names the path; the asker's own name leads.</div>
+      <div class="card"><h3>After the answer</h3>The next ask, or the box. A note stays at the start line ("· applied").</div>
+      <div class="card"><h3>Cost</h3>Medium: the approval dock already swaps the box; a gate's control in it is new, and "reply instead" must not lose a draft.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d5">
+  <header><span class="n">5</span><h2>The pill opens a tray over the box</h2></header>
+  <p class="why">Today's pill, made the way in: <b>it opens upward into a tray</b> over the box holding the question UI, a tab per ask; it opens by itself when an ask is new and folds to the pill when you type. The thread is not touched. <b>Closest to what ships</b>, and the only version that keeps the thread exactly as it was.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · 2 tasks it started ask</span></div>
+      <div class="thread">
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>2 things</b></span>
+          <span class="tail">8 steps · 3 min so far<span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+      </div>
+      <div class="foot">
+        <div class="tray">
+          <div class="tabs"><span class="tab on">⏸ Lesson: check before asking</span><span class="tab">⏸ Lesson: link before env check</span><span class="grow"></span><span class="tab">fold ⌄</span></div>
+          <div class="body">
+            <div class="crumb" style="color: var(--dim); font-size: 11px">Review a conversation for lessons › Lesson · choose option · asked 10:32</div>
+            <div class="q" style="font-weight: 600">Apply this lesson to how this workspace's conversations answer?</div>
+            <div class="rule" style="font: 400 12px var(--font-data); background: var(--panel-2); border-radius: 7px; padding: 6px 9px">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+            <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span><span class="grow"></span><span class="b q">go into the task →</span></div>
+          </div>
+        </div>
+        <div class="box">Reply…<span class="send"></span></div>
+      </div>
+    </div>
+    <div class="after">
+      <div class="card"><h3>Several ask</h3>A tab each, oldest first; folded, the pill says "2 waiting".</div>
+      <div class="card"><h3>Deeper</h3>The crumb names the path; a tab is named for the asker.</div>
+      <div class="card"><h3>After the answer</h3>Its tab goes; the last answered, the tray folds away with the pill.</div>
+      <div class="card"><h3>Cost</h3>Medium: the pills row exists (<code>WaitPills</code>); the tray and its auto-open rule are new.</div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d6">
+  <header><span class="n">6</span><h2>The task opens beside, at its ask</h2></header>
+  <p class="why">The asking task <b>opens in the side panel by itself</b>, scrolled to its question in its own conversation — the full context, the conversation left as it was. The start line says it is open beside. <b>Most context per ask</b>; it takes the panel from whatever was there, so it should only take an empty or unpinned one.</p>
+  <div class="stage">
+    <div class="win wide">
+      <div class="col">
+        <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line">
+            <span class="go"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span class="mark">open beside →</span>
+            <span class="tail">6 steps · 2 min so far<span class="chev"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></span>
+          </div>
+          <div class="reply">I've started a review of this conversation for lessons.</div>
+        </div>
+        <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">open beside · 10:32 AM</span></span></div>
+        <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Lesson: When I hit a question I can resolve…<span class="x">✕</span></div>
+        <div class="pb">
+          <div class="row"><span class="nm">read the correction</span><span class="at">10:31:40</span><span class="ok">✓</span></div>
+          <div class="row"><span class="nm">draft the change</span><span class="at">10:32:05</span><span class="ok">✓</span></div>
+          <div class="edge"><div class="ask">
+            <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+            <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+            <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+            <div class="why2">.jaira/instructions.md · +1 line</div>
+            <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="rules" style="margin-top: 12px">
+    <div><b>Several ask:</b> the oldest opens; the pill pages the rest into the panel.</div>
+    <div><b>Deeper:</b> the asker itself opens, its breadcrumb up to the conversation.</div>
+    <div><b>After the answer:</b> the panel stays on the task (you may want to watch it finish). <b>Cost:</b> small — panel entries exist; the rule for when it may take the panel is new.</div>
+  </div>
+</section>
+</body>
+</html>

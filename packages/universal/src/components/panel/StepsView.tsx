@@ -50,7 +50,7 @@ export function StepsBody({ detail, entry, convo, project, host }: { detail: Tas
   const t = useTokens();
   const selected = entry.step === undefined ? undefined : nodeAt(detail.instances, entry.step);
   const step = selected === undefined ? undefined : entry.step;
-  const asking = host.asking && detail.instances.some((node) => hasAsking(node)) ? askingInstanceOf(detail.instances) : undefined;
+  const asking = host.asking && detail.instances.some((node) => hasAsking(node, true)) ? askingInstanceOf(detail.instances, true) : undefined;
   const [rows, setRows] = useState(12);
   useStepFollow(step, host.current, host.onStep);
   const fit = useStepsFit(rows, step, host.current, host.onScreen, convo && host.onGoTo !== undefined);

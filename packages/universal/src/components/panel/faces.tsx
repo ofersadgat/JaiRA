@@ -43,6 +43,7 @@ import { ValueView } from "./ValueView";
 import { SidechainConversation } from "../run/SidechainConversation";
 import { ConfigCard as WorkflowConfigCard } from "../workflow/ConfigPanel";
 import { StatePanel } from "../workflow/StatePanel";
+import { RevealContext } from "../chat/StartedTaskLine";
 
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
@@ -402,7 +403,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         verbs: detail === null ? [] : taskVerbsOf({ startAgain: host.startAgain, cancel: host.cancel, onStack: host.onStack, adoptTask: host.adoptTask }, detail, project, true, askingOf(host, detail)),
         tabs: taskTabs(host.gate !== undefined ? { pending: host.gate } : undefined, detail, true, askingOf(host, detail)),
         tab: entry.tab,
-        body: body(),
+        // Placed down to its question (a started task's wait, `StartedTaskLine`): what it started opens to it too.
+        body: entry.reveal === true ? <RevealContext.Provider value={true}>{body()}</RevealContext.Provider> : body(),
         scroll: detail === null || !((entry.tab === "conversation" && loaded) || entry.tab === "steps"),
       };
     }

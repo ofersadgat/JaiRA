@@ -299,9 +299,10 @@ export interface BoardCard {
    * What the task is waiting on the PERSON for — a gate, an agent's approval, an agent's question —
    * stamped by the board's reader from what is pending (`markAsking`). The card reads as waiting
    * whatever the task's status says: one the app closed under is still waiting, and so is one whose
-   * agent is asking right now, which the run's status alone calls running.
+   * agent is asking right now, which the run's status alone calls running. `child`: a task under it
+   * (`parentTaskOf`) is asking, and the parent shows it (the person, 2026-11-23).
    */
-  asking?: "gate" | "approval" | "question";
+  asking?: "gate" | "approval" | "question" | "child";
   /** State id of the deepest active instance. */
   activeStateId?: string;
   activePath: PathStep[];
@@ -345,6 +346,8 @@ export interface BoardCard {
   /** With {@link type} `process`: its key, state, origin, ports and the task that started it. */
   process?: ProcessTaskFacts;
   updatedAt: number;
+  /** The newest clock among the tasks under it (`TaskSummary.childAt`): a child that moved leaves this card unseen. */
+  childAt?: number;
   /** When the task was made (`TaskSummary.createdAt`, as a time): what the Tasks list's When can say instead. */
   createdAt?: number;
   /**
@@ -1451,6 +1454,13 @@ export interface TaskSummary {
    * when a conversation began). Absent for a task that has made no call.
    */
   lastMessageAt?: number;
+  /**
+   * The newest clock among the tasks UNDER it (`parentTaskOf`), at any depth — each one's row or newest
+   * reply. Part of what a read mark is held against (`seenClockOf`): a child that moves makes its parent,
+   * and theirs, unseen too (the person, 2026-11-23: "if a child task updates, it should also mark the
+   * parent as unseen as well (recursively)"). Absent for a task with nothing under it.
+   */
+  childAt?: number;
 }
 
 /**

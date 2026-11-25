@@ -77,3 +77,18 @@ it("is each listed task's own, in one read, and leaves the others alone", () => 
   // A summary read for one task (a reader syncing what changed) carries it too.
   expect(taskSummaries(project, new Set([a.id]))[0]?.lastMessageAt).toBe(20);
 });
+
+// The person, 2026-11-23: "if a child task updates, it should also mark the parent as unseen as well (recursively)".
+it("holds a parent's clock to the newest move under it, at any depth, and only a task with something under it", () => {
+  const talk = createTask(project, { title: "talk", workflow: "chat/session" });
+  const review = createTask(project, { title: "review", workflow: "improve/conversation", origin: { kind: "started", taskId: talk.id, key: "call_5", index: 0 } });
+  const lesson = createTask(project, { title: "lesson", workflow: "improve/lesson", origin: { kind: "started", taskId: review.id, key: "call_3", index: 0 } });
+  const later = Date.now() + 60_000;
+  record("rl", lesson.id, "completed", later, later + 5);
+  const childAt = (taskId: string): number | undefined => taskSummaries(project).find((t) => t.taskId === taskId)?.childAt;
+  expect(childAt(talk.id)).toBe(later + 5);
+  expect(childAt(review.id)).toBe(later + 5);
+  expect(childAt(lesson.id)).toBeUndefined();
+  // A summary read for the parent alone (a reader syncing what changed) carries it too.
+  expect(taskSummaries(project, new Set([talk.id]))[0]?.childAt).toBe(later + 5);
+});

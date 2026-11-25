@@ -37,6 +37,14 @@ describe("a card whose task waits on you", () => {
     expect(marked.finished[0]!.asking).toBeUndefined();
   });
 
+  // The person, 2026-11-23: "the parent task should be in the waiting state which lets me know that it has something that needs to be done".
+  it("is marked when only a task under it asks — the engine's rolled-up wait — and its own ask still names itself", () => {
+    const projects = [{ live: [{ taskId: "parent", kind: "waiting" as const }, { taskId: "t-question", kind: "waiting" as const }, { taskId: "busy", kind: "running" as const }] }];
+    const asking = askingTasksOf([], [], [{ taskId: "t-question" }], projects);
+    expect(Object.fromEntries(asking)).toEqual({ "t-question": "question", parent: "child" });
+    expect(laneOf(card({ taskId: "parent", asking: "child" }))).toBe("paused");
+  });
+
   it("stands in the paused lane, named for what it waits on — though its run says canceled, or running", () => {
     expect(laneOf(card({ taskId: "t", status: "canceled", asking: "approval" }))).toBe("paused");
     expect(laneOf(card({ taskId: "t", status: "running", activeStatus: "running", asking: "question" }))).toBe("paused");

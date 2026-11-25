@@ -3,7 +3,7 @@
  * Nothing here renders: the shell's regions (`packages/universal/src/app`) draw from it.
  */
 import type { ProjectSummary, ProjectTask } from "@jaira/shared/browser";
-import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pillModel";
+import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, liveKindsOf, type PillCounts } from "./pillModel";
 import { projectName } from "./projects";
 import { groupRingItems } from "./ringModel";
 import type { SidebarProject, SidebarView } from "./sidebarTypes";
@@ -154,7 +154,9 @@ export function roomCountsOf(
    * repeating the mark, so there was nothing to follow it to. Chat counts conversations; Tasks
    * counts what is left.
    */
-  const chatCounts = taskCounts(allConversations, seen);
+  // A conversation that waits or runs — itself, or through a task it started — counts so in its room.
+  const live = liveKindsOf(projects);
+  const chatCounts = taskCounts(allConversations, seen, live);
   /** The project the address is standing on, as the summary its rows count from. */
   const atSummary = at === null ? null : (projects.find((p) => p.project === at) ?? null);
   /** Every workspace of the group the address stands in — a grouped project's rows count them all (decision 0013 §4). */
@@ -166,8 +168,8 @@ export function roomCountsOf(
     rootTasks: minusCounts(allCounts, chatCounts),
     rootChat: chatCounts,
     // This project's work, less what is in the room next door.
-    atTasks: minusCounts(sumCounts(atMembers.map((m) => projectCounts(m, seen))), taskCounts(atChats, seen)),
-    atChat: taskCounts(atChats, seen),
+    atTasks: minusCounts(sumCounts(atMembers.map((m) => projectCounts(m, seen))), taskCounts(atChats, seen, live)),
+    atChat: taskCounts(atChats, seen, live),
     seenRootTasks: projects.flatMap(runsOf),
     seenRootChat: unseenRows(allConversations, seen),
     seenAtTasks: atMembers.flatMap(runsOf),

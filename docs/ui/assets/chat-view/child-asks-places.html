@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="engineering/decisions/0029-workflows-that-learn-from-corrections">
+<meta name="state" content="a started task nested to its ask, with the window buttons: in place, main view, split, side panel">
+<meta name="captured" content="2026-11-24">
+<meta name="reflects" content="proposed">
+<title>Chat view · a started task asks · placed anywhere</title>
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+<style>
+@font-face { font-family: "DM Sans"; src: url("../../../../packages/app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2"); font-weight: 100 1000; }
+@font-face { font-family: "JetBrains Mono"; src: url("../../../../packages/app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2"); font-weight: 400 800; }
+:root {
+  --bg: #f5f6fa; --panel: #ffffff; --panel-2: #eef0f6; --panel-3: #e5e8f1; --line: #e0e3ec; --rule: #c5cadb;
+  --text: #121526; --dim: #5a5f7a; --faint: #9aa0b4; --accent: #4a4fd1; --ok: #13794a; --warn: #8f5f00; --bad: #c4302b;
+  --fill-accent: #4a4fd1; --on-accent: #fff; --tok-hint: #949cad;
+  --lift: 0 12px 32px rgba(24,30,42,.18);
+  --font-app: "DM Sans", -apple-system, "Segoe UI", system-ui, sans-serif;
+  --font-data: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --bg: #0f1017; --panel: #171923; --panel-2: #12141c; --panel-3: #1e2130; --line: #262a3a; --rule: #363b52;
+  --text: #e8e9f3; --dim: #8c90ab; --faint: #5f6779; --accent: #9ea2ff; --ok: #5fd49a; --warn: #f2c35b; --bad: #ff7b72; --fill-accent: #5a5fe0; --tok-hint: #5f6779;
+  --lift: 0 18px 50px rgba(0,0,0,.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 400 13px/1.5 var(--font-app); padding: 28px 28px 80px; }
+h1 { font-size: 20px; margin: 0 0 6px; font-weight: 650; }
+.lede { color: var(--dim); max-width: 1040px; margin: 0 0 10px; }
+.lede b { color: var(--text); }
+.toc { display: grid; grid-template-columns: repeat(3, minmax(0, 330px)); gap: 4px 18px; margin: 16px 0 30px; font-size: 12px; }
+.toc a { color: var(--dim); text-decoration: none; } .toc b { font-family: var(--font-data); color: var(--accent); margin-right: 6px; }
+section.d { margin: 0 0 56px; }
+section.d header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+section.d header .n { font: 700 12px var(--font-data); color: var(--on-accent); background: var(--fill-accent); border-radius: 6px; padding: 2px 7px; }
+section.d h2 { font-size: 16px; margin: 0; }
+.why { color: var(--dim); max-width: 1060px; margin: 0 0 12px; font-size: 12.5px; }
+.why b { color: var(--text); }
+.rules { display: grid; grid-template-columns: repeat(3, minmax(0, 340px)); gap: 6px 18px; margin: 0 0 14px; font-size: 12px; color: var(--dim); }
+.rules div b { color: var(--text); font-weight: 600; }
+.stage { display: flex; gap: 18px; align-items: stretch; }
+.win { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--lift); width: 760px; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+.win.wide { width: 1180px; flex-direction: row; }
+.win .col { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.title { padding: 9px 16px; border-bottom: 1px solid var(--panel-2); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; gap: 8px; }
+.ring { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--warn); flex: none; }
+.title .sub { color: var(--dim); font-weight: 400; font-size: 11.5px; margin-left: auto; }
+.thread { padding: 12px 22px 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+.user { align-self: flex-end; max-width: 70%; background: var(--panel-2); border-radius: 12px 12px 4px 12px; padding: 7px 12px; }
+.reply { max-width: 92%; }
+.row { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 12px; padding: 2px 4px; }
+.row .nm { color: var(--text); font-weight: 600; }
+.row .at { margin-left: auto; font: 400 10.5px var(--font-data); color: var(--faint); }
+.ok { color: var(--ok); }
+svg.i { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+/* the started line — ChildRunLine */
+.line { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 4px; font-size: 11.5px; color: var(--dim); }
+.go { border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); padding: 2px 7px; display: inline-flex; transform: rotate(-90deg); }
+.line b { color: var(--text); font-weight: 600; }
+.line .w { color: var(--warn); }
+.line .w b { color: var(--warn); font-family: var(--font-data); font-weight: 600; }
+.line .dot { color: var(--faint); }
+.tail { margin-left: auto; display: flex; align-items: center; gap: 4px; font: 400 10.5px var(--font-data); color: var(--dim); }
+.chev { width: 20px; height: 20px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--tok-hint); }
+.chev.open svg { transform: rotate(180deg); }
+.nest { flex-basis: 100%; margin: 4px 0 8px 18px; padding-left: 10px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, var(--line)); display: flex; flex-direction: column; gap: 4px; }
+.fold { color: var(--faint); font-size: 11px; padding: 2px 4px; }
+.fold u { text-decoration: none; border-bottom: 1px dashed var(--faint); }
+/* the question a task asks — the choose_option gate */
+.ask { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); background: color-mix(in srgb, var(--warn) 7%, var(--panel)); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; }
+.ask .hd { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--warn); }
+.ask .hd b { font-family: var(--font-data); }
+.ask .crumb { color: var(--dim); font-size: 11px; }
+.ask .q { font-weight: 600; }
+.ask .rule { font: 400 12px var(--font-data); background: var(--panel); border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; color: var(--text); }
+.ask .why2 { color: var(--dim); font-size: 12px; }
+.btns { display: flex; gap: 8px; align-items: center; }
+.b { font: 500 12px var(--font-app); border-radius: 7px; padding: 4px 11px; border: 1px solid var(--line); background: var(--panel); color: var(--text); }
+.b.p { background: var(--fill-accent); color: var(--on-accent); border-color: var(--fill-accent); }
+.b.q { border-color: transparent; background: transparent; color: var(--accent); }
+.ask.slim { padding: 7px 10px; gap: 6px; }
+/* the pills and the box */
+.pills { display: flex; justify-content: center; gap: 8px; padding: 0 0 8px; }
+.pill { display: flex; align-items: center; gap: 8px; padding: 5px 14px 5px 12px; border-radius: 14px; background: color-mix(in srgb, var(--warn) 10%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line)); box-shadow: 0 4px 14px rgba(15,20,30,.12); font-size: 11.5px; }
+.pill .w { color: var(--warn); font-weight: 600; }
+.pill .s { color: var(--dim); font-size: 10.5px; }
+.foot { padding: 0 18px 14px; }
+.box { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; color: var(--faint); background: var(--panel); display: flex; align-items: center; gap: 8px; }
+.box .send { margin-left: auto; width: 26px; height: 26px; border-radius: 8px; background: var(--panel-3); }
+.tray { border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); border-radius: 12px; background: var(--panel); box-shadow: var(--lift); margin: 0 0 8px; overflow: hidden; }
+.tray .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--panel-2); font-size: 11.5px; }
+.tray .tab { padding: 5px 10px; border-radius: 7px 7px 0 0; color: var(--dim); }
+.tray .tab.on { color: var(--text); font-weight: 600; background: color-mix(in srgb, var(--warn) 8%, var(--panel)); box-shadow: inset 0 -2px 0 var(--warn); }
+.tray .body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.panel { width: 420px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+.panel .ph { padding: 9px 14px; border-bottom: 1px solid var(--panel-2); display: flex; gap: 8px; align-items: center; font-size: 12.5px; font-weight: 600; }
+.panel .ph .x { margin-left: auto; color: var(--faint); font-weight: 400; }
+.panel .pb { padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.edge { border: 2px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 10px; padding: 2px; }
+.note { font-size: 11px; color: var(--accent); font-weight: 600; }
+.mark { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--line)); border-radius: 999px; padding: 0 7px; }
+.after { width: 380px; display: flex; flex-direction: column; gap: 10px; }
+.after .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--dim); }
+.after .card b { color: var(--text); }
+.grow { flex: 1; }
+.after h3 { font-size: 12px; margin: 0 0 4px; color: var(--text); }
+/* the place group — PlaceButtons, with "in place" first */
+.places { display: inline-flex; gap: 1px; padding: 1px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); flex: none; }
+.pbt { width: 26px; height: 24px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center; color: var(--dim); }
+.pbt svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.pbt.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--panel)); }
+.pbt.hov { color: var(--text); background: var(--panel-2); }
+.legend { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--dim); }
+.legend b { color: var(--text); font-weight: 600; }
+.tip { position: absolute; background: var(--text); color: var(--panel); font-size: 11px; padding: 3px 8px; border-radius: 6px; white-space: nowrap; }
+.crumbs { display: flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.crumbs .up { color: var(--dim); font-weight: 400; }
+.split { width: 470px; border-left: 1px solid var(--line); display: flex; flex-direction: column; background: var(--panel); }
+.lit { outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 2px; border-radius: 8px; }
+.anat { display: flex; gap: 28px; align-items: flex-start; }
+.anat .win { width: 760px; }
+</style>
+</head>
+<body>
+<h1>A started task, nested to its ask — and placed anywhere</h1>
+<p class="lede">Version 1 of <a href="child-asks.html#d1">the six</a>, with the person's amendment, 2026-11-24: <b>"I like 1, but I think we should have the same options as we do to open anything: the window buttons (open nested, open in main window, open in split window, open in context window)."</b> The started line's go-in button and its chevron become <b>one group of four</b>: the three places every artifact, terminal and agent lane already has (decision 0025), with <b>in place</b> first. The place it is shown in is lit; pressing another moves it there, and it is never drawn twice. The question opens in place by itself only when the task is shown nowhere else.</p>
+<div class="toc">
+  <a href="#a"><b>0</b>The line and its four places</a>
+  <a href="#b"><b>A</b>In place — opened by the ask</a>
+  <a href="#c"><b>B</b>Beside, in a split</a>
+  <a href="#d"><b>C</b>In the side panel</a>
+  <a href="#e"><b>D</b>As the main view</a>
+  <a href="#f"><b>E</b>The rules</a>
+</div>
+
+<section class="d" id="a">
+  <header><span class="n">0</span><h2>The line and its four places</h2></header>
+  <p class="why">The group sits at the end of the line, after the steps and time, as a terminal's card carries it: <b>always shown</b> while the task waits or is shown somewhere, on <b>hover</b> on a quiet line so a thread of finished starts stays calm. The first button folds and unfolds the nest (the Steps fold's glyphs); the other three are the window buttons exactly as elsewhere: same glyphs, same words, same order. A phone has no split, so it is not offered there.</p>
+  <div class="anat">
+    <div class="win">
+      <div class="thread">
+        <div class="line">
+          started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+          <span class="tail">6 steps · 2 min so far <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+        </div>
+        <div class="line">
+          started <b>Review a conversation for lessons</b><span class="dot">·</span><span>done</span>
+          <span class="tail">5 steps · 1 min</span>
+        </div>
+        <div class="line">
+          started <b>Review a conversation for lessons</b><span class="dot">·</span><span>done</span>
+          <span class="tail">5 steps · 1 min <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt hov" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+        </div>
+      </div>
+    </div>
+    <div class="legend">
+      <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span></span><span><b>In place</b>: nest it under the line, here in the conversation (shut: <i>Show it here</i>, open: <i>Fold it</i>)</span>
+      <span class="places"><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span></span><span><b>Open as the main view</b>: walk into it, as into a run's substate; the crumb leads back</span>
+      <span class="places"><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span></span><span><b>Open beside</b>: in a split pane</span>
+      <span class="places"><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span><span><b>Open in the side panel</b>: the context panel</span>
+      <span></span><span style="color: var(--faint)">Top: waiting, so shown. Middle: a quiet line. Bottom: the same line hovered.</span>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="b">
+  <header><span class="n">A</span><h2>In place — opened by the ask</h2></header>
+  <p class="why">Version 1 as mocked: the task asks, it is shown nowhere else, so the nest <b>opens itself</b> down to the question, and <b>in place</b> is lit on each line on the way down; the grandchild's line has its own group. Answered, a nest the ask opened shuts again; one you opened stays.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+      <div class="thread">
+        <div class="reply">It reads <code>VERCEL_ENV</code> before the project is linked, so the check sees nothing. Linking first fixes it.</div>
+        <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+        <div class="line">
+          started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+          <span class="tail">6 steps · 2 min so far <span class="places"><span class="pbt on" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 4 4 4 4-4"/><path d="M4 12h16"/><path d="m8 20 4-4 4 4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+          <div class="nest">
+            <div class="fold">▸ <u>3 steps before it</u> · read the conversation · found 1 lesson</div>
+            <div class="line">
+              started <b>Lesson: When I hit a question I can resolve…</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span>
+              <span class="tail">3 steps · 1 min so far <span class="places"><span class="pbt on" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 4 4 4 4-4"/><path d="M4 12h16"/><path d="m8 20 4-4 4 4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+              <div class="nest">
+                <div class="fold">▸ <u>2 steps before it</u> · drafted the change</div>
+                <div class="ask">
+                  <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+                  <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+                  <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+                  <div class="why2">Writes it to <code>.jaira/instructions.md</code> (+1 line). You corrected this at 10:30: "you could have just read the logs".</div>
+                  <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="reply">I've started a review of this conversation for lessons.</div>
+      </div>
+      <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">in Review › Lesson · 10:32 AM</span></span></div>
+      <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="c">
+  <header><span class="n">B</span><h2>Beside, in a split</h2></header>
+  <p class="why"><b>Open beside</b> pressed on the Lesson's line: its nest shuts (it is not drawn twice), the line keeps its wait and lights <i>beside</i>, and the split pane opens the task at its question with the same four buttons in its head, <i>beside</i> lit. A later ask of this task goes to the split, not into the nest.</p>
+  <div class="stage">
+    <div class="win wide" style="width: 1240px">
+      <div class="col">
+        <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line">
+            started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+            <span class="tail">6 steps · 2 min so far <span class="places"><span class="pbt on" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 4 4 4 4-4"/><path d="M4 12h16"/><path d="m8 20 4-4 4 4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+            <div class="nest">
+              <div class="fold">▸ <u>3 steps before it</u> · read the conversation · found 1 lesson</div>
+              <div class="line">
+                started <b>Lesson: When I hit a question I can resolve…</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span>
+                <span class="tail">3 steps · 1 min so far <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt on" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+              </div>
+            </div>
+          </div>
+          <div class="reply">I've started a review of this conversation for lessons.</div>
+        </div>
+        <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">beside · 10:32 AM</span></span></div>
+        <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+      </div>
+      <div class="split">
+        <div class="title"><span class="ring"></span>Lesson: When I hit a question…<span class="sub" style="display: flex; gap: 8px; align-items: center">improve/lesson <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt on" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span></div>
+        <div style="padding: 12px 16px; display: flex; flex-direction: column; gap: 6px">
+          <div class="row"><span class="nm">read the correction</span><span class="at">10:31:40</span><span class="ok">✓</span></div>
+          <div class="row"><span class="nm">draft the change</span><span class="at">10:32:05</span><span class="ok">✓</span></div>
+          <div class="ask">
+            <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+            <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+            <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+            <div class="why2"><code>.jaira/instructions.md</code> · +1 line</div>
+            <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="d">
+  <header><span class="n">C</span><h2>In the side panel</h2></header>
+  <p class="why"><b>Open in the side panel</b> on the review's line: the same, in the context panel, whose head carries the group with <i>side panel</i> lit. Pressing <i>in place</i> there brings it back into the nest and lets the panel go. The nest is the same wherever a task is drawn, so the review in the panel opens its own Lesson in place to the ask.</p>
+  <div class="stage">
+    <div class="win wide">
+      <div class="col">
+        <div class="title"><span class="ring"></span>Vercel build failure debugging<span class="sub">waits · a task it started asks</span></div>
+        <div class="thread">
+          <div class="row"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg><span class="nm">start task</span>improve/conversation<span class="at">10:31:02</span><span class="ok">✓</span></div>
+          <div class="line">
+            started <b>Review a conversation for lessons</b><span class="dot">·</span><span class="w">⏸ waiting for <b>choose option</b></span><span>in Lesson</span>
+            <span class="tail">6 steps · 2 min so far <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt on" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+          </div>
+          <div class="reply">I've started a review of this conversation for lessons.</div>
+        </div>
+        <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">side panel · 10:32 AM</span></span></div>
+        <div class="foot"><div class="box">Reply…<span class="send"></span></div></div>
+      </div>
+      <div class="panel">
+        <div class="ph">Review a conversation for lessons<span class="x" style="display: flex; gap: 8px; align-items: center"><span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt on" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span> ✕</span></div>
+        <div class="pb">
+          <div class="row"><span class="nm">read the conversation</span><span class="at">10:31:10</span><span class="ok">✓</span></div>
+          <div class="row"><span class="nm">find the lessons</span><span class="at">10:31:35</span><span class="ok">✓</span></div>
+          <div class="line" style="padding: 2px 0">started <b>Lesson: When I hit…</b><span class="dot">·</span><span class="w">⏸ <b>choose option</b></span><span class="tail"><span class="places"><span class="pbt on" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 4 4 4 4-4"/><path d="M4 12h16"/><path d="m8 20 4-4 4 4"/></svg></span><span class="pbt" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span>
+            <div class="nest">
+              <div class="ask slim">
+                <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+                <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+                <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="e">
+  <header><span class="n">D</span><h2>As the main view</h2></header>
+  <p class="why"><b>Open as the main view</b> on the Lesson's line: walked into, as a run's substate is. The title becomes a crumb back to the conversation, the task's own run is the page, and its question is drawn where it asks; in its head, <i>main view</i> lit. The box is still the conversation's (the crumb's first step), so you can answer and then reply.</p>
+  <div class="stage">
+    <div class="win">
+      <div class="title"><span class="crumbs"><span class="ring"></span><span class="up">Vercel build failure debugging › Review a conversation for lessons ›</span><b>Lesson</b></span><span class="sub" style="display: flex; gap: 8px; align-items: center">improve/lesson <span class="places"><span class="pbt" title="Show it here"><svg viewBox="0 0 24 24"><path d="m8 8 4-4 4 4"/><path d="M4 12h16"/><path d="m8 16 4 4 4-4"/></svg></span><span class="pbt on" title="Open as the main view"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/></svg></span><span class="pbt" title="Open beside"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M12 5v14"/></svg></span><span class="pbt" title="Open in the side panel"><svg viewBox="0 0 24 24"><path d="M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"/><path d="M15 5v14"/></svg></span></span></span></div>
+      <div class="thread">
+        <div class="row"><span class="nm">read the correction</span>"you could have just read the logs"<span class="at">10:31:40</span><span class="ok">✓</span></div>
+        <div class="row"><span class="nm">draft the change</span>.jaira/instructions.md<span class="at">10:32:05</span><span class="ok">✓</span></div>
+        <div class="ask">
+          <div class="hd">⏸ waiting for <b>choose option</b><span class="crumb">· asked 10:32</span></div>
+          <div class="q">Apply this lesson to how this workspace's conversations answer?</div>
+          <div class="rule">When I hit a question I can resolve by checking the code or logs, I check before asking.</div>
+          <div class="why2">Writes it to <code>.jaira/instructions.md</code> (+1 line).</div>
+          <div class="btns"><span class="b p">Apply</span><span class="b">Edit first</span><span class="b">Discard</span></div>
+        </div>
+      </div>
+      <div class="pills"><span class="pill"><span class="w">⏸ Waiting for answer</span><span class="s">here · 10:32 AM</span></span></div>
+      <div class="foot"><div class="box">Reply to Vercel build failure debugging…<span class="send"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="d" id="f">
+  <header><span class="n">E</span><h2>The rules</h2></header>
+  <div class="rules" style="grid-template-columns: repeat(2, minmax(0, 520px)); font-size: 12.5px">
+    <div><b>One place at a time.</b> A task is drawn in one place; pressing another moves it. The line keeps its words and lights where it is.</div>
+    <div><b>The ask opens it in place only when it is nowhere else.</b> Already beside or in the panel, the ask is drawn there, and the pill says where.</div>
+    <div><b>Every line on the way down has its own group.</b> The review can be in the panel while its Lesson nests inside it.</div>
+    <div><b>After the answer.</b> A nest the ask opened shuts; one you opened, a split, the panel and the main view stay where you put them.</div>
+    <div><b>The same group in the task view's rail</b> on its <i>started</i> and <i>made</i> lines, and in the head of wherever the task is shown.</div>
+    <div><b>Phone:</b> no split; <i>main view</i> and <i>side panel</i> as elsewhere on a phone.</div>
+  </div>
+</section>
+</body>
+</html>

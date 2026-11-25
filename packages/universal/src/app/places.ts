@@ -163,6 +163,12 @@ export function moveEntry(target: Place, entry: PanelEntry, lit: readonly Place[
     if (target === "panel") closePanel();
     return;
   }
+  leaveEntry(entry, lit);
+  placeEntry(target, entry, phone);
+}
+
+/** Take an entry back from every place it stands in — what drawing it in place again does first. */
+export function leaveEntry(entry: PanelEntry, lit: readonly Place[]): void {
   for (const place of lit) {
     if (place === "panel") panelOnStack.get()?.((was) => (was.entries.length > 1 ? pop(was) : close(was)));
     else {
@@ -171,7 +177,6 @@ export function moveEntry(target: Place, entry: PanelEntry, lit: readonly Place[
       if (topOfPath(split.panes[pane])?.key === entry.key) splitView.set(leavePane(split, pane));
     }
   }
-  placeEntry(target, entry, phone);
 }
 
 /** Anything a pane holds, to a place: an artifact moves as its buttons move it; anything else is opened there. */
@@ -209,4 +214,35 @@ function followedStack(stack: PanelStack, successors: ReadonlyMap<string, Publis
   const entries = stack.entries.map(step);
   const ahead = stack.ahead.map(step);
   return moved ? { ...stack, entries, ahead, motion: "none" } : stack;
+}
+
+/**
+ * A task's place button pressed (a started task's line, `StartedTaskLine`). Each place is a window of its
+ * own, with its own path — the person, 2026-11-24: "you should still be able to open inline, or in the
+ * context window, or to take over the current window without it affecting the split panel. only pressing
+ * split panel again should close the split panel if the split panel is currently open to that view,
+ * otherwise the split panel should be treated as a completely separate window with its own path. also, if
+ * there is a split window and you press on "open in whole window" whole window actually means the current
+ * frame, not to close the split window."
+ *
+ *  - main: the frame the press was in (a press focuses its pane first, `SplitPane.tsx`), on its path;
+ *  - split: the second pane, on its path — or, already showing it there, the split goes back a step;
+ *  - panel: on top of the side panel — or, already on top there, the panel closes.
+ *
+ * Nothing is taken from any other place. On a phone a split is the main view.
+ */
+export function placeTask(target: Place, entry: PanelEntry, phone: boolean): void {
+  const split = splitView.get();
+  if (target === "panel") {
+    if (panelTop.get()?.key === entry.key) closePanel();
+    else openInPanel(entry);
+    return;
+  }
+  if (target === "split" && !phone) {
+    if (topOfPath(split.panes[1])?.key === entry.key) splitView.set(leavePane(split, 1));
+    else splitView.set(openInPane(split, 1, entry));
+    return;
+  }
+  const here = phone || split.focus >= split.panes.length ? 0 : split.focus;
+  splitView.set(openInPane(split, here, entry));
 }

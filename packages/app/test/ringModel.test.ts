@@ -179,4 +179,25 @@ describe("what a conversation's ring holds", () => {
   it("dates an ask by the oldest open request", () => {
     expect(askedAtOf([{ taskId: "t", at: 9 }, { taskId: "t", at: 4 }, { at: 1 }])).toEqual({ t: 4 });
   });
+
+  // The person, 2026-11-23: "a parent task should not count as stopped when it has a non terminal child".
+  it("waits, and only waits, while a task it started asks — the engine's rolled-up wait is its ask", () => {
+    const asked = askedAtOf([], [{ live: [{ taskId: "t", kind: "waiting", since: 450 }, { taskId: "u", kind: "running", since: 1 }] }]);
+    expect(asked).toEqual({ t: 450 });
+    // Its row is `running` while the child is open; with nothing of its own in flight, that is a wait alone.
+    expect(chatRingItems({ ...task, status: "running" }, { seen: {}, producing: {}, askedAt: asked.t })).toEqual([{ kind: "waiting", since: 450 }]);
+    // A child working, asking nothing: the conversation works.
+    expect(chatRingItems({ ...task, status: "running" }, { seen: {}, producing: {} })).toEqual([{ kind: "running", since: 400 }]);
+    // Counted in its room as waiting, not running.
+    expect(taskCounts([{ ...task, status: "running" }], {}, new Map([["t", "waiting" as const]]))).toEqual({ waiting: 1 });
+  });
+
+  // The person, 2026-11-24: "the state of a nested task affecting the color of the parent task ring".
+  it("works or waits by a task under it whatever its own row says, read or not", () => {
+    const stopped = { ...task, status: "interrupted" as const };
+    expect(chatRingItems(stopped, { seen: { t: 9999 }, producing: {}, live: "running" })).toEqual([{ kind: "running", since: 400 }]);
+    expect(chatRingItems(stopped, { seen: { t: 9999 }, producing: {}, askedAt: 450, live: "waiting" })).toEqual([{ kind: "waiting", since: 450 }]);
+    expect(taskCounts([stopped], { t: 9999 }, new Map([["t", "waiting" as const]]))).toEqual({ waiting: 1 });
+    expect(taskCounts([stopped], { t: 9999 }, new Map([["t", "running" as const]]))).toEqual({ running: 1 });
+  });
 });

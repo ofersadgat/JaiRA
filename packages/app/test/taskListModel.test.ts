@@ -82,6 +82,21 @@ describe("an unseen task's dot (the unseen-tasks mockups, design 1)", () => {
     expect(unseenKindOf({ ...done, updatedAt: 25 }, { t4: 20 })).toBe("success");
   });
 
+  // The person, 2026-11-23: "if a child task updates, it should also mark the parent as unseen as well (recursively)".
+  it("comes back when a task under it moves, and goes once it is read that far", () => {
+    const parent = { ...card("t4", "Tool-error audit", "completed", 20), childAt: 30 };
+    expect(unseenKindOf(parent, { t4: 20 })).toBe("success");
+    expect(unseenKindOf(parent, { t4: 30 })).toBeNull();
+  });
+
+  // The person, 2026-11-24: "it isnt really unseen, its unseen or active … The main case where seeing the
+  // item causes it to disappear is if it has terminated".
+  it("stays lit while the task works or waits, read or not — only how it ended goes out once read", () => {
+    expect(unseenKindOf(card("b", "x", "running", 10), { b: 99 })).toBe("running");
+    expect(unseenKindOf(card("a", "x", "running", 10, { asking: "child" }), { a: 99 })).toBe("waiting");
+    expect(unseenKindOf(card("c", "x", "failed", 10), { c: 99 })).toBeNull();
+  });
+
   it("is the Chat ring's colour for it — a paused or canceled task yellow, though its square is grey", () => {
     expect(unseenKindOf(card("a", "x", "running", 1, { asking: "gate" }), {})).toBe("waiting");
     expect(unseenKindOf(card("b", "x", "running", 1), {})).toBe("running");
@@ -107,10 +122,10 @@ describe("how far opening a task marks it read", () => {
   });
 
   it("reads the boards' cards too — the clock the Tasks list and the board compare against", () => {
-    const running = card("t2", "Nightly build", "running", 70);
-    const board = { level: "", breadcrumb: [], columns: [{ key: "build", label: "build", cards: [running] }], atLevel: [] } as never;
+    const done = card("t2", "Nightly build", "completed", 70);
+    const board = { level: "", breadcrumb: [], columns: [{ key: "build", label: "build", cards: [done] }], atLevel: [] } as never;
     const lists = { tasks: [{ taskId: "t2", updatedAt: 50 }], allConversations: [], projects: [{ ended: [] }], boards: { "/a": board, "/b": null } };
     expect(windowClockOf("t2", lists)).toBe(70);
-    expect(unseenKindOf(running, { t2: windowClockOf("t2", lists) })).toBeNull();
+    expect(unseenKindOf(done, { t2: windowClockOf("t2", lists) })).toBeNull();
   });
 });

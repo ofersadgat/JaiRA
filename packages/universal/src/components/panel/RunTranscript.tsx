@@ -40,6 +40,10 @@ import { Button } from "../settings/Button";
 import { advanceTargetOf } from "@jaira/ui/stateSurfaceModel";
 import { durationOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { moveQuestionConfig, parseComponentConfig, type MoveQuestionView, type PendingApproval, type PendingQuestion, type PendingUserEvent, type SettledByView } from "@jaira/shared/browser";
+import { StartedTaskLine, type NestHandle } from "../chat/StartedTaskLine";
+import { askingCallIdOf, CallGateContext, isProgramRun, programCallsOf, weaveProgramCalls } from "@jaira/ui/programCalls";
+import { StartedTaskHostContext } from "./outcomeHost";
+import { isConversation } from "@jaira/shared/browser";
 
 /** What a run's conversation is read from — the store's fields, as `FileSurfaceContext` names them. */
 export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> &
@@ -174,7 +178,7 @@ export function RunTranscript({
     return next;
   }, [runPalette, agentsHere]);
   const rootPath = useMemo(() => (parent === undefined ? "" : mountPathOf(detail.instances, parent.instanceId)), [detail, parent]);
-  const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances)), [gate, onGate, detail.instances]);
+  const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances, true)), [gate, onGate, detail.instances]);
   const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at), [source.userEvents, detail.taskId]);
   // Where a running agent's question or approval is drawn: under the leaf whose call is running — or,
   // for one found in the record after the app closed under it, the leaf whose call asked it.
@@ -340,7 +344,7 @@ export function RunTranscript({
   }, [focus?.instance, focus?.at, bands, notes]);
 
   const render = (piece: SessionPiece): ReactNode => {
-    if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
+    if (gate !== undefined && onGate !== undefined && isAsking(piece.node, true)) {
       // Answered here for a machine that is offline: drawn as answered, with the answer waiting.
       if (gate.queued !== undefined && gate.offline !== undefined) {
         const outboxId = gate.queued.outboxId;
@@ -354,7 +358,7 @@ export function RunTranscript({
       return <GateSurface pending={gate} onSubmit={onGate} plain services={source.gateServices} />;
     }
     // The question once it is no longer being asked: the same control, as it was answered.
-    const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node));
+    const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node, true));
     if (settledCall !== undefined) return <SettledGate call={settledCall} node={piece.node} taskId={detail.taskId} project={source.project} services={source.gateServices} />;
     const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
     if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} records={records} />;
@@ -480,10 +484,17 @@ export function RunTranscript({
   };
   /** An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */
   const adopted = (taskId: string): ReactNode => <AdoptedHistory taskId={taskId} source={source} />;
+  // A task it started or made: its own line, nested and placed as a conversation's (`StartedTaskLine`).
+  const started = (taskId: string): ReactNode => <StartedTaskLine taskId={taskId} project={source.project ?? undefined} />;
   const empty = bands.length === 0 && notes.length === 0;
+  // A program's run, read whole, is drawn as the Chat view draws one — its calls as rows (`ProgramRows`);
+  // walked into one of its states, that state's own sheet.
+  const programView = isProgramRun(detail) && !isConversation(detail) && parent !== undefined && parent.instanceId === detail.instances[0]?.instanceId;
+  const programRows = programView ? <ProgramRows detail={detail} parent={parent} source={source} {...(gate !== undefined ? { gate } : {})} {...(onGate !== undefined ? { onGate } : {})} /> : null;
   if (nested) {
     // Nested, there is the page (its ground and padding) and nothing else — or, with nothing on it, the
     // sentence in its place.
+    if (programRows !== null) return <View flexDirection="column" minWidth={0}>{programRows}</View>;
     if (empty) return <NestedEmpty>This task had not entered a child yet.</NestedEmpty>;
     return (
       <View flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
@@ -500,6 +511,7 @@ export function RunTranscript({
           moveQuestion={moveQuestion}
           {...(source.onSelectTask !== undefined ? { onSelectTask: source.onSelectTask } : {})}
           adopted={adopted}
+          started={started}
           readingOf={readingOf}
           agent={agent}
         />
@@ -521,7 +533,9 @@ export function RunTranscript({
     >
       <View ref={content as never} flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22 + bottomInset}>
         <RowSpyContext.Provider value={spy}>
-        {empty ? (
+        {programRows !== null ? (
+          programRows
+        ) : empty ? (
           <Empty>This run has not entered a child yet.</Empty>
         ) : (
           <SessionBands
@@ -543,6 +557,7 @@ export function RunTranscript({
             readingOf={readingOf}
             {...(detail.origin !== undefined ? { origin: { ...detail.origin, ...(source.onSelectTask !== undefined ? { onGo: () => source.onSelectTask!(detail.origin!.taskId) } : {}) } } : {})}
             adopted={adopted}
+            started={started}
             agent={agent}
           />
         )}
@@ -552,6 +567,45 @@ export function RunTranscript({
         ))}
       </View>
     </ScrollView>
+  );
+}
+
+/**
+ * A PROGRAM's run (decision 0033: a script whose calls are its states) as the Chat view draws one — the
+ * person, 2026-11-24: "the task view should try to mirror the conversation view as much as possible". Its
+ * calls are rows woven in the order they were made, each by the renderer the registry gives it
+ * (`weaveProgramCalls`, the task view's roles): a function a tool row, an `llm()` a row with its answer,
+ * a `start_task` the task it started (`StartedTaskLine`). A call asking the person has the question's
+ * own control under its row (`CallGateContext`), and an agent's approval or question is drawn after.
+ */
+function ProgramRows({ detail, parent, source, gate, onGate }: { detail: TaskDetail; parent: InstanceNode; source: TranscriptSource; gate?: PendingInteraction; onGate?: (value: unknown) => void }): JSX.Element {
+  const records = source.records;
+  const entries = useMemo(() => weaveProgramCalls([], programCallsOf(parent, records), "task"), [parent, records]);
+  // The row the gate is asked at: the asking state's newest call (`askingCallIdOf`).
+  const askingCall = useMemo(() => (gate !== undefined ? askingCallIdOf(detail.instances) : undefined), [gate, detail.instances]);
+  const gateAt = useCallback(
+    (callId: string): ReactNode | undefined => (gate !== undefined && onGate !== undefined && callId === askingCall ? <GateSurface key={gate.requestId} pending={gate} onSubmit={onGate} plain services={source.gateServices} /> : undefined),
+    [gate, onGate, askingCall, source.gateServices],
+  );
+  const project = source.project ?? undefined;
+  const startedAt = useCallback((taskId: string, nest: NestHandle): ReactNode => <StartedTaskLine taskId={taskId} project={project} nest={nest} />, [project]);
+  const { approval, onApproval, question, onQuestion } = source;
+  return (
+    <CallGateContext.Provider value={gateAt}>
+      <StartedTaskHostContext.Provider value={startedAt}>
+        <Transcript session={null} entries={entries} working={detail.status === "running"} empty="This run has not made a call yet." />
+        {approval !== undefined && onApproval !== undefined ? (
+          <InlineHost>
+            <ApprovalSurface key={approval.requestId} pending={approval} onDecide={onApproval} />
+          </InlineHost>
+        ) : null}
+        {question !== undefined && onQuestion !== undefined ? (
+          <InlineHost>
+            <QuestionSurface key={question.requestId} pending={question} onSubmit={onQuestion} />
+          </InlineHost>
+        ) : null}
+      </StartedTaskHostContext.Provider>
+    </CallGateContext.Provider>
   );
 }
 
@@ -621,9 +675,10 @@ const PieceTranscript = memo(function PieceTranscript({
  * An adopted task's own history, drawn inside the conversation of the task that adopted it (decision
  * 0005). The adopted task keeps its journal and records, so its history is read from it — its tree,
  * turns, sessions, records and live tail, by ITS id (`taskRun.ts`) — and drawn by the same conversation,
- * nested: no scroller, no composer, under the line.
+ * nested: no scroller, no composer, under the line. A task a conversation STARTED is drawn the same way
+ * under the line its `start_task` left (`StartedTaskLine`, decision 0003's nest).
  */
-function AdoptedHistory({ taskId, source }: { taskId: string; source: TranscriptSource }): JSX.Element {
+export function AdoptedHistory({ taskId, source }: { taskId: string; source: TranscriptSource }): JSX.Element {
   // `useTaskRun` lays the run over a surface context; the transcript's source is the part of one it reads.
   const { detail, failed, context } = useTaskRun(taskId, source.project, source as unknown as FileSurfaceContext);
   if (failed !== null) return <NestedEmpty>{"Could not read what this task did: "}{failed}</NestedEmpty>;

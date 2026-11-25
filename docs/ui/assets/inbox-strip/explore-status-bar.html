@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="doc" content="ui/surfaces/inbox-strip">
+<meta name="state" content="explore">
+<meta name="captured" content="2026-11-24">
+<meta name="reflects" content="proposed">
+<title>inbox-strip · 12 status bar explorations</title>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../mockup.css">
+<script>if (location.hash === "#dark") document.documentElement.dataset.theme = "dark";</script>
+<style>
+  [hidden] { display: none !important; }
+  body.mockup { background: var(--bg); color: var(--text); font-family: var(--font-app); }
+  .xs-top { position: sticky; top: 0; z-index: 20; display: flex; gap: 18px; align-items: center; padding: 10px 0 12px; background: var(--bg); border-bottom: 1px solid var(--line); margin-bottom: 18px; font-size: 12px; color: var(--dim); }
+  .xs-top h1 { font: 600 15px/1.2 var(--font-app); color: var(--text); margin: 0 12px 0 0; }
+  .xs-top label { display: flex; gap: 8px; align-items: center; }
+  .xs-top button { font: inherit; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); cursor: pointer; }
+  .xs-intro { max-width: 980px; font-size: 13px; line-height: 1.55; color: var(--dim); margin: 0 0 22px; }
+  .xs-intro b { color: var(--text); font-weight: 600; }
+  .xs-mock { margin: 0 0 34px; }
+  .xs-mock h2 { font: 600 13.5px/1.3 var(--font-app); margin: 0 0 3px; color: var(--text); }
+  .xs-mock h2 .n { font-family: var(--font-data); color: var(--dim); margin-right: 8px; }
+  .xs-mock p.why { margin: 0 0 10px; font-size: 12.5px; color: var(--dim); max-width: 980px; line-height: 1.5; }
+  .xs-case { font: 600 10.5px/1 var(--font-data); color: var(--tok-hint); margin: 8px 0 4px; text-transform: lowercase; }
+  .xs-stage { width: var(--stage-w, 1028px); position: relative; background: var(--bg); border: 1px solid var(--line); overflow: visible; }
+  .xs-view { height: 26px; background: repeating-linear-gradient(135deg, transparent 0 8px, color-mix(in srgb, var(--line) 40%, transparent) 8px 9px); }
+  .xs-stage.tall .xs-view { height: 250px; }
+  .xs-mock:has(.m9-card) .xs-stage.tall .xs-view { height: 170px; }
+
+  /* the bar */
+  .xs-bar { display: flex; align-items: center; gap: 12px; padding: 0 14px; height: 40px; background: var(--panel); border-top: 1px solid var(--line); font-size: calc(var(--size-app) * 12 / 12.5); position: relative; }
+  .xs-label { font: 600 calc(var(--size-app) * 11.5 / 12.5) / 1 var(--font-app); flex: none; color: var(--text); }
+  .xs-fit { display: flex; align-items: center; gap: 12px; min-width: 0; flex: 1 1 auto; overflow: hidden; }
+  .xs-unit { flex: none; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .xs-unit:hover .xs-title { color: var(--accent); }
+  .xs-more { flex: none; color: var(--dim); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .xs-title { font: 500 12px/1.2 var(--font-app); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+  .xs-ask { font: 400 11px/1.2 var(--font-data); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
+  .xs-dim { color: var(--dim); }
+  .xs-hint { color: var(--tok-hint); }
+  .xs-sep { color: var(--tok-hint); flex: none; }
+  .xs-vr { width: 1px; align-self: stretch; margin: 9px 0; background: var(--line); flex: none; }
+  .xs-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--hue); flex: none; }
+  .xs-proj { font: 600 11px/1 var(--font-data); color: var(--dim); display: inline-flex; align-items: center; gap: 5px; flex: none; }
+  .xs-n { font: 700 10.5px/15px var(--font-data); color: var(--warn); background: color-mix(in srgb, var(--warn) 15%, transparent); border-radius: 999px; padding: 0 5px; flex: none; }
+  .xs-age { font: 600 10.5px/1 var(--font-data); color: var(--warn); flex: none; }
+  .xs-glyph { font: 700 10px/16px var(--font-data); width: 16px; height: 16px; text-align: center; border-radius: 4px; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); flex: none; }
+  .xs-ring { flex: none; display: block; overflow: visible; }
+  .xs-ring text { font-family: var(--font-data); font-weight: 700; }
+  .xs-btn { font: 600 11px/1 var(--font-app); padding: 4px 9px; border-radius: 5px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; flex: none; }
+  .xs-btn.primary { background: var(--fill-accent, var(--accent)); border-color: transparent; color: #fff; }
+  .xs-btn.ghost { border-color: transparent; background: transparent; color: var(--dim); }
+
+  /* 1 grouped chips */
+  .m1-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 999px; padding: 0 7px; line-height: 17px; font: 500 10.5px/17px var(--font-data); color: var(--text); background: color-mix(in srgb, var(--hue) 16%, transparent); flex: none; }
+  .m1-chip::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: var(--hue); }
+  .xs-grp { display: flex; align-items: center; gap: 12px; flex: none; }
+  .m3-crumb .xs-ask { max-width: 230px; }
+  .m1-group { display: flex; align-items: center; gap: 8px; flex: none; }
+
+  /* 3 path */
+  .m3-crumb { display: flex; align-items: baseline; gap: 5px; }
+  .m3-crumb .xs-title { font-weight: 600; max-width: 220px; }
+  .m3-crumb .chev { color: var(--tok-hint); }
+
+  /* 4 two-line */
+  .m4 .xs-bar { height: 50px; gap: 0; padding: 0; }
+  .m4-label { display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 0 14px; height: 100%; border-right: 1px solid var(--line); flex: none; }
+  .m4-label .big { font: 700 15px/1 var(--font-data); color: var(--warn); }
+  .m4 .xs-fit { gap: 0; height: 100%; align-items: stretch; }
+  .m4-cell { flex: none; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 4px; padding: 0 14px; border-right: 1px solid var(--line); max-width: 300px; cursor: pointer; }
+  .m4-cell:hover { background: var(--fill-ghost-hover, color-mix(in srgb, var(--text) 5%, transparent)); }
+  .m4-l1 { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .m4-l2 { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+  .m4-l2 .xs-ask { flex: 0 1 auto; min-width: 0; }
+  .m4 .xs-more { padding: 0 14px; align-self: center; }
+
+  /* 5 capsules */
+  .m5-cap { flex: none; display: flex; align-items: center; gap: 6px; height: 24px; padding: 0 4px 0 9px; border-radius: 6px; background: color-mix(in srgb, var(--text) 4%, transparent); border: 1px solid var(--line); border-left: 3px solid var(--hue); cursor: pointer; }
+  .m5-cap:hover { border-color: var(--hue); }
+  .m5-legend { display: flex; gap: 10px; margin-left: auto; flex: none; }
+
+  /* 6 next up */
+  .m6-next { display: flex; align-items: center; gap: 8px; flex: none; }
+  .m6-next .xs-ask { max-width: 260px; }
+  .m6-tag { font: 700 9.5px/1 var(--font-data); letter-spacing: .04em; color: var(--warn); flex: none; }
+  .m6-then { display: flex; align-items: center; gap: 10px; flex: 1 1 auto; min-width: 0; margin-left: 14px; }
+  .m6-then .xs-title { max-width: 120px; color: var(--dim); font-size: 11.5px; }
+
+  /* 7 sentence */
+  .m7 .xs-fit { gap: 0; }
+  .m7-s { white-space: nowrap; font: 400 12px/1 var(--font-app); color: var(--dim); }
+  .m7-s b { color: var(--warn); font-weight: 700; font-family: var(--font-data); }
+  .m7-link { color: var(--text); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--hue) 70%, transparent); text-decoration-thickness: 2px; text-underline-offset: 3px; cursor: pointer; }
+  .m7-link:hover { color: var(--accent); }
+
+  /* 8 lanes */
+  .m8-lane { flex: none; display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 10px 0 8px; border-radius: 7px; background: color-mix(in srgb, var(--hue) 11%, transparent); }
+  .m8-name { font: 700 10.5px/1 var(--font-data); color: color-mix(in srgb, var(--hue) 80%, var(--text)); flex: none; }
+  .m8-lane .xs-unit + .xs-unit::before { content: "·"; color: var(--tok-hint); margin-right: 4px; }
+
+  /* 9 dock */
+  .m9-dock { display: flex; gap: 6px; align-items: center; flex: none; }
+  .m9-tile { position: relative; cursor: pointer; }
+  .m9-tile .pip { position: absolute; right: -2px; bottom: -1px; width: 7px; height: 7px; border-radius: 50%; background: var(--hue); border: 1.5px solid var(--panel); }
+  .m9-card { position: absolute; bottom: 46px; width: 330px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 10px 12px; font-size: 12px; z-index: 3; }
+  .m9-card .hd { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .m9-card .row { display: flex; gap: 6px; align-items: baseline; padding: 4px 0; border-top: 1px solid var(--line); }
+  .m9-rest { color: var(--dim); font-size: 11.5px; }
+
+  /* 10 ages */
+  .m10-title { text-decoration: underline; text-decoration-color: var(--hue); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+
+  /* 11 tray */
+  .m11-sum { display: flex; align-items: center; gap: 8px; cursor: pointer; flex: none; }
+  .m11-tray { position: absolute; left: 0; right: 0; bottom: 40px; max-height: 260px; overflow: auto; background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -8px 20px rgba(0,0,0,.08); padding: 6px 0 8px; z-index: 3; }
+  .m11-ph { display: flex; gap: 6px; align-items: center; padding: 8px 14px 4px; font: 700 10.5px/1 var(--font-data); color: var(--dim); }
+  .m11-top { display: flex; gap: 8px; align-items: center; padding: 5px 14px; }
+  .m11-top .xs-title { max-width: none; font-weight: 600; }
+  .m11-ask { display: flex; gap: 8px; align-items: center; padding: 3px 14px 3px 46px; }
+  .m11-ask:hover, .m11-top:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .m11-ask .via { font: 400 11px/1.2 var(--font-app); color: var(--tok-hint); white-space: nowrap; }
+  .m11-ask .txt { font: 400 11.5px/1.3 var(--font-data); color: var(--text); flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* 12 slim status bar */
+  .m12 .xs-bar { height: 26px; gap: 0; padding: 0 6px; font-size: 11.5px; }
+  .m12-seg { display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 9px; cursor: pointer; flex: none; }
+  .m12-seg:hover, .m12-seg.on { background: color-mix(in srgb, var(--text) 7%, transparent); }
+  .m12-seg .xs-proj { font-size: 10.5px; }
+  .m12-pop { position: absolute; bottom: 30px; width: 400px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.14); padding: 6px 0; z-index: 3; font-size: 12px; }
+  .m12-pop .xs-title { max-width: 250px; }
+</style>
+</head>
+<body class="mockup">
+<div class="xs-top">
+  <h1>Status bar · 12 explorations</h1>
+  <label>bar width <input id="w" type="range" min="520" max="1400" value="1028"><span id="wv">1028px</span></label>
+  <button id="theme">light / dark</button>
+</div>
+<p class="xs-intro">
+  Each design is drawn twice: <b>today</b>, the four lesson asks actually waiting now (all in <b>topodiff</b>, from three conversations, two of them under
+  <i>Vercel build failure debugging</i>); and <b>busy</b>, eight asks under six top-level things across three projects, including a workflow task that is still
+  running. In every design an entry is the <b>top-level chat or task</b>, not the nested task that asks; the project is named once per group, not once per entry;
+  and entries are only folded into <b>+N more</b> when they really don't fit. Drag the width slider to see that.
+</p>
+<main id="mocks"></main>
+
+<script>
+/* ---------------- data ---------------- */
+const TODAY = [
+  { project: "topodiff", hue: "var(--p1)", items: [
+    { title: "Creating GitLab OAuth app", kind: "chat", age: "3h", asks: [
+      { kind: "lesson", via: "Review a conversation for lessons", text: "Read the code and answer with the real values" } ] },
+    { title: "topodiff website / landing page", kind: "chat", age: "3h", asks: [
+      { kind: "lesson", via: "Review a conversation for lessons", text: "Add a deliverable as another build target, not a sibling project" } ] },
+    { title: "Vercel build failure debugging", kind: "chat", age: "1h", asks: [
+      { kind: "lesson", via: "Lesson: investigate first", text: "Check it yourself before asking" },
+      { kind: "lesson", via: "Review a conversation for lessons", text: "Use the CLIs you have instead of asking" } ] },
+  ] },
+];
+const BUSY = [
+  { project: "JaiRA", hue: "var(--p2)", items: [
+    { title: "Inbox strip redesign", kind: "chat", age: "2m", running: true, asks: [
+      { kind: "question", via: null, text: "Group by project or by top-level task?" } ] },
+    { title: "Release nightly 2026-11-24", kind: "task", age: "12m", running: true, asks: [
+      { kind: "approval", via: "Publish", text: "git push origin release/nightly" },
+      { kind: "gate", via: "Release notes", text: "Publish these release notes?" } ] },
+  ] },
+  ...TODAY,
+  { project: "declarative-ai", hue: "var(--p3)", items: [
+    { title: "Migrate schema to v7", kind: "task", age: "25m", asks: [
+      { kind: "gate", via: "Plan", text: "Approve the migration plan" } ] },
+  ] },
+];
+const GLYPH = { question: "?", approval: "!", gate: "◆", lesson: "✦" };
+const NOUN = { question: ["question", "questions"], approval: ["approval", "approvals"], gate: ["decision", "decisions"], lesson: ["lesson", "lessons"] };
+const RANK = { question: 0, approval: 1, gate: 2, lesson: 3 };
+
+const askCount = (g) => g.reduce((n, p) => n + p.items.reduce((m, i) => m + i.asks.length, 0), 0);
+const itemCount = (g) => g.reduce((n, p) => n + p.items.length, 0);
+const flat = (g) => g.flatMap((p) => p.items.map((i) => ({ ...i, project: p.project, hue: p.hue })));
+const firstAsk = (i) => [...i.asks].sort((a, b) => RANK[a.kind] - RANK[b.kind])[0];
+const plural = (n, [one, many]) => `${n} ${n === 1 ? one : many}`;
+/** "2 lessons", "1 approval + 1 decision" */
+function summary(asks) {
+  const by = {};
+  for (const a of asks) by[a.kind] = (by[a.kind] ?? 0) + 1;
+  return Object.entries(by).sort((a, b) => RANK[a[0]] - RANK[b[0]]).map(([k, n]) => plural(n, NOUN[k])).join(" + ");
+}
+const askText = (i) => (i.asks.length === 1 ? i.asks[0].text : summary(i.asks));
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const tip = (i) => esc([i.title, ...i.asks.map((a) => `  ${a.via ? a.via + " › " : ""}${a.text}`)].join("\n"));
+const kindWord = (g) => {
+  const items = flat(g);
+  const chats = items.filter((i) => i.kind === "chat").length, tasks = items.length - chats;
+  return [chats ? plural(chats, ["chat", "chats"]) : "", tasks ? plural(tasks, ["task", "tasks"]) : ""].filter(Boolean).join(" and ");
+};
+
+/* The segmented ring, as the project tile and the chat row draw it: one segment per ask (warn), one for work going on (accent). */
+function ring(item, { size = 20, stroke = 2.4, center = "count" } = {}) {
+  const kinds = [...item.asks.map(() => "waiting"), ...(item.running ? ["running"] : [])];
+  const ink = { waiting: "var(--warn)", running: "var(--accent)" };
+  const c = size / 2, r = c - stroke / 2 - 0.5, n = kinds.length, gap = n > 1 ? 5 : 0, len = (100 - gap * n) / n;
+  const text = center === "count" ? String(item.asks.length) : center === "age" ? item.age : center;
+  const fs = text.length > 2 ? size * 0.3 : size * 0.42;
+  let s = `<svg class="xs-ring" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">`;
+  s += `<circle cx="${c}" cy="${c}" r="${r - stroke / 2 - 0.3}" fill="color-mix(in srgb, var(--warn) 22%, transparent)"/>`;
+  s += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="color-mix(in srgb, var(--dim) 28%, transparent)" stroke-width="${stroke}"/>`;
+  kinds.forEach((k, i) => {
+    s += `<circle cx="${c}" cy="${c}" r="${r}" fill="none" pathLength="100" stroke="${ink[k]}" stroke-width="${stroke}" stroke-dasharray="${len} ${100 - len}" stroke-dashoffset="${-(i * (len + gap)) + 25}"/>`;
+  });
+  if (text) s += `<text x="${c}" y="${c}" dy="0.36em" text-anchor="middle" font-size="${fs}" fill="var(--warn)">${esc(text)}</text>`;
+  return s + `</svg>`;
+}
+const label = (g) => `<span class="xs-label">Awaiting you</span><span class="pill pill-waiting pill-active" title="${askCount(g)} waiting on you"><span class="pill-glyph">⏸</span><span class="pill-n">${askCount(g)}</span></span>`;
+const more = `<span class="xs-more" hidden></span>`;
+const unit = (i, inner, extra = "") => `<span class="xs-unit ${extra}" data-asks="${i.asks.length}" title="${tip(i)}" style="--hue:${i.hue}">${inner}</span>`;
+const proj = (p) => `<span class="xs-proj" style="--hue:${p.hue}"><i class="xs-dot"></i>${esc(p.project)}</span>`;
+
+/* ---------------- the twelve ---------------- */
+const MOCKS = [
+  {
+    name: "Grouped chips",
+    why: "Closest to today's bar. The project chip appears once and the entries after it are top-level chats and tasks. A count shows when one has more than one ask.",
+    bar: (g) => label(g) + `<span class="xs-fit">${g.map((p) => `<span class="m1-group"><span class="m1-chip" style="--hue:${p.hue}">${esc(p.project)}</span>` +
+      p.items.map((i, k) => (k ? `<span class="xs-sep">·</span>` : "") + unit({ ...i, hue: p.hue }, `<span class="xs-title">${esc(i.title)}</span>${i.asks.length > 1 ? `<span class="xs-n">${i.asks.length}</span>` : ""}`)).join("") + `</span>`).join(`<span class="xs-vr"></span>`)}</span>` + more,
+  },
+  {
+    name: "Rings",
+    why: "Each top-level entry gets the same segmented ring as the project tile and the chat row. Each segment is one ask, plus blue while it is still working, with the ask count in the middle. Projects are a dot and a name, then a rule.",
+    bar: (g) => label(g) + `<span class="xs-fit">${g.map((p) => `<span class="xs-grp">${proj(p)}` + p.items.map((i) => unit({ ...i, hue: p.hue }, ring(i) + `<span class="xs-title">${esc(i.title)}</span>`)).join("") + `</span>`).join(`<span class="xs-vr"></span>`)}</span>` + more,
+  },
+  {
+    name: "Top-level › what it asks",
+    why: "Each entry says where it is and what it wants. With one ask it shows the ask's own words; with more it shows a summary. The nested task's name is in the tooltip, not the bar.",
+    bar: (g) => label(g) + `<span class="xs-fit">${g.map((p) => `<span class="xs-grp">` + proj(p) + p.items.map((i) => unit({ ...i, hue: p.hue }, `<span class="m3-crumb"><span class="xs-title">${esc(i.title)}</span><span class="chev">›</span><span class="xs-ask xs-shrink">${esc(askText(i))}</span></span>`)).join(`<span class="xs-sep">·</span>`) + `</span>`).join(`<span class="xs-vr"></span>`)}</span>` + more,
+  },
+  {
+    name: "Two lines",
+    why: "The bar is 10px taller. Each cell has the top-level title over the ask and how long it has waited, so both are readable without the tooltip. The project is the dot in the cell's first line.",
+    cls: "m4",
+    bar: (g) => `<span class="m4-label"><span class="xs-label">Awaiting you</span><span class="big">${askCount(g)}</span></span><span class="xs-fit">${flat(g).map((i) =>
+      `<span class="xs-unit m4-cell" data-asks="${i.asks.length}" title="${tip(i)}" style="--hue:${i.hue}"><span class="m4-l1"><i class="xs-dot"></i><span class="xs-title">${esc(i.title)}</span>${i.asks.length > 1 ? `<span class="xs-n">${i.asks.length}</span>` : ""}</span><span class="m4-l2"><span class="xs-ask">${esc(askText(i))}</span><span class="xs-age">${i.age}</span></span></span>`).join("")}</span>` + more,
+  },
+  {
+    name: "Capsules",
+    why: "Each top-level entry is a capsule with its project's hue as the left edge. The project names appear once, as a legend at the right end.",
+    bar: (g) => label(g) + `<span class="xs-fit">${flat(g).map((i) => `<span class="xs-unit m5-cap" data-asks="${i.asks.length}" title="${tip(i)}" style="--hue:${i.hue}"><span class="xs-title">${esc(i.title)}</span><span class="xs-n">${i.asks.length}</span></span>`).join("")}</span>` + more +
+      `<span class="m5-legend">${g.map(proj).join("")}</span>`,
+  },
+  {
+    name: "Next up, then the rest",
+    why: "The most urgent ask gets the room, and when it is a simple choice it can be answered right in the bar. The rest queue on the right as rings.",
+    bar: (g) => {
+      const all = flat(g), n = all[0], a = firstAsk(n);
+      return `<span class="m6-next"><span class="m6-tag">NEXT</span>${ring(n, { size: 18 })}<span class="xs-proj" style="--hue:${n.hue}"><i class="xs-dot"></i></span><span class="xs-title" style="font-weight:600">${esc(n.title)}</span><span class="xs-sep">›</span><span class="xs-ask" style="color:var(--text)">${esc(a.text)}</span>` +
+        (a.kind === "question" ? `<button class="xs-btn">Answer…</button>` : `<button class="xs-btn primary">${a.kind === "approval" ? "Allow" : "Apply"}</button><button class="xs-btn ghost">${a.kind === "approval" ? "Deny" : "Skip"}</button>`) +
+        `</span><span class="m6-then"><span class="xs-hint">then</span><span class="xs-fit" style="gap:10px">${all.slice(1).map((i) => unit(i, ring(i, { size: 16, stroke: 2 }) + `<span class="xs-title">${esc(i.title)}</span>`)).join("")}</span>${more}</span>`;
+    },
+  },
+  {
+    name: "One sentence",
+    why: "The bar reads as a sentence, and each underlined name opens that chat or task. The project is said once per clause.",
+    cls: "m7",
+    bar: (g) => `<span class="xs-fit"><span class="m7-s"><b>${askCount(g)}</b> waiting on you in ${kindWord(g)}${g.length > 1 ? ` across ${g.length} projects` : ""}&nbsp;—&nbsp;</span>` +
+      g.map((p, k) => `<span class="xs-grp" style="gap:0"><span class="m7-s">${k ? ";&nbsp;" : ""}${esc(p.project)}:&nbsp;</span>` + p.items.map((i, j) => (j ? `<span class="m7-s xs-sep">,&nbsp;</span>` : "") + unit({ ...i, hue: p.hue }, `<span class="m7-link">${esc(i.title)}</span>${i.asks.length > 1 ? `<span class="m7-s">&nbsp;(${i.asks.length})</span>` : ""}`)).join("") + `</span>`).join("") + `</span>` + more,
+  },
+  {
+    name: "Project lanes",
+    why: "Each project is a tinted lane that holds its top-level entries. Grouping is shown by the tint, not by repeated chips, and a lane's width shows how much it holds.",
+    bar: (g) => label(g) + `<span class="xs-fit">${g.map((p) => `<span class="m8-lane" style="--hue:${p.hue}"><span class="m8-name">${esc(p.project)}</span>${p.items.map((i) => unit({ ...i, hue: p.hue }, `<span class="xs-title">${esc(i.title)}</span>${i.asks.length > 1 ? `<span class="xs-n">${i.asks.length}</span>` : ""}`)).join("")}</span>`).join("")}</span>` + more,
+  },
+  {
+    name: "Dock",
+    tall: (which) => which === "today",
+    why: "Only rings, with a pip in the project's hue. The bar stays nearly empty, which leaves room for the event notice. Pointing at a ring opens a card that lists its asks (one is shown open here).",
+    bar: (g, which) => {
+      const all = flat(g), open = which === "today" ? 2 : -1;
+      return label(g) + `<span class="m9-dock">${all.map((i, k) => `<span class="m9-tile xs-unit" title="${k === open ? "" : tip(i)}">${ring(i, { size: 24, stroke: 2.6, center: "age" })}<i class="pip" style="--hue:${i.hue}"></i>` +
+        (k === open ? `<span class="m9-card" style="left:-10px"><span class="hd"><i class="xs-dot" style="--hue:${i.hue}"></i><span class="xs-dim" style="font:600 11px var(--font-data)">${esc(i.project)}</span><span class="xs-title" style="font-weight:600;max-width:none">${esc(i.title)}</span></span>` +
+          i.asks.map((a) => `<span class="row"><span class="xs-glyph">${GLYPH[a.kind]}</span><span style="flex:1"><span class="xs-hint" style="font-size:11px">${esc(a.via ?? "")}</span><br><span style="font-family:var(--font-data);font-size:11.5px">${esc(a.text)}</span></span><button class="xs-btn">Open</button></span>`).join("") + `</span>` : "") + `</span>`).join("")}</span>` +
+        `<span class="m9-rest">${kindWord(g)}</span>`;
+    },
+  },
+  {
+    name: "Oldest first, with what it wants",
+    why: "Entries are sorted by how long they have waited, and a glyph tells the kind of ask: ? question, ! approval, ◆ decision, ✦ lesson. The project is a coloured underline on the title, so it is never repeated as text.",
+    bar: (g) => label(g) + `<span class="xs-fit">${flat(g).sort((a, b) => ageMin(b.age) - ageMin(a.age)).map((i) => unit(i, `<span class="xs-glyph">${GLYPH[firstAsk(i).kind]}</span><span class="xs-title m10-title">${esc(i.title)}</span>${i.asks.length > 1 ? `<span class="xs-n">${i.asks.length}</span>` : ""}<span class="xs-age">${i.age}</span>`)).join("")}</span>` + more,
+  },
+  {
+    name: "Summary that opens a tray",
+    why: "The bar holds one line of summary. Opening it raises a tray with the whole tree: project, then top-level chat or task, then each nested ask with its own path and buttons to answer it there.",
+    tall: (which) => which === "today",
+    bar: (g, which) => {
+      const s = `<span class="m11-sum">${label(g)}<span class="xs-dim">in ${kindWord(g)}${g.length > 1 ? ` · ${g.length} projects` : ` · ${esc(g[0].project)}`}</span><span class="xs-hint">${which === "today" ? "▾" : "▴"}</span></span>`;
+      const rings = `<span class="xs-fit" style="gap:5px;justify-content:flex-end">${flat(g).map((i) => unit(i, ring(i, { size: 16, stroke: 2 }))).join("")}</span>`;
+      if (which !== "today") return s + rings;
+      return s + rings + `<div class="m11-tray">${g.map((p) => `<div class="m11-ph"><i class="xs-dot" style="--hue:${p.hue}"></i>${esc(p.project)}</div>` + p.items.map((i) =>
+        `<div class="m11-top">${ring(i, { size: 18 })}<span class="xs-title">${esc(i.title)}</span><span class="xs-hint" style="font-size:11px">${i.kind}</span><span class="xs-age" style="margin-left:auto">${i.age}</span></div>` +
+        i.asks.map((a) => `<div class="m11-ask"><span class="xs-glyph">${GLYPH[a.kind]}</span><span class="via">${esc(a.via ?? "")} ›</span><span class="txt">${esc(a.text)}</span><button class="xs-btn primary">Apply</button><button class="xs-btn ghost">Skip</button></div>`).join("")).join("")).join("")}</div>`;
+    },
+  },
+  {
+    name: "Slim editor-style bar",
+    why: "A 26px bar like an editor's status bar, with one segment per project. Clicking a segment opens a list of its top-level entries and their asks (open here for topodiff). It gives the most room back to the window.",
+    cls: "m12",
+    tall: (which) => which === "today",
+    bar: (g, which) => {
+      const segs = g.map((p, k) => `<span class="m12-seg ${which === "today" && k === 0 ? "on" : ""}" style="--hue:${p.hue}">${proj(p)}<span class="xs-n">⏸ ${p.items.reduce((n, i) => n + i.asks.length, 0)}</span></span>`).join("");
+      const pop = which !== "today" ? "" : `<div class="m12-pop" style="left:6px">${g[0].items.map((i) => `<div class="m11-top">${ring(i, { size: 18 })}<span class="xs-title" style="font-weight:600">${esc(i.title)}</span><span class="xs-age" style="margin-left:auto">${i.age}</span></div>` +
+        i.asks.map((a) => `<div class="m11-ask" style="padding-left:40px"><span class="txt">${esc(a.text)}</span></div>`).join("")).join("")}</div>`;
+      return `<span class="xs-label" style="padding:0 8px 0 6px;font-size:11px">Awaiting you</span>` + segs + `<span style="margin-left:auto" class="xs-hint">${askCount(g)} in ${kindWord(g)}</span>` + pop;
+    },
+  },
+];
+function ageMin(a) { const n = parseFloat(a); return a.endsWith("h") ? n * 60 : a.endsWith("d") ? n * 1440 : n; }
+
+/* ---------------- render ---------------- */
+const root = document.getElementById("mocks");
+root.innerHTML = MOCKS.map((m, k) => `<section class="xs-mock ${m.cls ?? ""}"><h2><span class="n">${String(k + 1).padStart(2, "0")}</span>${esc(m.name)}</h2><p class="why">${m.why}</p>` +
+  [["today", TODAY], ["busy", BUSY]].map(([which, g]) => `<div class="xs-case">${which} · ${askCount(g)} asks in ${itemCount(g)} top-level ${itemCount(g) === 1 ? "thing" : "things"}</div>` +
+    `<div class="xs-stage ${m.tall?.(which) ? "tall" : ""}"><div class="xs-view"></div><footer class="xs-bar">${m.bar(g, which)}</footer></div>`).join("") + `</section>`).join("");
+
+/* Fold into "+N more" only what really does not fit (point 1). */
+function fit(bar) {
+  const box = bar.querySelector(".xs-fit"), more = bar.querySelector(".xs-more");
+  if (!box || !more) return;
+  const units = [...box.querySelectorAll(":scope > .xs-unit, :scope > * > .xs-unit, :scope > .m1-group, :scope > .m8-lane")];
+  box.querySelectorAll("[data-hid]").forEach((u) => { u.hidden = false; u.removeAttribute("data-hid"); });
+  box.querySelectorAll(".xs-title, .xs-shrink").forEach((t) => { t.style.maxWidth = ""; });
+  more.hidden = true;
+  const leaves = [...box.querySelectorAll(".xs-unit")];
+  let hiddenAsks = 0;
+  for (let i = leaves.length - 1; i >= 0 && box.scrollWidth > box.clientWidth + 1; i--) {
+    leaves[i].hidden = true; leaves[i].setAttribute("data-hid", "");
+    const sep = leaves[i].previousElementSibling;
+    if (sep && sep.classList.contains("xs-sep")) { sep.hidden = true; sep.setAttribute("data-hid", ""); }
+    hiddenAsks += Number(leaves[i].dataset.asks ?? 1);
+    const grp = leaves[i].closest(".xs-grp, .m1-group, .m8-lane");
+    if (grp && [...grp.querySelectorAll(".xs-unit")].every((u) => u.hidden)) {
+      grp.hidden = true; grp.setAttribute("data-hid", "");
+      const vr = grp.previousElementSibling;
+      if (vr && vr.classList.contains("xs-vr")) { vr.hidden = true; vr.setAttribute("data-hid", ""); }
+    }
+    more.hidden = false; more.textContent = `+${hiddenAsks} more`;
+  }
+  // the first folded entry comes back with its title cut short, when the room left is worth it
+  const firstHidden = leaves.find((u) => u.hidden);
+  if (firstHidden) {
+    const t = firstHidden.querySelector(".xs-shrink") ?? firstHidden.querySelector(".xs-title");
+    firstHidden.hidden = false; firstHidden.removeAttribute("data-hid");
+    const sep = firstHidden.previousElementSibling;
+    if (sep && sep.classList.contains("xs-sep")) { sep.hidden = false; sep.removeAttribute("data-hid"); }
+    const over = box.scrollWidth - box.clientWidth;
+    const room = t ? t.offsetWidth - over - 2 : -1;
+    if (t && over > 0 && room >= 70) {
+      t.style.maxWidth = room + "px";
+      hiddenAsks -= Number(firstHidden.dataset.asks ?? 1);
+      more.textContent = `+${hiddenAsks} more`; more.hidden = hiddenAsks === 0;
+    } else if (over > 0 || !t) {
+      firstHidden.hidden = true; firstHidden.setAttribute("data-hid", "");
+      if (sep && sep.classList.contains("xs-sep")) { sep.hidden = true; sep.setAttribute("data-hid", ""); }
+    } else {
+      hiddenAsks -= Number(firstHidden.dataset.asks ?? 1);
+      more.textContent = `+${hiddenAsks} more`; more.hidden = hiddenAsks === 0;
+    }
+  }
+  // a group whose entries are all folded goes too
+  box.querySelectorAll(".m1-group, .m8-lane, .xs-grp").forEach((grp) => {
+    if ([...grp.querySelectorAll(".xs-unit")].every((u) => u.hidden)) { grp.hidden = true; grp.setAttribute("data-hid", ""); }
+  });
+}
+const fitAll = () => document.querySelectorAll(".xs-bar").forEach(fit);
+const w = document.getElementById("w"), wv = document.getElementById("wv");
+w.addEventListener("input", () => { document.body.style.setProperty("--stage-w", w.value + "px"); wv.textContent = w.value + "px"; fitAll(); });
+document.getElementById("theme").addEventListener("click", () => {
+  const d = document.documentElement; d.dataset.theme = d.dataset.theme === "dark" ? "" : "dark"; fitAll();
+});
+document.fonts?.ready.then(fitAll); fitAll();
+</script>
+</body>
+</html>

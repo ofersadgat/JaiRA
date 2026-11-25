@@ -280,8 +280,8 @@ function Column({
           {...((isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) as object)}
         >
           {roots.map((v) => (
-            <RailItem key={v.id} on={rootOn(v) && !settingsOpen} label={v.label} caption={v.short ?? v.label} counts={v.counts} onPress={() => goRoot(v)}>
-              {(on) => <RailIcon on={on} glyph={v.glyph} />}
+            <RailItem key={v.id} on={rootOn(v) && !settingsOpen} label={v.label} caption={v.short ?? v.label} counts={v.ring === undefined ? v.counts : undefined} onPress={() => goRoot(v)}>
+              {(on) => (v.ring !== undefined ? <RoomTile ring={v.ring} glyph={v.glyph} on={on} /> : <RailIcon on={on} glyph={v.glyph} />)}
             </RailItem>
           ))}
           <View width={28} height={1} flexShrink={0} marginVertical={3} backgroundColor={t.v("line") as never} />
@@ -427,6 +427,39 @@ function RailIcon({ on, glyph }: { on: boolean; glyph: string }): JSX.Element {
       <Glyph scale={15 / 12.5} color={on ? "accent" : "dim"}>
         {glyph}
       </Glyph>
+    </View>
+  );
+}
+
+/**
+ * A room across every project drawn as a project's tile is (All chats): its glyph on the tile, inside the
+ * ring of everything in it — each conversation's own ring on one, a segment per thing working, asking or
+ * finished unread — in place of the one-colour badge (the person, 2026-11-24: "the pip in the chat menu
+ * should be segmented like the project level ring"). The room you are in keeps the accent.
+ */
+function RoomTile({ ring, glyph, on }: { ring: SidebarProject["ring"]; glyph: string; on: boolean }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View marginHorizontal={-5} marginTop={-5} marginBottom={-2}>
+      <TileRing
+        items={ring}
+        size={44}
+        on={on}
+        letters={glyph}
+        tile={(body, tint) => (
+          <View
+            width={34}
+            height={34}
+            borderRadius={10}
+            alignItems="center"
+            justifyContent="center"
+            {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, on ? "accent" : "line") as object)}
+            backgroundColor={(tint ?? (on ? t.v("tint-accent") : t.v("panel"))) as never}
+          >
+            {body}
+          </View>
+        )}
+      />
     </View>
   );
 }

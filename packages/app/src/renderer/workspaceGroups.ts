@@ -129,11 +129,16 @@ export function mergeBoards(group: ProjectGroup, boards: Readonly<Record<string,
  * Which tasks are waiting on the person, and for what — from the inbox: a gate (not a move's question),
  * an agent's approval, an agent's question, live or found in the record after the app closed. A
  * question outranks an approval, which outranks a gate: the one an agent is blocked on is the one named.
+ *
+ * And, from the projects' summaries, every task waiting only because a task UNDER it asks (`child`):
+ * the engine rolls a child's ask up into its parents (`ProjectSummary.live`), so a task whose review
+ * asks the person reads as waiting rather than as running or done (the person, 2026-11-23).
  */
 export function askingTasksOf(
   pending: ReadonlyArray<{ taskId?: string; about?: string; moves?: boolean }>,
   approvals: ReadonlyArray<{ taskId?: string }>,
   questions: ReadonlyArray<{ taskId?: string }>,
+  projects: ReadonlyArray<{ live?: ReadonlyArray<{ taskId: string; kind: "running" | "waiting" }> | undefined }> = [],
 ): Map<string, NonNullable<BoardCard["asking"]>> {
   const asking = new Map<string, NonNullable<BoardCard["asking"]>>();
   // A gate is the parked run's (`taskId`) and the task it is about (`about`) alike, as `parkedGateOf` reads it.
@@ -143,6 +148,7 @@ export function askingTasksOf(
   }
   for (const approval of approvals) if (approval.taskId !== undefined) asking.set(approval.taskId, "approval");
   for (const question of questions) if (question.taskId !== undefined) asking.set(question.taskId, "question");
+  for (const project of projects) for (const task of project.live ?? []) if (task.kind === "waiting" && !asking.has(task.taskId)) asking.set(task.taskId, "child");
   return asking;
 }
 

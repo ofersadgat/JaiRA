@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
-import { hueOf } from "@jaira/ui/pillModel";
+import { hueOf, liveKindsOf } from "@jaira/ui/pillModel";
+import { askedAtOf, chatsRingItems } from "@jaira/ui/ringModel";
 import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebarTypes";
 import type { View as AppView } from "@jaira/ui/store";
@@ -118,6 +119,17 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
   const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
   const projectHues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
   const rooms = roomCountsOf(state.projects, state.allConversations, groups, state.at, ui.seen);
+  /** All chats' ring in the rail: every conversation's ring on one, as a project's tile holds its tasks'. */
+  const chatsRing = useMemo(
+    () =>
+      chatsRingItems(state.allConversations, {
+        seen: ui.seen,
+        producing: state.producing,
+        asked: askedAtOf([...state.approvals, ...state.questions], state.projects),
+        live: Object.fromEntries(liveKindsOf(state.projects)),
+      }),
+    [state.allConversations, ui.seen, state.producing, state.approvals, state.questions, state.projects],
+  );
   /**
    * What the open project's title narrows the panel to (`scopeModel.ts`): kept per project, and the
    * address follows it — a workspace chosen is the one Files and Tasks show; a machine chosen moves off
@@ -322,6 +334,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
       : {
           ...v,
           counts: rooms.rootChat,
+          ring: chatsRing,
           onSeen: () => actions.markSeenAll(rooms.seenRootChat),
           acts: [{ ...newChat, onAct: (from) => (actions.standOn(null), newChat.onAct(from)) }, find("conversations")],
           panel: <ChatDrawer find={finding.conversations === true} />,
@@ -621,7 +634,7 @@ function TasksDrawer(): JSX.Element {
   const ui = state.settings.ui;
   const group = groupOf(groupProjects(state.projects, ui.groupWorkspaces !== false), state.at);
   const scope = group === undefined ? {} : scopeOf(ui, group);
-  const asking = useMemo(() => askingTasksOf(state.pending, state.approvals, state.questions), [state.pending, state.approvals, state.questions]);
+  const asking = useMemo(() => askingTasksOf(state.pending, state.approvals, state.questions, state.projects), [state.pending, state.approvals, state.questions, state.projects]);
   const cards = useMemo(() => {
     if (group === undefined) return [];
     const board = markAsking(markQueued(mergeBoards(group, state.boards), state.queue), asking);
