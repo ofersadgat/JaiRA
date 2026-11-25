@@ -464,6 +464,11 @@ describe("what ships, laid over a workspace's tree", () => {
     // The conversation is a script, and its copy is one: the file the comment in it says to edit.
     expect(copy.file.endsWith(`${CHAT_SESSION}.ts`)).toBe(true);
     expect(copy.builtIn?.layers).toEqual(["project", "system"]);
+    // Its Configuration reads it as the state it compiles to — the top-level state, not the code (2026-11-24).
+    const configuration = service.readWorkflow({ stateId: CHAT_SESSION, layer: "system", compiled: true });
+    expect(configuration.script).toEqual({});
+    expect(configuration.file.endsWith(`${CHAT_SESSION}.ts`)).toBe(true);
+    expect(JSON.parse(configuration.text)).toMatchObject({ label: "Session" });
     // A second override of the same layer is refused rather than clobbering the first.
     expect(() =>
       service.moveWorkflow({ stateId: CHAT_SESSION, layer: "system", to: CHAT_SESSION, toLayer: "project", copy: true }),

@@ -19,6 +19,7 @@ import { ApprovalRequired } from "@jaira/shared";
 import {
   browseWorkflows,
   canonicalModulePath,
+  effectiveState,
   initProject,
   loadWorkflowBundle,
   moduleEntriesOf,
@@ -31,6 +32,7 @@ import {
   scriptFilesOf,
   scriptModuleOptions,
   scriptModulesFor,
+  scriptStateText,
   snapshotWithModules,
   userModules,
   workflowLoadOptions,
@@ -96,6 +98,16 @@ describe("a workflow script in a project", { timeout: 30_000 }, () => {
     expect(roots.some((id) => id.startsWith("greet/"))).toBe(false);
     expect(roots).not.toContain("helpers");
     expect(browser.files.find((f) => f.stateId === "greet")).toMatchObject({ file: "greet.ts", label: "Greet" });
+  });
+
+  it("shows, as its configuration, the document it compiles to for the state it is — not its code (2026-11-24)", async () => {
+    const p = await open();
+    const found = effectiveState(p, "greet", browseWorkflows(p));
+    expect(found.source).toMatchObject({ stateId: "greet", file: join(p.paths.workflowsDir, "greet.ts"), script: {} });
+    expect(JSON.parse(found.source!.text)).toMatchObject({ label: "Greet", description: "Say hello, loudly." });
+    // The same reading the panel's `workflow:read { compiled }` makes, asked directly.
+    const text = scriptStateText(join(p.paths.workflowsDir, "greet.ts"), "greet", p.paths.workflowsDir, scriptContextOf(p.paths)).text;
+    expect(text).toBe(found.source!.text);
   });
 
   it("loads with the states its compile generates, in-tree and by id, and validates", async () => {

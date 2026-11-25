@@ -5093,7 +5093,8 @@ export function useApp() {
         const at = await locateState(stateId);
         if (at === null) return null;
         try {
-          return await invoke("workflow:read", { stateId, layer: at.layer, ...inLayer(at.layer) });
+          // `compiled`: a workflow script is shown as the state it compiles to — its configuration, not its code.
+          return await invoke("workflow:read", { stateId, layer: at.layer, compiled: true, ...inLayer(at.layer) });
         } catch {
           return null;
         }

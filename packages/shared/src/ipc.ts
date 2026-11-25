@@ -640,6 +640,11 @@ export interface ReadWorkflowRequest {
   project?: ProjectRef;
   /** Another machine's id: its file, read there (`Federation.route`) — Settings' path naming that machine. */
   machine?: string;
+  /**
+   * Read a workflow SCRIPT as the state document it compiles to rather than as its code — what a
+   * state's Configuration shows ({@link WorkflowSource.script}). A state file reads the same either way.
+   */
+  compiled?: boolean;
 }
 
 export interface WorkflowSource {
@@ -655,6 +660,13 @@ export interface WorkflowSource {
   exists: boolean;
   /** How this state stands against what ships — see {@link BuiltInStanding}. */
   builtIn?: BuiltInStanding;
+  /**
+   * Present when the state is a workflow SCRIPT (decision 0029 §2): `file` is its code, and {@link text}
+   * is not the file but the state document the script compiles to for the state it is — what its
+   * Configuration shows, as a reading, since a form cannot write back into code. `error` says why there
+   * is no document when the script does not compile ({@link text} is then empty).
+   */
+  script?: { error?: string };
 }
 
 /**

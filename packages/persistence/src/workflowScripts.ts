@@ -111,6 +111,27 @@ function contextFor(workflowsDir: string, given: ScriptContext | undefined): Scr
   return { searchPath, requirePath: requirePathFor(searchPath), roots: { SYSTEM: jairaBuiltInPaths().dir } };
 }
 
+/**
+ * What a script's Configuration reads (the person, 2026-11-24: "it should be showing the configuration
+ * of the top level state"): the document the script at `file` compiles to for the state it IS, as the
+ * JSON a state file would hold — or, for a script that does not compile, why not. `workflowsDir` is the
+ * directory holding it, for the context a compile with none named falls back to ({@link contextFor}).
+ */
+export function scriptStateText(
+  file: string,
+  stateId: string,
+  workflowsDir: string,
+  context?: ScriptContext,
+): { text: string; error?: undefined } | { text?: undefined; error: string } {
+  try {
+    const document = compileWorkflowScript(file, stateId, contextFor(workflowsDir, context)).documents[stateId];
+    if (document === undefined) return { error: `it compiles to no state called '${stateId}'` };
+    return { text: `${JSON.stringify(document, null, 2)}\n` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
 /** Whether every file a compile read still reads the same. */
 function isCurrent(compiled: CompiledScript, vfs: Vfs): boolean {
   for (const [file, hash] of Object.entries(compiled.generated.inputs)) {

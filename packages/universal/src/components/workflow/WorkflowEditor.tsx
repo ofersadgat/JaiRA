@@ -574,6 +574,8 @@ export function WorkflowEditor({
   };
 
   const body = (): ReactNode => {
+    // A workflow script that does not compile has no document to show, on any tab.
+    if (source.script?.error !== undefined) return <Reason flexShrink={0}>This script does not compile ({source.script.error}) — fix it in the script to see its configuration.</Reason>;
     if (e.comparing) {
       if (e.shippedText === null) return <Empty>{e.compareError ?? "reading what ships…"}</Empty>;
       return <IslandBand min={140}>{(height) => <Island component="diff" height={height} props={{ original: e.shippedText, modified: e.text, mime: WORKFLOW_JSON, sideBySide: true, readOnly: true }} />}</IslandBand>;
@@ -790,6 +792,9 @@ export function WorkflowEditor({
             <LayerBar model={layerBarOf(source, layerActions?.hasProject === true, e.copyOnEdit)} busy={busy} comparing={e.comparing} onAction={e.onLayerAction} />
             <SegTabs tabs={tabs} value={tab} words={TAB_WORDS} titles={TAB_TITLES} onPick={e.setTab} />
           </View>
+          {source.script !== undefined && source.script.error === undefined ? (
+            <Sub flexShrink={0}>the state this script compiles to — change it in the script</Sub>
+          ) : null}
           {body()}
           {!savesOf(readOnly, e.shipped) ? null : (
             <EditorActions

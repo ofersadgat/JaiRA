@@ -45,7 +45,8 @@ import type { Project } from "./project";
 import { workflowLayerDirs } from "./fileLayers";
 import { boardPathOf, breadcrumbOf, endedAtOf, headingOf, projectBoard, type TaskProjection, type WorkflowShape } from "./projection";
 import { isStateFile } from "./snapshots";
-import { isWorkflowScript } from "./workflowScripts";
+import { isScriptFile, isWorkflowScript, scriptStateText } from "./workflowScripts";
+import { scriptContextOf } from "./userModules";
 import { workflowShape } from "./shape";
 import { bundleFor, taskRun, taskSummaries, type ViewOptions } from "./views";
 
@@ -967,6 +968,11 @@ export function effectiveState(
     if (entry === undefined) return undefined;
     const file = join(entry.root, entry.file);
     if (!existsSync(file)) return undefined;
+    // A workflow script's configuration is the document it compiles to for the state it is, not its code.
+    if (isScriptFile(entry.file)) {
+      const compiled = scriptStateText(file, stateId, entry.root, scriptContextOf(project.paths));
+      return { stateId, layer: entry.layer, file, text: compiled.text ?? "", exists: true, script: compiled.error !== undefined ? { error: compiled.error } : {} };
+    }
     return { stateId, layer: entry.layer, file, text: readFileSync(file, "utf8"), exists: true };
   })();
 

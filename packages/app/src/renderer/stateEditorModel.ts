@@ -166,8 +166,13 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
    * Not when Shared already has a copy: that copy is the one that loads, and editing the built-in
    * would write a second one over it. The bar says to open the copy instead.
    */
-  const copyOnEdit = shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
-  const readOnly = input.outerReadOnly || (shipped && !copyOnEdit);
+  /**
+   * A workflow SCRIPT's configuration is the document its code compiles to (`WorkflowSource.script`):
+   * a reading always, because a form cannot write back into code — the script is changed as code.
+   */
+  const scripted = source.script !== undefined;
+  const copyOnEdit = !scripted && shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
+  const readOnly = input.outerReadOnly || scripted || (shipped && !copyOnEdit);
   /** The newest text while the copy is being written, and whether it has been asked for. */
   const copying = useRef<{ file: string; text: string } | null>(null);
   /** Redraws the form while the copy is being written — the text lives in the ref above. */
@@ -463,7 +468,9 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
 
 /** The file's name in the top bar: a shipped file as a reference names it, and whether it is new. */
 export function editorPathOf(source: WorkflowSource, shipped: boolean): string {
-  return `${shipped ? `$SYSTEM/workflows/${source.stateId}.json` : source.file}${source.exists ? "" : " · new file"}`;
+  // A script is named as the script it is (`session.ts`), not as the state file it compiles to.
+  const suffix = source.script !== undefined ? (/\.[^./\\]+$/.exec(source.file)?.[0] ?? ".ts") : ".json";
+  return `${shipped ? `$SYSTEM/workflows/${source.stateId}${suffix}` : source.file}${source.exists ? "" : " · new file"}`;
 }
 
 /** Whether the editor offers Save: not in a reading, and never for what ships. */

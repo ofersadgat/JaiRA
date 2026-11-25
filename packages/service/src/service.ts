@@ -235,6 +235,9 @@ import {
   makeThrowawayWorkspace,
   prepareOverlayModules,
   removeThrowawayWorkspace,
+  isScriptFile,
+  scriptContextOf,
+  scriptStateText,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -14257,8 +14260,24 @@ export class AppService {
   readWorkflow(request: ReadWorkflowRequest): WorkflowSource {
     const file = this.workflowFile(request.stateId, request.layer, request.project);
     const exists = existsSync(file);
-    const text = exists ? readFileSync(file, "utf8") : "";
     const builtIn = exists ? this.builtInStanding(request.stateId, request.project) : undefined;
+    // A workflow SCRIPT is read as the document it compiles to for the state it is — what its
+    // Configuration shows (the person, 2026-11-24: "it should be showing the configuration of the top
+    // level state") — not as its code, which the form would refuse as JSON.
+    if (request.compiled === true && exists && isScriptFile(file)) {
+      const paths = this.sessionOf(request.project)?.project.paths;
+      const compiled = scriptStateText(file, request.stateId, this.layerWorkflowsDir(request.layer, request.project), paths !== undefined ? scriptContextOf(paths) : undefined);
+      return {
+        stateId: request.stateId,
+        layer: request.layer,
+        file,
+        text: compiled.text ?? "",
+        exists,
+        ...(builtIn !== undefined ? { builtIn } : {}),
+        script: compiled.error !== undefined ? { error: compiled.error } : {},
+      };
+    }
+    const text = exists ? readFileSync(file, "utf8") : "";
     return {
       stateId: request.stateId,
       layer: request.layer,
