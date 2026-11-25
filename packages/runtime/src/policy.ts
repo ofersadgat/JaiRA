@@ -39,7 +39,7 @@
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict, ToolGate } from "@declarative-ai/permissions";
-import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
+import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type EnvironmentLookup, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
 import { blockNowOf, REVEALS, RESOURCE_JUDGES, type ResourceVerdict } from "./resourceJudges";
 import { MachineFactsCache, type MachineFactsSource, type MachineReading } from "./machineFacts";
@@ -557,6 +557,12 @@ export interface DecideCommandOptions {
    * a part names and every `cd` before it is resolved. Absent, words are taken as written.
    */
   expand?: ((word: string) => string) | undefined;
+  /**
+   * The environment the line runs in (decision 0007 §4, amended 2026-11-25): what a variable the line
+   * does not set itself is read through — `& $env:X …`, `"$HOME/x"`, `%TEMP%` — so its parts are judged
+   * on what runs. Absent, only the line's own assignments are read through.
+   */
+  env?: EnvironmentLookup | undefined;
   /**
    * The line is started to KEEP RUNNING (decision 0032, ruling 1): the call says `run_in_background:
    * true` — JaiRA's `shell`, or Claude's own `Bash` (the person's ruling 6, "same line"). Beside its
@@ -1087,7 +1093,7 @@ function backgroundPart(started: ReadonlyArray<{ command?: ParsedCommand; where:
  * (`CommandPart.where`).
  */
 export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix", options: DecideCommandOptions = {}): CommandDecision {
-  const taken = takeApart(line, dialect);
+  const taken = takeApart(line, dialect, [], options.env !== undefined ? { env: options.env } : {});
   const parts: CommandPart[] = [];
   const commands: Array<ParsedCommand | undefined> = [];
   let findRoots: string[] = ["."];
@@ -1239,6 +1245,8 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     parts,
     verdict,
     ...(taken.reason !== undefined ? { unparsed: taken.reason } : {}),
+    // What the parts were read through: the dialog draws each row with the values in place.
+    ...(taken.variables !== undefined ? { variables: taken.variables } : {}),
     ...(options.permissionSet !== undefined && options.permissionSetSource !== undefined ? { permissionSet: options.permissionSetSource } : {}),
     ...(options.permissionSet !== undefined && options.stack !== undefined ? { stack: approvalStackOf(options.stack, options.grants !== undefined) } : {}),
   });
@@ -1327,7 +1335,13 @@ export interface CompilePolicyOptions {
    * The task's shell, read as each `shell` call is judged (decision 0030, ruling 7): the directory a line
    * starts in when the call names none, and how a word's `~` and `$VARS` expand there.
    */
-  shellAt?: () => { cwd?: string | undefined; expand?: ((word: string) => string) | undefined } | undefined;
+  shellAt?: () => { cwd?: string | undefined; expand?: ((word: string) => string) | undefined; env?: EnvironmentLookup | undefined } | undefined;
+  /**
+   * The environment an agent's OWN shell tool (Claude's `Bash`, `PowerShell`) runs its lines in — what a
+   * variable such a line does not set is read through (decision 0007 §4, amended 2026-11-25). Absent, or
+   * `undefined` where the values are not this engine's (WSL, a container), only the line's own are.
+   */
+  agentEnv?: () => EnvironmentLookup | undefined;
   /**
    * The configured MCP servers — what each server's tools COUNT AS among the standard tools (decision
    * 0019, ruling 5), so a mapped tool's call is judged by that tool's line too. Absent ⇒ none is mapped.
@@ -1521,9 +1535,13 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     const shell = tool === SHELL_SUBJECT || tool.endsWith("__shell") ? options.shellAt?.() : undefined;
     const own = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
     const cwd = own ?? shell?.cwd;
+    // What a variable the line does not set is read through: for an agent's own shell tool (its dialect
+    // noted against the call), the environment the agent was started with; else the task shell's.
+    const env = callDialectOf(input, tool) !== undefined ? options.agentEnv?.() : shell?.env;
     const decideUnder = (judging: { permissionSet: ShellPermissionSet; source: string; stack?: PermissionStackDecl } | undefined): CommandDecision =>
       decideCommand(policy, commandOf(input) ?? "", callDialectOf(input, tool) ?? dialect, {
         ...(shell?.expand !== undefined ? { expand: shell.expand } : {}),
+        ...(env !== undefined ? { env } : {}),
         permissionSet: judging?.permissionSet,
         permissionSetSource: judging?.source,
         stack: judging?.stack,

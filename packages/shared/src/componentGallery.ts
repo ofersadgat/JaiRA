@@ -639,6 +639,8 @@ export const GALLERY_VARIANT_ORDER: readonly string[] = [
   "function",
   // A shell line judged under a stack of sets, its rows answered one by one (decision 0023 ruling 7).
   "layers",
+  // A shell line read through the variables it sets, its rows drawn as they run (decision 0007 §4, 2026-11-25).
+  "variables",
   "input",
   "empty",
 ];
@@ -1134,6 +1136,51 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             ],
           },
           input: { command: "rm foo.txt && git commit -m wip" },
+        },
+      },
+      {
+        id: "variables",
+        title: "Read through its variables",
+        note: "`& $e` runs what the line set `$e` to, so the part is judged as msedge, not as a program decided at run time. The line stays as written; each row is the part as it runs, the value standing where its reference was — highlighted in both places, and underlined where the entry matched it. Point at either to see what it stands for.",
+        sample: {
+          tool: "PowerShell",
+          command: String.raw`$d="$env:TEMP\shots"; $e="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; & $e --headless --screenshot="$d\home.png" http://127.0.0.1:8142/; dir $d`,
+          parts: {
+            line: String.raw`$d="$env:TEMP\shots"; $e="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; & $e --headless --screenshot="$d\home.png" http://127.0.0.1:8142/; dir $d`,
+            dialect: "powershell",
+            verdict: "asks",
+            permissionSet: "inline",
+            parts: [
+              {
+                span: { start: 91, end: 154 },
+                matched: [{ start: 91, end: 93 }],
+                text: String.raw`$e --headless --screenshot="$d\home.png" http://127.0.0.1:8142/`,
+                kind: "command",
+                subject: "msedge",
+                verdict: "asks",
+                decidedBy: { source: "permissionSet", entry: "shell", reason: "the permission set's 'shell' is ask" },
+                widths: ["msedge"],
+              },
+              {
+                span: { start: 156, end: 162 },
+                matched: [{ start: 156, end: 159 }],
+                text: "dir $d",
+                kind: "tool",
+                subject: "glob",
+                paths: [String.raw`C:\Users\me\AppData\Local\Temp\shots`],
+                verdict: "allowed",
+                decidedBy: { source: "permissionSet", entry: "glob", reason: "the permission set's 'glob' is allow" },
+                widths: ["get-childitem"],
+              },
+            ],
+            variables: [
+              { span: { start: 4, end: 13 }, name: "$env:TEMP", value: String.raw`C:\Users\me\AppData\Local\Temp` },
+              { span: { start: 91, end: 93 }, name: "$e", value: String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe` },
+              { span: { start: 119, end: 121 }, name: "$d", value: String.raw`C:\Users\me\AppData\Local\Temp\shots` },
+              { span: { start: 160, end: 162 }, name: "$d", value: String.raw`C:\Users\me\AppData\Local\Temp\shots` },
+            ],
+          },
+          input: { command: String.raw`$d="$env:TEMP\shots"; $e="C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"; & $e --headless --screenshot="$d\home.png" http://127.0.0.1:8142/; dir $d` },
         },
       },
       {

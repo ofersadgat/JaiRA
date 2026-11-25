@@ -29,11 +29,17 @@
 import type { TextSpan } from "./commandParts";
 import type { ShellRequest } from "./shellCommand";
 import { POWERSHELL_PURE_METHODS, POWERSHELL_PURE_STATICS, isHarmlessVariable } from "./shellTables";
+import type { VariableScope } from "./shellVariables";
 import type { ShellToken, ShellWalk } from "./shellWords";
 
 export interface PowerShellHooks {
   /** One command's words, taken apart as any argv is: embedders opened, runners marked. */
   argv(words: ShellToken[], via: string[], depth: number): ShellWalk;
+  /**
+   * What this text's variables are read through (`shellVariables.ts`): `$e` after `$e = "…"`, and
+   * `$env:TEMP`. Absent, every variable is decided when the line runs.
+   */
+  scope?: VariableScope;
 }
 
 /** A line PowerShell would refuse to parse. */
@@ -556,6 +562,15 @@ class Parser {
       add(this.quoted());
       return token();
     }
+    if (c === "$") {
+      // `& $e …` after `$e = "…"`: the word is the value — unless a member or an index of it is taken.
+      const ref = this.certainAt(this.i);
+      if (ref !== undefined && !this.memberAt(ref.end)) {
+        add(this.readThrough(this.i, ref));
+        this.i = ref.end;
+        return token();
+      }
+    }
     if (c === "$" && this.dollar()) {
       this.postfix(from);
       dynamic = true;
@@ -586,6 +601,12 @@ class Parser {
       }
       if (ch === "$") {
         const k = this.i;
+        const ref = this.certainAt(k);
+        if (ref !== undefined) {
+          add(this.readThrough(k, ref));
+          this.i = ref.end;
+          continue;
+        }
         if (this.dollar()) {
           dynamic = true;
           keep(k, this.i);
@@ -600,6 +621,109 @@ class Parser {
   }
 
   // --- values --------------------------------------------------------------------------------
+
+  // --- variables read through -----------------------------------------------------------------
+
+  /**
+   * A plain variable reference at `j` — `$e`, `${e}`, `$env:TEMP` — whose value the scope makes certain
+   * here (`shellVariables.ts`): where it ends, and the value. Nothing is consumed or recorded.
+   */
+  private certainAt(j: number): { end: number; value: string } | undefined {
+    const scope = this.hooks.scope;
+    if (scope === undefined || this.text[j] !== "$") return undefined;
+    let name: string;
+    let end: number;
+    if (this.text[j + 1] === "{") {
+      const close = this.text.indexOf("}", j + 2);
+      if (close < 0) return undefined;
+      name = this.text.slice(j + 2, close);
+      if (name.includes("`")) return undefined;
+      end = close + 1;
+    } else {
+      const m = /^[A-Za-z0-9_]+(?::[A-Za-z0-9_]+)?/.exec(this.text.slice(j + 1, j + 258));
+      if (m === null) return undefined;
+      name = m[0];
+      end = j + 1 + m[0].length;
+    }
+    const value = scope.value(name);
+    return value === undefined ? undefined : { end, value };
+  }
+
+  /** Whether a member or an index of the value before `k` is taken (`$e.Length`, `$e[0]`, `$e::X`). */
+  private memberAt(k: number): boolean {
+    const c = this.text[k];
+    return c === "[" || (c === ":" && this.text[k + 1] === ":") || (c === "." && /[A-Za-z_"'$\u2018\u2019\u201c\u201d]/.test(this.text[k + 1] ?? ""));
+  }
+
+  /** The reference at `j` as its value, each character mapped into the reference — and recorded. */
+  private readThrough(j: number, ref: { end: number; value: string }): Piece {
+    const map: number[] = [];
+    for (let k = 0; k < ref.value.length; k++) map.push(this.at(j + Math.min(k, ref.end - j - 1)));
+    this.hooks.scope?.record({ span: this.span(j, ref.end), name: this.text.slice(j, ref.end), value: ref.value });
+    return { value: ref.value, map, dynamic: false };
+  }
+
+  /**
+   * The value `from`…`to` is, when it is a literal: a quoted string whose references are all certain,
+   * or a certain reference alone. A bare word is no literal in PowerShell — `$e = C:\x.exe` runs it.
+   */
+  private literalAt(from: number, to: number): string | undefined {
+    let end = to;
+    while (end > from && (isBlank(this.text[end - 1]) || this.text[end - 1] === "\n" || this.text[end - 1] === ";")) end--;
+    const c = this.text[from];
+    if (isSingleQuote(c)) {
+      const saved = this.i;
+      this.i = from;
+      try {
+        const piece = this.single();
+        return this.i === end ? piece.value : undefined;
+      } catch (error) {
+        if (error instanceof Syntax) return undefined;
+        throw error;
+      } finally {
+        this.i = saved;
+      }
+    }
+    if (isDoubleQuote(c)) {
+      let value = "";
+      let j = from + 1;
+      for (;;) {
+        const ch = this.text[j];
+        if (ch === undefined) return undefined;
+        if (isDoubleQuote(ch)) {
+          if (!isDoubleQuote(this.text[j + 1])) break;
+          value += '"';
+          j += 2;
+          continue;
+        }
+        if (ch === "`") {
+          const n = this.text[j + 1];
+          if (n === undefined) return undefined;
+          value += ESCAPES[n] ?? n;
+          j += 2;
+          continue;
+        }
+        if (ch === "$") {
+          const ref = this.certainAt(j);
+          if (ref !== undefined) {
+            value += ref.value;
+            j = ref.end;
+            continue;
+          }
+          // A `$` that names nothing is a character; one that does is decided when the line runs.
+          if (/^[A-Za-z0-9_{(?^$:]/.test(this.text[j + 1] ?? "")) return undefined;
+        }
+        value += ch;
+        j++;
+      }
+      return j + 1 === end ? value : undefined;
+    }
+    if (c === "$") {
+      const ref = this.certainAt(from);
+      return ref !== undefined && ref.end === end ? ref.value : undefined;
+    }
+    return undefined;
+  }
 
   /** `$( … )` or a variable at `this.i`: past it, and true; false (and nowhere) for a `$` that is a character. */
   private dollar(): boolean {
@@ -879,6 +1003,13 @@ class Parser {
       return j + 2;
     }
     if (c === "$") {
+      const ref = this.certainAt(j);
+      if (ref !== undefined) {
+        const read = this.readThrough(j, ref);
+        piece.value += read.value;
+        piece.map.push(...read.map);
+        return ref.end;
+      }
       const saved = this.i;
       this.i = j;
       if (this.dollar()) {
@@ -933,10 +1064,18 @@ class Parser {
 
   /** `target = statement`: the target judged, then the statement taken apart. */
   private assignment(from: number, op: { from: number; to: number }): void {
-    for (const [a, b] of targetsOf(this.text, from, op.from)) this.target(a, b);
+    const targets = targetsOf(this.text, from, op.from);
+    for (const [a, b] of targets) this.target(a, b);
     this.i = op.to;
     this.lines();
+    const valueFrom = this.i;
+    // At the top of the text, `$e = "…"` is straight-line: what `$e` is from here on (`shellVariables.ts`).
+    const top = this.marks.length === 0;
     this.statement();
+    if (!top || targets.length !== 1 || this.text.slice(op.from, op.to).trim() !== "=") return;
+    const own = /^\$(?:\{([^}:`]*)\}|([A-Za-z0-9_]+))$/.exec(this.text.slice(targets[0]![0], targets[0]![1]));
+    const value = own === null ? undefined : this.literalAt(valueFrom, this.i);
+    if (own !== null && value !== undefined) this.hooks.scope?.assign(own[1] ?? own[2]!, value);
   }
 
   /**

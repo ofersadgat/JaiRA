@@ -73,6 +73,7 @@ export * from "./mcp";
 export * from "./permissionSetBuckets";
 export * from "./commandParts";
 export * from "./shellCommand";
+export * from "./shellVariables";
 export * from "./terminals";
 export * from "./processes";
 export * from "./shellTables";

@@ -125,7 +125,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, initial
       {drawn ? (
         <>
           <Artifact t={t} testID="approval-command">
-            {lineSegments(approval.line, approval.parts).map((segment, at) =>
+            {lineSegments(approval.line, approval.parts, approval.variables).map((segment, at) =>
               segment.kind === "glue" ? (
                 <Text key={at} color={t.v("tok-hint") as never}>
                   {segment.text}
@@ -379,25 +379,41 @@ function Artifact({ t, testID, children }: { t: Tokens; testID: string; children
   );
 }
 
-/** A part's words, the ones its permission-set line matched underlined in its hue. */
+/**
+ * A part's words, the ones its permission-set line matched underlined in its hue. A variable read
+ * through is highlighted — the hue at 30%, its reference and its value alike — and says, pointed at,
+ * what it stands for: on the line `$e = C:\…\msedge.exe`, in a row `C:\…\msedge.exe ← $e`.
+ */
 function Pieces({ t, pieces, hue }: { t: Tokens; pieces: readonly Piece[]; hue: string }): JSX.Element {
   return (
     <>
-      {pieces.map((piece, at) =>
-        piece.matched ? (
-          <Text
-            key={at}
-            fontWeight="600"
-            {...((isWeb
-              ? { boxShadow: `inset 0 -2px 0 ${t.mix(hue, 75, "transparent")}` }
-              : { textDecorationLine: "underline", textDecorationColor: t.mix(hue, 75, "transparent") }) as object)}
-          >
+      {pieces.map((piece, at) => {
+        const variable = piece.variable;
+        if (!piece.matched && variable === undefined) return <Fragment key={at}>{piece.text}</Fragment>;
+        const underline = piece.matched
+          ? isWeb
+            ? { boxShadow: `inset 0 -2px 0 ${t.mix(hue, 75, "transparent")}` }
+            : { textDecorationLine: "underline", textDecorationColor: t.mix(hue, 75, "transparent") }
+          : {};
+        const highlight =
+          variable !== undefined
+            ? {
+                backgroundColor: t.mix(hue, 30, "transparent"),
+                ...(isWeb
+                  ? {
+                      borderRadius: 3,
+                      title: piece.text === variable.name ? `${variable.name} = ${variable.value}` : `${variable.value} ← ${variable.name}`,
+                      style: { boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone", outline: `1px dashed ${t.mix(hue, 70, "transparent")}`, outlineOffset: -1 },
+                    }
+                  : {}),
+              }
+            : {};
+        return (
+          <Text key={at} {...(piece.matched ? { fontWeight: "600" } : {})} {...(underline as object)} {...(highlight as object)}>
             {piece.text}
           </Text>
-        ) : (
-          <Fragment key={at}>{piece.text}</Fragment>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }

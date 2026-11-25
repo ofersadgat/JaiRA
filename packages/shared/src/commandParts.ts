@@ -22,6 +22,21 @@ export interface TextSpan {
   end: number;
 }
 
+/**
+ * A variable reference the line was read THROUGH (decision 0007 §4, amended 2026-11-25): `$e`,
+ * `${HOME}`, `$env:TEMP`, `%TEMP%`, whose value the line itself or its environment makes certain where
+ * it is read. Its parts are judged on the value; the approval draws the line as written and each part's
+ * row as it runs, the value standing where the reference was.
+ */
+export interface ResolvedVariable {
+  /** The reference in the original line. */
+  span: TextSpan;
+  /** The reference as written (`$e`, `$env:TEMP`, `%TEMP%`). */
+  name: string;
+  /** What it stands for. */
+  value: string;
+}
+
 /** What a part is a request for. */
 export type CommandPartKind =
   /** A file utility, judged as the standard tool on its path (`cat` → `read_file`). */
@@ -164,6 +179,11 @@ export interface CommandApproval {
   verdict: CommandPartVerdict;
   /** Why the line (or a payload inside it) could not be taken apart. */
   unparsed?: string;
+  /**
+   * The variable references the parts were judged through, in source order — where a row draws the
+   * value instead of the reference. Absent when none was resolved.
+   */
+  variables?: ResolvedVariable[];
   /**
    * Which permission set judged the line, when one did: the REFERENCE the asking state names it by
    * (`$/permission-sets/feature/implementation/writes-asking`), or {@link INLINE_PERMISSION_SET} when the map is

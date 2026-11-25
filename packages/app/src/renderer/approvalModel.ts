@@ -45,6 +45,7 @@ import {
   type PendingApproval,
   type TextSpan,
   type PermissionSetAddition,
+  type ResolvedVariable,
   type WritableSetLayer,
 } from "@jaira/shared/browser";
 
@@ -60,6 +61,12 @@ export function hueOf(index: number): string {
 export interface Piece {
   text: string;
   matched: boolean;
+  /**
+   * The variable reference this stretch is (decision 0007 §4, amended 2026-11-25): on the line, the
+   * reference as written; in a row, the value standing where it was. Both are drawn highlighted, so a
+   * row's value is traced back to its reference by colour, underline and highlight.
+   */
+  variable?: ResolvedVariable;
 }
 
 export type LineSegment =
@@ -71,12 +78,23 @@ export type LineSegment =
 const clamp = (span: TextSpan, length: number): TextSpan => ({ start: Math.max(0, Math.min(span.start, length)), end: Math.max(0, Math.min(span.end, length)) });
 const covers = (span: TextSpan, at: number): boolean => at >= span.start && at < span.end;
 
-/** The line as tinted stretches and glue. Spans outside the line, empty or reversed, are ignored. */
-export function lineSegments(line: string, parts: ReadonlyArray<Pick<CommandPart, "span" | "matched">>): LineSegment[] {
+/** Adds `text` to `pieces`, joining the last piece when it is drawn the same way and is no variable's. */
+function extend(pieces: Piece[], text: string, matched: boolean, variable?: ResolvedVariable): void {
+  const last = pieces.at(-1);
+  if (variable === undefined && last !== undefined && last.variable === undefined && last.matched === matched) last.text += text;
+  else pieces.push({ text, matched, ...(variable !== undefined ? { variable } : {}) });
+}
+
+/**
+ * The line as tinted stretches and glue. Spans outside the line, empty or reversed, are ignored. Each
+ * of `variables` — the references the parts were read through — is a piece of its own, as written.
+ */
+export function lineSegments(line: string, parts: ReadonlyArray<Pick<CommandPart, "span" | "matched">>, variables: readonly ResolvedVariable[] = []): LineSegment[] {
   const spans = parts.map((part) => clamp(part.span, line.length));
   const size = (index: number): number => spans[index]!.end - spans[index]!.start;
   const owner: Array<number | undefined> = [];
   const matched: boolean[] = [];
+  const reference: Array<ResolvedVariable | undefined> = [];
   for (let at = 0; at < line.length; at++) {
     let own: number | undefined;
     spans.forEach((span, index) => {
@@ -86,6 +104,7 @@ export function lineSegments(line: string, parts: ReadonlyArray<Pick<CommandPart
     });
     owner.push(own);
     matched.push(own !== undefined && parts[own]!.matched.some((m) => covers(clamp(m, line.length), at)));
+    reference.push(variables.find((variable) => covers(clamp(variable.span, line.length), at)));
   }
   const out: LineSegment[] = [];
   for (let at = 0; at < line.length; at++) {
@@ -97,28 +116,39 @@ export function lineSegments(line: string, parts: ReadonlyArray<Pick<CommandPart
       else out.push({ kind: "glue", text: char });
       continue;
     }
+    const variable = reference[at];
     if (last?.kind === "part" && last.part === own) {
       const piece = last.pieces.at(-1)!;
-      if (piece.matched === matched[at]) piece.text += char;
-      else last.pieces.push({ text: char, matched: matched[at]! });
+      // A reference's characters stay one piece; the next reference, or the words after it, start another.
+      if (variable !== undefined && piece.variable === variable) piece.text += char;
+      else extend(last.pieces, char, matched[at]!, variable);
       continue;
     }
-    out.push({ kind: "part", part: own, pieces: [{ text: char, matched: matched[at]! }] });
+    out.push({ kind: "part", part: own, pieces: [{ text: char, matched: matched[at]!, ...(variable !== undefined ? { variable } : {}) }] });
   }
   return out;
 }
 
-/** One part's own words, with the same underline the line gives them. */
-export function partPieces(line: string, part: CommandPart): Piece[] {
+/**
+ * One part's own words, with the same underline the line gives them — as it RUNS: each of `variables`
+ * inside it drawn as its value, where the reference was, under the reference's underline.
+ */
+export function partPieces(line: string, part: CommandPart, variables: readonly ResolvedVariable[] = []): Piece[] {
   const span = clamp(part.span, line.length);
   const text = span.end > span.start ? line.slice(span.start, span.end) : part.text;
   if (text !== part.text && part.text.length > 0) return [{ text: part.text, matched: false }];
+  const inside = span.end > span.start ? variables.filter((v) => v.span.start >= span.start && v.span.end <= span.end && v.span.end > v.span.start) : [];
   const pieces: Piece[] = [];
-  for (let at = 0; at < text.length; at++) {
+  for (let at = 0; at < text.length; ) {
     const is = part.matched.some((m) => covers(m, span.start + at));
-    const last = pieces.at(-1);
-    if (last !== undefined && last.matched === is) last.text += text[at]!;
-    else pieces.push({ text: text[at]!, matched: is });
+    const variable = inside.find((v) => v.span.start === span.start + at);
+    if (variable !== undefined) {
+      extend(pieces, variable.value, is, variable);
+      at = variable.span.end - span.start;
+      continue;
+    }
+    extend(pieces, text[at]!, is);
+    at++;
   }
   return pieces;
 }
@@ -188,7 +218,7 @@ export function partRows(approval: CommandApproval): PartRow[] {
     return {
       index,
       hue: hueOf(index),
-      pieces: repeats ? [{ text: "what it runs", matched: false }] : partPieces(approval.line, part),
+      pieces: repeats ? [{ text: "what it runs", matched: false }] : partPieces(approval.line, part, approval.variables),
       subject: fellThrough(part) ? entry! : part.subject,
       ...(notes.length > 0 ? { note: notes.join(" · ") } : {}),
       verdict: part.verdict,

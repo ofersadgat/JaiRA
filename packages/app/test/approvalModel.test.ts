@@ -568,3 +568,29 @@ describe("a Where choice too long for its chip", () => {
     expect(middleOut("abcdefghij", 7)).toBe("ab…ghij");
   });
 });
+
+describe("a line read through its variables (decision 0007 §4, amended 2026-11-25)", () => {
+  const EDGE = String.raw`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`;
+  const line = String.raw`$d="$env:TEMP\tdshots"; $e="${EDGE}"; foreach($n in 1..6){ & $e --headless --screenshot="$d\d$n.png" "http://127.0.0.1:8142/?hero=$n" 2>$null | Out-Null }; dir $d`;
+  const env = (name: string): string | undefined => (name.toLowerCase() === "temp" ? String.raw`C:\Temp` : undefined);
+  const approval = decideCommand({}, line, "powershell", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "ask" }).permissionSet), permissionSetSource: "inline", env }).parts;
+
+  /** A row's pieces as a string: `{value}` a variable's value, `_…_` underlined. */
+  const drawn = (pieces: readonly { text: string; matched: boolean; variable?: unknown }[]): string =>
+    pieces.map((p) => (p.variable !== undefined ? `{${p.matched ? `_${p.text}_` : p.text}}` : p.matched ? `_${p.text}_` : p.text)).join("");
+
+  it("judges the part on what runs, and says so in its row", () => {
+    const row = partRows(approval).find((r) => r.pieces.some((p) => p.text === EDGE))!;
+    expect(row.subject).toBe("shell"); // no line names msedge: the fallback answers for it
+    expect(drawn(row.pieces)).toBe(String.raw`{_${EDGE}_} --headless --screenshot="{C:\Temp\tdshots}\d$n.png" "http://127.0.0.1:8142/?hero=$n"`);
+    expect(partRows(approval).find((r) => r.subject === "glob")!.pieces.map((p) => p.text).join("")).toBe(String.raw`dir C:\Temp\tdshots`);
+  });
+
+  it("draws the line as written, each reference read through a piece of its own", () => {
+    const pieces = lineSegments(approval.line, approval.parts, approval.variables).flatMap((s) => (s.kind === "part" ? s.pieces : []));
+    const references = pieces.filter((p) => p.variable !== undefined).map((p) => `${p.text}=${p.variable!.value}`);
+    expect(references).toEqual([`$e=${EDGE}`, String.raw`$d=C:\Temp\tdshots`, String.raw`$d=C:\Temp\tdshots`]);
+    // The reference is underlined on the line where its value is in the row: the program the entry matched.
+    expect(pieces.find((p) => p.text === "$e")!.matched).toBe(true);
+  });
+});

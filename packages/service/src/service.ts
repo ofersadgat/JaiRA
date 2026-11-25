@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import { ancestorsOf, COMPONENT_NAMES, CUT_OFF_EVENT, drawnInsideParent, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
+import { ancestorsOf, COMPONENT_NAMES, CUT_OFF_EVENT, drawnInsideParent, environmentLookupOf, MOVE_EVENTS, type ChoiceQuestion, type EnvironmentLookup, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -7287,6 +7287,8 @@ export class AppService {
     this.dropRecoveredAsks(open, (r) => r.taskId === taskId);
     if (opts.loaded !== undefined) {
       open.grantsRestored.delete(taskId);
+        // An agent's own shell tool reads its `$env:X` in the environment the agent was started with.
+        agentEnv: () => this.agentEnvAt(config.execEnvironment),
       this.restoreGrants(open, taskId);
     }
     // Which state each instance is, so a permission function is told the state its call belongs to —
@@ -8851,7 +8853,7 @@ export class AppService {
    * an emulated command starts with. In WSL or a container the values are not this engine's, so nothing
    * expands.
    */
-  private shellAt(taskId: string, execEnv: JairaConfigOf["execEnvironment"]): { cwd?: string; expand?: (word: string) => string } | undefined {
+  private shellAt(taskId: string, execEnv: JairaConfigOf["execEnvironment"]): { cwd?: string; expand?: (word: string) => string; env?: EnvironmentLookup } | undefined {
     const session = this.shells.peek(taskId);
     const native = !isWslEnv(execEnv) && !isContainerEnv(execEnv);
     const env: Record<string, string | undefined> | undefined = session?.live?.alive === true ? (session.env ?? process.env) : native ? process.env : undefined;
@@ -8886,9 +8888,19 @@ export class AppService {
       }
     }
   }
+      // What a line's variables are read through when it does not set them (decision 0007 §4, amended 2026-11-25).
+      ...(env !== undefined ? { env: environmentLookupOf(env, process.platform === "win32") } : {}),
 
   /** How a permission set reference is followed in this project — the reader a state's `tools` is followed with. */
   private permissionSetReaderOf(paths: JairaPaths): PermissionSetReader {
+  /**
+   * The environment an agent's own shell tool (Claude's `Bash`, `PowerShell`) runs its lines in: the one
+   * this engine started the agent with. In WSL or a container it is not this engine's, so nothing is read.
+   */
+  private agentEnvAt(execEnv: JairaConfigOf["execEnvironment"]): EnvironmentLookup | undefined {
+    return !isWslEnv(execEnv) && !isContainerEnv(execEnv) ? environmentLookupOf(process.env, process.platform === "win32") : undefined;
+  }
+
     return permissionSetReader(workflowLoadOptions(paths, { tolerant: true }));
   }
 

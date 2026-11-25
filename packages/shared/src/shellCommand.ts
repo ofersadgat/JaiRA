@@ -24,8 +24,9 @@
  * treats that as "ask", never as "allow".
  */
 import { isCommandRunner } from "./commandRunners";
-import type { TextSpan } from "./commandParts";
+import type { ResolvedVariable, TextSpan } from "./commandParts";
 import { walkPowerShell } from "./powershellCommand";
+import { VariableScope, type EnvironmentLookup } from "./shellVariables";
 import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
 import type { ShellToken as Token, ShellWalk as Walk } from "./shellWords";
 
@@ -168,7 +169,29 @@ export interface ParseResult {
 export interface TakenApart extends ParseResult {
   /** Commands, redirects and unmodellable pieces, in source order. */
   requests: ShellRequest[];
+  /** The variable references the requests were read through (`shellVariables.ts`), in source order. */
+  variables?: ResolvedVariable[];
 }
+
+export interface TakeApartOptions {
+  /**
+   * The environment the line runs in: what an environment variable the line does not set is read
+   * through (`$env:TEMP`, `$HOME`, `%TEMP%`). Absent, only the line's own assignments are.
+   */
+  env?: EnvironmentLookup;
+}
+
+/**
+ * The walk under way, for the texts it opens: the environment, the scope of each text it is inside
+ * (innermost last), and every reference read through. Set by {@link takeApart} for its own call and
+ * restored after it — taking apart is synchronous, so no other walk can see it.
+ */
+interface Resolution {
+  env?: EnvironmentLookup;
+  scopes: VariableScope[];
+  resolved: ResolvedVariable[];
+}
+let resolution: Resolution | undefined;
 
 const POSIX_SEPARATORS = new Set(["&&", "||", ";", ";;", "|", "|&", "&", "\n", "(", ")"]);
 /** cmd: `&` runs one command after another, and `;` is no separator at all. */
@@ -238,7 +261,7 @@ function closeOfParen(text: string, from: number): number {
  * offsets when this text is the inside of `sh -c "…"` — so every span comes out in the line the
  * person will be shown.
  */
-function tokenize(text: string, map: readonly number[] | undefined, dialect: "posix" | "cmd"): Tokenized {
+function tokenize(text: string, map: readonly number[] | undefined, dialect: "posix" | "cmd", scope?: VariableScope): Tokenized {
   const posix = dialect === "posix";
   const at = (i: number): number => (map === undefined ? i : i < map.length ? map[i]! : (map[map.length - 1] ?? -1) + 1);
   const endAt = (j: number): number => (j > 0 ? at(j - 1) + 1 : at(0));
@@ -265,6 +288,64 @@ function tokenize(text: string, map: readonly number[] | undefined, dialect: "po
     begin(i);
     value += c;
     valueMap.push(at(i));
+  };
+
+  /**
+   * A `$NAME`, `${NAME}` (POSIX) or `%NAME%` (cmd) at `i` whose value the scope makes certain and that
+   * stays one word where it stands: its value goes into the word in its place, each character mapped
+   * into the reference, and the reference is recorded. Returns the index just past it, or -1.
+   */
+  const readThrough = (i: number, quoted: boolean): number => {
+    if (scope === undefined) return -1;
+    const m = posix ? /^\$(?:\{([A-Za-z_][A-Za-z0-9_]*)\}|([A-Za-z_][A-Za-z0-9_]*))/.exec(text.slice(i, i + 258)) : /^%([A-Za-z_][^%\s:=~]*)%/.exec(text.slice(i, i + 258));
+    if (m === null) return -1;
+    const name = m[1] ?? m[2]!;
+    const resolved = scope.value(name);
+    if (resolved === undefined || !scope.fits(resolved, quoted)) return -1;
+    const end = i + m[0].length;
+    begin(i);
+    for (let k = 0; k < resolved.length; k++) {
+      value += resolved[k];
+      valueMap.push(at(i + Math.min(k, m[0].length - 1)));
+    }
+    scope.record({ span: { start: at(i), end: endAt(end) }, name: m[0], value: resolved });
+    return end;
+  };
+
+  // The statement being read, for the assignments a POSIX text keeps (`E=/usr/bin/x; $E`): where it
+  // began among the tokens, whether it began the text or followed `;` or a newline, and how deep the
+  // control structures and parentheses around it are.
+  let statementFrom = 0;
+  let straight = true;
+  let nesting = 0;
+  let lost = false;
+  /** The statement ends at `separator` (undefined: at the end of the text). */
+  const settle = (separator: string | undefined): void => {
+    const words = tokens.slice(statementFrom);
+    if (posix && scope !== undefined && straight && !lost && nesting === 0 && (separator === undefined || separator === ";" || separator === "\n") && words.length > 0 && words.every((t) => t.type === "word")) {
+      const assigns = words[0]!.value === "export" ? words.slice(1) : words;
+      const pairs = assigns.map((t) => (t.dynamic === true ? null : /^([A-Za-z_][A-Za-z0-9_]*)=([^]*)$/.exec(t.value)));
+      // `~` expands in an assignment: its value is not what is written.
+      if (assigns.length > 0 && pairs.every((p) => p !== null && !p[2]!.includes("~"))) for (const p of pairs) scope.assign(p![1]!, p![2]!);
+    }
+    // What the statement opens and closes, by its leading keywords.
+    for (const word of words) {
+      if (word.type !== "word") break;
+      const w = word.value;
+      if (w === "if" || w === "while" || w === "until" || w === "for" || w === "select" || w === "{") nesting++;
+      else if (w === "fi" || w === "done" || w === "}") nesting--;
+      else if (w === "case" || w === "esac") lost = true;
+      else if (w !== "then" && w !== "do" && w !== "else" && w !== "elif" && w !== "!") break;
+    }
+    if (separator === "(") nesting++;
+    else if (separator === ")") nesting--;
+    straight = separator === ";" || separator === "\n";
+  };
+  /** A separator: the statement before it settled, and the next one begun after it. */
+  const separate = (op_: string, from: number, to: number): void => {
+    settle(op_);
+    op("op", op_, from, to);
+    statementFrom = tokens.length;
   };
   const push = (end: number): void => {
     if (value.length > 0 || had) {
@@ -349,7 +430,14 @@ function tokenize(text: string, map: readonly number[] | undefined, dialect: "po
           j = end;
           continue;
         }
-        if (posix ? q === "$" : cmdExpands(text, j)) dynamic = true;
+        if (posix ? q === "$" : cmdExpands(text, j)) {
+          const past = readThrough(j, true);
+          if (past >= 0) {
+            j = past - 1;
+            continue;
+          }
+          dynamic = true;
+        }
         add(q, j);
       }
       if (j >= text.length) return { tokens: [], subs: [], unparsed: "unterminated quote" };
@@ -384,7 +472,7 @@ function tokenize(text: string, map: readonly number[] | undefined, dialect: "po
     }
     if (c === "\n") {
       push(i);
-      op("op", "\n", i, i + 1);
+      separate("\n", i, i + 1);
       // The bodies of the here-documents opened on this line: data, not commands.
       while (pendingHeredocs.length > 0) {
         const doc = pendingHeredocs.shift()!;
@@ -488,20 +576,28 @@ function tokenize(text: string, map: readonly number[] | undefined, dialect: "po
     const two = text.slice(i, i + 2);
     if (two === "&&" || two === "||" || (posix && (two === ";;" || two === "|&"))) {
       push(i);
-      op("op", two, i, i + 2);
+      separate(two, i, i + 2);
       i++;
       continue;
     }
     if ((posix && c === ";") || c === "|" || c === "(" || c === ")" || c === "&") {
       push(i);
-      op("op", c, i, i + 1);
+      separate(c, i, i + 1);
       continue;
     }
-    if (posix ? c === "$" && /[A-Za-z_{@*#?!0-9$-]/.test(next ?? "") : cmdExpands(text, i)) dynamic = true;
+    if (posix ? c === "$" && /[A-Za-z_{@*#?!0-9$-]/.test(next ?? "") : cmdExpands(text, i)) {
+      const past = readThrough(i, false);
+      if (past >= 0) {
+        i = past - 1;
+        continue;
+      }
+      dynamic = true;
+    }
     add(c, i);
   }
   if (pendingHeredocs.length > 0) return { tokens: [], subs: [], unparsed: "unterminated here-document" };
   push(text.length);
+  settle(undefined);
   return { tokens, subs };
 }
 
@@ -1042,8 +1138,20 @@ function walk(text: string, map: readonly number[] | undefined, dialect: Command
     return { start: first, end: last };
   };
   if (depth > MAX_DEPTH) return { requests: [{ kind: "unparsed", span: spanOf(), reason: "nested too deeply to follow" }], unparsed: "nested too deeply to follow" };
-  if (dialect === "powershell") return walkPowerShell(text, map, via, depth, { argv: (words, inner, at) => argv(words, "powershell", inner, at) });
-  const tokenized = tokenize(text, map, dialect);
+  // This text's variables, read through as the walk goes; a payload it opens gets a scope of its own.
+  const reading = resolution ?? { scopes: [], resolved: [] };
+  const scope = new VariableScope(dialect, text, reading.scopes.at(-1), reading.env, reading.resolved);
+  reading.scopes.push(scope);
+  try {
+    return walkText(text, map, dialect, via, depth, scope, spanOf);
+  } finally {
+    reading.scopes.pop();
+  }
+}
+
+function walkText(text: string, map: readonly number[] | undefined, dialect: CommandDialect, via: string[], depth: number, scope: VariableScope, spanOf: () => TextSpan): Walk {
+  if (dialect === "powershell") return walkPowerShell(text, map, via, depth, { argv: (words, inner, at) => argv(words, "powershell", inner, at), scope });
+  const tokenized = tokenize(text, map, dialect, scope);
   if (tokenized.unparsed !== undefined) {
     // At the top the LINE is unparsed and holds nothing; inside a payload the piece is, and the
     // rest of the line is still judged — a deny beside it must stay a deny.
@@ -1077,17 +1185,42 @@ function walk(text: string, map: readonly number[] | undefined, dialect: Command
  * inside the line is unreadable, `unparsed` is still true and the piece is a request
  * of kind `unparsed`, beside everything that could be read.
  */
-export function takeApart(line: string, dialect: CommandDialect = "posix", via: string[] = []): TakenApart {
-  const walked = walk(line, undefined, dialect, via, 0);
+export function takeApart(line: string, dialect: CommandDialect = "posix", via: string[] = [], options: TakeApartOptions = {}): TakenApart {
+  const outer = resolution;
+  const reading: Resolution = { ...(options.env !== undefined ? { env: options.env } : {}), scopes: [], resolved: [] };
+  resolution = reading;
+  let walked: Walk;
+  try {
+    walked = walk(line, undefined, dialect, via, 0);
+  } finally {
+    resolution = outer;
+  }
   const requests = [...walked.requests].sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
   // An opened runner that was never a request of its own is the gate's, not a command rules match on.
   const commands = requests.flatMap((r) => (r.kind === "command" && (r.opened === undefined || r.opened.kept) ? [r.command] : []));
+  const variables = requests.length > 0 ? outermost(reading.resolved) : [];
   return {
     requests,
     commands,
     unparsed: walked.unparsed !== undefined,
     ...(walked.unparsed !== undefined ? { reason: walked.unparsed } : {}),
+    ...(variables.length > 0 ? { variables } : {}),
   };
+}
+
+/**
+ * The references read through, once each and in source order — one a payload read again inside
+ * another's value (`sh -c "$X"`) is drawn as the outer one.
+ */
+function outermost(resolved: readonly ResolvedVariable[]): ResolvedVariable[] {
+  const sorted = [...resolved].sort((a, b) => a.span.start - b.span.start || b.span.end - a.span.end);
+  const out: ResolvedVariable[] = [];
+  for (const variable of sorted) {
+    const last = out.at(-1);
+    if (last !== undefined && variable.span.start < last.span.end) continue;
+    out.push(variable);
+  }
+  return out;
 }
 
 /** {@link takeApart}, as the commands alone — what rules and built-ins match on. */
