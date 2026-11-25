@@ -302,6 +302,15 @@ export class ProjectSession {
   /** requestId → taskId, for a request whose registration could not name one. */
   readonly requestTask = new Map<string, string>();
   /**
+   * taskId → when the person last answered something it asked: a gate, an approval or a question. An
+   * answer is a turn of the task's like a message is, but moves neither its row nor its newest reply
+   * (the call it answered is still open), so it is kept here for the ring round the project's tile,
+   * which counts work from the newest turn in its tree (`listProjects`; the person, 2026-11-24:
+   * "answering the question should have at least reset the time"). In memory, like {@link requestTask}:
+   * a run resumed after a restart starts a new turn of its own.
+   */
+  readonly answeredAt = new Map<string, number>();
+  /**
    * The waits for a message that give up after an idle stretch — `input({ idle })` (decision 0029 §6) —
    * by request id: each answers its wait `{ idle: true }` when the stretch since it first asked is over.
    */

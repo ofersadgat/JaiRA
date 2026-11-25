@@ -474,7 +474,10 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
 
     // Answered, the lesson ends, and the conversation is idle again — its last reply's status.
     const gate = service.pendingInteractions().find((p) => p.taskId === child.taskId && p.component === "choose_option")!;
+    const before = Date.now();
     service.submitInteraction(gate.requestId, { decision: "discard" });
+    // The answer is a turn of the lesson's, which the ring round the project counts work from.
+    expect((service as unknown as { session(): { answeredAt: Map<string, number> } }).session().answeredAt.get(child.taskId)).toBeGreaterThanOrEqual(before);
     await eventually(() => finished(child.taskId), "the lesson to finish", 20_000);
     await eventually(() => service.listTasks().find((t) => t.taskId === taskId)?.status === "completed", "the conversation to read as idle", 20_000);
     expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ waiting: 0 });
@@ -489,7 +492,7 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
 
   // The person, 2026-11-24: "the state of a nested task affecting the color of the parent task ring".
   it("leaves a task waiting while a task under it is interrupted, and working while one runs, whatever its own row says", () => {
-    const { project } = (service as unknown as { session(): { project: Project } }).session();
+    const { project, answeredAt } = (service as unknown as { session(): { project: Project; answeredAt: Map<string, number> } }).session();
     const parent = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "hi", improve: false } });
     const child = service.createTask({ title: "Review", workflow: "improve/conversation", inputs: { context: { task: parent.taskId } } });
     project.tasks.write({ ...project.tasks.read(child.taskId)!, origin: { kind: "started", taskId: parent.taskId } } as Parameters<typeof project.tasks.write>[0]);
@@ -501,6 +504,10 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
     expect(summary().waiting).toBe(1);
     project.runtime.setStatus(child.taskId, "running", 3000);
     expect(summary().live).toContainEqual({ taskId: parent.taskId, kind: "running", since: 3000 });
+    // Answered, the work under it counts from the answer: the newest turn in its tree (the person,
+    // 2026-11-24: "answering the question should have at least reset the time").
+    answeredAt.set(child.taskId, 3500);
+    expect(summary().live).toContainEqual({ taskId: parent.taskId, kind: "running", since: 3500 });
     project.runtime.setStatus(child.taskId, "completed", 4000);
     expect(summary().live?.some((t) => t.taskId === parent.taskId)).toBe(false);
     expect(summary().waiting).toBe(0);

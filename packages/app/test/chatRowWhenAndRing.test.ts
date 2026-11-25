@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { TaskSummary } from "@jaira/shared/browser";
 import { arrangeConversations, controlsOf, whenOf } from "../src/renderer/chatListModel";
-import { chatsRingItems } from "../src/renderer/ringModel";
+import { chatRingItems, chatsRingItems, workedAtOf } from "../src/renderer/ringModel";
 
 const chat = (patch: Partial<TaskSummary> & Pick<TaskSummary, "taskId">): TaskSummary =>
   ({ title: patch.taskId, status: "completed", workflow: "session", createdAt: new Date(1_000).toISOString(), updatedAt: 2_000, ...patch }) as TaskSummary;
@@ -60,5 +60,28 @@ describe("All chats' ring", () => {
 
   it("is empty when nothing is going on and everything is read", () => {
     expect(chatsRingItems([chat({ taskId: "read", updatedAt: 1_500 })], { seen: { read: 2_000 }, producing: {}, asked: {}, live: {} })).toEqual([]);
+  });
+});
+
+// The person, 2026-11-24: "answering the question should have at least reset the time", then "the
+// conversation ring should work the same way" as the project's.
+describe("a conversation's ring, while it works", () => {
+  const facts = { seen: {}, producing: {} };
+
+  it("counts from the newest turn in its tree: its own message, or what moved under it", () => {
+    expect(chatRingItems(chat({ taskId: "c", status: "running", updatedAt: 1_000, lastMessageAt: 2_000 }), facts)).toEqual([{ kind: "running", since: 2_000 }]);
+    expect(chatRingItems(chat({ taskId: "c", status: "running", updatedAt: 1_000, lastMessageAt: 2_000, childAt: 5_000 }), facts)).toEqual([{ kind: "running", since: 5_000 }]);
+  });
+
+  it("counts from the person's answer, which only the engine knows of", () => {
+    const projects = [{ live: [{ taskId: "c", kind: "running" as const, since: 7_000 }, { taskId: "w", kind: "waiting" as const, since: 3_000 }] }];
+    expect(workedAtOf(projects)).toEqual({ c: 7_000 });
+    const task = chat({ taskId: "c", status: "running", updatedAt: 1_000, lastMessageAt: 2_000 });
+    expect(chatRingItems(task, { ...facts, live: "running", workedAt: workedAtOf(projects).c })).toEqual([{ kind: "running", since: 7_000 }]);
+    expect(chatsRingItems([task], { ...facts, asked: {}, live: { c: "running" }, worked: workedAtOf(projects) })).toEqual([{ kind: "running", since: 7_000 }]);
+  });
+
+  it("keeps a newer message this window heard before the engine's next summary", () => {
+    expect(chatRingItems(chat({ taskId: "c", status: "running", lastMessageAt: 9_000 }), { ...facts, workedAt: 7_000 })).toEqual([{ kind: "running", since: 9_000 }]);
   });
 });

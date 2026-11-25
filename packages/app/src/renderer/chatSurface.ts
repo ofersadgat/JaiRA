@@ -7,7 +7,7 @@ import type { CallView } from "./callRenderers";
 import { askOfTask } from "./approvalCall";
 import { chatProjectOf, conversationStartOf, type ConversationStart } from "./chatWorkflow";
 import { parkedGateOf } from "./panelHost";
-import { askedAtOf } from "./ringModel";
+import { askedAtOf, workedAtOf } from "./ringModel";
 import { liveKindsOf } from "./pillModel";
 import type {
   ApprovalScope,
@@ -113,6 +113,8 @@ export interface ChatSurface {
   asked: Readonly<Record<string, number>>;
   /** What the engine says each live conversation is doing, itself or through a task it started (`ProjectSummary.live`). */
   liveKinds?: Readonly<Record<string, "running" | "waiting">> | undefined;
+  /** When each working conversation's work counts from — the newest turn in its tree, by the engine (`workedAtOf`). */
+  workedAt?: Readonly<Record<string, number>> | undefined;
   /** How far each conversation has been read — see `JairaUiState.seen`. */
   seen: Readonly<Record<string, number>>;
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
@@ -259,6 +261,7 @@ export function chatSurfaceOf(
     unplaced: Object.fromEntries(state.queue.map((q) => [q.taskId, q.phase])),
     asked: askedAtOf([...state.approvals, ...state.questions], state.projects),
     liveKinds: Object.fromEntries(liveKindsOf(state.projects)),
+    workedAt: workedAtOf(state.projects),
     seen: state.settings.ui.seen,
     onSeen: actions.markSeen,
     onOpen: actions.openConversation,

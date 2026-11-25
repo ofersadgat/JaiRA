@@ -1353,8 +1353,9 @@ export interface ProjectSummary {
 
 /**
  * One task working or parked on a person (see {@link ProjectSummary.live}). `since` is when it was
- * asked — the earliest open approval or question — for a parked one, and otherwise the task row's
- * clock, which is also what a gate without a clock of its own counts from.
+ * asked — the earliest open approval or question — for a parked one (a gate without a clock of its own
+ * counts from the task row's), and for a working one the newest turn anywhere in its tree: its row, its
+ * newest reply, what moved under it, or the person's last answer to it or to a task under it.
  */
 export interface LiveTask {
   taskId: string;

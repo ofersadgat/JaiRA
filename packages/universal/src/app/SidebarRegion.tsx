@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { hueOf, liveKindsOf } from "@jaira/ui/pillModel";
-import { askedAtOf, chatsRingItems } from "@jaira/ui/ringModel";
+import { askedAtOf, chatsRingItems, workedAtOf } from "@jaira/ui/ringModel";
 import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebarTypes";
 import type { View as AppView } from "@jaira/ui/store";
@@ -127,6 +127,7 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         producing: state.producing,
         asked: askedAtOf([...state.approvals, ...state.questions], state.projects),
         live: Object.fromEntries(liveKindsOf(state.projects)),
+        worked: workedAtOf(state.projects),
       }),
     [state.allConversations, ui.seen, state.producing, state.approvals, state.questions, state.projects],
   );

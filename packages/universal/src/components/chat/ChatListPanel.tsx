@@ -37,6 +37,8 @@ export interface ChatListSurface {
   asked?: Readonly<Record<string, number>> | undefined;
   /** What each conversation is doing through the tasks under it — `ChatSurface.liveKinds`. */
   liveKinds?: Readonly<Record<string, "running" | "waiting">> | undefined;
+  /** When each working conversation's work counts from — `ChatSurface.workedAt`. */
+  workedAt?: Readonly<Record<string, number>> | undefined;
   seen: Readonly<Record<string, number>>;
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
@@ -246,8 +248,8 @@ function Row({
   const t = useTokens();
   const [hovered, hover] = useHover();
   const ring = useMemo(
-    () => chatRingItems(task, { seen: surface.seen, producing: surface.producing, askedAt: surface.asked?.[task.taskId], live: surface.liveKinds?.[task.taskId] }),
-    [task, surface.seen, surface.producing, surface.asked, surface.liveKinds],
+    () => chatRingItems(task, { seen: surface.seen, producing: surface.producing, askedAt: surface.asked?.[task.taskId], live: surface.liveKinds?.[task.taskId], workedAt: surface.workedAt?.[task.taskId] }),
+    [task, surface.seen, surface.producing, surface.asked, surface.liveKinds, surface.workedAt],
   );
   const controls = controlsOf(task);
   const fork = forkTitleOf(task);

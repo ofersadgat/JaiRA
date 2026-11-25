@@ -143,7 +143,14 @@ export function projectRingItems(summary: Pick<ProjectSummary, "ended"> & { live
  */
 export function chatRingItems(
   task: Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt" | "childAt">,
-  facts: { seen: Readonly<Record<string, number>>; producing: Readonly<Record<string, number>>; askedAt?: number | undefined; live?: "running" | "waiting" | undefined },
+  facts: {
+    seen: Readonly<Record<string, number>>;
+    producing: Readonly<Record<string, number>>;
+    askedAt?: number | undefined;
+    live?: "running" | "waiting" | undefined;
+    /** The engine's clock for its work, where it says it works: the newest turn in its tree (`workedAtOf`). */
+    workedAt?: number | undefined;
+  },
 ): RingItem[] {
   const items: RingItem[] = [];
   if (facts.askedAt !== undefined) items.push({ kind: "waiting", since: facts.askedAt });
@@ -153,7 +160,12 @@ export function chatRingItems(
   // that runs makes it work whatever its own row says (`live`, the person, 2026-11-24).
   const answering = (facts.producing[task.taskId] ?? 0) > 0 || (facts.askedAt === undefined && (task.status === "running" || facts.live === "running"));
   const clock = seenClockOf(task);
-  if (answering) items.push({ kind: "running", since: task.lastMessageAt ?? task.updatedAt });
+  // Its work counts from the newest turn in its tree, as a project's ring counts it (the person,
+  // 2026-11-24: "the conversation ring should work the same way"): its own newest message, what moved
+  // under it, and — known only to the engine, whose `live` says it — the person's last answer to it or
+  // to a task under it. The latest of them, so a reply this window has heard before the engine's next
+  // summary still counts.
+  if (answering) items.push({ kind: "running", since: Math.max(task.lastMessageAt ?? task.updatedAt, task.childAt ?? 0, facts.workedAt ?? 0) });
   else if ((facts.seen[task.taskId] ?? 0) < clock) {
     const kind = pillKindOf(task.status);
     if (kind !== null && kind !== "running" && kind !== "waiting") items.push({ kind, since: clock });
@@ -177,15 +189,33 @@ export function askedAtOf(
 }
 
 /**
+ * When each task the engine says is working counts its work from, by task id: the newest turn in its
+ * tree, the person's answers included (`LiveTask.since`) — what a conversation's ring counts from too.
+ */
+export function workedAtOf(projects: ReadonlyArray<{ live?: readonly LiveTask[] | undefined }>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const p of projects) for (const t of p.live ?? []) if (t.kind === "running") out[t.taskId] = t.since;
+  return out;
+}
+
+/**
  * What the ring round the rail's All chats holds: every conversation's own ring (`chatRingItems`) on
  * one, the way a project's tile holds its tasks (the person, 2026-11-24: "the pip in the chat menu should
  * be segmented like the project level ring").
  */
 export function chatsRingItems(
   conversations: ReadonlyArray<Pick<TaskSummary, "taskId" | "status" | "updatedAt" | "lastMessageAt" | "childAt">>,
-  facts: { seen: Readonly<Record<string, number>>; producing: Readonly<Record<string, number>>; asked: Readonly<Record<string, number>>; live: Readonly<Record<string, "running" | "waiting">> },
+  facts: {
+    seen: Readonly<Record<string, number>>;
+    producing: Readonly<Record<string, number>>;
+    asked: Readonly<Record<string, number>>;
+    live: Readonly<Record<string, "running" | "waiting">>;
+    worked?: Readonly<Record<string, number>>;
+  },
 ): RingItem[] {
-  return conversations.flatMap((task) => chatRingItems(task, { seen: facts.seen, producing: facts.producing, askedAt: facts.asked[task.taskId], live: facts.live[task.taskId] }));
+  return conversations.flatMap((task) =>
+    chatRingItems(task, { seen: facts.seen, producing: facts.producing, askedAt: facts.asked[task.taskId], live: facts.live[task.taskId], workedAt: facts.worked?.[task.taskId] }),
+  );
 }
 
 /** The project rings summed for a group of workspaces: every member's items on the one ring. */

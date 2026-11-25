@@ -2206,6 +2206,9 @@ export class AppService {
           session.project.commands.record({
             taskId: run.taskId,
             tool: request?.tool ?? "unknown",
+        // The person's answer is a turn of the task's: the ring counts its work from here.
+        const asker = run?.taskId ?? session?.approvalsSeen.get(requestId)?.taskId;
+        if (by === "person" && session !== undefined && asker !== undefined) session.answeredAt.set(asker, Date.now());
             ...(request?.command !== undefined ? { command: request.command } : {}),
             decision: decision.decision === "allow" ? "approved" : "denied",
             // Answered by the stack changing under it: the policy's, not the person's.
@@ -6287,18 +6290,30 @@ export class AppService {
       // makes every ancestor wait; one that runs makes them run, where nothing under them waits.
       // A gate carries no clock of its own, so a child parked at one is counted from its row's.
       const ancestors = ancestorsOf(tasks);
-      const childRuns = new Map<string, number>();
+      // The newest turn anywhere in a task's tree — its row, its newest reply, what moved under it, and
+      // the person's last answer to it or to a task under it: what a working task's segment counts from
+      // (the person, 2026-11-24: "the ring is supposed to represent the time since the last
+      // message/turn of the latest message in the task tree"). A row's own clock does not move when a
+      // question is answered, so counted from it, a run that was just answered read as hours old.
+      const answered = new Map<string, number>();
+      for (const task of tasks) {
+        const at = session.answeredAt.get(task.taskId);
+        if (at === undefined) continue;
+        for (const id of [task.taskId, ...(ancestors.get(task.taskId) ?? [])]) answered.set(id, Math.max(answered.get(id) ?? 0, at));
+      }
+      const newestTurn = (t: TaskSummary): number => Math.max(t.updatedAt, t.lastMessageAt ?? 0, t.childAt ?? 0, answered.get(t.taskId) ?? 0);
+      const childRuns = new Set<string>();
       for (const task of tasks) {
         const above = ancestors.get(task.taskId) ?? [];
         if (above.length === 0) continue;
         const waits = parked.has(task.taskId) || task.status === "interrupted";
         if (!waits && task.status !== "running") continue;
-        const at = waits ? (askedAt.get(task.taskId) ?? task.updatedAt) : task.updatedAt;
+        const at = askedAt.get(task.taskId) ?? task.updatedAt;
         for (const id of above) {
           if (waits) {
             parked.add(id);
             askedAt.set(id, Math.min(askedAt.get(id) ?? Infinity, at));
-          } else childRuns.set(id, Math.min(childRuns.get(id) ?? Infinity, at));
+          } else childRuns.add(id);
         }
       }
       // A child drawn only inside its parent (`drawnInsideParent`: a conversation's review, a mount's
@@ -6343,7 +6358,7 @@ export class AppService {
           .map((t) =>
             parked.has(t.taskId) || askedAt.has(t.taskId)
               ? { taskId: t.taskId, kind: "waiting" as const, since: askedAt.get(t.taskId) ?? t.updatedAt }
-              : { taskId: t.taskId, kind: "running" as const, since: t.status === "running" ? t.updatedAt : t.answering === true ? (t.lastMessageAt ?? t.updatedAt) : (childRuns.get(t.taskId) ?? t.updatedAt) },
+              : { taskId: t.taskId, kind: "running" as const, since: newestTurn(t) },
           ),
       });
     }
@@ -11732,9 +11747,12 @@ export class AppService {
    * did not travel with the list would be a card that silently refused to be picked up.
    */
   pendingUserEvents(): PendingUserEvent[] {
+    const asker = owner?.questions.list().find((r) => r.requestId === requestId)?.taskId;
     return [
       ...[...this.sessions.entries()].flatMap(([key, s]) => s.userEvents.list().map((request) => ({ ...request, project: this.refOf(key) }))),
       ...(this.federation.pendingOf("userEvent") as unknown as PendingUserEvent[]),
+    // The person's answer is a turn of the task's: the ring counts its work from here.
+    if (asker !== undefined) owner.answeredAt.set(asker, Date.now());
     ];
   }
 
@@ -11988,6 +12006,10 @@ export class AppService {
       }
       // A RECOVERED gate has no live park to hold, so a follow-up state's answer settles as it is:
       // the loop needs a run to re-park on, and the resumed run gets these answers seeded.
+    // The person's answer is a turn of the task's: the ring counts its work from here.
+    const parked = owner?.hub.list().find((r) => r.requestId === requestId);
+    const asker = parked !== undefined ? (parked.taskId ?? owner!.requestTask.get(requestId)) : undefined;
+    if (owner !== undefined && asker !== undefined) owner.answeredAt.set(asker, Date.now());
       settled = settledFollowUp(answers);
     }
     if (owner !== undefined && owner.hub.submit(requestId, settled)) return { requestId };
