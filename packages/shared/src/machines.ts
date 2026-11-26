@@ -55,6 +55,8 @@ export interface TailnetJaira {
   form?: MachineForm;
   /** The address that answered: what pairing and the connection use. */
   url: string;
+  /** It allows auto pair (decision 0022, amended 2026-11-25): a machine of the same Tailscale account pairs with it with no code. */
+  autoPair?: boolean;
 }
 
 /**
@@ -79,6 +81,10 @@ export interface TailnetDeviceView {
   olderSelf?: boolean;
   /** Its page in Tailscale's admin console. */
   consoleUrl?: string;
+  /** The Tailscale account it is signed in as (its login), when Tailscale says. */
+  user?: string;
+  /** Auto pair with it was tried lately and did not pair: why. */
+  autoPairFailed?: string;
 }
 
 /**
@@ -144,7 +150,19 @@ export interface MachinesView {
    * loopback port its engine listens on for other machines and devices, while it does — what Tailscale
    * publishes, and what `adb reverse` points an emulator at.
    */
-  self: MachineView & { tailnet: TailnetView; version: string; copy: CopyChoice; port?: number; settings?: SettingsSyncView };
+  self: MachineView & {
+    tailnet: TailnetView;
+    version: string;
+    copy: CopyChoice;
+    port?: number;
+    settings?: SettingsSyncView;
+    /**
+     * Allow auto pair (decision 0022, amended 2026-11-25): a machine on the tailnet signed in to Tailscale
+     * as the same account pairs with this one with no code, and this one pairs by itself with any such
+     * machine that allows it too.
+     */
+    autoPair: boolean;
+  };
   machines: PeerView[];
   /** The phones that hold a token for this machine. */
   devices: DeviceView[];

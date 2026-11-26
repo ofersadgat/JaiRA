@@ -32,6 +32,8 @@ export interface TailnetPeer {
   online: boolean;
   lastSeenAt?: number;
   ips: string[];
+  /** The Tailscale account it is signed in as (its login): what auto pair matches against this machine's. */
+  user?: string;
   /** Where to ask it whether JaiRA runs there; absent ⇒ the usual places on {@link dnsName}. */
   addresses?: string[];
 }
@@ -102,7 +104,8 @@ export function loopbackTailnet(peers?: () => TailnetPeer[]): TailnetPort {
       .map((address) => {
         const base = /^https?:\/\//.test(address) ? address : `http://${address}`;
         const host = base.replace(/^https?:\/\//, "");
-        return { id: base, name: `loopback-${host.split(":").pop() ?? host}`, dnsName: host, os: process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macOS" : "linux", online: true, ips: ["127.0.0.1"], addresses: [base] };
+        // Every loopback home is the one person's: signed in as the same "you" as this one.
+        return { id: base, name: `loopback-${host.split(":").pop() ?? host}`, dnsName: host, os: process.platform === "win32" ? "windows" : process.platform === "darwin" ? "macOS" : "linux", online: true, ips: ["127.0.0.1"], user: "you", addresses: [base] };
       });
   return {
     via: "helper",

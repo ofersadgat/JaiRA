@@ -2862,6 +2862,11 @@ export interface IpcContract {
   "machines:pair": { request: { device: string; code: string }; response: MachinesView };
   "machines:pairCancel": { request: void; response: MachinesView };
   /**
+   * Allow auto pair, or stop (decision 0022, amended 2026-11-25): machines on the tailnet signed in to
+   * Tailscale as the same account pair with this one with no code.
+   */
+  "machines:autoPair": { request: { on: boolean }; response: MachinesView };
+  /**
    * Pair a phone (decision 0013, amended 2026-10-04): show a one-time code, and announce this machine to
    * phones on the local network while it shows; or stop showing it.
    */
@@ -3188,6 +3193,7 @@ export const IPC_CHANNELS = [
   "machines:pairAsk",
   "machines:pair",
   "machines:pairCancel",
+  "machines:autoPair",
   "machines:pairCode",
   "machines:pairCodeCancel",
   "machines:refuse",

@@ -12,6 +12,7 @@ import {
   FORM_CHOICES,
   MACHINES_WORDS as W,
   askingWords,
+  autoPairWords,
   checkedWords,
   diskWords,
   errorOf,
@@ -407,8 +408,32 @@ function YourMachines({ view, onView }: { view: MachinesView; onView: (v: Machin
       ) : (
         rows.map((row) => <DeviceRow key={row.key} row={row} onView={onView} picked={row.machine !== undefined && named?.id === row.machine} onPick={row.machine !== undefined ? () => pick(row) : undefined} />)
       )}
+      <AutoPair view={view} onView={onView} />
       <PairPhone view={view} onView={onView} />
     </SettingsSection>
+  );
+}
+
+/**
+ * Allow auto pair (decision 0022, amended 2026-11-25): machines signed in to Tailscale as the same account
+ * pair with this one with no code, and this one pairs by itself with those that allow it too.
+ */
+function AutoPair({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const turn = (on: boolean): void => {
+    setBusy(true);
+    setError(undefined);
+    invoke("machines:autoPair", { on })
+      .then(onView, (e: unknown) => setError(isOlderEngine(e) ? `${view.self.label} runs an older JaiRA, which has no auto pair: update it first` : errorOf(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <SettingsRow
+      name={W.autoPair.name}
+      description={error !== undefined ? <Words parts={[autoPairWords(view), " ", { error: sentence(error) }]} /> : autoPairWords(view)}
+      control={<Switch on={view.self.autoPair === true} label={W.autoPair.name} disabled={busy} onChange={turn} />}
+    />
   );
 }
 

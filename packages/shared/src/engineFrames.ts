@@ -77,7 +77,16 @@ export type ClientFrame =
   | { t: "pair-ask"; machine: PeerMachine }
   | { t: "pair-ask"; device: PairingDevice; os?: "android" | "ios" }
   /** The asker gave up: stop showing the code. */
-  | { t: "pair-cancel"; id: string };
+  | { t: "pair-cancel"; id: string }
+  /**
+   * Auto pair (decision 0022, amended 2026-11-25): pair with no code, which a machine that allows auto
+   * pair takes from a device on its tailnet signed in to Tailscale as the same account. Before answering
+   * it asks the asker back, at the tailnet address the asker says it is published at, to confirm `nonce`
+   * (`pair-auto-check`): so the asker is that device, not something claiming its address.
+   */
+  | { t: "pair-auto"; machine: PeerMachine; token: string; nonce: string }
+  /** Did you ask `machine` to auto pair, with this nonce? Answered `ok` with the asker's id, or refused. */
+  | { t: "pair-auto-check"; machine: PeerMachine; nonce: string };
 
 /** Host → client. */
 export type HostFrame =
@@ -95,8 +104,8 @@ export type HostFrame =
   | { t: "paired"; machine: PeerMachine; token: string; fleet: PeerMachine[] }
   /** A code is showing on this machine now, until `expiresAt`. */
   | { t: "asked"; expiresAt: number }
-  /** `pair-cancel` heard. */
-  | { t: "ok" };
+  /** `pair-cancel` heard; `pair-auto-check` confirmed, by the machine `id`. */
+  | { t: "ok"; id?: string };
 
 // --- the protocol ---------------------------------------------------------------------------------------
 

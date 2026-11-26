@@ -36,6 +36,8 @@ export interface NetworkListener {
 export interface NetworkListenerOptions {
   host: EngineHost;
   identity: () => MachineIdentity;
+  /** This machine allows auto pair (decision 0022, amended 2026-11-25): said at `/.well-known/jaira`. */
+  autoPair?: () => boolean;
   version: string;
   /** Default {@link NETWORK_PORT}; taken, any free port is used and said. */
   port?: number;
@@ -79,7 +81,7 @@ export async function listenNetwork(options: NetworkListenerOptions): Promise<Ne
     if (request.method === "GET" && request.url === "/.well-known/jaira") {
       const identity = options.identity();
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, protocol: ENGINE_PROTOCOL }));
+      response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, protocol: ENGINE_PROTOCOL, ...(options.autoPair?.() === true ? { autoPair: true } : {}) }));
       return;
     }
     const artifact = request.method === "GET" ? /^\/artifact\/([0-9a-f]{32})(\/[^?#]*)?/.exec(request.url ?? "") : null;

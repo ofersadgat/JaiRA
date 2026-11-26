@@ -226,6 +226,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
       net = await listenNetwork({
         host: claimed,
         identity: () => service.fleet.identity(),
+        autoPair: () => service.fleet.allowsAutoPair(),
         version: options.version,
         artifacts: { served: (token, path) => service.servedArtifact(token, path), blob: (id) => service.servedBlob(id) },
         ...(options.network.port !== undefined ? { port: options.network.port } : {}),

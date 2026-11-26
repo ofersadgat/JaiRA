@@ -5,11 +5,11 @@
  */
 import { describe, expect, it } from "vitest";
 import type { MachinesView, TailnetView } from "@jaira/shared";
-import { checkedWords, machineRowsOf, settingsSyncWords, tailnetWords } from "../src/renderer/machinesModel";
+import { autoPairWords, checkedWords, machineRowsOf, settingsSyncWords, tailnetWords } from "../src/renderer/machinesModel";
 
 function view(tailnet: TailnetView, more: Partial<MachinesView> = {}): MachinesView {
   return {
-    self: { id: "me", label: "desk", os: "windows", form: "desktop", tags: [], tailnet, version: "0.1.0", copy: { mode: "nothing" } },
+    self: { id: "me", label: "desk", os: "windows", form: "desktop", tags: [], tailnet, version: "0.1.0", copy: { mode: "nothing" }, autoPair: false },
     machines: [],
     devices: [],
     tailnetDevices: [],
@@ -87,8 +87,8 @@ describe("the machine list", () => {
       ["nas", "Linux", "offline", null],
     ]);
     expect(rows.find((r) => r.name === "studio")).toMatchObject({ face: { shape: "server", mark: "linux", dot: "on" }, asking: 1 });
-    expect(rows.find((r) => r.name === "build-box")).toMatchObject({ grey: true, face: { shape: "auto", mark: "linux", dot: "on" }, sub: "Start JaiRA there, then Refresh." });
-    expect(rows.find((r) => r.name === "pixel")).toMatchObject({ face: { shape: "phone", mark: "android" }, sub: "Open JaiRA there and sign in to Tailscale, then Refresh." });
+    expect(rows.find((r) => r.name === "build-box")).toMatchObject({ grey: true, face: { shape: "auto", mark: "linux", dot: "on" }, sub: "Start JaiRA there: it is listed within a minute." });
+    expect(rows.find((r) => r.name === "pixel")).toMatchObject({ face: { shape: "phone", mark: "android" }, sub: "Open JaiRA there and sign in to Tailscale: it is listed within a minute." });
     expect(rows.find((r) => r.name === "jaira-desk-1")).toMatchObject({ sub: "An older registration of this machine.", action: { kind: "console", href: "https://login.tailscale.com/admin/machines/100.64.0.6" } });
     expect(rows.find((r) => r.name === "old-box")?.sub).toMatch(/Not on your tailnet now\.$/);
   });
@@ -99,6 +99,29 @@ describe("the machine list", () => {
       ["this machine", undefined],
       ["mac-mini", "paired · offline"],
     ]);
+  });
+
+  it("says what Pair does with a machine that allows auto pair, and why auto pair did not pair", () => {
+    const studio = (more: Partial<MachinesView["tailnetDevices"][number]>, autoPair = true): MachinesView["tailnetDevices"][number] => ({
+      ...devices[1]!,
+      jaira: { ...devices[1]!.jaira!, ...(autoPair ? { autoPair: true } : {}) },
+      ...more,
+    });
+    const subOf = (d: MachinesView["tailnetDevices"][number], selfAuto = false): string | undefined => {
+      const v = view(ON, { tailnetDevices: [d] });
+      return machineRowsOf({ ...v, self: { ...v.self, autoPair: selfAuto } }).find((r) => r.name === "studio")?.sub;
+    };
+    expect(subOf(studio({ user: "me@example.com" }, false))).toBeUndefined();
+    expect(subOf(studio({ user: "ME@example.com" }))).toBe("Allows auto pair: Pair pairs it with no code.");
+    expect(subOf(studio({ user: "me@example.com" }), true)).toBe("Allows auto pair: pairing with this machine by itself.");
+    expect(subOf(studio({ user: "them@example.com" }))).toBe("Allows auto pair, but is signed in to Tailscale as them@example.com: Pair asks for a code.");
+    expect(subOf(studio({ user: "me@example.com", autoPairFailed: "studio is signed in to Tailscale as another account" }))).toBe("Auto pair did not pair: studio is signed in to Tailscale as another account.");
+  });
+
+  it("says what Allow auto pair does, on and off", () => {
+    const v = view(ON);
+    expect(autoPairWords(v)).toBe("Pairing takes a code shown on the other machine. On, your machines signed in to Tailscale as me@example.com pair with this one with no code.");
+    expect(autoPairWords({ ...v, self: { ...v.self, autoPair: true } })).toMatch(/^Your machines signed in to Tailscale as me@example\.com pair with this one with no code, .* A machine you unpair is not paired again by itself\.$/);
   });
 
   it("lists a paired phone with Unpair", () => {

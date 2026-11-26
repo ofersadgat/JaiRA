@@ -20,8 +20,16 @@
  *   itself on the local network (`lanPairing.ts`), so a phone on the same Wi-Fi lists it and pairs by
  *   typing the code — proved by a code exchange, never sent — then joins the tailnet with Tailscale built
  *   in, its sign-in page opened here.
+ * - **Found by itself** (decision 0022, amended 2026-11-25). The tailnet's devices are asked again every
+ *   minute, so a JaiRA started on one is listed without Refresh.
+ * - **Auto pair** (the same amendment). A machine that allows it pairs with no code with a machine on the
+ *   tailnet signed in to Tailscale as the same account: the asker sends `pair-auto`, and the asked checks
+ *   the asker's tailnet device is that account's, then asks it back at that device's tailnet address to
+ *   confirm the nonce before trading tokens. Two that both allow it pair by themselves once they find
+ *   each other, the one with the smaller id asking. A machine unpaired by hand is never auto paired again:
+ *   it pairs again only by a code.
  */
-import { randomInt } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, sep } from "node:path";
@@ -53,6 +61,10 @@ interface FleetFile {
   url?: string;
   /** What it was on the tailnet, kept while signed out: still registered as this. */
   tailnet?: { node?: string; tailnet?: string; user?: string; consoleUrl?: string; removing?: boolean };
+  /** Allow auto pair: machines of the same Tailscale account pair with this one with no code. */
+  autoPair?: boolean;
+  /** Machines unpaired by hand (here, or by any member of the group): never auto paired again, only by a code. */
+  declined?: string[];
 }
 
 /** Where tokens this machine HOLDS for others are kept: the keychain, or a 0600 file where there is none. */
@@ -79,6 +91,8 @@ export interface FleetOptions {
    * what is not archived, a `jaira serve` with no window nothing (ruling 7).
    */
   copyByDefault?: CopyChoice["mode"];
+  /** Tests: how often the tailnet's devices are asked again ({@link RESCAN_MS}). */
+  rescanMs?: number;
   /** Tests: how long the first retry waits. */
   retryMs?: number;
   /** Tests: how long the first try to come back onto the tailnet waits, after Tailscale went down. */
@@ -115,6 +129,12 @@ export const TAILNET_HEALTH = "tailnet";
 /** After Tailscale went down, how long the first try to come back waits, and the longest any waits. */
 const TAILNET_RETRY_MS = 15_000;
 const TAILNET_RETRY_MAX_MS = 10 * 60_000;
+/** How often the tailnet's devices are asked again whether JaiRA runs there, without Refresh. */
+const RESCAN_MS = 60_000;
+/** After auto pair with a device did not pair, how long until it is tried again by itself. */
+const AUTO_RETRY_MS = 2 * 60_000;
+/** How long the asker of an auto pair waits to be asked back. */
+const AUTO_NONCE_MS = 60_000;
 
 const secretName = (machineId: string): string => `jaira.machine.${machineId}`;
 
@@ -147,6 +167,14 @@ export class Fleet {
   private readonly probes = new Map<string, { at: number; jaira?: TailnetJaira; none?: true }>();
   private readonly probing = new Set<string>();
   private checkedAt: number | undefined;
+  /** Asking the tailnet's devices again, every {@link RESCAN_MS}. */
+  private rescan: ReturnType<typeof setInterval> | undefined;
+  /** Auto pairs this machine asked for, by the asked machine's id: the nonce it will be asked back about. */
+  private readonly autoAsking = new Map<string, { nonce: string; expiresAt: number }>();
+  /** Auto pairs under way, by the asked machine's id. */
+  private readonly autoPairing = new Set<string>();
+  /** Auto pairs that did not pair, by tailnet device: why, and when. */
+  private readonly autoFailed = new Map<string, { reason: string; at: number }>();
   private loopbackPort: number | undefined;
   private host: EngineHost | undefined;
   private stopped = false;
@@ -169,6 +197,8 @@ export class Fleet {
         ...(raw.reachable === true ? { reachable: true } : {}),
         ...(typeof raw.url === "string" ? { url: raw.url } : {}),
         ...(typeof raw.tailnet === "object" && raw.tailnet !== null ? { tailnet: raw.tailnet } : {}),
+        ...(raw.autoPair === true ? { autoPair: true } : {}),
+        ...(Array.isArray(raw.declined) ? { declined: raw.declined.filter((d): d is string => typeof d === "string") } : {}),
       };
     } catch {
       return { machines: [] };
@@ -266,7 +296,186 @@ export class Fleet {
     const before = file.machines.find((m) => m.id === machine.id);
     const next: KnownMachine = { ...(before ?? { addedAt: Date.now() }), ...machine, ...patch } as KnownMachine;
     file.machines = [...file.machines.filter((m) => m.id !== machine.id), next];
+    // Paired again — by a code, Pair, or an introduction — so no longer a machine unpaired by hand.
+    if (file.declined?.includes(machine.id) === true) file.declined = file.declined.filter((d) => d !== machine.id);
     this.write(file);
+  }
+
+  /** Unpaired by hand: not auto paired again until Pair is pressed for it. */
+  private decline(machineId: string): void {
+    const file = this.read();
+    if (file.declined?.includes(machineId) === true) return;
+    this.write({ ...file, declined: [...(file.declined ?? []), machineId].slice(-200) });
+  }
+
+  // --- auto pair --------------------------------------------------------------------------------------
+
+  /** This machine allows auto pair. */
+  allowsAutoPair(): boolean {
+    return this.read().autoPair === true;
+  }
+
+  /** Allow auto pair, or stop. Allowed, it pairs now with the machines that allow it too. */
+  setAutoPair(on: boolean): MachinesView {
+    const file = this.read();
+    const { autoPair: _was, ...rest } = file;
+    this.write(on ? { ...rest, autoPair: true } : rest);
+    this.options.log?.("info", on ? "auto pair allowed: machines signed in to Tailscale as you pair with this one with no code" : "auto pair stopped: pairing takes a code again");
+    if (on) {
+      this.autoFailed.clear();
+      void this.autoPairFound();
+    }
+    this.changed();
+    return this.view();
+  }
+
+  /** Whether a tailnet device is signed in to Tailscale as the account this machine is. */
+  private sameAccount(device: { user?: string } | undefined): boolean {
+    const mine = this.tailnetState.user;
+    return device?.user !== undefined && mine !== undefined && device.user.toLowerCase() === mine.toLowerCase();
+  }
+
+  /** The tailnet device published at an engine URL: by its host, port and all, else its name. */
+  private deviceAt(engineUrl: string): TailnetPeer | undefined {
+    let host: string;
+    try {
+      host = new URL(engineUrl).host.toLowerCase();
+    } catch {
+      return undefined;
+    }
+    const name = host.replace(/:\d+$/, "");
+    return this.peersSeen.find((p) => p.dnsName.toLowerCase() === host) ?? this.peersSeen.find((p) => p.dnsName.toLowerCase() === name);
+  }
+
+  /**
+   * The online tailnet device published at an engine URL, the devices asked for again when it is not among
+   * them: a machine that just came onto the tailnet may find this one before this one has heard of it.
+   */
+  private async awaitDevice(engineUrl: string, ms = 5000): Promise<TailnetPeer | undefined> {
+    const now = (): TailnetPeer | undefined => {
+      const device = this.deviceAt(engineUrl);
+      return device?.online === true ? device : undefined;
+    };
+    if (now() !== undefined) return now();
+    try {
+      this.port().devices();
+    } catch {
+      return undefined;
+    }
+    for (const end = Date.now() + ms; Date.now() < end; ) {
+      await new Promise((r) => setTimeout(r, 100));
+      if (now() !== undefined) return now();
+    }
+    return this.deviceAt(engineUrl);
+  }
+
+  /**
+   * Pair by itself with every machine found that allows auto pair, when this one does too: signed in to
+   * Tailscale as the same account, not paired yet, not unpaired by hand, and — so that two never ask each
+   * other at once — with a larger id than this one's.
+   */
+  private async autoPairFound(): Promise<void> {
+    if (this.stopped || !this.allowsAutoPair() || this.tailnetState.state !== "on") return;
+    const me = this.identity().id;
+    const file = this.read();
+    const known = new Set(file.machines.map((m) => m.id));
+    const declined = new Set(file.declined ?? []);
+    const now = Date.now();
+    for (const device of this.peersSeen) {
+      const jaira = this.probes.get(device.id)?.jaira;
+      if (!device.online || jaira?.kind !== "machine" || jaira.autoPair !== true || !this.sameAccount(device)) continue;
+      if (jaira.id === me || known.has(jaira.id) || declined.has(jaira.id) || this.autoPairing.has(jaira.id) || jaira.id < me) continue;
+      const failed = this.autoFailed.get(device.id);
+      if (failed !== undefined && now - failed.at < AUTO_RETRY_MS) continue;
+      try {
+        await this.pairAuto(device.id);
+        this.options.log?.("info", `paired with ${jaira.label} by itself: both allow auto pair`);
+      } catch (e) {
+        this.options.log?.("warn", `could not auto pair with ${jaira.label}: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  /** Auto pair with a device: no code, the asked machine checking this one is its own account's. */
+  private async pairAuto(deviceId: string): Promise<void> {
+    const jaira = this.jairaOn(deviceId);
+    if (this.autoPairing.has(jaira.id)) throw new Error(`already pairing with ${jaira.label}`);
+    this.autoPairing.add(jaira.id);
+    const remembered = engineUrlOf(jaira.url);
+    const nonce = randomBytes(24).toString("base64url");
+    const forThem = this.tokens.issue(jaira.id, jaira.label);
+    this.autoAsking.set(jaira.id, { nonce, expiresAt: Date.now() + AUTO_NONCE_MS });
+    try {
+      let answer: HostFrame;
+      try {
+        answer = await askOnce({ url: await this.reachable(remembered) }, { t: "pair-auto", machine: this.selfPeer(), token: forThem, nonce }, 30_000);
+      } catch (e) {
+        throw new Error(`could not reach ${jaira.label}: ${(e as Error).message}`);
+      }
+      if (answer.t !== "paired") throw new Error(answer.t === "refused" ? answer.reason : `${jaira.label} did not pair`);
+      if (answer.machine?.id !== jaira.id) throw new Error(`another machine than ${jaira.label} answered`);
+      this.autoFailed.delete(deviceId);
+      await this.paired(answer, remembered);
+    } catch (e) {
+      this.tokens.revoke(jaira.id);
+      this.autoFailed.set(deviceId, { reason: (e as Error).message, at: Date.now() });
+      this.changed();
+      throw e;
+    } finally {
+      this.autoAsking.delete(jaira.id);
+      this.autoPairing.delete(jaira.id);
+    }
+  }
+
+  /**
+   * Another machine asked to auto pair (`pair-auto`). Taken only while this machine allows it, from a
+   * machine published on this tailnet signed in to Tailscale as the same account, that was not unpaired
+   * by hand here — and only once that machine, asked back at its tailnet address, confirms it asked.
+   */
+  private async heardAuto(frame: Record<string, unknown>): Promise<HostFrame> {
+    const me = this.identity();
+    const refused = (reason: string): HostFrame => ({ t: "refused", reason });
+    if (!this.allowsAutoPair()) return refused(`${me.label} does not allow auto pair: pair with a code`);
+    const now = Date.now();
+    while (this.askTimes.length > 0 && now - this.askTimes[0]! > 60_000) this.askTimes.shift();
+    if (this.askTimes.length >= MAX_ASKS_PER_MINUTE) return refused("too many asks to pair in the last minute: wait a moment");
+    this.askTimes.push(now);
+    const raw = frame["machine"] as PeerMachine | undefined;
+    const token = frame["token"];
+    const nonce = frame["nonce"];
+    if (raw === undefined || typeof raw.id !== "string" || typeof token !== "string" || typeof nonce !== "string") return refused("an auto pair needs the asking machine, its token and a nonce");
+    const machine = sanitizePeer(raw);
+    if (machine.id === me.id) return refused("a machine cannot pair with itself");
+    if (this.read().declined?.includes(machine.id) === true) return refused(`${machine.label} was unpaired from ${me.label}: pair with a code`);
+    if (this.tailnetState.state !== "on") return refused(`${me.label} is not on the tailnet`);
+    if (machine.url === undefined) return refused(`${machine.label} did not say where it is on the tailnet`);
+    const device = await this.awaitDevice(machine.url);
+    if (device === undefined || !device.online) return refused(`${machine.label} is not a device on ${me.label}'s tailnet`);
+    if (!this.sameAccount(device)) return refused(`${machine.label} is signed in to Tailscale as another account than ${me.label}: pair with a code`);
+    let check: HostFrame;
+    try {
+      check = await askOnce({ url: await this.reachable(machine.url) }, { t: "pair-auto-check", machine: this.selfPeer(), nonce }, 15_000);
+    } catch (e) {
+      return refused(`${me.label} could not reach ${machine.label} back on the tailnet: ${(e as Error).message}`);
+    }
+    if (check.t !== "ok" || check.id !== machine.id) return refused(`${machine.label}, asked back on the tailnet, did not confirm it asked`);
+    this.remember(machine);
+    this.holdToken(machine.id, token);
+    const issued = this.tokens.issue(machine.id, machine.label);
+    this.options.log?.("info", `paired with ${machine.label}: it asked, and this machine allows auto pair`);
+    this.link(machine.id);
+    this.changed();
+    return { t: "paired", machine: this.selfPeer(), token: issued, fleet: this.known().map(peerOf) };
+  }
+
+  /** Asked back about an auto pair (`pair-auto-check`): confirmed only for the machine asked, and its nonce. */
+  private heardAutoCheck(frame: Record<string, unknown>): HostFrame {
+    const asker = (frame["machine"] as { id?: unknown } | undefined)?.id;
+    const pending = typeof asker === "string" ? this.autoAsking.get(asker) : undefined;
+    if (pending === undefined || pending.expiresAt <= Date.now() || typeof frame["nonce"] !== "string" || frame["nonce"] !== pending.nonce) {
+      return { t: "refused", reason: "this machine did not ask to auto pair with that one" };
+    }
+    return { t: "ok", id: this.identity().id };
   }
 
   view(): MachinesView {
@@ -312,6 +521,7 @@ export class Fleet {
         copy: this.copying(),
         ...(port !== undefined ? { port } : {}),
         ...(settings !== undefined ? { settings } : {}),
+        autoPair: this.allowsAutoPair(),
       },
       machines,
       devices: this.devices(),
@@ -657,8 +867,17 @@ export class Fleet {
     void this.probeAll(devices);
   }
 
+  /**
+   * Ask the online devices not asked yet, or not for {@link RESCAN_MS} — JaiRA may have started or
+   * stopped there, or allowed auto pair — then auto pair with what was found.
+   */
   private async probeAll(devices: readonly TailnetPeer[]): Promise<void> {
-    const asked = devices.filter((d) => d.online && !this.probes.has(d.id) && !this.probing.has(d.id));
+    const now = Date.now();
+    const stale = (id: string): boolean => {
+      const probe = this.probes.get(id);
+      return probe === undefined || now - probe.at >= (this.options.rescanMs ?? RESCAN_MS);
+    };
+    const asked = devices.filter((d) => d.online && stale(d.id) && !this.probing.has(d.id));
     if (asked.length === 0) {
       // Nothing left to ask (no device online, or each asked already): the list is as checked as it gets.
       if (this.probing.size === 0) this.checkedAt = Date.now();
@@ -667,6 +886,22 @@ export class Fleet {
     await Promise.all(asked.map((d) => this.probe(d)));
     this.checkedAt = Date.now();
     this.changed();
+    await this.autoPairFound();
+  }
+
+  /** Every {@link RESCAN_MS} while on the tailnet: the devices said again, and each asked again. */
+  private startRescan(): void {
+    if (this.rescan !== undefined) return;
+    this.rescan = setInterval(() => {
+      if (this.stopped || !this.tailnetRunning || this.tailnetState.state !== "on") return;
+      try {
+        this.port().devices();
+      } catch {
+        // the port says the devices when it can
+      }
+      void this.probeAll(this.peersSeen);
+    }, this.options.rescanMs ?? RESCAN_MS);
+    this.rescan.unref?.();
   }
 
   /** Ask one device whether JaiRA runs there: `/.well-known/jaira`, in the places Tailscale may serve it. */
@@ -686,11 +921,19 @@ export class Fleet {
   private async wellKnownAt(base: string): Promise<Omit<TailnetJaira, "url">> {
     const reach = await this.port().door(base);
     const response = await fetch(`${reach}/.well-known/jaira`, { signal: AbortSignal.timeout(PROBE_MS) });
-    const body = (await response.json()) as { jaira?: boolean; machineId?: string; label?: string; os?: string; form?: string; version?: string; device?: { id?: string; label?: string; kind?: string } };
+    const body = (await response.json()) as { jaira?: boolean; machineId?: string; label?: string; os?: string; form?: string; version?: string; autoPair?: boolean; device?: { id?: string; label?: string; kind?: string } };
     if (body.jaira !== true) throw new Error("not JaiRA");
     const os = (["windows", "mac", "linux", "android", "ios"] as const).find((o) => o === body.os);
     if (typeof body.machineId === "string") {
-      return { kind: "machine", id: body.machineId, label: String(body.label ?? body.machineId).slice(0, 80), version: String(body.version ?? "?"), ...(os !== undefined ? { os } : {}), form: machineFormOf(body.form) };
+      return {
+        kind: "machine",
+        id: body.machineId,
+        label: String(body.label ?? body.machineId).slice(0, 80),
+        version: String(body.version ?? "?"),
+        ...(os !== undefined ? { os } : {}),
+        form: machineFormOf(body.form),
+        ...(body.autoPair === true ? { autoPair: true } : {}),
+      };
     }
     if (body.device !== undefined && typeof body.device.id === "string" && body.device.kind === "phone") {
       return { kind: "phone", id: body.device.id, label: String(body.device.label ?? "A phone").slice(0, 80), version: String(body.version ?? "?"), ...(os !== undefined ? { os } : {}) };
@@ -705,6 +948,7 @@ export class Fleet {
     return this.peersSeen.map((d) => {
       const probe = this.probes.get(d.id);
       const consoleUrl = consoleUrlOf(d.ips);
+      const failed = this.autoFailed.get(d.id);
       return {
         id: d.id,
         name: d.name,
@@ -716,6 +960,8 @@ export class Fleet {
         ...(probe?.none === true ? { noJaira: true } : {}),
         ...(older !== undefined && !d.online && (older.test(d.name) || older.test(d.dnsName.split(".")[0] ?? "")) ? { olderSelf: true } : {}),
         ...(consoleUrl !== undefined ? { consoleUrl } : {}),
+        ...(d.user !== undefined ? { user: d.user } : {}),
+        ...(failed !== undefined && Date.now() - failed.at < AUTO_RETRY_MS ? { autoPairFailed: failed.reason } : {}),
       };
     });
   }
@@ -841,6 +1087,8 @@ export class Fleet {
   readonly preAuth: PreAuthHandler = async (frame) => {
     const refused = (reason: string): HostFrame => ({ t: "refused", reason });
     if (frame.t === "pair-ask") return this.heardAsk(frame);
+    if (frame.t === "pair-auto") return this.heardAuto(frame);
+    if (frame.t === "pair-auto-check") return this.heardAutoCheck(frame);
     if (frame.t === "pair-cancel") {
       if (this.asked !== undefined && this.asked.byId === String(frame["id"])) {
         this.asked = undefined;
@@ -943,9 +1191,21 @@ export class Fleet {
     return jaira;
   }
 
-  /** Pair was pressed for a device: ask it to show a code, which the person then types here. */
+  /**
+   * Pair was pressed for a device. One that allows auto pair, signed in to Tailscale as this machine's
+   * account, pairs now with no code; otherwise — or when it refuses — it is asked to show a code, which
+   * the person then types here.
+   */
   async pairAsk(deviceId: string): Promise<MachinesView> {
     const jaira = this.jairaOn(deviceId);
+    if (jaira.kind === "machine" && jaira.autoPair === true && this.sameAccount(this.peersSeen.find((p) => p.id === deviceId))) {
+      try {
+        await this.pairAuto(deviceId);
+        return this.view();
+      } catch (e) {
+        this.options.log?.("info", `${jaira.label} did not auto pair (${(e as Error).message}): asking it to show a code`);
+      }
+    }
     const answer = await this.askAt(jaira.url);
     this.asking = { device: deviceId, url: jaira.url, expiresAt: answer.expiresAt };
     this.changed();
@@ -1005,13 +1265,18 @@ export class Fleet {
       this.tokens.revoke(them.machineId);
       throw new Error(answer.t === "refused" ? answer.reason : "that machine did not pair");
     }
+    await this.paired(answer, remembered);
+    return this.view();
+  }
+
+  /** The other machine paired: remember it and its token, connect, and meet the rest of its fleet. */
+  private async paired(answer: Extract<HostFrame, { t: "paired" }>, remembered: string): Promise<void> {
     this.remember(sanitizePeer({ ...answer.machine, url: answer.machine.url ?? remembered }));
     this.holdToken(answer.machine.id, answer.token);
     this.options.log?.("info", `paired with ${answer.machine.label}`);
     this.link(answer.machine.id);
     this.changed();
     await this.meetFleetOf(answer.machine.id, answer.fleet);
-    return this.view();
   }
 
   /** Ask `via` to introduce this machine to each member of its fleet this one does not know. */
@@ -1055,6 +1320,7 @@ export class Fleet {
     for (const [id, link] of this.links) if (id !== machineId) await link.client?.invoke("fleet:forget", { id: machineId }).catch(() => undefined);
     await this.links.get(machineId)?.client?.invoke("fleet:forget", { id: this.identity().id }).catch(() => undefined);
     this.drop(machineId);
+    this.decline(machineId);
     if (target !== undefined) this.options.log?.("info", `forgot ${target.label}`);
     this.changed();
     return this.view();
@@ -1104,6 +1370,8 @@ export class Fleet {
       "fleet:forget": ((request: { id: string }) => {
         const forgotten = request.id === this.identity().id ? caller.id : request.id;
         this.drop(forgotten);
+        // Unpaired from the whole group by hand: no member auto pairs with it again.
+        this.decline(forgotten);
         this.changed();
         return null;
       }) as Handler,
@@ -1220,6 +1488,7 @@ export class Fleet {
     this.loopbackPort = loopbackPort;
     this.stopped = false;
     for (const machine of this.known()) this.link(machine.id);
+    this.startRescan();
     await this.applyTailnet();
   }
 
@@ -1233,6 +1502,8 @@ export class Fleet {
     if (this.lanExpiry !== undefined) clearTimeout(this.lanExpiry);
     void this.lan?.stop(true);
     if (this.tailnetRetry.timer !== undefined) clearTimeout(this.tailnetRetry.timer);
+    if (this.rescan !== undefined) clearInterval(this.rescan);
+    this.rescan = undefined;
     this.tailnetPort?.close();
     this.tailnetRunning = false;
     for (const link of this.links.values()) {

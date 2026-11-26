@@ -34,7 +34,7 @@ interface HelperLine {
   self?: { id?: string; name?: string; dnsName?: string; ips?: string[] };
   user?: { login?: string; name?: string };
   tailnet?: string;
-  devices?: Array<{ id?: string; name?: string; dnsName?: string; os?: string; online?: boolean; lastSeen?: number; ips?: string[] }>;
+  devices?: Array<{ id?: string; name?: string; dnsName?: string; os?: string; online?: boolean; lastSeen?: number; ips?: string[]; user?: string }>;
   door?: string;
   local?: string;
   error?: string;
@@ -121,7 +121,7 @@ export class HelperTailnet implements TailnetPort {
     if (said.devices !== undefined) {
       const devices: TailnetPeer[] = said.devices.flatMap((d) =>
         typeof d.id === "string" && typeof d.dnsName === "string"
-          ? [{ id: d.id, name: d.name ?? d.dnsName.split(".")[0] ?? d.id, dnsName: d.dnsName, os: d.os ?? "", online: d.online === true, ...(typeof d.lastSeen === "number" ? { lastSeenAt: d.lastSeen } : {}), ips: d.ips ?? [] }]
+          ? [{ id: d.id, name: d.name ?? d.dnsName.split(".")[0] ?? d.id, dnsName: d.dnsName, os: d.os ?? "", online: d.online === true, ...(typeof d.lastSeen === "number" ? { lastSeenAt: d.lastSeen } : {}), ips: d.ips ?? [], ...(typeof d.user === "string" && d.user !== "" ? { user: d.user } : {}) }]
           : [],
       );
       this.hear?.({ kind: "devices", devices });

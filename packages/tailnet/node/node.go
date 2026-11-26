@@ -8,7 +8,7 @@
 //	{"state":"needs-login","url":"https://login.tailscale.com/a/…"}   sign in on this page
 //	{"state":"dropped"}                                              it was running, and Tailscale signed it out
 //	{"state":"running","self":{…},"user":{…},"tailnet":"…","url":"…"}
-//	{"devices":[{"id","name","dnsName","os","online","lastSeen","ips"}, …]}
+//	{"devices":[{"id","name","dnsName","os","online","lastSeen","ips","user"}, …]}
 //	{"state":"error","message":"…"}
 package node
 
@@ -198,6 +198,10 @@ func (n *Node) sayDevices() {
 			"os":      peer.OS,
 			"online":  peer.Online,
 			"ips":     ipsOf(peer),
+		}
+		// Whose device it is: auto pair matches it against this machine's own account.
+		if user, ok := status.User[peer.UserID]; ok && user.LoginName != "" {
+			device["user"] = user.LoginName
 		}
 		if !peer.LastSeen.IsZero() {
 			device["lastSeen"] = peer.LastSeen.UnixMilli()

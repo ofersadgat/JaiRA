@@ -383,6 +383,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "machines:pairAsk": ((request: { device: string }) => service.fleet.pairAsk(String(request.device))) as Handler,
     "machines:pair": ((request: { device: string; code: string }) => service.fleet.pair(String(request.device), String(request.code))) as Handler,
     "machines:pairCancel": (() => service.fleet.pairCancel()) as Handler,
+    "machines:autoPair": ((request: { on: boolean }) => service.fleet.setAutoPair(request?.on === true)) as Handler,
     "machines:pairCode": (() => service.fleet.pairingCode()) as Handler,
     "machines:pairCodeCancel": (() => service.fleet.cancelPairing()) as Handler,
     "machines:refuse": (() => service.fleet.refuse()) as Handler,

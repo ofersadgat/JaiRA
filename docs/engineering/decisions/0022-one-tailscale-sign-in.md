@@ -2,7 +2,7 @@
 id: engineering/decisions/0022-one-tailscale-sign-in
 type: decision
 status: built
-updated: 2026-10-26
+updated: 2026-11-25
 decides_for: [engineering/units/machines]
 ---
 
@@ -216,3 +216,68 @@ eighth state:
   Reconnect tries now.
 - **Signed out by Tailscale** (the key expired, or the device was removed in the admin console) is an
   error too, with nothing to try again: it clears once the person signs in.
+
+## Amendment, 2026-11-25: found by itself, and auto pair
+
+The person: "jaira should autodetect other machines in the network and list them in the machines list.
+also, there should be a setting for "allow auto pair" which allows other machines to automatically
+connect instead of passing the pairing information back and forth". Asked which network, which machines
+may pair with no code, and whether they pair with no click, they chose: the tailnet only, but found
+without Refresh; the same Tailscale account; and two machines that both allow it pairing by themselves.
+
+**Found by itself.** Every minute while this machine is on the tailnet it says the devices again and asks
+each online device whether JaiRA runs there (`Fleet.startRescan`): a device asked over a minute ago is
+asked again, keeping what it last answered until the new answer comes, so a row never flickers back to
+"checking…". JaiRA started on a device is listed within a minute, and a device's "Start JaiRA there"
+says so. Refresh still asks every device now.
+
+**Each device's account.** The tailnet's devices carry the Tailscale login they are signed in as
+(`TailnetPeer.user`): the Tailscale app's `status --json` (`Peer.UserID` into `User`), the helper's
+`devices` event (`node.go`), and `you` on loopback rigs. The list shows it (`TailnetDeviceView.user`).
+
+**Allow auto pair**, a switch under Your machines, off by default, kept in `fleet.json` (`autoPair`) and
+said at `/.well-known/jaira` (`autoPair: true`), which the list reads (`TailnetJaira.autoPair`).
+
+- **Only the same account.** A machine that allows it pairs with no code only with a machine on its
+  tailnet whose device is signed in to Tailscale as the same login, compared without case. A tailnet
+  may be shared, or a company's: a person's other machines are those signed in as them.
+- **The asker is who it says.** The asker sends `pair-auto` before any token: itself (with its tailnet
+  address), the token it issued for the asked machine, and a nonce. The asked machine takes it only while
+  it allows auto pair, from a machine not unpaired by hand there, published at a device on its tailnet
+  that is online and of its account (the devices are asked again, up to five seconds, when the asker is
+  not among them yet: a machine just come onto the tailnet may find this one first). It then asks the
+  asker back, at that device's tailnet address, `pair-auto-check` with the nonce: answered `ok` with the
+  asker's id only by a machine that is asking that machine to auto pair with that nonce, for a minute.
+  Only then are tokens traded, as with a code (`paired`, then introductions to the rest of the group).
+  Something on the tailnet claiming another machine's address learns nothing: the nonce went only to the
+  asked machine, and only the device at that address is asked back. The asker, too, sends its token only
+  to a device of its own account that said it allows auto pair.
+- **By themselves.** After the devices are asked, a machine that allows auto pair pairs with every JaiRA
+  machine found that allows it too, of its account, not paired yet and not unpaired by hand — the one
+  with the smaller machine id asking, so two never ask each other at once. One that did not pair is
+  tried again after two minutes, its row saying why ("Auto pair did not pair: …").
+- **Pair.** Pressed for a machine that allows auto pair and is of this account, it pairs with no code;
+  when that is refused, or the machine is another account's, it asks for a code as before.
+- **Unpair holds.** A machine unpaired by hand is remembered as declined (`fleet.json`'s `declined`) on
+  every member of the group, as Unpair reaches all of them: none auto pairs with it again, or takes its
+  `pair-auto`. It pairs again by a code, which takes it off the list.
+- **The list says it.** An unpaired JaiRA machine that allows auto pair says what Pair will do ("Allows
+  auto pair: Pair pairs it with no code", "…: pairing with this machine by itself"), or that it is
+  another account's and Pair asks for a code.
+
+**Verified.** `app/test/autoPair.test.ts`, real engines on a loopback tailnet, each signed in as an
+account of its own: off until allowed, and said at `/.well-known/jaira` and to the list; two of one
+account pair by themselves once both allow it, and a third that allows it joins and is introduced to
+both; Pair pairs with no code; another account's machine is never auto paired, and Pair asks it for a
+code; `pair-auto` from an address the tailnet says is another account's, or from a machine that, asked
+back, never asked, is refused, as is any while not allowed; a machine unpaired by hand is not auto paired
+again, and pairs again by a code. `machinesModel.test.ts`: the switch's words and each row's.
+
+**Not built, or not yet seen.**
+
+- The helper's `node.go` says each device's login; it was not built here (no Go on this machine), so on
+  a machine using the bundled helper auto pair finds no device of the same account until the helper is
+  rebuilt (the release build does it). The Tailscale app's route needs nothing new.
+- Not seen between two real machines on the person's tailnet.
+- A machine on the local network that is not on the tailnet is not found: every connection is the
+  tailnet's (§5).

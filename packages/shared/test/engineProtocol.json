@@ -100,6 +100,7 @@
     "machines:pair",
     "machines:pairAsk",
     "machines:pairCancel",
+    "machines:autoPair",
     "machines:pairCode",
     "machines:pairCodeCancel",
     "machines:projectsFolder",

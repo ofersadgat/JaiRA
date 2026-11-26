@@ -133,6 +133,7 @@ interface CliPeer {
   Online?: boolean;
   LastSeen?: string;
   TailscaleIPs?: string[];
+  UserID?: number;
 }
 
 async function cliStatus(cli: string): Promise<CliStatus | undefined> {
@@ -150,8 +151,20 @@ export function peersOf(status: CliStatus): TailnetPeer[] {
     const dnsName = (p.DNSName ?? "").replace(/.$/, "");
     if (p.ID === undefined || dnsName === "") return [];
     const seen = p.LastSeen !== undefined ? Date.parse(p.LastSeen) : NaN;
+    const user = p.UserID !== undefined ? status.User?.[String(p.UserID)]?.LoginName : undefined;
     // A machine served by the app may be on any of serve's three ports.
-    return [{ id: p.ID, name: p.HostName ?? dnsName.split(".")[0] ?? p.ID, dnsName, os: p.OS ?? "", online: p.Online === true, ...(Number.isFinite(seen) && seen > 0 ? { lastSeenAt: seen } : {}), ips: p.TailscaleIPs ?? [] }];
+    return [
+      {
+        id: p.ID,
+        name: p.HostName ?? dnsName.split(".")[0] ?? p.ID,
+        dnsName,
+        os: p.OS ?? "",
+        online: p.Online === true,
+        ...(Number.isFinite(seen) && seen > 0 ? { lastSeenAt: seen } : {}),
+        ips: p.TailscaleIPs ?? [],
+        ...(user !== undefined ? { user } : {}),
+      },
+    ];
   });
 }
 

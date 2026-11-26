@@ -121,6 +121,32 @@ export function sentence(text: string): string {
   return /[.!?]$/.test(c) ? c : `${c}.`;
 }
 
+/** A tailnet device is signed in to Tailscale as the account this machine is: auto pair's test. */
+export function sameAccountOf(view: MachinesView, device: { user?: string }): boolean {
+  const mine = view.self.tailnet.user;
+  return device.user !== undefined && mine !== undefined && device.user.toLowerCase() === mine.toLowerCase();
+}
+
+/** What Allow auto pair says (decision 0022, amended 2026-11-25), on or off. */
+export function autoPairWords(view: MachinesView): string {
+  const as = view.self.tailnet.user !== undefined ? `signed in to Tailscale as ${view.self.tailnet.user}` : "signed in to Tailscale as you";
+  return view.self.autoPair
+    ? `Your machines ${as} pair with this one with no code, and this one pairs by itself with those that allow it too. A machine you unpair is not paired again by itself.`
+    : `Pairing takes a code shown on the other machine. On, your machines ${as} pair with this one with no code.`;
+}
+
+/**
+ * What an unpaired JaiRA machine's row says under its name: why auto pair did not pair, or what Pair
+ * will do when it allows auto pair.
+ */
+export function autoPairSubOf(view: MachinesView, device: { user?: string; autoPairFailed?: string; jaira?: { kind: string; autoPair?: boolean } }): string | undefined {
+  if (device.jaira?.kind !== "machine") return undefined;
+  if (device.autoPairFailed !== undefined) return `Auto pair did not pair: ${sentence(device.autoPairFailed).replace(/^./, (c) => c.toLowerCase())}`;
+  if (device.jaira.autoPair !== true) return undefined;
+  if (!sameAccountOf(view, device)) return `Allows auto pair, but is signed in to Tailscale as ${device.user ?? "another account"}: Pair asks for a code.`;
+  return view.self.autoPair ? "Allows auto pair: pairing with this machine by itself." : "Allows auto pair: Pair pairs it with no code.";
+}
+
 /** What the Tailscale row says (decision 0022 §3), and which of its buttons it has. */
 export type TailnetAction = "signIn" | "signOut" | "remove" | "cancel" | "removeCancel" | "reconnect";
 
@@ -303,12 +329,14 @@ export function machineRowsOf(view: MachinesView): MachineRow[] {
     if (d.jaira !== undefined) {
       const isPhone = d.jaira.kind === "phone";
       const jmark = d.jaira.os ?? mark;
+      const autoSub = autoPairSubOf(view, d);
       rows.push({
         key: d.id,
         name: d.jaira.label,
         kind: isPhone ? `${jmark !== undefined ? SYSTEM_WORDS[jmark] : system} phone` : machineKindOf({ form: d.jaira.form ?? "desktop", os: d.jaira.os === "windows" || d.jaira.os === "mac" || d.jaira.os === "linux" ? d.jaira.os : "linux" }),
         face: { shape: isPhone ? "phone" : (d.jaira.form ?? "desktop"), ...(jmark !== undefined ? { mark: jmark } : {}), dot: "on" },
         state: { text: isPhone ? "JaiRA open" : `JaiRA ${d.jaira.version}`, tone: "dim" },
+        ...(autoSub !== undefined ? { sub: autoSub } : {}),
         grey: false,
         action: { kind: "pair", device: d.id },
         ...(asking !== undefined ? { asking } : {}),
@@ -331,7 +359,7 @@ export function machineRowsOf(view: MachinesView): MachineRow[] {
         kind: system,
         face,
         state: { text: phone ? "JaiRA isn't open" : "JaiRA isn't running", tone: "dim" },
-        sub: phone ? "Open JaiRA there and sign in to Tailscale, then Refresh." : "Start JaiRA there, then Refresh.",
+        sub: phone ? "Open JaiRA there and sign in to Tailscale: it is listed within a minute." : "Start JaiRA there: it is listed within a minute.",
         grey: true,
       });
       continue;
@@ -478,8 +506,9 @@ export const MACHINES_WORDS = {
   },
   yours: {
     title: "Your machines",
-    info: "Every device on your tailnet. Pair asks the other one to show a code, which you type here. Pairing one machine introduces it to the rest; Unpair takes it out of all of them.",
+    info: "Every device on your tailnet, asked every minute whether JaiRA runs there. Pair asks the other one to show a code, which you type here — or, where it allows auto pair and is signed in to Tailscale as you, pairs with no code. Pairing one machine introduces it to the rest; Unpair takes it out of all of them.",
   },
+  autoPair: { name: "Allow auto pair" },
   pair: { name: "Pair a phone", button: "Show a code" },
   pairCode: { name: "Code for pairing" },
   nearbyLog: { name: "Phones nearby" },
