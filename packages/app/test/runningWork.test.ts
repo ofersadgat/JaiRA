@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { writeWorkflowFiles } from "@jaira/runtime";
-import { testHome } from "@jaira/testing";
+import { eventually, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 
 const ROOT = "gated";
@@ -54,6 +54,35 @@ describe("runningWork", () => {
     await service.startTask({ taskId });
     await until(() => service.pendingInteractions().some((p) => p.taskId === taskId), "the gate");
     expect(service.runningWork()).toEqual([{ taskId, project: expect.any(String), title: "Pick a way", kind: "run", waiting: "person" }]);
+    expect(service.activeWork()).toEqual({ runs: 0, turns: 0 });
+  });
+});
+
+describe("runningWork with a conversation", () => {
+  beforeEach(async () => {
+    await service.close();
+    rmSync(dir, { recursive: true, force: true });
+    shippedLayer();
+    dir = mkdtempSync(join(tmpdir(), "jaira-running-work-chat-"));
+    initProject(dir, testHome());
+    service = new AppService({ baseDir: testHome(), publish: () => undefined });
+    await service.open(dir);
+  });
+
+  /** The program waits at its `input()` for the next message — between replies, idle. */
+  const idle = (taskId: string): boolean =>
+    (service as unknown as { session(): { hub: { list(): Array<{ component: string; taskId?: string }> } } })
+      .session()
+      .hub.list()
+      .some((r) => r.component === "input" && r.taskId === taskId);
+
+  // The person, 2026-11-26: the quit dialog said "6 waiting on you or an event", and nothing in the app
+  // showed any of them waiting — each was a conversation sitting at its next message.
+  it("leaves out a conversation sitting idle until its next message", async () => {
+    const { taskId } = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "hello there", improve: false } });
+    await service.startTask({ taskId, fake: [{ promptIncludes: "hello there", output: "hi" }] });
+    await eventually(() => service.sessionHistory({ taskId }).length >= 1 && idle(taskId), "the opening reply", 20_000);
+    expect(service.runningWork()).toEqual([]);
     expect(service.activeWork()).toEqual({ runs: 0, turns: 0 });
   });
 });

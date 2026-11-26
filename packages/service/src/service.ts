@@ -17614,13 +17614,25 @@ export class AppService {
    * or on the world (`parkedRuns`), and a run or turn with an approval or a question open
    * (`asksPerson`) — those are cut by a quit and asked again at the next open, and waiting for them to
    * finish would be waiting for the person who is trying to quit.
+   *
+   * A conversation sitting idle until its next message is not listed at all: it is not working and
+   * not waiting on anything but being written to, and nothing in the app shows it as waiting (`busyIn`
+   * leaves it out the same way). Listed, it read as "waiting on you or an event" (the person,
+   * 2026-11-26: "6 waiting on you or an event … there are no waiting indicators anywhere in the ui").
    */
   runningWork(): RunningWork[] {
     const work: RunningWork[] = [];
     for (const session of this.sessions.values()) {
       const parked = session.parkedRuns();
+      const idle = new Set<string>();
+      for (const request of session.hub.list()) {
+        const taskId = request.taskId ?? session.requestTask.get(request.requestId);
+        if (request.component === INPUT_FUNCTION && taskId !== undefined) idle.add(taskId);
+      }
       for (const taskId of session.live.keys()) {
-        const kind = session.live.has(taskId) ? "run" : "turn";
+        if (idle.has(taskId) && !this.asksPerson(session, taskId)) continue;
+        const meta = session.project.tasks.tryRead(taskId);
+        const kind = meta !== undefined && isConversation(meta) ? "turn" : "run";
         const waiting = this.asksPerson(session, taskId)
           ? "person"
           : parked.has(taskId)
@@ -17631,7 +17643,7 @@ export class AppService {
         work.push({
           taskId,
           project: session.dir,
-          title: session.project.tasks.tryRead(taskId)?.title ?? taskId,
+          title: meta?.title ?? taskId,
           kind,
           ...(waiting !== undefined ? { waiting } : {}),
         });
