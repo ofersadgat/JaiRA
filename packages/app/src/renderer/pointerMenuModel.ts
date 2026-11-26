@@ -125,6 +125,30 @@ function editItems(flags: FrameContextMenu["editFlags"], field?: HTMLElement): M
   ];
 }
 
+/**
+ * What a misspelled word offers: Chromium's suggestions, each replacing it, and adding it to the
+ * dictionary. Nothing when the word under the pointer is spelled right.
+ *
+ * Above the edit verbs, as every spellchecking editor puts them: the reason somebody right-clicks a
+ * squiggly word is the word. "No suggestions" is said rather than left out, so a menu that opens
+ * straight on Cut over a marked word does not read as the spellchecker not having been asked.
+ */
+function spellingItems(menu: FrameContextMenu, field?: HTMLElement): MenuItem[] {
+  const word = menu.misspelledWord;
+  if (word === "") return [];
+  const run = (verb: "replace" | "learn", text: string) => () => {
+    // As with the edit verbs: Chromium replaces the word in whatever has focus.
+    if (field !== undefined && document.activeElement !== field) field.focus({ preventScroll: true });
+    void invoke("shell:spelling", { verb, word: text }).catch(() => undefined);
+  };
+  const items: MenuItem[] =
+    menu.dictionarySuggestions.length === 0
+      ? [{ label: "No spelling suggestions", disabled: true, onSelect: () => undefined }]
+      : menu.dictionarySuggestions.map((suggestion) => ({ label: suggestion, onSelect: run("replace", suggestion) }));
+  items.push({ label: "Add to dictionary", separator: true, onSelect: run("learn", word) });
+  return items;
+}
+
 /** What an image offers, wherever it lives: the picture, the file, and the address. */
 function imageItems(src: string, x: number, y: number): MenuItem[] {
   const items: MenuItem[] = [
@@ -279,9 +303,17 @@ export function itemsForEvent(event: MouseEvent): MenuItem[] {
  * Exported for its own sake: this is the branch a test can actually reach — no DOM, no element, just
  * the description Chromium forwarded — and it is the branch that decides what right-clicking inside
  * a model-authored page offers.
+ *
+ * `field` is present when the click was in one of the window's OWN fields, let through to Chromium
+ * so the spellchecker's verdict comes back with it: the element the verbs give the focus back to.
  */
-export function itemsForFrame(menu: FrameContextMenu): MenuItem[] {
-  if (menu.isEditable) return editItems(menu.editFlags);
+export function itemsForFrame(menu: FrameContextMenu, field?: HTMLElement): MenuItem[] {
+  if (menu.isEditable) {
+    const spelling = spellingItems(menu, field);
+    const edits = editItems(menu.editFlags, field);
+    if (spelling.length > 0) edits[0] = { ...edits[0]!, separator: true };
+    return [...spelling, ...edits];
+  }
   if (menu.mediaType === "image") return imageItems(menu.srcURL, menu.x, menu.y);
   const items: MenuItem[] = [];
   if (menu.selectionText.trim() !== "") {

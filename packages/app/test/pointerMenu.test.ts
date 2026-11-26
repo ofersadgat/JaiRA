@@ -25,6 +25,9 @@ function clicked(over: Partial<FrameContextMenu> = {}): FrameContextMenu {
     mediaType: "none",
     isEditable: false,
     editFlags: { canCut: false, canCopy: false, canPaste: false, canSelectAll: false },
+    misspelledWord: "",
+    dictionarySuggestions: [],
+    mainFrame: false,
     ...over,
   };
 }
@@ -77,6 +80,19 @@ describe("a right-click inside an artifact frame", () => {
     expect(labels(menu)).toEqual(["Cut", "Copy", "Paste", "Select all"]);
     // Shown disabled rather than dropped: a menu whose items move about is a menu you have to read.
     expect(itemsForFrame(menu).map((item) => item.disabled)).toEqual([true, true, false, false]);
+  });
+
+  it("leads with the spellchecker's suggestions over a misspelled word, then the edit verbs", () => {
+    const flags = { canCut: false, canCopy: false, canPaste: true, canSelectAll: true };
+    const menu = clicked({ isEditable: true, editFlags: flags, misspelledWord: "teh", dictionarySuggestions: ["the", "ten"] });
+    expect(labels(menu)).toEqual(["the", "ten", "Add to dictionary", "Cut", "Copy", "Paste", "Select all"]);
+    expect(itemsForFrame(menu).map((item) => item.separator === true)).toEqual([false, false, true, true, false, false, true]);
+  });
+
+  it("says so when a misspelled word has no suggestions, rather than leaving the spellchecker out", () => {
+    const menu = clicked({ isEditable: true, misspelledWord: "qzxv", dictionarySuggestions: [] });
+    expect(labels(menu)).toEqual(["No spelling suggestions", "Add to dictionary", "Cut", "Copy", "Paste", "Select all"]);
+    expect(itemsForFrame(menu)[0]?.disabled).toBe(true);
   });
 
   it("offers to save a clip, which has no bitmap to copy", () => {

@@ -242,6 +242,16 @@ function bridge(): JairaBridge {
   return api;
 }
 
+/**
+ * Whether this is the desktop app's own window — Electron's preload, with no host bridge installed over
+ * it — where the browser process hears a right-click this document lets through and forwards it as
+ * `frame:contextMenu`. In a browser or on a phone nothing would, and a click let through would raise
+ * the browser's own menu instead.
+ */
+export function browserForwardsMenus(): boolean {
+  return installed === undefined && window.jaira !== undefined;
+}
+
 export async function invoke<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>> {
   // A process task (decision 0032, "The view") has no workflow, run or conversation: the engine refuses
   // every channel about a task but its detail, cancel, archive and delete. Never sent, and quiet.

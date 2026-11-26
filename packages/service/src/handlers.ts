@@ -29,6 +29,7 @@ export const HOST_CHANNELS = [
   "shell:download",
   "shell:copyImageAt",
   "shell:edit",
+  "shell:spelling",
   "licenses:read",
   "update:state",
   "update:check",

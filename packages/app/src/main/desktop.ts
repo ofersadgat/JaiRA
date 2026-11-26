@@ -655,6 +655,21 @@ function edit(verb: "cut" | "copy" | "paste" | "selectAll"): { verb: string } {
   return { verb };
 }
 
+/**
+ * Put a suggestion in place of the misspelled word, or add the word to the spellchecker's dictionary.
+ *
+ * `replaceMisspelling` is Chromium's own editing command on the focused frame, so it is undoable and
+ * the field hears it as an `input` like any typing — which is what keeps a React-controlled box in step.
+ */
+function spelling(verb: "replace" | "learn", word: string): { done: boolean } {
+  if (window === undefined || window.isDestroyed() || word === "") return { done: false };
+  if (verb === "replace") {
+    window.webContents.replaceMisspelling(word);
+    return { done: true };
+  }
+  return { done: window.webContents.session.addWordToSpellCheckerDictionary(word) };
+}
+
 function copyImageAt(x: number, y: number): { copied: boolean } {
   if (window === undefined || window.isDestroyed()) return { copied: false };
   window.webContents.copyImageAt(Math.round(x), Math.round(y));
@@ -677,6 +692,7 @@ const hostHandlers: Record<HostChannel, Handler> = {
   "shell:download": ((request: { url: string }) => download(request.url)) as Handler,
   "shell:copyImageAt": ((request: { x: number; y: number }) => copyImageAt(request.x, request.y)) as Handler,
   "shell:edit": ((request: { verb: "cut" | "copy" | "paste" | "selectAll" }) => edit(request.verb)) as Handler,
+  "shell:spelling": ((request: { verb: "replace" | "learn"; word: string }) => spelling(request.verb, String(request.word ?? ""))) as Handler,
   "licenses:read": (() => readLicenseManifest()) as Handler,
   "update:state": (() => updates.current()) as Handler,
   "update:check": (() => updates.check()) as Handler,
@@ -857,6 +873,10 @@ async function createWindow(): Promise<BrowserWindow> {
    * not a gap to close, so the fix is not to open the frame up but to forward what the browser
    * process already saw, and let the renderer draw the SAME menu it draws everywhere else.
    *
+   * The one main-frame case: a right-click in one of the window's own fields, which the renderer lets
+   * through on purpose, because whether the word under it is misspelled — and what to suggest — is
+   * the spellchecker's knowledge, and only reaches anyone by this event. `mainFrame` says which it was.
+   *
    * `params.x` / `params.y` are in the web area's coordinates, which is the space a DOM event's
    * `clientX` / `clientY` is in — so the menu lands under the pointer without any translation.
    *
@@ -885,6 +905,9 @@ async function createWindow(): Promise<BrowserWindow> {
             canPaste: params.editFlags.canPaste,
             canSelectAll: params.editFlags.canSelectAll,
           },
+          misspelledWord: params.misspelledWord,
+          dictionarySuggestions: [...params.dictionarySuggestions],
+          mainFrame: params.frame !== null && params.frame === win.webContents.mainFrame,
         },
       } satisfies PushMessage);
     } catch (e) {

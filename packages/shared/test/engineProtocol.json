@@ -171,6 +171,7 @@
     "shell:exportArtboard",
     "shell:reveal",
     "shell:saveFile",
+    "shell:spelling",
     "state:effective",
     "state:slots",
     "state:view",

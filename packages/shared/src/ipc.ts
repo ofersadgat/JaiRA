@@ -2710,6 +2710,14 @@ export interface IpcContract {
    * own behaviour is the point of offering these at all.
    */
   "shell:edit": { request: { verb: "cut" | "copy" | "paste" | "selectAll" }; response: { verb: string } };
+  /**
+   * Act on the misspelled word a right-click landed on: put one of Chromium's suggestions in its place
+   * (`replace`), or teach the spellchecker the word so it stops being marked (`learn`).
+   *
+   * The browser's, for the same reason as `shell:edit`: the replacement is an editing command on the
+   * focused field — undoable, and heard by the field as typing — and the dictionary is the session's.
+   */
+  "shell:spelling": { request: { verb: "replace" | "learn"; word: string }; response: { done: boolean } };
   "history:size": { request: { project?: ProjectRef } | void; response: HistorySize };
   "history:prune": { request: PruneRequest; response: PruneResult & { remaining: HistorySize } };
   /**
@@ -3099,6 +3107,7 @@ export const IPC_CHANNELS = [
   "shell:download",
   "shell:copyImageAt",
   "shell:edit",
+  "shell:spelling",
   "history:size",
   "history:prune",
   "learning:measures",
@@ -3684,6 +3693,22 @@ export interface FrameContextMenu {
   isEditable: boolean;
   /** What the edit verbs would actually do here — Chromium's own answer, not a guess. */
   editFlags: { canCut: boolean; canCopy: boolean; canPaste: boolean; canSelectAll: boolean };
+  /**
+   * The misspelled word under the cursor, empty when there is none — and Chromium's suggestions for
+   * it, which can be empty even when there is one.
+   *
+   * Only the browser process knows these: the spellchecker's verdicts are not in the DOM. That is why
+   * a right-click in one of the window's OWN fields is let through to Chromium as well, and comes back
+   * by this route.
+   */
+  misspelledWord: string;
+  dictionarySuggestions: string[];
+  /**
+   * Whether the click was in the window's own document rather than an artifact's frame — the one
+   * case the renderer let through on purpose (a field, so its spelling is heard) and can match to the
+   * element it saw.
+   */
+  mainFrame: boolean;
 }
 
 export const PUSH_CHANNEL = "jaira:push";
