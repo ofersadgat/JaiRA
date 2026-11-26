@@ -22,7 +22,7 @@ import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter
 import { boundView, framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
-import { tweaksOf, type TweakLever } from "./canvasTweaks";
+import { leverCount, tweaksOf, type TweakLever } from "./canvasTweaks";
 import { Popover } from "./popover";
 
 export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line" | "comment";
@@ -373,7 +373,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   /** Which tool each group's button stands for: the last one picked from it. */
   const [groupPick, setGroupPick] = useState<Record<ToolGroup, CanvasTool>>({ pen: "pen", shape: "rect" });
   /** The one menu open: a tool group's, the zoom's, the pages', or an artboard's downloads. */
-  const [menu, setMenu] = useState<{ kind: "group"; group: ToolGroup } | { kind: "zoom" } | { kind: "pages" } | { kind: "download"; file: string } | null>(null);
+  const [menu, setMenu] = useState<{ kind: "group"; group: ToolGroup } | { kind: "zoom" } | { kind: "pages" } | { kind: "layers" } | { kind: "download"; file: string } | null>(null);
   const menuAnchor = useRef<Element | null>(null);
   const menuBox = useRef<HTMLDivElement | null>(null);
   const openMenu = (next: NonNullable<typeof menu>, anchor: Element): void => {
@@ -1302,6 +1302,20 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const order = (index.order ?? []).filter((f) => index.boards[f] !== undefined && onPage(index.boards[f]!));
   const layerOn = spaceHeld || (tool !== "pointer" && tool !== "text" && tool !== "comment");
   const interactive = order.filter((f) => index.boards[f]!.is_interactive === true);
+  /** The artboards on this page, each with its name and how many tweaks it declares. */
+  const layers = order.map((file) => ({ file, title: index.boards[file]!.title ?? file.replace(/\.dc\.html$/, ""), levers: leverCount(tweaksOf(sourceOf(file))) }));
+  /**
+   * The artboard the panel's Properties and Tweaks are about: the one chosen, or the one an element chosen
+   * is in. No fallback: what the panel shows is always what the layer button names.
+   */
+  const current = selection !== null && selection.kind !== "note" && index.boards[selection.file] !== undefined ? selection.file : undefined;
+  const currentLayer = layers.find((l) => l.file === current);
+  /** Choose an artboard from a list (the layer menu, the Tweaks tab's): selected, and brought into view. */
+  const pickLayer = (file: string): void => {
+    setGroup([]);
+    setSelection({ kind: "board", file });
+    bringIntoView(file);
+  };
   /** Numbered as they were written: a pin keeps its number when others are resolved. */
   const numbered = comments.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => index.boards[c.file] !== undefined);
   const shownPins = numbered.filter((c) => showResolved || c.resolvedAt === undefined);
@@ -1629,6 +1643,24 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               <span style={divider} />
             </>
           ) : null}
+          {/* What the panel's Properties and Tweaks are about, and the way to any artboard on this page. */}
+          <button
+            type="button"
+            aria-label="Layer"
+            aria-haspopup="menu"
+            aria-expanded={menu?.kind === "layers"}
+            title={currentLayer !== undefined ? `${currentLayer.title}${element !== null ? ` › ${element.tag}` : ""}` : selection?.kind === "note" ? "A note" : "No artboard selected"}
+            onClick={(e) => openMenu({ kind: "layers" }, e.currentTarget)}
+            style={{ ...textButton, maxWidth: 220, color: currentLayer !== undefined || selection?.kind === "note" ? "var(--text, #121526)" : "var(--dim, #5a5f7a)" }}
+          >
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
+              {currentLayer !== undefined ? currentLayer.title : selection?.kind === "note" ? "Note" : "No layer"}
+              {currentLayer !== undefined && element !== null ? <span style={{ color: "var(--dim, #5a5f7a)" }}>{` › ${element.tag}`}</span> : null}
+            </span>
+            {currentLayer !== undefined && currentLayer.levers > 0 ? <Glyph d={SLIDERS} size={12} /> : null}
+            <Glyph d={CARET} size={10} />
+          </button>
+          <span style={divider} />
           {(["pointer", "hand", "text", "artboard", "note"] as const).map((which) => toolButtonFor(toolOf(which)))}
           {toolButtonFor(toolOf(groupPick.pen), "pen")}
           {toolButtonFor(toolOf(groupPick.shape), "shape")}
@@ -1715,7 +1747,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               )
             ) : tab === "tweaks" ? (
               <TweaksTab
-                file={selection !== null && selection.kind !== "note" ? selection.file : order[0]}
+                file={current}
+                layers={layers}
+                onPick={pickLayer}
                 source={(file) => sourceOf(file)}
                 // A tweak is kept as the prop's default in the artboard's `data-props`: saved with the
                 // canvas, and drawn again from the source like every other change.
@@ -1809,6 +1843,26 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       {p.name}
                     </button>
                   ))
+                : menu.kind === "layers"
+                  ? layers.length === 0
+                    ? <span style={{ ...menuItem, cursor: "default", color: "var(--dim, #5a5f7a)" }}>No artboards on this page</span>
+                    : layers.map((l) => (
+                        <button
+                          key={l.file}
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={l.file === current}
+                          title={l.title}
+                          onClick={() => {
+                            pickLayer(l.file);
+                            setMenu(null);
+                          }}
+                          style={{ ...menuItem, maxWidth: 340, fontWeight: l.file === current ? 600 : 400 }}
+                        >
+                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.title}</span>
+                          {l.levers > 0 ? <LeverChip count={l.levers} /> : null}
+                        </button>
+                      ))
                 : onExport !== undefined
                   ? (["png", "pdf"] as const).map((format) => (
                       <button
@@ -2244,12 +2298,43 @@ function NoteProperties({ note: n, onChange, onDelete }: { note: CanvasNote; onC
 }
 
 /** The artboard's `data-props` levers, live in its frame (`dc:props`). */
-function TweaksTab({ file, source, onChange }: { file: string | undefined; source: (file: string) => string; onChange: (file: string, name: string, value: unknown) => void }): JSX.Element {
-  if (file === undefined) return <p style={hint}>No artboard yet.</p>;
+function TweaksTab({ file, layers, onPick, source, onChange }: { file: string | undefined; layers: ReadonlyArray<{ file: string; title: string; levers: number }>; onPick: (file: string) => void; source: (file: string) => string; onChange: (file: string, name: string, value: unknown) => void }): JSX.Element {
+  // The artboards on this page that declare tweaks, the chosen one marked: a press chooses another.
+  const tweakable = layers.filter((l) => l.levers > 0);
+  const list = (
+    <Section title="Artboards with tweaks">
+      {tweakable.length === 0 ? (
+        <p style={{ ...hint, margin: 0 }}>{layers.length === 0 ? "No artboards on this page." : "No artboard on this page declares tweaks."}</p>
+      ) : (
+        tweakable.map((l) => (
+          <button key={l.file} type="button" aria-current={l.file === file ? "true" : undefined} title={l.title} onClick={() => onPick(l.file)} style={{ ...layer, display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 5, fontWeight: l.file === file ? 600 : 400, background: l.file === file ? "var(--fill-ghost-selected, #e5e8f1)" : "transparent" }}>
+            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
+            <LeverChip count={l.levers} />
+          </button>
+        ))
+      )}
+    </Section>
+  );
+  if (file === undefined) {
+    return (
+      <>
+        {list}
+        {tweakable.length > 0 ? <p style={hint}>Select an artboard to see its tweaks.</p> : null}
+      </>
+    );
+  }
   // Grouped by the `section` each names, in the order the file first names it; a colour's `options` are
   // its swatches, and a number's `unit` labels it (the Design type's format, "`data-props`").
   const groups = tweaksOf(source(file));
-  if (groups.length === 0) return <p style={hint}>{file} declares no tweaks.</p>;
+  const title = layers.find((l) => l.file === file)?.title ?? file;
+  if (groups.length === 0) {
+    return (
+      <>
+        {list}
+        <p style={hint}>{title} declares no tweaks.</p>
+      </>
+    );
+  }
   const set = (name: string, value: unknown): void => onChange(file, name, value);
   const control = (p: TweakLever): JSX.Element => {
     const { name, value } = p;
@@ -2288,14 +2373,27 @@ function TweaksTab({ file, source, onChange }: { file: string | undefined; sourc
     return <Field key={name} label={name} value={String(value ?? "")} onCommit={(v) => set(name, v)} />;
   };
   return (
-    <Section title={`Tweaks · ${file}`}>
-      {groups.map((g, i) => (
-        <div key={g.section ?? ""} role="group" aria-label={g.section ?? "Tweaks"} style={{ marginTop: i === 0 ? 0 : 10 }}>
-          {g.section !== undefined ? <h6 style={{ margin: "0 0 6px", fontSize: 11.5, fontWeight: 600, color: "var(--text, #121526)" }}>{g.section}</h6> : null}
-          {g.levers.map(control)}
-        </div>
-      ))}
-    </Section>
+    <>
+      {list}
+      <Section title={`Tweaks · ${file}`}>
+        {groups.map((g, i) => (
+          <div key={g.section ?? ""} role="group" aria-label={g.section ?? "Tweaks"} style={{ marginTop: i === 0 ? 0 : 10 }}>
+            {g.section !== undefined ? <h6 style={{ margin: "0 0 6px", fontSize: 11.5, fontWeight: 600, color: "var(--text, #121526)" }}>{g.section}</h6> : null}
+            {g.levers.map(control)}
+          </div>
+        ))}
+      </Section>
+    </>
+  );
+}
+
+/** How many tweaks an artboard declares, with the sliders that stand for them. */
+function LeverChip({ count }: { count: number }): JSX.Element {
+  return (
+    <span title={`${String(count)} tweak${count === 1 ? "" : "s"}`} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 11, color: "var(--dim, #5a5f7a)", flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+      <Glyph d={SLIDERS} size={12} />
+      {count}
+    </span>
   );
 }
 

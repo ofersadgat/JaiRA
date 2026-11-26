@@ -57,6 +57,9 @@ export function tweakGroups(declared: Readonly<Record<string, unknown>>): TweakG
   return [...groups].filter(([, levers]) => levers.length > 0).map(([section, levers]) => ({ section, levers }));
 }
 
+/** How many levers the groups hold. */
+export const leverCount = (groups: readonly TweakGroup[]): number => groups.reduce((n, g) => n + g.levers.length, 0);
+
 const parsed = new Map<string, TweakGroup[]>();
 
 /** The levers an artboard's source declares, kept per source text: the board asks again on every draw. */

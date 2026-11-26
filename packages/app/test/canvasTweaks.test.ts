@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tweakGroups, tweaksOf } from "../src/renderer/canvasTweaks";
+import { leverCount, tweakGroups, tweaksOf } from "../src/renderer/canvasTweaks";
 
 describe("tweakGroups", () => {
   it("keeps only the props that ask for an editor, never $preview", () => {
@@ -38,6 +38,13 @@ describe("tweakGroups", () => {
   it("carries a number's unit and bounds", () => {
     const [group] = tweakGroups({ gap: { editor: "range", default: 16, min: 0, max: 48, step: 4, unit: "px" } });
     expect(group!.levers[0]).toEqual({ name: "gap", editor: "range", value: 16, min: 0, max: 48, step: 4, unit: "px" });
+  });
+});
+
+describe("leverCount", () => {
+  it("counts the levers across every section", () => {
+    expect(leverCount(tweakGroups({ a: { editor: "boolean" }, b: { editor: "color", section: "S" }, c: { editor: "int", section: "S" }, d: { editor: null } }))).toBe(3);
+    expect(leverCount([])).toBe(0);
   });
 });
 
