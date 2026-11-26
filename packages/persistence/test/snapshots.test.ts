@@ -148,4 +148,29 @@ describe("snapshot commit under a rename that fails", () => {
     expect(staging()).toEqual([]);
     expect(existsSync(join(dir, snapshotHash(bundle)))).toBe(false);
   });
+
+  it("stages each attempt apart, so a staging directory that would not go away is never in the next one's way", async () => {
+    const bundle = loadBundle(STATES, "wf");
+    const used: string[] = [];
+    await expect(
+      ensureSnapshot(dir, bundle, {
+        rename: (from) => {
+          used.push(from);
+          eperm();
+        },
+      }),
+    ).rejects.toThrow(/EPERM/);
+    // What a watcher holding it open while it was removed leaves behind: the first attempt's staging,
+    // still there (2026-11-25, `.staging-0d4c…-60504/improve`, delete-pending for hours).
+    mkdirSync(join(used[0]!, "improve"), { recursive: true });
+    const snap = await ensureSnapshot(dir, bundle, {
+      rename: (from, to) => {
+        used.push(from);
+        renameSync(from, to);
+      },
+    });
+    expect(snap.created).toBe(true);
+    expect(used.at(-1)).not.toBe(used[0]);
+    expect(snapshotHash(loadSnapshot(dir, snap.hash))).toBe(snap.hash);
+  });
 });

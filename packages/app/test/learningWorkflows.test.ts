@@ -490,6 +490,34 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
     service.cancelTask(taskId);
   });
 
+  // The person, 2026-11-25: "investigate why the two topodiff sessions are marked as still continuing.
+  // nothing appears to be happening in each of them" — each over an improver whose start had failed,
+  // left `queued` under it: a child that never ends, so the conversation never read as idle.
+  it("ends a task it started and could not start, failed, and leaves the conversation idle rather than working over it", async () => {
+    const { taskId } = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "write a haiku" } });
+    const start = service.startTask.bind(service);
+    service.startTask = async (request) => {
+      if (request.taskId !== taskId) throw new Error("EPERM, Permission denied: .staging-0d4c-60504");
+      return start(request);
+    };
+    await start({
+      taskId,
+      fake: [
+        { promptIncludes: "The person's message:", output: { verdict: "clear", lesson: "Never use emojis", quote: "no emojis, ever" } },
+        { promptIncludes: "write a haiku", output: "leaves fall 🍂" },
+        { promptIncludes: "no emojis, ever", output: "leaves fall" },
+      ],
+    });
+    await eventually(() => service.sessionHistory({ taskId }).length >= 1, "the first reply", 20_000);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "no emojis, ever" });
+    const lesson = () => service.listTasks().find((t) => t.workflow === "improve/lesson" && t.origin?.taskId === taskId);
+    await eventually(() => lesson()?.status === "failed", "the lesson that could not start to end, failed", 20_000);
+    await eventually(() => service.listTasks().find((t) => t.taskId === taskId)?.waitsForMessage === true, "the conversation to wait for its next message", 20_000);
+    expect(service.listTasks().find((t) => t.taskId === taskId)?.status).toBe("completed");
+    expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ waiting: 0, live: [] });
+    service.cancelTask(taskId);
+  });
+
   // The person, 2026-11-24: "the state of a nested task affecting the color of the parent task ring".
   it("leaves a task waiting while a task under it is interrupted, and working while one runs, whatever its own row says", () => {
     const { project, answeredAt } = (service as unknown as { session(): { project: Project; answeredAt: Map<string, number> } }).session();

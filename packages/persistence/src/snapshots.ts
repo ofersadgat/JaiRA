@@ -230,11 +230,36 @@ const COMMIT_BACKOFF_MS = [20, 40, 80, 160] as const;
  * Throw away a staging directory, tolerating the same handles that make the rename fail.
  *
  * `force` alone suppresses a missing path, not a busy one: node only retries EBUSY/EPERM/ENOTEMPTY
- * when asked, and without that this cleanup can throw over the error it is cleaning up after —
- * replacing a diagnosis with a complaint about a temp directory.
+ * when asked. And retries are not always enough — a directory deleted while another process holds it
+ * open (a watcher, the indexer) is left DELETE-PENDING on Windows, refusing every access until that
+ * handle closes, which can be hours. So this never throws: a staging directory is a temp directory,
+ * and failing to remove one must not replace the diagnosis it was cleaning up after, nor fail a
+ * snapshot whose own write went through. Each attempt stages under a name of its own
+ * ({@link stagingDirFor}), so one that will not go away is never in a later attempt's way.
  */
 function discardStaging(staging: string): void {
-  rmSync(staging, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  try {
+    rmSync(staging, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  } catch (e) {
+    log.debug(`could not remove snapshot staging ${staging}: ${(e as Error).message}`);
+  }
+}
+
+let stagingSeq = 0;
+
+/**
+ * A staging directory no other attempt uses — this process's, and this attempt's within it.
+ *
+ * It was `.staging-<hash>-<pid>`: one path for every attempt at a snapshot in a process. Two starts
+ * of one workflow could interleave over it across the commit's backoff, and a staging directory left
+ * behind — one a watcher held open while it was removed — failed every later attempt at that
+ * snapshot, at the cleanup before anything was written, until the app restarted (2026-11-25: each
+ * improver a topodiff conversation started failed on `EPERM, Permission denied` at
+ * `.staging-0d4c…-60504`, hours after the first).
+ */
+function stagingDirFor(snapshotsDir: string, hash: string): string {
+  stagingSeq += 1;
+  return join(snapshotsDir, `.staging-${hash}-${process.pid}-${stagingSeq}`);
 }
 
 /**
@@ -281,10 +306,10 @@ async function commitStaging(staging: string, dir: string, rename: (from: string
 
 /**
  * Async only for the backoff in {@link commitStaging} — everything this does with the filesystem
- * is still synchronous, and deliberately so: a snapshot is written in one uninterrupted stretch,
- * which is what makes two starts in one process serialize rather than interleave over a staging path
- * they share. The one `await` is on the retry path, where the process has nothing better to do than
- * wait for somebody else to close a file.
+ * is still synchronous: a snapshot is written in one uninterrupted stretch. Two starts in one process
+ * stage under names of their own ({@link stagingDirFor}), so the one `await` — on the retry path,
+ * where the process has nothing better to do than wait for somebody else to close a file — cannot
+ * let one of them write into, or remove, the other's.
  */
 export async function ensureSnapshot(
   snapshotsDir: string,
@@ -297,8 +322,7 @@ export async function ensureSnapshot(
 
   // Stage then rename, so a crash mid-write never leaves a half snapshot
   // behind under its final content-addressed name.
-  const staging = join(snapshotsDir, `.staging-${hash}-${process.pid}`);
-  discardStaging(staging);
+  const staging = stagingDirFor(snapshotsDir, hash);
   mkdirSync(staging, { recursive: true });
   const ids: Record<string, string> = {};
   for (const stateId of Object.keys(bundle.states)) {

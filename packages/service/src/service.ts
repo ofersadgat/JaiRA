@@ -2706,8 +2706,31 @@ export class AppService {
       this.log({ level: "info", source: "run", message: `started ${request.state} (${meta.id}) from ${fromTask}`, project: open.key, taskId: fromTask });
       return { taskId: meta.id };
     } catch (e) {
-      return { taskId: meta.id, error: (e as Error).message };
+      const reason = (e as Error).message;
+      this.failUnstartedChild(open, fromTask, meta.id, reason);
+      return { taskId: meta.id, error: reason };
     }
+  }
+
+  /**
+   * A child `startChildOf` made and could not start ENDS, failed, and so does its mirror in the
+   * conversation's journal. Left `queued`, it stood in that journal as entered and never ended — a
+   * child the conversation was still running, for good — and the conversation read as working while
+   * it sat waiting on the person (2026-11-25: two topodiff conversations "still continuing", each over
+   * an improver whose snapshot could not be written). A start that got far enough to end the row
+   * itself (a capability gate) is not ended twice; its mirror is settled all the same.
+   */
+  private failUnstartedChild(open: ProjectSession, fromTask: string, taskId: string, reason: string): void {
+    const project = open.project;
+    const status = project.runtime.get(taskId)?.status;
+    if ((status === "queued" || status === "running") && !open.live.has(taskId)) {
+      finishTaskRun(project, taskId, "failed", { failure: { classification: "permanent", reason: `could not start: ${reason}` } });
+    }
+    this.settleStarted(open, taskId, "failed");
+    this.log({ level: "warn", source: "run", message: `could not start ${taskId} from ${fromTask}: ${reason}`, project: open.key, taskId: fromTask });
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+    this.publishFor(open, { type: "store:invalidate", scope: "board" });
   }
 
   /**
