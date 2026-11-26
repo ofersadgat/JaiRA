@@ -60,6 +60,8 @@ export interface ConnectProps {
    * person sets — or none, a permanent store — and a way to drop the conversations it holds.
    */
   kept?: KeptOnDevice | undefined;
+  /** Drawn in a page (Settings → Machines' This phone), not as a screen of its own. */
+  embedded?: boolean | undefined;
 }
 
 /** A phone's mirror, as its Connect screen says it. */
@@ -106,7 +108,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn, paired, kept }: ConnectProps): JSX.Element {
+export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn, paired, kept, embedded }: ConnectProps): JSX.Element {
   const t = useTokens();
   const [address, setAddress] = useState(initial?.address ?? "");
   const [code, setCode] = useState(initial?.code ?? "");
@@ -166,7 +168,8 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
   const others = paired !== undefined && paired.length > 0;
   const mine = others ? (
     <View gap={6} marginBottom={10}>
-      {heading("This phone's machines")}
+      {/* In Settings → Machines, its section's title says it. */}
+      {embedded === true ? null : heading("This phone's machines")}
       {paired.map((m) => (
         <View key={m.key} flexDirection="row" alignItems="center" gap={10} borderWidth={1} borderColor={t.v("line") as never} borderRadius={7} paddingHorizontal={10} paddingVertical={8} backgroundColor={t.v("panel") as never}>
           <View width={8} height={8} borderRadius={4} backgroundColor={t.v(m.state === "connected" ? "ok" : m.state === "connecting" ? "accent" : "warn") as never} />
@@ -221,7 +224,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
 
   if (saved !== undefined) {
     return (
-      <Frame t={t}>
+      <Frame t={t} embedded={embedded === true}>
         {heading(`Connecting to ${saved.label}`)}
         <Text fontFamily={t.v("font-data") as never} fontSize={13} color={t.v("dim") as never}>
           {saved.address}
@@ -242,7 +245,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
       const canPair = code.trim() !== "" && !pairingThis;
       const place = where(picked);
       return (
-        <Frame t={t}>
+        <Frame t={t} embedded={embedded === true}>
           <View flexDirection="row" alignItems="center" gap={8}>
             <MachineIcon face={{ shape: "desktop", ...(markOf(picked.os) !== undefined ? { mark: markOf(picked.os)! } : {}) }} size={20} ground="bg" />
             {heading(picked.label)}
@@ -270,7 +273,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
     }
     const search = nearbySearchWords(nearby, now);
     return (
-      <Frame t={t}>
+      <Frame t={t} embedded={embedded === true}>
         {mine}
         {heading(others ? "Pair another machine" : "Connect to a JaiRA machine")}
         <View flexDirection="row" alignItems="center" gap={8}>
@@ -322,7 +325,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
   }
 
   return (
-    <Frame t={t}>
+    <Frame t={t} embedded={embedded === true}>
       {mine}
       {heading(others ? "Pair another machine" : "Connect to a JaiRA machine")}
       {words(
@@ -350,7 +353,9 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
   );
 }
 
-function Frame({ t, children }: { t: ReturnType<typeof useTokens>; children: ReactNode }): JSX.Element {
+function Frame({ t, embedded, children }: { t: ReturnType<typeof useTokens>; embedded: boolean; children: ReactNode }): JSX.Element {
+  // In a page (Settings → Machines on a phone): the page's column, not a screen of its own.
+  if (embedded) return <View gap={10} maxWidth={420}>{children}</View>;
   return (
     <View flex={1} backgroundColor={t.v("bg") as never} alignItems="center" justifyContent="center" padding={16}>
       <View width="100%" maxWidth={420} gap={10}>

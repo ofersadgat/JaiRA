@@ -27,7 +27,7 @@ import { useSheetInset } from "./columnsFit";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { phoneDrawer, phoneInbox, phonePanelOpener, rightEdgeTouch, sheetAsk, sheetCovers } from "./viewState";
-import { remoteStatus } from "./remoteStatus";
+import { remoteStatus, useOpenPhoneMachines } from "./remoteStatus";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
 
 /**
@@ -43,7 +43,7 @@ import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
  * - **the context panel** a sheet over the room (`PanelColumn` → `PanelSheet`);
  * - **the inbox strip** gone: the INBOX row opens the Inbox room (`InboxRoom`) in its place;
  * - **the machine**, while none is connected: a line under the title bar saying so, which opens the
- *   Connect screen (`RemoteLine`). The shell does not wait for a machine to be drawn.
+ *   phone's machines in Settings → Machines (`RemoteLine`). The shell does not wait for a machine to be drawn.
  *
  * The keyboard: the frame stands clear of it, so what is at its foot — a composer, a sheet's field —
  * rides on it (`useKeyboardTop`, on iOS; Android resizes the window for it, `adjustResize`). How it looks:
@@ -113,18 +113,19 @@ export function PhoneFrame(): JSX.Element {
 /**
  * The phone's machine, while it is not connected (`remoteStatus`): the shell is drawn at once and its
  * projects come with the machine, so this line says why there are none yet — no machine paired, one being
- * reached, one not answering — and opens the Connect screen. How it looks: a row, 40 tall, padding 0 12,
+ * reached, one not answering — and opens Settings → Machines, where the phone's machines are. How it looks: a row, 40 tall, padding 0 12,
  * gap 8, --panel-2, a --line under it; a dot 8 round (--dim, --accent reaching, --warn not answering), the
  * words app 13/12.5 one line, and Connect / Details app 13/12.5 600 --accent at the end.
  */
 export function RemoteLine(): JSX.Element | null {
   const t = useTokens();
   const status = remoteStatus.use();
+  const openMachines = useOpenPhoneMachines();
   if (status === null) return null;
   const words =
     status.state === "none" ? "No machine connected" : status.state === "connecting" ? `Connecting to ${status.label ?? "your machine"}…` : `${status.label ?? "Your machine"}: ${status.detail ?? "not answering"}`;
   return (
-    <Press onPress={status.open} label={`${words}. ${status.state === "none" ? "Connect" : "Details"}`} flexShrink={0} height={40} paddingHorizontal={12} flexDirection="row" alignItems="center" gap={8} box={({ pressed }) => ({ backgroundColor: t.v(pressed ? "panel-3" : "panel-2"), ...(edge(t, { bottom: 1 }) as object) })}>
+    <Press onPress={openMachines} label={`${words}. ${status.state === "none" ? "Connect" : "Details"}`} flexShrink={0} height={40} paddingHorizontal={12} flexDirection="row" alignItems="center" gap={8} box={({ pressed }) => ({ backgroundColor: t.v(pressed ? "panel-3" : "panel-2"), ...(edge(t, { bottom: 1 }) as object) })}>
       <View width={8} height={8} borderRadius={4} backgroundColor={t.v(status.state === "problem" ? "warn" : status.state === "connecting" ? "accent" : "dim") as never} />
       <Txt spec={{ voice: "app", scale: 13 / 12.5 }} ellip flex={1} minWidth={0}>
         {words}

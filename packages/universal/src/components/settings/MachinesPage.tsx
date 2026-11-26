@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { Linking } from "react-native";
 import { View } from "@tamagui/core";
 import type { CopyChoice, MachinesView, OutboxView, ProjectSummary } from "@jaira/shared/browser";
@@ -35,7 +35,9 @@ import {
 } from "@jaira/ui/machinesModel";
 import { invoke } from "@jaira/ui/store";
 import { useView } from "@jaira/ui/useView";
+import { PhoneConnectContext, phoneMachines, type PhoneConnect } from "../../app/remoteStatus";
 import { useShell } from "../../app/shell";
+import { Connect } from "../../screens/Connect";
 import { copyText } from "../../clipboard";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -68,6 +70,10 @@ import { Words } from "./Words";
  *   the code field       under the row's sentence: a `SchemaForm` of the one code, and Pair
  *
  * Unpair and Remove ask first (`AskDialog`).
+ *
+ * On a phone the page opens with the phone's own machines and the way to pair another (`ThisPhone`, the
+ * `Connect` panel its connection gives through `PhoneConnectContext`); the rest is the connected
+ * machine's, and is left out while the phone reaches none.
  */
 export function MachinesPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -76,9 +82,13 @@ export function MachinesPage(): JSX.Element {
   // A paired machine in Settings' path: its own section, read and changed there.
   const named = state.settingsPath.machine;
   const peer = named !== undefined && named.self !== true && view?.machines.some((m) => m.id === named.id) === true ? named.id : undefined;
+  const phone = useContext(PhoneConnectContext);
+  const reached = phoneMachines.use();
   return (
     <SettingsLayerContext.Provider value={null}>
-      {view === undefined ? (
+      {phone !== null ? <ThisPhone phone={phone} /> : null}
+      {/* A phone that reaches no machine has nothing more to show: the rest is read through one. */}
+      {phone !== null && (reached?.connected ?? 0) === 0 ? null : view === undefined ? (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>{W.reading}</Txt>
       ) : (
         <>
@@ -117,6 +127,25 @@ function NameChip({ label, state }: { label: string; state: MachineChipState }):
 /** An error in a row's sentence, in --bad (`Words`). */
 function ErrorWords({ error }: { error: string }): JSX.Element {
   return <Words parts={[{ error: sentence(error) }]} />;
+}
+
+/**
+ * On a phone, its own machines first (decision 0015, amended 2026-10-04): each one with what it is doing
+ * and Forget, what the phone keeps of them, and the way to pair another — the machines on its Wi-Fi
+ * showing a code, or an address. It is drawn whether or not any machine answers: the sections under it
+ * are the connected machine's, read through it.
+ */
+function ThisPhone({ phone }: { phone: NonNullable<PhoneConnect> }): JSX.Element {
+  const { shown } = phone;
+  useEffect(() => {
+    shown(true);
+    return () => shown(false);
+  }, [shown]);
+  return (
+    <SettingsSection id="phone" title="This phone's machines" plain>
+      <Connect {...phone.props} embedded />
+    </SettingsSection>
+  );
 }
 
 function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {

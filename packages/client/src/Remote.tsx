@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
-import { AppState, Linking, Pressable, Text, View } from "react-native";
+import { AppState, Linking } from "react-native";
 import { engineUrlOf, hostOfUrl, typedLanMachine, type LanAnnouncement } from "@jaira/shared/browser";
-import { Connect, connectionLost, connectionRestored, phoneMachines, remoteStatus, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
+import { Connect, PhoneConnectContext, connectionLost, connectionRestored, phoneMachines, remoteStatus, type ConnectProps, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { deviceIdFrom } from "@jaira/ui/windowAddress";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
@@ -34,9 +34,10 @@ import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "..
  * `shell` (the phone app, decision 0015 amended 2026-10-04): the shell is NOT held back until a machine
  * answers, and the phone keeps every machine it pairs with. The shell is drawn at once on the fleet
  * bridge (`fleetLinks.ts`, `fleetBridge.ts`), whose requests wait until a machine answers, so it stands
- * empty — no projects — while the line under its title bar says why (`remoteStatus`) and opens the
- * Connect screen over it. Its projects are those of every machine it reaches. The Connect screen lists
- * the phone's machines and pairs another; the drawer opens it at any time (`phoneMachines`).
+ * empty — no projects — while the line under its title bar says why (`remoteStatus`). Its projects are
+ * those of every machine it reaches. The phone's machines, and the way to pair another, are a section of
+ * Settings → Machines (`PhoneConnectContext`, the `Connect` panel drawn in the page), which the line and
+ * the drawer's row (`phoneMachines`) open.
  */
 
 /** An address and a one-time code that came with the page's URL or the app's link — what a QR code carries. */
@@ -118,8 +119,9 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   }, [ungated]);
   /** The link (address and code) a pairing was already started for (`shell`). */
   const linkPaired = useRef<string | null>(null);
-  /** The Connect screen over the shell, opened from its line or the drawer (`shell`). */
-  const [form, setForm] = useState(false);
+  /** How many of Settings → Machines' This phone sections are on screen (`shell`): it looks for machines only then. */
+  const [shownCount, setShownCount] = useState(0);
+  const shown = useCallback((on: boolean): void => setShownCount((n) => Math.max(0, n + (on ? 1 : -1))), []);
   const [phase, setPhase] = useState<Phase>(electron ? "connected" : "loading");
   const [saved, setSaved] = useState<SavedPairing | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
@@ -204,14 +206,10 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
     [open],
   );
 
-  /**
-   * A pairing made: connected to — alone, or (`shell`) among the phone's other machines, the Connect
-   * screen going back to the shell once it is done (`done`).
-   */
-  const adopt = (pairing: SavedPairing, done = true): void => {
+  /** A pairing made: connected to — alone, or (`shell`) among the phone's other machines. */
+  const adopt = (pairing: SavedPairing): void => {
     if (!ungated) return connect(pairing);
     fleet.add(pairing);
-    if (done) setForm(false);
   };
 
   /**
@@ -259,7 +257,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         // The attempts stay on screen beside the reason, to read what was tried.
         setNearbyPairing(undefined);
         // Paired, but not onto the tailnet: connecting carries on, offering the sign-in on the phone.
-        if (kept !== undefined) adopt(kept, false);
+        if (kept !== undefined) adopt(kept);
         setProblem((e as Error).message + (attempts.length > 0 && kept === undefined ? ` (tried ${attempts.map((a) => `${a.address}: ${a.state === "failed" ? (a.reason ?? "no answer") : a.state}`).join("; ")})` : ""));
       } finally {
         if (turn.current === mine) setBusy(false);
@@ -365,8 +363,9 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
     };
   }, [electron]);
 
-  // The machines on this Wi-Fi showing a code, while the form is up.
-  const formUp = !ungated || form;
+  // The machines on this Wi-Fi showing a code, while the form is up — on a phone, while Settings →
+  // Machines shows its machines.
+  const formUp = !ungated || shownCount > 0;
   useEffect(() => {
     if (electron || !NEARBY_SUPPORTED || phase !== "ask" || !formUp) return;
     const since = Date.now();
@@ -397,22 +396,20 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
 
   useEffect(() => () => bridge.current?.close(), []);
 
-  // The shell's line (`shell`): why it has no projects yet, and the way to the Connect screen — and the
-  // drawer's way to it, whatever the line says.
+  // The shell's line (`shell`): why it has no projects yet — and the drawer's row of the phone's machines.
+  // Both open Settings → Machines, where they are listed and another is paired.
   const links = fleet.links;
   useEffect(() => {
     if (!ungated) return undefined;
-    const open = (): void => setForm(true);
-    phoneMachines.set({ open, labels: links.map((l) => l.pairing.machine.label), connected: links.filter((l) => l.state === "connected").length });
+    phoneMachines.set({ labels: links.map((l) => l.pairing.machine.label), connected: links.filter((l) => l.state === "connected").length });
     const why = fleet.notice ?? problem ?? links.find((l) => l.reason !== undefined)?.reason;
     if (!fleet.loaded || links.some((l) => l.state === "connected")) remoteStatus.set(null);
-    else if (links.length === 0) remoteStatus.set({ state: "none", ...(why !== undefined && why !== null ? { detail: why } : {}), open });
+    else if (links.length === 0) remoteStatus.set({ state: "none", ...(why !== undefined && why !== null ? { detail: why } : {}) });
     else
       remoteStatus.set({
         state: links.some((l) => l.reason !== undefined) ? "problem" : "connecting",
         label: links.length === 1 ? links[0]!.pairing.machine.label : `${links.length} machines`,
         ...(why !== undefined && why !== null ? { detail: why } : {}),
-        open,
       });
     return undefined;
   }, [ungated, links, fleet.loaded, fleet.notice, problem]);
@@ -425,9 +422,49 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   );
 
 
-  if (ungated) {
-    if (!form) return <>{children}</>;
-  } else if (phase === "connected") return <>{children}</>;
+  // The way to pair: the form a browser shows before its machine answers, and what a phone's Settings →
+  // Machines shows of the phone's own machines.
+  const formProps: ConnectProps = {
+    initial: { address: address ?? pageAddress() ?? "", code: code ?? "" },
+    problem: ungated ? (fleet.notice ?? problem) : problem,
+    busy,
+    onPair: (a, c) => void pair(a, c),
+    ...(ungated
+      ? {
+          paired: links.map((l) => ({
+            key: l.pairing.machine.id,
+            label: l.pairing.machine.label,
+            address: l.pairing.address,
+            state: l.state,
+            ...(l.reason !== undefined ? { reason: l.reason } : {}),
+            onForget: () => fleet.forget(l.pairing.machine.id),
+          })),
+          ...(phoneMirror !== undefined && kept !== undefined
+            ? { kept: { ...kept, onLimit: (limit: number | null) => void phoneMirror?.setLimit(limit), onClear: () => void phoneMirror?.clearViews() } }
+            : {}),
+        }
+      : {}),
+    ...(NEARBY_SUPPORTED
+      ? {
+          nearby: {
+            machines: nearby.machines.map((m) => ({ key: m.key, label: m.label, os: m.os, addresses: m.addresses, port: m.port })),
+            state: nearby.state,
+            since: nearby.since,
+            phone: nearby.phone,
+            ...(nearby.problem !== undefined ? { problem: nearby.problem } : {}),
+          },
+          onSearchAgain: () => {
+            setProblem(null);
+            setSearch((n) => n + 1);
+          },
+          onPairNearby: (key: string, c: string) => pairWithNearby(key, c),
+          ...(nearbyPairing !== undefined ? { pairing: { ...nearbyPairing, ...(tailnetLine !== undefined && (nearbyPairing.step === "joining" || nearbyPairing.step === "approve") ? { detail: tailnetLine } : {}) } } : {}),
+        }
+      : {}),
+  };
+  // A phone's shell is drawn at once; its machines are a section of Settings → Machines.
+  if (ungated) return <PhoneConnectContext.Provider value={{ props: formProps, shown }}>{children}</PhoneConnectContext.Provider>;
+  if (phase === "connected") return <>{children}</>;
   if (phase === "loading") return null;
   const forget = (): void => {
     turn.current += 1;
@@ -440,7 +477,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
     setPhase("ask");
   };
   const screen =
-    !ungated && phase === "connecting" && saved !== undefined ? (
+    phase === "connecting" && saved !== undefined ? (
       <Connect
         saved={{ label: saved.machine.label, address: saved.address, ...(saved.tailnet === true && tailnetLine !== undefined ? { detail: tailnetLine } : {}) }}
         problem={signInUrl !== undefined ? "Tailscale on this phone needs its sign-in approved before it can reach the machine: open it here, or pair again with a code to open it on the machine" : problem}
@@ -450,59 +487,8 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         {...(signInUrl !== undefined ? { signIn: () => void Linking.openURL(signInUrl) } : {})}
       />
     ) : (
-      <Connect
-        // A link that arrives later fills the fields it carries.
-        key={`${address ?? ""}|${code ?? ""}`}
-        initial={{ address: address ?? pageAddress() ?? "", code: code ?? "" }}
-        problem={ungated ? (fleet.notice ?? problem) : problem}
-        busy={busy}
-        onPair={(a, c) => void pair(a, c)}
-        {...(ungated
-          ? {
-              paired: links.map((l) => ({
-                key: l.pairing.machine.id,
-                label: l.pairing.machine.label,
-                address: l.pairing.address,
-                state: l.state,
-                ...(l.reason !== undefined ? { reason: l.reason } : {}),
-                onForget: () => fleet.forget(l.pairing.machine.id),
-              })),
-              ...(phoneMirror !== undefined && kept !== undefined
-                ? { kept: { ...kept, onLimit: (limit: number | null) => void phoneMirror?.setLimit(limit), onClear: () => void phoneMirror?.clearViews() } }
-                : {}),
-            }
-          : {})}
-        {...(NEARBY_SUPPORTED
-          ? {
-              nearby: {
-                machines: nearby.machines.map((m) => ({ key: m.key, label: m.label, os: m.os, addresses: m.addresses, port: m.port })),
-                state: nearby.state,
-                since: nearby.since,
-                phone: nearby.phone,
-                ...(nearby.problem !== undefined ? { problem: nearby.problem } : {}),
-              },
-              onSearchAgain: () => {
-                setProblem(null);
-                setSearch((n) => n + 1);
-              },
-              onPairNearby: (key: string, c: string) => pairWithNearby(key, c),
-              ...(nearbyPairing !== undefined ? { pairing: { ...nearbyPairing, ...(tailnetLine !== undefined && (nearbyPairing.step === "joining" || nearbyPairing.step === "approve") ? { detail: tailnetLine } : {}) } } : {}),
-            }
-          : {})}
-      />
+      // A link that arrives later fills the fields it carries.
+      <Connect key={`${address ?? ""}|${code ?? ""}`} {...formProps} />
     );
-  const framed = frame !== undefined ? frame(screen) : screen;
-  if (!ungated) return framed;
-  // Over the shell, with a way back to it.
-  return (
-    <>
-      {children}
-      <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
-        {framed}
-        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setForm(false)} style={{ position: "absolute", top: 8, right: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: "rgba(20, 22, 40, 0.08)" }}>
-          <Text style={{ fontSize: 15, color: "#4a4fd1", fontWeight: "600" }}>Close</Text>
-        </Pressable>
-      </View>
-    </>
-  );
+  return frame !== undefined ? frame(screen) : screen;
 }

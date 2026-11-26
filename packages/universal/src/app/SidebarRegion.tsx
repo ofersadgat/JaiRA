@@ -52,7 +52,7 @@ import { useColumnsFit } from "./columnsFit";
 import { aboutNotes, splitView } from "./viewState";
 import { usePhone } from "./phone";
 import { routeOpen, taskPaneEntryOf } from "@jaira/ui/splitModel";
-import { phoneMachines } from "./remoteStatus";
+import { phoneMachines, useOpenPhoneMachines } from "./remoteStatus";
 import { View } from "@tamagui/core";
 import { Press, Txt } from "../primitives";
 import { useTokens } from "../tokens";
@@ -705,19 +705,20 @@ const CHAT_SORT_MODE = "chat.list.sort";
 
 /**
  * A phone's own machines, in its drawer over Update and Settings (decision 0015, amended 2026-10-04): their
- * names and how many answer; pressed, the Connect screen that lists them and pairs another. How it looks:
+ * names and how many answer; pressed, Settings → Machines, which lists them and pairs another. How it looks:
  * a row 40 tall, padding 0 12, gap 10 — ▣ (--dim), the names (app-label, one line), "n of m" (--dim).
  */
 function PhoneMachinesRow({ onOpen }: { onOpen: () => void }): JSX.Element | null {
   const t = useTokens();
   const machines = phoneMachines.use();
+  const openMachines = useOpenPhoneMachines();
   if (machines === null) return null;
   const names = machines.labels.length === 0 ? "Connect a machine" : machines.labels.join(", ");
   return (
     <Press
       onPress={() => {
         onOpen();
-        machines.open();
+        openMachines();
       }}
       label={`This phone's machines: ${names}`}
       height={40}
