@@ -660,8 +660,8 @@ function buildRunEnvironment(
     keychain: (name) => keychain.get(name),
   });
   // The Git tools (decision 0010 §1), over the call's workspace — else the project — and the forge its
-  // remote picks. Nobody can be asked from here, so `publish: "ask"` refuses a push with a sentence;
-  // a durable run re-registers them with its terminal (`wireRemotes`).
+  // remote picks. A push is decided by its permission line, and refused where the project's publish
+  // policy is `deny`; a durable run re-registers them with its terminal (`wireRemotes`).
   registerGitTools(
     registry,
     workspaceGitHost({

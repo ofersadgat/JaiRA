@@ -153,3 +153,32 @@ describe("a handle's id", () => {
     expect(remoteHandleId("github", "github.com", "ofersadgat/JaiRA", 7)).toBe("github.com/ofersadgat/JaiRA#7");
   });
 });
+
+describe("a refusal at a repository", () => {
+  it("is a 401, 403 or 404 from the forge, or git saying it has no access — never the network", async () => {
+    const { isAccessRefusal } = await import("../src/forge");
+    expect(isAccessRefusal({ status: 404, message: "Not Found" })).toBe(true);
+    expect(isAccessRefusal({ status: 403 })).toBe(true);
+    expect(isAccessRefusal({ status: 500, message: "the forge answered 500" })).toBe(false);
+    expect(isAccessRefusal({ message: "listing the pull requests of ofersadgat/topodiff: the forge answered 404 — Not Found" })).toBe(true);
+    expect(isAccessRefusal({ message: "remote: Write access to repository not granted.\nfatal: unable to access 'https://github.com/o/r.git/': The requested URL returned error: 403" })).toBe(true);
+    expect(isAccessRefusal({ message: "ERROR: Repository not found." })).toBe(true);
+    expect(isAccessRefusal({ message: "! [rejected] main -> main (fetch first)" })).toBe(false);
+    expect(isAccessRefusal({ message: "Could not resolve host: github.com" })).toBe(false);
+    expect(isAccessRefusal(undefined)).toBe(false);
+  });
+});
+
+describe("what a git, gh or glab command printed", () => {
+  it("is a refusal when it could not sign in or was not let in — never a push behind the remote", async () => {
+    const { mentionsForgeRefusal } = await import("../src/forge");
+    expect(mentionsForgeRefusal("fatal: Authentication failed for 'https://github.com/o/r.git/'")).toBe(true);
+    expect(mentionsForgeRefusal("fatal: could not read Username for 'https://github.com': terminal prompts disabled")).toBe(true);
+    expect(mentionsForgeRefusal("git@github.com: Permission denied (publickey).")).toBe(true);
+    expect(mentionsForgeRefusal("To get started with GitHub CLI, please run:  gh auth login")).toBe(true);
+    expect(mentionsForgeRefusal("HTTP 401: Bad credentials (https://api.github.com/user)")).toBe(true);
+    expect(mentionsForgeRefusal("remote: Write access to repository not granted.")).toBe(true);
+    expect(mentionsForgeRefusal("! [rejected]        main -> main (fetch first)")).toBe(false);
+    expect(mentionsForgeRefusal("Everything up-to-date")).toBe(false);
+  });
+});

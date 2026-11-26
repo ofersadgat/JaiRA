@@ -2,7 +2,7 @@ import { useContext, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, type ForgeCheck, type JairaForgeConnection, type SecretTarget } from "@jaira/shared/browser";
 import { layerWriter } from "@jaira/ui/configWriter";
-import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgeSshOf, forgesOf, gitToolsSentence, newForgeOf, schemaGistOf, secretTargetsOf, stateWord, type ForgeSshView } from "@jaira/ui/connectionsModel";
+import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRefusalsOf, forgeRowOf, forgeSshOf, forgesOf, gitToolsSentence, newForgeOf, schemaGistOf, secretTargetsOf, stateWord, type ForgeSshView } from "@jaira/ui/connectionsModel";
 import type { IntegrationsPaneProps } from "@jaira/ui/integrationsPaneTypes";
 import { Txt } from "../../../primitives";
 import { SchemaForm } from "../../form/SchemaForm";
@@ -187,6 +187,8 @@ function ForgeRow({
   ].filter((box) => box !== null);
 
   const error = oauth?.errors.get(name);
+  // Where it signs in and is refused: said open or closed, as a sign-in error is.
+  const refusals = forgeRefusalsOf(check);
   const schema = builtin ? BUILTIN_FORGE_SCHEMA : CUSTOM_FORGE_SCHEMA;
   const wide = open
     ? [
@@ -248,7 +250,15 @@ function ForgeRow({
           />
         </>
       }
-      wide={[...(error !== undefined ? [<Wide key="error"><Problem>{error}</Problem></Wide>] : []), ...wide]}
+      wide={[
+        ...(error !== undefined ? [<Wide key="error"><Problem>{error}</Problem></Wide>] : []),
+        ...refusals.map((line) => (
+          <Wide key={`refused:${line}`}>
+            <Problem>{line}</Problem>
+          </Wide>
+        )),
+        ...wide,
+      ]}
     />
   );
 }

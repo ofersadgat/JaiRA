@@ -642,6 +642,22 @@ describe("cadence", () => {
     expect(store.cursors.get(JSON.stringify(["origin", "github.com/acme/app"]))?.error).toBeUndefined();
   });
 
+  it("says when a look succeeds, so a refusal it reported can be taken back", async () => {
+    const said: string[] = [];
+    const w = new RepositoryWatcher({
+      targets: () => [target()],
+      clock,
+      onEvent: () => undefined,
+      onError: (t, e) => void said.push(`refused ${t.repository}: ${e.message}`),
+      onLooked: (t) => void said.push(`reached ${t.repository}`),
+    });
+    forge.failWith = new ForgeError("Not Found", 404);
+    await w.kick();
+    forge.failWith = undefined;
+    await clock.advance(2 * MIN);
+    expect(said).toEqual(["refused acme/app: Not Found", "reached acme/app"]);
+  });
+
   it("stops at dispose, and a look that comes back to a closed project writes nothing", async () => {
     let open = true;
     const w = new RepositoryWatcher({ targets: () => [target()], clock, onEvent: (_p, e) => void events.push(e), live: () => open });

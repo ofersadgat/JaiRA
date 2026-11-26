@@ -93,8 +93,6 @@ export interface PublishRequest {
    */
   question?: string;
   confirmLabel?: string;
-  /** The agent's tool call asking (`ctx.toolCallId`), so the question is drawn under its row. */
-  callId?: string;
 }
 
 /**
@@ -118,26 +116,29 @@ export interface PublishAuthorizerOptions {
 
 export class PublishRefusal extends Error {}
 
+const DENIED = "this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed";
+
 export class PublishAuthorizer {
   private granted = false;
 
   constructor(private readonly options: PublishAuthorizerOptions) {}
 
   /**
-   * Refuse, or return once the task may publish. `request` is built only when somebody is asked.
-   *
-   * `permitted`: the call that publishes was let through by its own permission line with nobody asked
-   * — an agent's `git_push` under a set that says `allow` (the person, 2026-11-25: "permission is on
-   * full. it should be approved"). That line IS the person's say-so for this call, so `ask` asks
-   * nothing more; a project that says `deny` still refuses.
+   * Why nothing may publish here at all — the project says `deny` — or `undefined`. All an agent's own
+   * Git tool asks of the policy (`git_push`, `open_merge_request`): whether to ASK was its permission
+   * line's to decide, and it has (the person, 2026-11-25: "it shouldnt be asking me for git push
+   * permission when it already has it").
    */
-  async authorize(request: () => Promise<PublishRequest>, permitted = false): Promise<void> {
+  refusal(): string | undefined {
+    return this.options.publish === "deny" ? DENIED : undefined;
+  }
+
+  /** Refuse, or return once the task may publish. `request` is built only when somebody is asked. */
+  async authorize(request: () => Promise<PublishRequest>): Promise<void> {
     const mode = this.options.publish;
     if (mode === "allow") return;
-    if (mode === "deny") {
-      throw new PublishRefusal("this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed");
-    }
-    if (permitted || this.granted || this.options.answered?.() === true) return;
+    if (mode === "deny") throw new PublishRefusal(DENIED);
+    if (this.granted || this.options.answered?.() === true) return;
     if (this.options.confirmPublish === undefined) {
       throw new PublishRefusal(
         "publishing needs a person's say-so and nobody can be asked here — grant it with functions.review_artifacts.publish: \"allow\", or run where the question can be answered",

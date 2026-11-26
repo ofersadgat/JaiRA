@@ -15,12 +15,12 @@
  *
  * ## What leaves the machine
  *
- * A push leaves the machine, so `git_push` and `open_merge_request` pass the SAME publish question
- * the review primitives do — `functions.review_artifacts.publish`, asked at most once per task
- * ({@link PublishAuthorizer}) — on top of the tool's own permission mode, unless that mode itself let
- * the call through with nobody asked ({@link GitToolHost.permits}): a set that says `git_push: allow`
- * is the person's say-so, and asking again behind it is a question nobody expects. A comment, a merge and a
- * close are decided by the tool's mode alone, as `remote_comment`/`remote_merge`/`remote_close` are.
+ * Every one of them is decided by its own permission line, as any tool is: `git_push: allow` pushes,
+ * `ask` asks first, `deny` refuses. A push leaves the machine, so `git_push` and `open_merge_request`
+ * also meet the project's publish policy — but only its `deny` (`functions.review_artifacts.publish`,
+ * {@link PublishAuthorizer.refusal}): asking again behind a line that already decided was a second
+ * question for one push, and under `full` a question nobody expected (the person, 2026-11-25: "why
+ * does git_push depend on the functions.review_artifacts.publish permission?").
  *
  * `git_push` pushes with the CONNECTION's token, not whatever git would have found: the token is
  * handed to git as an `Authorization` header through `GIT_CONFIG_*` environment variables — never an
@@ -38,6 +38,7 @@ import {
   FORGE_CLIS,
   FORGE_LABELS,
   handleOfSummary,
+  isAccessRefusal,
   parseDuration,
   parseRemoteUrl,
   signComment,
@@ -59,7 +60,7 @@ import type { Exec } from "./exec";
 import { forgeAccess, NoForgeConnection, type ForgeAccess, type ForgeCliOptions, type ForgeHttp } from "./forge";
 import { Git } from "./git";
 import { isWslEnv, type ExecEnv } from "./paths";
-import { PublishRefusal, type PublishAuthorizer, type PublishRequest } from "./remote";
+import type { PublishAuthorizer } from "./remote";
 import type { SecretResolver } from "./secrets";
 
 export const GIT_TOOL_NAMES = [
@@ -98,17 +99,18 @@ export interface GitToolHost {
   readonly execEnv?: ExecEnv;
   /** The connection for a host: its provider and token. Throws {@link NoForgeConnection} when there is none. */
   forge(host: string): ForgeAccess;
+  /** Why the project lets nothing publish (`functions.review_artifacts.publish: deny`), or `undefined`. */
+  publishRefusal(): string | undefined;
   /**
-   * `functions.review_artifacts.publish`. Throws {@link PublishRefusal}; `request` is built only when somebody is asked.
-   * `permitted`: the call's own permission line let it through with nobody asked ({@link permits}).
+   * A push reached a repository, or was refused at it for want of access (`refused`, what git said) —
+   * so Connections can say where a connection that signs in fine does not work (`ForgeCheck.unreachable`).
    */
-  authorizePublish(request: () => Promise<PublishRequest>, permitted?: boolean): Promise<void>;
+  onRepositoryAccess?(where: { connection: string; host: string; repository: string }, refused: string | undefined): void;
   /**
-   * Whether the permission set the task's calls are decided under lets this call through with nobody
-   * asked — `git_push` under `full`. Then that line answered the publish question for this call, and
-   * `ask` asks nothing more. Absent: no set is known here, and the publish question decides alone.
+   * Something that went through the connection failed — a push git would not make, a forge request,
+   * `gh`/`glab` — so the host can check the connection again and say a lost sign-in where it is fixed.
    */
-  permits?(tool: string, args: Record<string, unknown>): boolean;
+  onForgeFailure?(error: Error): void;
   /** The event hub `wait_for_event` waits on. Absent: no repository watcher runs here, and the tool says so. */
   readonly events?: EventWaits;
   /**
@@ -135,12 +137,14 @@ export interface WorkspaceGitOptions {
   http?: ForgeHttp;
   /** The forge's command line, for a connection with no token (`ForgeOptions.cli`). */
   cli?: ForgeCliOptions;
-  /** The run's publish question — `RemotePrimitives.publishing` where a run has them, so both ask once. */
-  publishing: Pick<PublishAuthorizer, "authorize">;
+  /** The run's publish policy — `RemotePrimitives.publishing` where a run has them. Only its `deny` is read. */
+  publishing: Pick<PublishAuthorizer, "refusal">;
   /** What `wait_for_event` waits on. Absent: it answers that nothing watches the repository here. */
   events?: EventWaits;
-  /** See {@link GitToolHost.permits}. */
-  permits?: (tool: string, args: Record<string, unknown>) => boolean;
+  /** See {@link GitToolHost.onRepositoryAccess}. */
+  onRepositoryAccess?: GitToolHost["onRepositoryAccess"];
+  /** See {@link GitToolHost.onForgeFailure}. */
+  onForgeFailure?: GitToolHost["onForgeFailure"];
   /** See {@link GitToolHost.modelOf}. */
   modelOf?: (ctx: ExecServices | undefined) => string | undefined;
   /** See {@link GitToolHost.artifacts}. */
@@ -155,8 +159,9 @@ export function workspaceGitHost(options: WorkspaceGitOptions): GitToolHost {
     ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
     git: (dir) => new Git({ exec: options.exec, repoDir: dir, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}) }),
     forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}), ...(options.cli !== undefined ? { cli: options.cli } : {}) }),
-    authorizePublish: (request, permitted) => options.publishing.authorize(request, permitted),
-    ...(options.permits !== undefined ? { permits: options.permits } : {}),
+    publishRefusal: () => options.publishing.refusal(),
+    ...(options.onRepositoryAccess !== undefined ? { onRepositoryAccess: options.onRepositoryAccess } : {}),
+    ...(options.onForgeFailure !== undefined ? { onForgeFailure: options.onForgeFailure } : {}),
     ...(options.events !== undefined ? { events: options.events } : {}),
     ...(options.modelOf !== undefined ? { modelOf: options.modelOf } : {}),
     ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
@@ -169,7 +174,7 @@ export function noGitToolHost(where = "here"): GitToolHost {
   const refuse = (): never => {
     throw new Error(unserved);
   };
-  return { unserved, taskId: "", git: refuse, forge: refuse, authorizePublish: refuse };
+  return { unserved, taskId: "", git: refuse, forge: refuse, publishRefusal: refuse };
 }
 
 /** A sentence for the model, returned as the call's `{ error }`. */
@@ -256,6 +261,8 @@ export function forgeTool(host: GitToolHost, name: string, spec: Omit<Tool, "run
       try {
         return (await body(record(input), ctx)) as JsonValue;
       } catch (e) {
+        // What the forge (or its command line) failed at, not what the call got wrong: worth a look at the connection.
+        if (!(e instanceof GitToolRefusal)) host.onForgeFailure?.(e as Error);
         if (e instanceof GitToolRefusal) return { error: e.message };
         return { error: `${name}: ${(e as Error).message ?? String(e)}` };
       }
@@ -287,30 +294,10 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
     return head !== undefined && head.startsWith(`${at.remote}/`) ? head.slice(at.remote.length + 1) : "main";
   };
 
-  /** Ask the publish question about this push — unless the call's own permission line already allowed it. */
-  const authorize = async (call: { tool: string; args: Record<string, unknown>; ctx: ExecServices | undefined }, at: Reached, branch: string, target: string, question: string, confirmLabel: string): Promise<void> => {
-    try {
-      await host.authorizePublish(async () => {
-        const identity = await at.git.identity();
-        const who = await at.access.provider.whoami().catch(() => undefined);
-        return {
-          taskId: host.taskId,
-          provider: at.access.provider.kind,
-          to: `${at.remote} · ${at.location.host}/${at.location.project}`,
-          host: at.location.host,
-          project: at.location.project,
-          branch,
-          target,
-          commitsAs: identity.name !== undefined ? `${identity.name} (git config)` : "whoever git config names",
-          ...(who !== undefined ? { openedBy: `@${who.login}` } : {}),
-          question,
-          confirmLabel,
-          ...(call.ctx?.toolCallId !== undefined ? { callId: call.ctx.toolCallId } : {}),
-        };
-      }, host.permits?.(call.tool, call.args) === true);
-    } catch (e) {
-      throw e instanceof PublishRefusal ? new GitToolRefusal(e.message) : e;
-    }
+  /** A push meets the project's publish policy: refused where it says `deny`, never asked about. */
+  const mayPublish = (): void => {
+    const refused = host.publishRefusal();
+    if (refused !== undefined) throw new GitToolRefusal(refused);
   };
 
   /**
@@ -323,11 +310,16 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
     // With a token, over https whatever the remote says, so the push is the connection's. Through the
     // forge's command line there is no token to send: the remote as it is, signed as git signs it.
     const pushUrl = at.access.token === undefined || /^https?:\/\//i.test(at.url) ? at.url : `https://${at.location.host}/${at.location.project}.git`;
+    const where = { connection: at.access.name, host: at.location.host, repository: at.location.project };
     try {
       await at.git.run(["push", pushUrl, `refs/heads/${branch}:refs/heads/${branch}`], { timeoutMs: 120_000, env: pushCredentials(at.access, pushUrl, host.execEnv) });
     } catch (e) {
+      // Refused for want of access — not a push behind the remote — is the connection's problem there.
+      if (isAccessRefusal(e as Error)) host.onRepositoryAccess?.(where, lastLines(e));
+      host.onForgeFailure?.(e as Error);
       throw new GitToolRefusal(`the push of ${branch} to ${at.location.host}/${at.location.project} was refused — ${lastLines(e)}`);
     }
+    host.onRepositoryAccess?.(where, undefined);
     await at.git.tryRun(["update-ref", `refs/remotes/${at.remote}/${branch}`, head]);
     return head;
   };
@@ -420,7 +412,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
       "open_merge_request",
       {
         description:
-          "Push the workspace's current branch (or `branch`) to the forge with the connection's credentials, and open its merge request into `target` — or, when one is already open for the branch, return that one, now carrying the pushed commits. Commit first: only commits are pushed. Asks the person first unless this project lets its tasks publish.",
+          "Push the workspace's current branch (or `branch`) to the forge with the connection's credentials, and open its merge request into `target` — or, when one is already open for the branch, return that one, now carrying the pushed commits. Commit first: only commits are pushed. Refused where the project lets nothing publish.",
         inputSchema: {
           type: "object",
           properties: {
@@ -440,7 +432,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
         const target = text(args["target"]) ?? (await defaultTarget(at));
         if (branch === target) throw new GitToolRefusal(`the branch to open from is ${target} itself — a merge request needs a branch of its own`);
         const forge = FORGE_LABELS[at.access.provider.kind];
-        await authorize({ tool: "open_merge_request", args, ctx }, at, branch, target, `Push ${branch} to ${forge.name} and open a ${forge.request} into ${target}?`, "Push and open");
+        mayPublish();
         const pushed = await push(at, branch);
         const title = text(args["title"]) ?? (await at.git.tryRun(["log", "-1", "--format=%s", `refs/heads/${branch}`])) ?? branch;
         const handle = await at.access.provider.open({
@@ -536,7 +528,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
       "git_push",
       {
         description:
-          "Push the workspace's current branch (or `branch`) to the branch of the same name on the forge, with the connection's credentials. Only commits are pushed, and never by force: a push the forge refuses as not a fast-forward comes back as an error. Asks the person first unless this project lets its tasks publish.",
+          "Push the workspace's current branch (or `branch`) to the branch of the same name on the forge, with the connection's credentials. Only commits are pushed, and never by force: a push the forge refuses as not a fast-forward comes back as an error. Refused where the project lets nothing publish.",
         inputSchema: {
           type: "object",
           properties: { branch: { type: "string", description: "The local branch to push. Absent: the current branch." }, ...REMOTE_PROPERTY },
@@ -546,7 +538,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
       async (args, ctx) => {
         const at = await reach(args, ctx);
         const branch = text(args["branch"]) ?? (await currentBranch(at.git));
-        await authorize({ tool: "git_push", args: { ...args, branch }, ctx }, at, branch, branch, `Push ${branch} to ${FORGE_LABELS[at.access.provider.kind].name}?`, "Push");
+        mayPublish();
         const head = await push(at, branch);
         return { ok: true, repository: repository(at), branch, head };
       },

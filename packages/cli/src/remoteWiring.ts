@@ -170,8 +170,8 @@ export function wireRemotes(registry: CapabilityRegistry<WorkflowMetrics>, optio
   });
 
   // The Git tools (decision 0010 §1), again — `buildRunEnvironment` registered them over the project
-  // with nobody to ask. A durable run has the task's workspace and a terminal, and they share the
-  // primitives' publish question, so a task asked once is asked once.
+  // with nobody to ask. A durable run has the task's workspace and a terminal, and they read the
+  // primitives' publish policy — only its `deny`; a push asks, or not, by its own permission line.
   registerGitTools(
     registry,
     workspaceGitHost({

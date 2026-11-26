@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { parseConfig, type ConfigView, type ForgeCheck, type LocalServerProbe, type McpDetectedSource, type McpServerConfig, type McpServerStatus, type ProbeResult } from "@jaira/shared";
-import { forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRowOf, forgeSshOf, forgesOf, foundServersOf, lookedInOf, mcpActionOf, mcpChipOf, routeActionOf, routeChipOf, routeLineOf, schemaGistOf, NEW_SERVER_SCHEMA } from "../src/renderer/connectionsModel";
+import { forgeActionOf, forgeChipOf, forgeLineOf, forgePlaceOf, forgeRefusalsOf, forgeRowOf, forgeSshOf, forgesOf, foundServersOf, lookedInOf, mcpActionOf, mcpChipOf, routeActionOf, routeChipOf, routeLineOf, schemaGistOf, NEW_SERVER_SCHEMA } from "../src/renderer/connectionsModel";
 import { MODEL_PROVIDERS } from "../src/renderer/providerSpecs";
 
 const spec = (id: string) => MODEL_PROVIDERS.find((one) => one.id === id)!;
@@ -121,6 +121,33 @@ describe("a forge, closed", () => {
     const row = forgeRowOf("gitlab", forges["gitlab"]!, refused, oauth);
     expect(forgeActionOf(row, refused, "gitlab.com", true)).toEqual({ kind: "sign-in", label: "Sign in again", title: "opens gitlab.com with a code to enter" });
     expect(forgeActionOf(row, refused, "gitlab.com", false)).toEqual({ kind: "token", label: "Replace the token", title: "filed under GITLAB_TOKEN" });
+  });
+
+  it("says where a connection that signs in was refused, and offers to sign in again", () => {
+    const unreachable = [
+      { repository: "ofersadgat/topodiff", detail: "listing the pull requests of ofersadgat/topodiff: the forge answered 404 — Not Found", projects: ["topodiff"], at: 1 },
+      { repository: "ofersadgat/other", detail: "remote: Write access to repository not granted.", projects: [], at: 2 },
+    ];
+    const check: ForgeCheck = { ...checks["github"]!, unreachable };
+    const row = forgeRowOf("github", forges["github"]!, check, oauth);
+    expect(row.state).toBe("available");
+    expect(forgeLineOf(row.state, check)).toEqual({ word: "ready", rest: "can't reach ofersadgat/topodiff and 1 more" });
+    expect(forgeRefusalsOf(check)).toEqual([
+      "Can't reach ofersadgat/topodiff (used by topodiff) — listing the pull requests of ofersadgat/topodiff: the forge answered 404 — Not Found",
+      "Can't reach ofersadgat/other — remote: Write access to repository not granted.",
+    ]);
+    expect(forgeActionOf(row, check, "github.com", true)).toEqual({ kind: "sign-in", label: "Sign in again", title: "opens github.com with a code to enter" });
+    // Nothing refused: nothing said, and no button.
+    expect(forgeRefusalsOf(checks["github"])).toEqual([]);
+  });
+
+  it("keeps a connection whose command line was signed out a row that offers to sign in again", () => {
+    const out: ForgeCheck = { ...checks["gitlab"]!, provider: "github", host: "github.com", name: "github", detail: "gh is not signed in to github.com", signedOut: "gh is not signed in to github.com" };
+    expect(forgePlaceOf(true, out)).toBe("row");
+    const row = forgeRowOf("github", forges["github"]!, out, oauth);
+    expect(row.state).toBe("unavailable");
+    expect(forgeLineOf(row.state, out).rest).toBe("gh is not signed in to github.com");
+    expect(forgeActionOf(row, out, "github.com", true)).toMatchObject({ kind: "sign-in", label: "Sign in again" });
   });
 });
 

@@ -46,7 +46,7 @@ function host(url: string, options: { sink?: false } = {}): GitToolHost {
     git: () => git,
     forge: (forgeHost) =>
       forgeAccess(parseIntegrations(undefined), forgeHost, { secrets: new SecretResolver({ env: { GITLAB_TOKEN: "good", GITHUB_TOKEN: "good" } }), http: replay.http }),
-    authorizePublish: async () => undefined,
+    publishRefusal: () => undefined,
     ...(options.sink === false ? {} : { artifacts: centralArtifactSink({ store, vars: vars() }) }),
   };
 }

@@ -794,6 +794,8 @@ export function forgeState(enabled: boolean, check: ForgeCheck | undefined): Pro
   if (check.status === "ok") return "available";
   if (check.status === "failed") return "unavailable";
   if (check.status === "disabled") return "off";
+  // Its command line signed out: a sign-in to do again, drawn as a refused one is — a row, not the shelf.
+  if (check.signedOut !== undefined) return "unavailable";
   return "unconfigured";
 }
 
@@ -952,13 +954,19 @@ export function forgeSshOf(connection: JairaForgeConnection, check: ForgeCheck |
  * while there is no token for it at all.
  */
 export function forgePlaceOf(enabled: boolean, check: ForgeCheck | undefined): "row" | "shelf" {
-  return enabled && check?.status === "unconfigured" ? "shelf" : "row";
+  return enabled && check?.status === "unconfigured" && check.signedOut === undefined ? "shelf" : "row";
 }
 
-/** A forge row's closed line: the state's word, then — connected — the token's scopes, or else what the check found. */
+/**
+ * A forge row's closed line: the state's word, then — connected — the token's scopes, or else what the
+ * check found. A connection refused at a project's repository says THAT first: it signs in, and does not
+ * work where it is used (`ForgeCheck.unreachable`).
+ */
 export function forgeLineOf(state: ProviderState, check: ForgeCheck | undefined): { word: string; rest: string | undefined } {
   const word = stateWord(state);
   if (check === undefined || state === "off" || state === "unchecked") return { word, rest: undefined };
+  const refused = state === "available" ? (check.unreachable ?? []) : [];
+  if (refused.length > 0) return { word, rest: `can't reach ${refused[0]!.repository}${refused.length > 1 ? ` and ${refused.length - 1} more` : ""}` };
   if (state === "available") {
     const scopes = check.identity?.scopes;
     return { word, rest: scopes !== undefined && scopes.length > 0 ? scopes.join(", ") : undefined };
@@ -966,8 +974,18 @@ export function forgeLineOf(state: ProviderState, check: ForgeCheck | undefined)
   return { word, rest: check.detail !== "" ? check.detail : undefined };
 }
 
+/**
+ * The repositories a connection was refused at, one line each, as its row says them: which, who uses it,
+ * and what the forge said (`ForgeCheck.unreachable`).
+ */
+export function forgeRefusalsOf(check: ForgeCheck | undefined): string[] {
+  return (check?.unreachable ?? []).map((one) => `Can't reach ${one.repository}${one.projects.length > 0 ? ` (used by ${one.projects.join(", ")})` : ""} — ${one.detail}`);
+}
+
 /** The one button a closed forge row carries: sign in through the browser, or store a token where there is no sign-in. */
 export function forgeActionOf(row: ReturnType<typeof forgeRowOf>, check: ForgeCheck | undefined, host: string, canSignIn: boolean): { kind: "sign-in" | "token"; label: string; title: string } | undefined {
+  // Signed in, and refused at a repository it is used for: signing in again — another account, a wider token — is the fix.
+  if (check !== undefined && row.state === "available" && (check.unreachable?.length ?? 0) > 0 && canSignIn) return { kind: "sign-in", label: "Sign in again", title: `opens ${host} with a code to enter` };
   if (check === undefined || row.state === "available" || row.state === "off" || row.state === "unchecked") return undefined;
   if (canSignIn) return { kind: "sign-in", label: row.state === "unavailable" ? "Sign in again" : `Sign in with ${row.label}`, title: `opens ${host} with a code to enter` };
   return { kind: "token", label: check.credential !== undefined ? "Replace the token" : "Add a token", title: `filed under ${row.tokenName}` };

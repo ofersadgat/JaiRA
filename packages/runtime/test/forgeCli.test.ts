@@ -150,11 +150,15 @@ describe("a connection with no token", () => {
     expect(github!.credential).toBeUndefined();
   });
 
-  it("stays not set up when the command line is signed out or not there", async () => {
+  it("stays not set up when the command line is not there, and says a signed-out one is a sign-in to do again", async () => {
     const exec = fakeCli({}, { gh: "out", glab: "missing" });
     const [gitlab, github] = await checkForges(parseIntegrations(undefined), { secrets: secrets({}), cli: { exec } });
     expect(gitlab).toMatchObject({ status: "unconfigured", detail: "no token stored under GITLAB_TOKEN", credentialMissing: "GITLAB_TOKEN" });
-    expect(github).toMatchObject({ status: "unconfigured", detail: "no token stored under GITHUB_TOKEN" });
+    expect(gitlab!.signedOut).toBeUndefined();
+    // No way in either way — and one that worked before is a sign-in LOST, which Settings says (`ForgeCheck.signedOut`).
+    expect(github).toMatchObject({ status: "unconfigured", fix: "sign in again — here, or `gh auth login --hostname github.com` in a terminal" });
+    expect(github!.signedOut).toMatch(/is not signed in to github\.com/);
+    expect(github!.detail).toBe(github!.signedOut);
   });
 
   it("is not looked for through the command line when a token is stored", async () => {

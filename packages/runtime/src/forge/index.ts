@@ -171,7 +171,11 @@ async function checkForgeCli(base: Pick<ForgeCheck, "name" | "provider" | "host"
     }
     return { ...base, status: "ok", detail: `signed in as @${identity.login} through ${program}`, identity, via: "cli" };
   } catch (error) {
-    if (error instanceof ForgeCliUnavailable) return none;
+    // Installed and signed out: a sign-in lost, if it ever worked (`ForgeCheck.signedOut`); not installed is no way in at all.
+    if (error instanceof ForgeCliUnavailable) {
+      if (error.reason !== "signed-out") return none;
+      return { ...none, detail: error.message, fix: `sign in again — here, or \`${program} auth login --hostname ${connection.host}\` in a terminal`, signedOut: error.message };
+    }
     const why = error instanceof ForgeError && error.status > 0 ? `${FORGE_LABELS[connection.provider].name} answered ${error.status}` : (error as Error).message;
     return { ...base, status: "failed", detail: `${program} could not reach ${connection.host} — ${why}`, fix: "check the host and the network, then re-check", via: "cli" };
   }

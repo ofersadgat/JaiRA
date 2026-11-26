@@ -108,6 +108,8 @@ export interface RepositoryWatcherOptions {
   onEvent: (project: string, event: EventDelivery) => void;
   clock?: WatchClock;
   onError?: (target: RepoWatchTarget, error: Error) => void;
+  /** A look at the target succeeded — the forge let the connection read it. */
+  onLooked?: (target: RepoWatchTarget) => void;
   /**
    * Whether a look that was awaiting the forge may still touch its target's store — not when the
    * project closed while the forge answered. Absent: always.
@@ -315,6 +317,7 @@ export class RepositoryWatcher {
       polling.floorSeconds = undefined;
       polling.checkedAt = this.clock.now();
       polling.error = undefined;
+      if (this.alive(key, target)) this.options.onLooked?.(target);
     } catch (error) {
       if (!this.alive(key, target)) return;
       polling.failures += 1;

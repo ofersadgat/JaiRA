@@ -350,13 +350,20 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
     return { action: "deny", reason: "removing .git destroys the repository" };
   }
 
+  // `git push origin +main`: a `+` on a refspec forces that ref as `--force` does — refused like it, so a
+  // set that lets pushes through (`full`'s `git push: allow`) never lets a forced one through with them.
+  if (command.program === "git" && command.subcommand === "push" && command.args.some((arg) => arg.startsWith("+"))) {
+    return { action: "deny", reason: "force push rewrites published history" };
+  }
+
   const ask = (reason: string): { action: PolicyAction; reason: string } => ({ action: "require_approval", reason });
 
   if (command.program === "git") {
     if (command.subcommand === "push") return ask("pushes publish work");
     if (command.subcommand === "merge") return ask("merges change shared history");
     if (command.subcommand === "config" && command.flags.includes("--global")) return ask("global config affects every repository");
-    if (command.subcommand === "remote") return ask("changing remotes redirects where work is published");
+    // Listing them (`git remote -v`, `git remote show origin`, `get-url`) changes nothing.
+    if (command.subcommand === "remote" && REMOTE_CHANGES.has(command.args[0] ?? "")) return ask("changing remotes redirects where work is published");
   }
   if (NETWORK_PROGRAMS.has(command.program)) {
     // Fetching a script and piping it to a shell is the shape worth naming.
@@ -383,6 +390,9 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
   if (commandWords(command).some((a) => SECRET_PATTERNS.some((p) => p.test(a)))) return ask("the command touches a credentials path");
   return undefined;
 }
+
+/** `git remote`'s subcommands that change where work goes; the rest only look. */
+const REMOTE_CHANGES: ReadonlySet<string> = new Set(["add", "rename", "remove", "rm", "set-url", "set-head", "set-branches", "prune", "update"]);
 
 /** Strictest wins, so nothing benign on the same line can soften a verdict. */
 const RANK: Record<PolicyAction, number> = { allow: 0, require_approval: 1, deny: 2 };

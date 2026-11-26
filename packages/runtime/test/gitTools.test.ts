@@ -53,8 +53,10 @@ interface Setup {
   events?: EventWaits;
   /** The model behind a call — what a comment is signed with. */
   modelOf?: () => string | undefined;
-  /** What the task's permission set lets through with nobody asked. */
-  permits?: (tool: string, args: Record<string, unknown>) => boolean;
+  /** Told when something that went through the connection failed. */
+  onForgeFailure?: (error: Error) => void;
+  /** Told when a push reaches a repository, or is refused there. */
+  onRepositoryAccess?: (where: { connection: string; host: string; repository: string }, refused: string | undefined) => void;
 }
 
 function tools(setup: Setup = {}): Record<string, Tool> {
@@ -68,7 +70,8 @@ function tools(setup: Setup = {}): Record<string, Tool> {
       http: replay.http,
       ...(setup.events !== undefined ? { events: setup.events } : {}),
       ...(setup.modelOf !== undefined ? { modelOf: setup.modelOf } : {}),
-      ...(setup.permits !== undefined ? { permits: setup.permits } : {}),
+      ...(setup.onRepositoryAccess !== undefined ? { onRepositoryAccess: setup.onRepositoryAccess } : {}),
+      ...(setup.onForgeFailure !== undefined ? { onForgeFailure: setup.onForgeFailure } : {}),
       publishing: new PublishAuthorizer({
         publish: setup.publish ?? "allow",
         ...(setup.answer !== undefined
@@ -254,54 +257,40 @@ describe("git_push", () => {
     expect(await call(tools({ publish: "deny" }), "git_push")).toEqual({
       error: "this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed",
     });
+    expect((await call(tools({ publish: "deny" }), "open_merge_request"))["error"]).toMatch(/functions\.review_artifacts\.publish is deny/);
     expect(ran.some((r) => r.args[0] === "push")).toBe(false);
   });
 
-  it("refuses under ask when nobody can be asked", async () => {
-    commit();
-    expect((await call(tools({ publish: "ask" }), "git_push"))["error"]).toMatch(/^publishing needs a person's say-so/);
-  });
-
-  it("asks once per task, saying what it is pushing and as whom", async () => {
-    commit();
-    const set = tools({ publish: "ask", answer: "once" });
-    expect(await call(set, "git_push")).toMatchObject({ ok: true });
-    expect(await call(set, "git_push")).toMatchObject({ ok: true });
-    expect(asked).toHaveLength(1);
-    expect(asked[0]).toMatchObject({
-      taskId: "t-1",
-      provider: "gitlab",
-      to: "origin · gitlab.com/gitlab-org/gitlab-runner",
-      branch: "task/t-1",
-      commitsAs: "Test Author (git config)",
-      openedBy: "@jaira-bot",
-      question: "Push task/t-1 to GitLab?",
-      confirmLabel: "Push",
-    });
-  });
-
-  it("asks nothing when the task's permission set allows the push, and still refuses under deny", async () => {
+  it("never asks: its own permission line decided whether to, whatever the publish policy's ask says", async () => {
     const head = commit();
-    const seen: Array<[string, Record<string, unknown>]> = [];
-    const permits = (tool: string, args: Record<string, unknown>): boolean => {
-      seen.push([tool, args]);
-      return tool === "git_push";
-    };
-    expect(await call(tools({ publish: "ask", answer: "no", permits }), "git_push")).toMatchObject({ ok: true, head });
+    // Even where nobody could be asked, and where somebody would say no: no question is put.
+    expect(await call(tools({ publish: "ask" }), "git_push")).toMatchObject({ ok: true, head });
+    expect(await call(tools({ publish: "ask", answer: "no" }), "git_push")).toMatchObject({ ok: true, head });
     expect(asked).toEqual([]);
-    // Judged at the branch it pushes, so a line with places (`main: ask`) answers for it.
-    expect(seen).toEqual([["git_push", { branch: "task/t-1" }]]);
-    expect(await call(tools({ publish: "deny", permits }), "git_push")).toEqual({
-      error: "this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed",
-    });
-    // A set that does not allow it outright leaves the question to be asked.
-    expect(await call(tools({ publish: "ask", answer: "no", permits: () => false }), "git_push")).toEqual({ error: "publishing was declined — nothing was pushed" });
-    expect(asked).toHaveLength(1);
   });
 
-  it("says a declined push was declined", async () => {
+  it("says the connection reached the repository when a push lands, and nothing when one is rejected for being behind", async () => {
+    const seen: Array<[string, string | undefined]> = [];
+    const onRepositoryAccess = (where: { connection: string; host: string; repository: string }, refused: string | undefined): void => void seen.push([`${where.connection} ${where.host}/${where.repository}`, refused]);
     commit();
-    expect(await call(tools({ publish: "ask", answer: "no" }), "git_push")).toEqual({ error: "publishing was declined — nothing was pushed" });
+    expect(await call(tools({ onRepositoryAccess }), "git_push")).toMatchObject({ ok: true });
+    expect(seen).toEqual([["gitlab gitlab.com/gitlab-org/gitlab-runner", undefined]]);
+    // Behind the remote is not a matter of access: the connection is not said to be refused.
+    const reviewer = rig.reviewer();
+    rig.git(reviewer, "fetch", "origin", "task/t-1");
+    rig.git(reviewer, "checkout", "-B", "task/t-1", "FETCH_HEAD");
+    rig.git(reviewer, "commit", "--allow-empty", "-m", "someone else's work");
+    rig.git(reviewer, "push", "origin", "task/t-1");
+    rig.git(rig.work, "commit", "--allow-empty", "-m", "mine");
+    seen.length = 0;
+    const failed: string[] = [];
+    expect((await call(tools({ onRepositoryAccess, onForgeFailure: (e) => void failed.push(e.message) }), "git_push"))["error"]).toMatch(/was refused/);
+    expect(seen).toEqual([]);
+    // Any push git would not make has the connection looked at again; a call that got something wrong does not.
+    expect(failed).toHaveLength(1);
+    failed.length = 0;
+    expect((await call(tools({ onForgeFailure: (e) => void failed.push(e.message) }), "git_push", { remote: "nope" }))["error"]).toMatch(/no git remote called/);
+    expect(failed).toEqual([]);
   });
 
   it("refuses a detached HEAD, and a push the remote rejects comes back as a sentence", async () => {
@@ -328,7 +317,8 @@ describe("open_merge_request", () => {
     expect(rig.git(rig.bare, "rev-parse", "refs/heads/task/t-1")).toBe(head);
     const created = replay.seen.find((r) => r.method === "POST")!;
     expect(created.body).toMatchObject({ source_branch: "task/t-1", target_branch: "main", title: "Revise the second line", description: "Why." });
-    expect(asked.map((r) => [r.question, r.branch, r.target])).toEqual([["Push task/t-1 to GitLab and open a merge request into main?", "task/t-1", "main"]]);
+    // Its permission line decided; the publish policy is not asked about it.
+    expect(asked).toEqual([]);
   });
 
   it("refuses to open a request from the target onto itself", async () => {

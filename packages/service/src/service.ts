@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import { ancestorsOf, COMPONENT_NAMES, CUT_OFF_EVENT, drawnInsideParent, environmentLookupOf, MOVE_EVENTS, type ChoiceQuestion, type EnvironmentLookup, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
+import { ancestorsOf, COMPONENT_NAMES, isAccessRefusal, mentionsForgeRefusal, type ForgeCheck, CUT_OFF_EVENT, drawnInsideParent, environmentLookupOf, MOVE_EVENTS, type ChoiceQuestion, type EnvironmentLookup, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -1694,6 +1694,11 @@ function restrictToEventsFunctions(registry: ReturnType<typeof newRegistry>): vo
 const CALLER_TRIES = 15;
 const CALLER_RETRY_MS = 100;
 
+/** How long after one check of the forge connections a failure may ask for the next (`AppService.forgeFailed`). */
+const FORGE_RECHECK_MS = 60_000;
+/** A process that runs git, gh or glab: the program itself, or a shell line naming one. */
+const FORGE_PROGRAM = /(?:^|[\s"'\\/;&|(])(?:git|gh|glab)(?:\.exe)?(?=[\s"';&|)]|$)/i;
+
 export class AppService {
   /**
    * The open projects, by {@link sessionKey}.
@@ -2306,6 +2311,115 @@ export class AppService {
   private readonly skippedRemotes = new Set<string>();
 
   /**
+   * Repositories a forge connection was refused at though it signs in — by `<connection>\0<host>/<repo>`
+   * (`ForgeCheck.unreachable`). The Connections row says so, and so does an error on Settings' board:
+   * a token that answers "who am I" but cannot see the project's repository looked like a working
+   * connection while every push and every look there failed (the person, 2026-11-25).
+   */
+  private readonly repoRefusals = new Map<string, { connection: string; host: string; repository: string; projects: Set<string>; detail: string; at: number }>();
+
+  /** When a failure last had the forge connections checked again (`forgeFailed`), and the one waiting. */
+  private forgeRecheckAt = 0;
+  private forgeRecheckTimer?: ReturnType<typeof setTimeout>;
+
+  /**
+   * Something that went through a forge connection failed — a git command, a forge request, `gh` or
+   * `glab`: check the connections again, so a token that was revoked or a command line that was signed
+   * out is said where it is fixed — Connections, and an error on Settings' board with Sign in again —
+   * rather than only in the failure (the person, 2026-11-25: "whenever any git command fails using the
+   * oauth or the command line tool, we should check the tool and properly show the user that they need
+   * to login in again"). At most once a minute, the rest folded into one check after it: a remote that
+   * keeps failing must not become a request to the forge every time it is looked at.
+   */
+  private forgeFailed(why: string): void {
+    if (this.closed) return;
+    const wait = this.forgeRecheckAt + FORGE_RECHECK_MS - Date.now();
+    if (wait > 0) {
+      if (this.forgeRecheckTimer === undefined) {
+        this.forgeRecheckTimer = setTimeout(() => {
+          this.forgeRecheckTimer = undefined;
+          this.forgeFailed(why);
+        }, wait);
+        (this.forgeRecheckTimer as { unref?: () => void }).unref?.();
+      }
+      return;
+    }
+    this.forgeRecheckAt = Date.now();
+    this.log({ level: "info", source: "config", message: `checking the forge connections again: ${why.split(/\r?\n/)[0]!.slice(0, 200)}` });
+    void this.recheckForges().catch(() => undefined);
+  }
+
+  /** The forge connections alone, checked again onto the snapshot — what {@link forgeFailed} asks for. */
+  private async recheckForges(): Promise<void> {
+    const where = this.healthScope();
+    const config = this.effectiveConfig();
+    const marks = this.readSettings().forgeSignIns ?? {};
+    const forges = await checkForges(config.integrations, {
+      secrets: this.secretResolver(),
+      signedIn: (credential) => marks[credential]?.source,
+      ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
+      ...withForgeCli(this.forgeCli(config.execEnvironment)),
+    });
+    if (this.closed) return;
+    this.observeForges(where, forges);
+    const snapshot = this.availability;
+    if (snapshot === undefined) return;
+    // A connection still signed in as the same account keeps what its ssh keys were found to do.
+    const merged = forges.map((check) => {
+      const was = snapshot.forges?.find((one) => one.name === check.name);
+      return was?.ssh !== undefined && check.status === "ok" && was.status === "ok" && was.identity?.login === check.identity?.login ? { ...check, ssh: was.ssh } : check;
+    });
+    this.availability = { ...snapshot, forges: merged };
+    this.publish({ type: "store:invalidate", scope: "availability" });
+  }
+
+  /**
+   * The forge checks onto Settings' board: one that worked and now fails is an error with Sign in again.
+   * A command line signed out of a connection that worked (`ForgeCheck.signedOut`) is that too — a
+   * sign-in lost, not a connection never set up — though the check calls it `unconfigured`.
+   */
+  private observeForges(where: string, forges: readonly ForgeCheck[]): void {
+    // Its detail and fix already say what was signed out and how to sign in again (`checkForgeCli`).
+    const observed = forges.map((check) => (check.signedOut !== undefined ? { ...check, status: "failed" as const } : check));
+    this.health.observe("forge", where, observed, (name) => {
+      const forge = forges.find((one) => one.name === name);
+      return { title: forge !== undefined ? `${name} (${forge.host})` : name, action: "sign-in", subject: name };
+    });
+  }
+
+  /** A look or a push at a repository: refused there (`refused`, one line), or reached. */
+  private noteRepoAccess(where: { connection: string; host: string; repository: string }, refused: string | undefined, project?: string): void {
+    const key = `${where.connection}\u0000${where.host}/${where.repository}`;
+    const id = `forge-repo:${where.connection}:${where.host}/${where.repository}`;
+    const held = this.repoRefusals.get(key);
+    if (refused === undefined) {
+      if (held === undefined) return;
+      this.repoRefusals.delete(key);
+      this.health.clear(id);
+      this.publish({ type: "store:invalidate", scope: "availability" });
+      return;
+    }
+    const projects = held?.projects ?? new Set<string>();
+    if (project !== undefined) projects.add(basename(this.sessions.get(project)?.dir ?? project));
+    const same = held !== undefined && held.detail === refused;
+    this.repoRefusals.set(key, { ...where, projects, detail: refused, at: Date.now() });
+    if (same) return;
+    const forge = this.availability.forges?.find((check) => check.name === where.connection);
+    const named = projects.size > 0 ? `, which ${[...projects].join(" and ")} ${projects.size === 1 ? "uses" : "use"},` : "";
+    this.health.set({
+      id,
+      level: "error",
+      page: "connections",
+      title: `${where.connection} (${where.host})`,
+      detail: `can't reach ${where.repository}${named} — ${refused}${forge?.identity !== undefined ? ` (signed in as @${forge.identity.login})` : ""}`,
+      fix: `give the ${where.connection} connection access to ${where.repository}: sign in again with an account that has it, or use a token that includes it`,
+      action: "sign-in",
+      subject: where.connection,
+    });
+    this.publish({ type: "store:invalidate", scope: "availability" });
+  }
+
+  /**
    * Every remote of every open project that has a `git.*` event switched on, with those events.
    *
    * The remotes are the project's own `.git/config` (decision 0010 §2: nothing about where is typed);
@@ -2368,8 +2482,14 @@ export class AppService {
       this.repoWatch = new RepositoryWatcher({
         targets: () => this.repoWatchTargets(),
         onEvent: (project, event) => void this.deliverEvent(project, event),
-        onError: (target, error) =>
-          this.log({ level: "warn", source: "runtime", message: `could not look at ${target.remote} (${target.host}/${target.repository}) for events: ${error.message}`, project: target.project }),
+        onError: (target, error) => {
+          // A refusal is the CONNECTION's problem at this repository — said where the connection is, not only in the log.
+          if (isAccessRefusal(error as Error & { status?: number })) this.noteRepoAccess(target, error.message, target.project);
+          // Whatever it was, the connection is checked again: a revoked token fails every look the same way.
+          this.forgeFailed(`looking at ${target.host}/${target.repository} failed: ${error.message}`);
+          this.log({ level: "warn", source: "runtime", message: `could not look at ${target.remote} (${target.host}/${target.repository}) for events: ${error.message}`, project: target.project });
+        },
+        onLooked: (target) => this.noteRepoAccess(target, undefined),
         live: (target) => this.sessions.get(target.project)?.project.repoWatch === target.store,
       });
     }
@@ -6876,9 +6996,13 @@ export class AppService {
     // spawns until the run starts.
     let owner: RunOwner | undefined;
     let observe: ExecObserver<number> | undefined;
+    // The processes that run git, gh or glab — named, or in a shell line — by token: what they print is
+    // listened to for a refusal (`mentionsForgeRefusal`), and gh/glab failing at all is heard.
+    const forgeJobs = new Map<number, string>();
     const observer: ExecObserver = {
       onSpawn: (event) => {
         const token = observe?.onSpawn(event);
+        if (typeof token === "number" && FORGE_PROGRAM.test(`${event.command} ${event.argv.join(" ")}`)) forgeJobs.set(token, basename(event.command).toLowerCase());
         // The lifecycle row. `taskId` clicks through to the task and `jobId` opens what this process
         // printed — one stamp answering both "which run was that" and "what did it say".
         this.log({
@@ -6902,9 +7026,22 @@ export class AppService {
           taskId,
           ...(typeof token === "number" ? { jobId: token } : {}),
         });
+        const program = typeof token === "number" ? forgeJobs.get(token) : undefined;
+        if (program !== undefined) {
+          forgeJobs.delete(token as number);
+          // `gh`/`glab` failing is the command line failing; git's failures are heard in what it prints.
+          if (event.code !== 0 && /^(?:gh|glab)(?:\.exe)?$/.test(program)) this.forgeFailed(`${program} exited ${code}`);
+        }
         observe?.onExit(token as number | undefined, event);
       },
-      onOutput: (token, event) => observe?.onOutput?.(token as number | undefined, event),
+      onOutput: (token, event) => {
+        if (typeof token === "number" && forgeJobs.has(token) && mentionsForgeRefusal(event.chunk)) {
+          // Once per process: what it says next is the same refusal.
+          forgeJobs.delete(token);
+          this.forgeFailed(`a git command was refused: ${event.chunk.trim()}`);
+        }
+        observe?.onOutput?.(token as number | undefined, event);
+      },
       onError: (error, phase) => observe?.onError?.(error, phase),
     };
     const exec = new NodeExec({ execEnv: config.execEnvironment, observer });
@@ -7054,9 +7191,8 @@ export class AppService {
     registerWorkflowTools(registry, this.workflowHostFor(open, taskId));
     // The skills (decision 0029 §10), from every layer this project reads, nearest first.
     registerSkillTools(registry, project.paths.roots);
-    // The Git tools (decision 0010 §1), over this task's workspace and the forge its remote picks. Their
-    // publish question is the remote primitives' own (registered below), so a task asked once by
-    // either is asked once.
+    // The Git tools (decision 0010 §1), over this task's workspace and the forge its remote picks. A push
+    // meets the remote primitives' publish policy (registered below), but only where it refuses.
     registerGitTools(
       registry,
       workspaceGitHost({
@@ -7068,12 +7204,10 @@ export class AppService {
         secrets: this.secretResolver(open),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
         ...withForgeCli(this.forgeCli(config.execEnvironment)),
-        publishing: { authorize: (request, permitted) => remotePrimitives.publishing.authorize(request, permitted) },
-        // The set the conversation's calls are decided under (`live`, below — read at call time, so a pick
-        // in the composer counts): a push it allows with nobody asked is not asked about again.
-        permits: (tool, args) =>
-          live.permissionSet !== undefined &&
-          allowsCall(projectPolicy(config), live.permissionSet, tool, args, dialectFor(config.execEnvironment), { root: workspace.root, packages: filePackages, mcp: config.mcp }) === true,
+        // Only the policy's `deny`: whether a push asks is its own permission line's to say.
+        publishing: { refusal: () => remotePrimitives.publishing.refusal() },
+        onRepositoryAccess: (where, refused) => this.noteRepoAccess(where, refused, open.key),
+        onForgeFailure: (error) => this.forgeFailed(`a Git tool failed: ${error.message}`),
         events: this.toolEventWaits(open, taskId),
         modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
         // A CI download is the task's artifact, in its central folder (decision 0016).
@@ -7218,7 +7352,7 @@ export class AppService {
       // a question a test never answers.
       ...(scripted === undefined ? { confirmPublish: (request: PublishRequest) => this.askToPublish(open, taskId, request) } : {}),
       grantProject: () => this.grantPublish(open),
-      // A yes given in a typed turn of this task (an agent's `git_push`) counts here too, and back.
+      // A yes given in an earlier run of this task counts here too, and back.
       publishAnswered: () => open.publishGranted.has(taskId),
       onPublishGranted: () => open.publishGranted.add(taskId),
       // What a comment it posts is signed with: the model behind the call, where it can be told.
@@ -13303,7 +13437,15 @@ export class AppService {
    * itself — at startup, at project open, and after every configuration write.
    */
   readAvailability(): AvailabilitySnapshot {
-    return this.availability;
+    if (this.repoRefusals.size === 0 || this.availability.forges === undefined) return this.availability;
+    // Each connection carries the repositories it was refused at (`ForgeCheck.unreachable`).
+    const forges = this.availability.forges.map((check) => {
+      const unreachable = [...this.repoRefusals.values()]
+        .filter((one) => one.connection === check.name)
+        .map((one) => ({ repository: one.repository, detail: one.detail, projects: [...one.projects], at: one.at }));
+      return unreachable.length > 0 ? { ...check, unreachable } : check;
+    });
+    return { ...this.availability, forges };
   }
 
   /**
@@ -13435,10 +13577,7 @@ export class AppService {
     this.scheduleForgeRenewal(marks);
     // A route or a forge connection that worked and now does not (a key revoked, a sign-in expired).
     this.health.observe("route", where, routes, (name) => ({ title: ROUTE_TITLES[name] ?? name, action: "check", subject: name }));
-    this.health.observe("forge", where, forges ?? [], (name) => {
-      const forge = forges?.find((f) => f.name === name);
-      return { title: forge !== undefined ? `${name} (${forge.host})` : name, action: "sign-in", subject: name };
-    });
+    this.observeForges(where, forges ?? []);
     // What the DEFAULT executor's tree resolves to, derived from both halves and only here — the tree
     // a run gets (`defaultTree`): an agent that is down keeps its route, marked with why, and is
     // refused at the call rather than routed around.
@@ -14331,7 +14470,6 @@ export class AppService {
     const result = await open.hub.ask(
       "confirm_action",
       {
-        // An agent's `git_push` / `open_merge_request` (decision 0010) says what IT is asking.
         prompt: request.question ?? `Push this review to ${forge.name} and open a ${forge.request}?`,
         confirmLabel: request.confirmLabel ?? "Push and open",
         cancelLabel: request.question !== undefined ? "Don't publish" : "Review here only",
@@ -14344,9 +14482,6 @@ export class AppService {
         options: [{ value: "always", label: "Always for this project", description: "sets functions.review_artifacts.publish to allow in this project's settings" }],
       },
       taskId,
-      undefined,
-      // Under the agent's call that asks, where the conversation or its subagent draws it.
-      request.callId,
     );
     // A rejected park is a shutdown or a cancel, never a yes.
     if ("error" in result && result.error !== undefined) return "no";

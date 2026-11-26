@@ -861,6 +861,60 @@ export interface ForgeCheck {
   via?: "oauth" | "token" | "cli";
   /** Which of this machine's ssh keys let it in to the host — checked once the connection is `ok`. */
   ssh?: ForgeSshKeys;
+  /**
+   * Repositories this connection was REFUSED at though it signs in fine: a project's remote whose look
+   * the forge answered 401, 403 or 404 (the repository watcher), or a push it would not take
+   * (`git_push`). Signing in only asks who the token is, which a token scoped to other repositories
+   * answers — so this is the one place a connection that works can say where it does not (the person,
+   * 2026-11-25: "if github is broken why doesnt the connections page show it as broken?"). Cleared when
+   * a look or a push there succeeds.
+   */
+  unreachable?: ForgeRepoProblem[];
+  /**
+   * The connection goes through the forge's command line (`gh`, `glab`), which is installed and no
+   * longer signed in to the host — what it said. The check is `unconfigured` (there is no way in), and
+   * one that worked before is a sign-in LOST: Settings says to sign in again (the person, 2026-11-25:
+   * "whenever any git command fails using the oauth or the command line tool, we should check the tool
+   * and properly show the user that they need to login in again").
+   */
+  signedOut?: string;
+}
+
+/** A repository a forge connection was refused at — see {@link ForgeCheck.unreachable}. */
+export interface ForgeRepoProblem {
+  /** `owner/repo`, on the connection's host. */
+  repository: string;
+  /** What the forge or git said, one line. */
+  detail: string;
+  /** The projects whose remote points there, by directory — what the warning names. */
+  projects: string[];
+  /** When it was last refused, epoch ms. */
+  at: number;
+}
+
+/**
+ * Whether what a git, `gh` or `glab` command printed says it could not sign in, or was refused — a
+ * reason to check the forge connections again (`AppService.forgeFailed`). Read off output as it
+ * arrives, so a refusal inside a longer line (`git push …; git status`) is heard though the line exits 0.
+ */
+export function mentionsForgeRefusal(text: string): boolean {
+  return (
+    isAccessRefusal({ message: text }) ||
+    /authentication failed|could not read username|invalid username or password|bad credentials|permission denied \(publickey\)|token (?:has )?expired|(?:gh|glab) auth login|not logged in|http 401|401 unauthorized/i.test(text)
+  );
+}
+
+/**
+ * Whether a failure is the forge REFUSING this connection at a repository — no access, or no such
+ * repository as far as the token can see — rather than the network or the forge being down. Read off
+ * an API answer's status (`status`), else what git printed: GitHub's "Write access to repository not
+ * granted" and "Permission to … denied", "Repository not found", an https 401/403/404.
+ */
+export function isAccessRefusal(error: { message?: string; status?: number } | undefined): boolean {
+  if (error === undefined) return false;
+  if (error.status === 401 || error.status === 403 || error.status === 404) return true;
+  const text = error.message ?? "";
+  return /write access to repository not granted|permission to \S+ denied|repository not found|could not read from remote repository|the requested url returned error: 40[134]|answered 40[134]\b/i.test(text);
 }
 
 /** One of this machine's ssh keys, and whether it lets the machine in to a forge's host. */
