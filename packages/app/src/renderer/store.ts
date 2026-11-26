@@ -85,6 +85,7 @@ import type {
 import { withNoticeRead } from "./noticesModel";
 import { appendInstallLog, installLogKey, startedInstallLog, type InstallLog } from "./installLog";
 import { appendJobText, withRecentFolder, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
+import { chatOnArriving } from "./chatArrival";
 import {
   clearedAbove,
   statesPath,
@@ -2373,7 +2374,9 @@ export function useApp() {
 
   const refreshAll = useCallback(async () => {
     const current = await invoke("project:current", undefined).catch(() => null);
-    patch({ at: current?.dir ?? null });
+    const at = current?.dir ?? null;
+    // A project opened or made new is arrived at here: its Chat view is a new conversation in it.
+    patch(at !== ref.current.at ? { at, chat: chatOnArriving(ref.current.chat) } : { at });
     // A project Settings' path names that the window no longer has is taken out of the path: the pages
     // must not go on saying they edit a document there is no way to reach. Only once the window lists
     // projects at all — before its first list, every project would look closed.
@@ -2858,6 +2861,7 @@ export function useApp() {
           taskFocus: project,
           trail: [],
           trailState: null,
+          chat: chatOnArriving(ref.current.chat),
         });
         // Told to the engine, which is where a reloaded window asks where it stands (`project:current`,
         // the project THIS connection opened last). Without it the address moved only here: a window

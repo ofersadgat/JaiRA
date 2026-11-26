@@ -254,8 +254,9 @@ export function RunComposer({
         keeping.current--;
       });
   };
-  const send = (message: string): void => {
-    if (instanceId === undefined) return;
+  const send = (message: string): boolean => {
+    // Nothing to send into: the box keeps it.
+    if (instanceId === undefined) return false;
     setBusy(true);
     setError(null);
     void invoke("chat:send", { taskId, instanceId, message, overrides, ...(project !== undefined ? { project } : {}) })
@@ -265,6 +266,7 @@ export function RunComposer({
         setBusy(false);
         setSent((n) => n + 1);
       });
+    return true;
   };
   // Stop what is actually going: the TASK while it runs or asks (`task:cancel` withdraws a gate too), a
   // turn typed into a settled run otherwise (`chat:cancel`).

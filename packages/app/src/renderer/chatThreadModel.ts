@@ -5,7 +5,7 @@
  * host's, reached through `jump`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
+import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn, TaskStatus } from "@jaira/shared/browser";
 import { keepDraft, useKeptDraft } from "./composerDrafts";
 import { openingOf, titleOf } from "./chatWorkflow";
 import type { ChatSurface, RewindOutcome } from "./chatSurface";
@@ -114,9 +114,22 @@ export function armingText(arming: Arming, running: string | null = null, worktr
   return running !== null ? `${what} ${running}: wait for it to finish, or stop it now.` : what;
 }
 
-/** What the empty box says: a reply, or what an armed edit or fork will send. */
-export function replyPlaceholder(arming: Arming | null): string {
+/** What the empty box says: a reply, what an armed edit or fork will send, or — stranded — that it starts a new conversation. */
+export function replyPlaceholder(arming: Arming | null, stranded = false): string {
+  if (stranded && arming === null) return "This conversation cannot be continued — a message here starts a new one in this project…";
   return arming?.kind === "edit" ? "Say this instead…" : arming?.kind === "fork" ? "Start the new conversation with…" : "Reply…";
+}
+
+/**
+ * Whether a conversation can take no message and never will: there is no thread to send into, it is
+ * not waiting to be placed, and either it could not be read or its task has ended (or is ending) —
+ * not `queued` or `running`, which are a conversation still on its way to a thread. Unknown status
+ * (the detail not read yet) is not stranded: that is a conversation still loading.
+ */
+export function strandedFor(at: { hasThread: boolean; notStarted: boolean; unreadable: boolean; status: TaskStatus | undefined }): boolean {
+  if (at.hasThread || at.notStarted) return false;
+  if (at.unreadable) return true;
+  return at.status !== undefined && at.status !== "queued" && at.status !== "running";
 }
 
 /**
@@ -188,18 +201,27 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const queuedSettings = useMemo(() => queued?.settings ?? {}, [JSON.stringify(queued?.settings ?? {})]);
   const [startPlan, setStartPlan] = useState<ChatPlanView | null>(null);
   const notStarted = queued !== undefined;
+  /**
+   * A conversation nothing can be said to: no thread to send into, and none coming — it could not be
+   * read, or it ended without ever running (2026-11-26: one interrupted before its run began). Its box
+   * starts a new conversation in this project instead ({@link strandedFor}), so its chips say what that
+   * start would run, asked the same way.
+   */
+  const stranded = strandedFor({ hasThread: thread !== null, notStarted, unreadable: unreadable !== null, status: surface.detail?.status });
   useEffect(() => {
-    if (!notStarted) return;
+    if (!notStarted && !stranded) return;
     let live = true;
-    // The workflow the waiting conversation was made to run, or — not read yet — the one the settings name.
-    const stateId = surface.detail?.workflow;
-    void invoke("chat:startPlan", { ...(stateId !== undefined ? { stateId } : {}), overrides: queuedSettings, ...(project !== undefined ? { project } : {}) })
+    // The workflow the waiting conversation was made to run, or — not read yet — the one the settings
+    // name; stranded, the one a new conversation runs (`newConversation`), under the box's picks.
+    const stateId = notStarted ? surface.detail?.workflow : undefined;
+    void invoke("chat:startPlan", { ...(stateId !== undefined ? { stateId } : {}), overrides: notStarted ? queuedSettings : overrides, ...(project !== undefined ? { project } : {}) })
       .then((next) => live && setStartPlan(next))
       .catch(() => live && setStartPlan(null));
     return () => {
       live = false;
     };
-  }, [notStarted, queuedSettings, project]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notStarted, stranded, queuedSettings, stranded ? overrides : null, project]);
   /**
    * The message it will open with: what was just typed here, or what the task was made with — the one
    * text input a conversation's workflow takes, whatever it is called (decision 0021).
@@ -282,9 +304,28 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thread, title, taskId, project]);
 
-  const send = (message: string): void => {
+  /**
+   * Send what the box holds — true when it was taken (the box empties), false when nothing took it (the
+   * box keeps it). Never dropped: a send that went nowhere used to empty the box all the same, and the
+   * words were gone (2026-11-26).
+   */
+  const send = (message: string): boolean => {
     const instanceId = thread?.instanceId;
-    if (instanceId === undefined) return;
+    if (instanceId === undefined) {
+      // Nothing here to say it to. A conversation that will never run — it ended without a run, or
+      // cannot be read — hands the message to a new conversation in this project, the start page's
+      // send; one still being read or started keeps it in the box until it can take it.
+      if (!stranded) return false;
+      setError(null);
+      setSending((n) => n + 1);
+      void surface
+        .onNew(message, overrides)
+        .then((started) => {
+          if (started === null) setDraft(message);
+        })
+        .finally(() => setSending((n) => Math.max(0, n - 1)));
+      return true;
+    }
     const armed = arming;
     setArming(null);
     setError(null);
@@ -295,7 +336,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       setSending((n) => n + 1);
       const started = armed.side === "start" ? surface.onNew(message, overrides) : surface.onFork(taskId, armed.seq, message, overrides, project);
       void started.finally(() => setSending((n) => Math.max(0, n - 1)));
-      return;
+      return true;
     }
     setSending((n) => n + 1);
     // The person's own commands since the last message go with this one (decision 0028, ruling 8) —
@@ -342,6 +383,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
         // would blink off the screen and come back a minute later.
         read();
       });
+    return true;
   };
 
   /**
@@ -522,8 +564,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     const reason = withMessage ? draft.trim() : "";
     // The message is the reason, and the program's next `input()` takes it: sent, so queued for it.
     if (reason !== "") {
-      send(reason);
-      setDraft("");
+      if (send(reason)) setDraft("");
     }
     if (target === null) {
       void invoke("chat:cancel", { taskId, ...(project !== undefined ? { project } : {}) }).catch(() => undefined);
@@ -820,6 +861,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     disarm,
     confirmRewind,
     send,
+    stranded,
     stop: stopOrChoose,
     runningCalls,
     choosing,

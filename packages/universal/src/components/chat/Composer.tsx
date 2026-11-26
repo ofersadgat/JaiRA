@@ -136,7 +136,8 @@ export function Composer({
   joinable?: boolean;
   overrides: ChatSettings;
   onOverrides: (next: ChatSettings) => void;
-  onSend: (message: string) => void;
+  /** Send it: `false` when nothing took it, so the box keeps what was typed; anything else empties it. */
+  onSend: (message: string) => boolean | void;
   onStop?: (() => void) | undefined;
   disabled?: string;
   placeholder?: string;
@@ -206,7 +207,8 @@ export function Composer({
   const send = (): void => {
     const message = withFiles(draft.trim(), files);
     if (message === "" || !canSend) return;
-    onSend(message);
+    // Emptied only once it went somewhere: a send nothing took used to clear the box all the same.
+    if (onSend(message) === false) return;
     setDraft("");
     setFiles([]);
     setMention(null);
