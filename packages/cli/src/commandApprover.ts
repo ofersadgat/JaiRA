@@ -361,16 +361,18 @@ const HOW_TO_BE_ASKED: Record<Unasked, string> = {
 
 /**
  * Why a call was refused without asking anybody, and what would let it run: the flag that asks, and
- * per asking part the permission set line that answers it for good. A permission set's entry is answered in the
- * permission set; a built-in ask is answered by naming the command in the permission set, which replaces it. A line
- * no permission set judges — `run_command`'s, or a state's that declares no permission set — answers to the
- * built-ins alone, and only turning them off (`functions.shell.builtins`) takes one of their questions
- * away.
+ * per asking part the permission set line that answers it for good. A line no permission set judges —
+ * `run_command`'s, or a state's that declares no permission set — answers to the shipped
+ * `base/allow-all` under `security/standard`; a state that declares a set of its own answers its questions.
  */
 export function unattendedRefusal(request: ApprovalRequest, unasked: Unasked): string {
   const how = `nobody was asked: ${HOW_TO_BE_ASKED[unasked]}`;
   const allow = allowAdvice(request);
-  return allow.length > 0 ? `${how}. To let it run without asking, write ${allow.join("; and ")}` : `${how}.`;
+  // A line no permission set judges (`run_command`'s, a state that declares none) answers to the shipped
+  // profile; no line written anywhere reaches it, so no line is advised — only where its questions come from.
+  const unreached = request.parts !== undefined && request.parts.permissionSet === undefined && askingParts(request.parts).some((part) => part.decidedBy.source === "permissionSet");
+  const why = unreached ? ". This line answers to no permission set of the run's, only to the shipped security/standard, which asks about it" : "";
+  return allow.length > 0 ? `${how}${why}. To let it run without asking, write ${allow.join("; and ")}` : `${how}${why}.`;
 }
 
 function allowAdvice(request: ApprovalRequest): string[] {
@@ -380,7 +382,7 @@ function allowAdvice(request: ApprovalRequest): string[] {
     return [`a "${request.tool}": "allow" line in the state's permission set`];
   }
   // A permission set line is advice only where a permission set judged the line. `run_command` has none in reach —
-  // its line answers to the built-ins alone — and neither has a state that declares no permission set.
+  // its line answers to the shipped `security/standard` — and neither has a state that declares no permission set.
   const permissionSet = parts.permissionSet === undefined ? undefined : parts.permissionSet === INLINE_PERMISSION_SET ? "the permission set written on the state" : `the permission set ${parts.permissionSet}`;
   const out: string[] = [];
   for (const part of askingParts(parts)) {
@@ -388,12 +390,7 @@ function allowAdvice(request: ApprovalRequest): string[] {
     const { source } = part.decidedBy;
     let advice: string | undefined;
     if (source === "parser" || width === undefined) advice = `nothing lets "${part.text}" run unasked: a line the parser cannot read always asks`;
-    else if (source === "permissionSet") advice = `a "${width}": "allow" line in ${permissionSet ?? "the state's permission set"}`;
-    else if (source === "builtin")
-      advice =
-        permissionSet !== undefined
-          ? `a "${width}": "allow" line in ${permissionSet}`
-          : `nothing short of turning the built-ins off lets "${width}" run unasked here, since this line answers to them alone — "functions": { "shell": { "builtins": false } } in .jaira/settings.json, for a disposable workspace only`;
+    else if ((source === "permissionSet" || source === "builtin") && permissionSet !== undefined) advice = `a "${width}": "allow" line in ${permissionSet}`;
     else if (source === "scope") advice = `a scope that allows ${part.paths?.join(", ") ?? part.url ?? "the place"} for ${part.subject}`;
     if (advice !== undefined && !out.includes(advice)) out.push(advice);
   }

@@ -33,7 +33,7 @@ import {
 import { AGENT_CLI, AGENT_CODEX, registerAgentRuntimes } from "./agents";
 import { CLAUDE_TOOLS } from "./agentTools";
 import { agentPromptRoutes } from "./modelRoutes";
-import { compilePolicy, type JairaPolicy } from "./policy";
+import { compilePolicy, projectPolicy, type JairaPolicy } from "./policy";
 import { answeredWithoutAsking, withPermissionFunctions, type PermissionFunctionRunner } from "./permissionFunctions";
 import type { ResolvedMcpServer } from "./mcpServers";
 import { grantAlwaysGrantedTools, JAIRA_TOOL_NAMES } from "./tools";
@@ -142,7 +142,7 @@ export interface HandedOptions {
 function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: ExecPolicy; approve?: Approver } {
   if (options.run === undefined) {
     return {
-      policy: compilePolicy(options.policy ?? {}, options.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
+      policy: compilePolicy(options.policy ?? projectPolicy(), options.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
       // The approver a host hands the engine: the functions a permission set names asked first, then the
       // person — who, here, refuses, and is counted, since being asked at all is the measurement.
       approve: withPermissionFunctions(

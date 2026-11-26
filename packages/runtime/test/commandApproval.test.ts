@@ -11,7 +11,8 @@ import { lowerPermissionSet, parsePermissionSet } from "@jaira/shared";
 import { ApprovalHub, type ApprovalRequest } from "../src/approval";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 
-const PERMISSION_SET = { shell: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
+// `git reset --hard: deny` is `security/guarded`'s line — a refusal is a line of the set, never a rule in code.
+const PERMISSION_SET = { shell: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", "git reset --hard": "deny", other: "deny" } as const;
 
 function harness(source?: string) {
   const asked: ApprovalRequest[] = [];

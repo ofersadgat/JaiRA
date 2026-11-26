@@ -93,9 +93,10 @@ describe("a mapped call, judged", () => {
     expect(judged(set, "computer", { action: "type", text: "hi" })).toMatchObject({ action: "deny", parts: ["control_input:denied"] });
   });
 
-  it("asks before what counts as `power`, as before a push", () => {
-    expect(judged({ power: native("allow") }, "reboot", {}, { builtins: true })).toMatchObject({ action: "require_approval", parts: ["power:asks"] });
-    expect(judged({ power: native("allow") }, "reboot", {}, { builtins: false })).toMatchObject({ action: "allow" });
+  it("judges what counts as `power` by the set's `power` line, as it would JaiRA's own — no rule in code asks on top", () => {
+    expect(judged({ power: native("ask") }, "reboot")).toMatchObject({ action: "require_approval", parts: ["power:asks"] });
+    expect(judged({ power: native("allow") }, "reboot")).toMatchObject({ action: "allow", parts: ["power:allowed"] });
+    expect(judged({ power: native("deny") }, "reboot")).toMatchObject({ action: "deny", parts: ["power:denied"] });
   });
 
   it("judges what counts as `shell` part by part, the parts drawn after the tool's name", () => {

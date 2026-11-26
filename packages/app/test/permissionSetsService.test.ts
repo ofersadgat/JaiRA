@@ -37,6 +37,14 @@ const others: string[] = [];
 
 const shipped = (id: string): PermissionSetDecl => JSON.parse(readFileSync(join(jairaBuiltInPaths().dir, "permission-sets", `${id}.json`), "utf8")) as PermissionSetDecl;
 
+/**
+ * A shipped set as the pane SHOWS it — the map its file resolves to, the security profile it stands on
+ * (`"layers"`, 2026-11-25) followed and merged in — which is what an edit of it sends back. The file
+ * itself is not a map of lines: `layers` is followed before lines are read.
+ */
+const asShown = (id: string): PermissionSetDecl =>
+  resolvePermissionSetDecl(`$SYSTEM/permission-sets/${id}`, permissionSetReader(workflowLoadOptions(jairaPaths(dir, testHome()), { tolerant: true })), "", []) as PermissionSetDecl;
+
 const write = (root: string, rel: string, body: unknown): string => {
   const file = join(root, rel);
   mkdirSync(dirname(file), { recursive: true });
@@ -72,6 +80,10 @@ describe("permissionSets:read", () => {
       "improve/simulation",
       "read-only",
       "read-only-scratch",
+      // The security profiles the presets stand on (2026-11-25): read, copied and stacked like any set.
+      "security/guarded",
+      "security/standard",
+      "security/strict",
     ]);
     expect(view.records.every((r) => r.files.every((f) => f.layer === "system" && f.decl !== undefined))).toBe(true);
     // Every layer a set can be in, nearest first: the settings' six, then what ships (decision 0023, amended 2026-11-18).
@@ -101,7 +113,7 @@ describe("permissionSets:read", () => {
 
 describe("permissionSets:write", () => {
   it("writes an override of what ships, following it, holding only what differs — and says so", () => {
-    const decl: PermissionSetDecl = { ...shipped("read-only"), shell: "ask" };
+    const decl: PermissionSetDecl = { ...asShown("read-only"), shell: "ask" };
     const written = service.writePermissionSetSettings({ id: "read-only", layer: "project", project: dir, permissionSet: decl });
     expect(written.kind).toBe("override");
     expect(readFileSync(written.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/read-only",\n  "shell": "ask"\n}\n`);
@@ -115,7 +127,7 @@ describe("permissionSets:write", () => {
   });
 
   it("stops following when a line what ships holds is taken out, because an override cannot say that", () => {
-    const { glob: _gone, ...rest } = shipped("read-only");
+    const { glob: _gone, ...rest } = asShown("read-only");
     const written = service.writePermissionSetSettings({ id: "read-only", layer: "project", project: dir, permissionSet: rest });
     expect(written.kind).toBe("detach");
     expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual(rest);
@@ -143,12 +155,12 @@ describe("permissionSets:write", () => {
 
 describe("permissionSets:reset", () => {
   it("deletes the override, so what ships answers again", () => {
-    const written = service.writePermissionSetSettings({ id: "read-only", layer: "project", project: dir, permissionSet: { ...shipped("read-only"), shell: "ask" } });
+    const written = service.writePermissionSetSettings({ id: "read-only", layer: "project", project: dir, permissionSet: { ...asShown("read-only"), shell: "ask" } });
     expect(service.resetPermissionSetSettings({ id: "read-only", layer: "project", project: dir }).file).toBe(written.file);
     expect(existsSync(written.file)).toBe(false);
     const at = permissionSetsAt(service.readPermissionSetSettings({ project: dir, usedBy: false }).records, "project").find((one) => one.id === "read-only")!;
     expect(at.here).toBe(false);
-    expect(at.source.decl).toEqual(shipped("read-only"));
+    expect(at.source.decl).toEqual(asShown("read-only"));
   });
 
   it("refuses to delete a permission set that overrides nothing, and refuses what ships", () => {
@@ -187,7 +199,7 @@ describe("copy on first edit", () => {
   });
 
   it("on this project, over a shared copy: copies the set as it is IN EFFECT — the shared one — and says so", () => {
-    service.writePermissionSetSettings({ id: "ask-first", layer: "base", project: dir, permissionSet: { ...shipped("ask-first"), shell: "allow" } });
+    service.writePermissionSetSettings({ id: "ask-first", layer: "base", project: dir, permissionSet: { ...asShown("ask-first"), shell: "allow" } });
     const seen = readAt("project", "ask-first");
     const written = service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...seen.source.decl!, web_fetch: "deny" } });
     expect(written.file).toBe(join(dir, ".jaira", "permission-sets", "ask-first.json"));
@@ -200,7 +212,7 @@ describe("copy on first edit", () => {
   });
 
   it("Put back the built-in deletes the layer's copy, and what ships answers again", () => {
-    const written = service.writePermissionSetSettings({ id: "ask-first", layer: "base", project: dir, permissionSet: { ...shipped("ask-first"), shell: "allow" } });
+    const written = service.writePermissionSetSettings({ id: "ask-first", layer: "base", project: dir, permissionSet: { ...asShown("ask-first"), shell: "allow" } });
     expect(service.resetPermissionSetSettings({ id: "ask-first", layer: "base", project: dir }).file).toBe(written.file);
     expect(existsSync(written.file)).toBe(false);
     const after = readAt("base", "ask-first");
@@ -211,7 +223,7 @@ describe("copy on first edit", () => {
 
   it("from a layer an older engine keeps no sets for: the change, replayed over the chosen layer's own view, carries none of the nearer layer's lines", () => {
     // The project has its own copy; the page's layer reads it, and its change goes to Shared.
-    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...shipped("ask-first"), web_fetch: "deny" } });
+    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...asShown("ask-first"), web_fetch: "deny" } });
     const shown = readAt("project", "ask-first").source.decl!;
     const onto = readAt("base", "ask-first").source.decl!;
     const written = service.writePermissionSetSettings({
@@ -240,7 +252,7 @@ describe("a permission set in each of the settings' layers", () => {
     resolvePermissionSetDecl(`$/permission-sets/${id}`, permissionSetReader(workflowLoadOptions(jairaPaths(dir, testHome()), { tolerant: true })), "", []) as PermissionSetDecl;
 
   it("keeps each layer's copy where its settings are kept, and the project on this machine out of git", () => {
-    const base = shipped("ask-first");
+    const base = asShown("ask-first");
     const machine = service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...base, web_fetch: "deny" } });
     expect(machine.file).toBe(join(testHome(), "machine", "permission-sets", "ask-first.json"));
     const local = service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: dir, permissionSet: { ...base, shell: "allow" } });
@@ -256,7 +268,7 @@ describe("a permission set in each of the settings' layers", () => {
   });
 
   it("is read by a run as the settings are: you in the project, Just you, the project on this machine, this machine, the project", () => {
-    const base = shipped("ask-first");
+    const base = asShown("ask-first");
     service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...base, web_fetch: "allow" } });
     expect(inEffect("ask-first").web_fetch).toBe("allow");
     service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...base, web_fetch: "deny" } });
@@ -272,10 +284,10 @@ describe("a permission set in each of the settings' layers", () => {
   });
 
   it("follows no project's copy from a layer that is no project's, which every project reads", () => {
-    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...shipped("ask-first"), web_fetch: "allow" } });
+    service.writePermissionSetSettings({ id: "ask-first", layer: "project", project: dir, permissionSet: { ...asShown("ask-first"), web_fetch: "allow" } });
     // This machine's pane sees what ships under it, not this project's copy…
     expect(readAt("machine", "ask-first").source.layer).toBe("system");
-    const written = service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...shipped("ask-first"), shell: "allow" } });
+    const written = service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: dir, permissionSet: { ...asShown("ask-first"), shell: "allow" } });
     // …so its copy follows what ships, and means the same in every project on this machine.
     expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", shell: "allow" });
     // The project on this machine is the project's, and follows the nearest copy under it, this machine's.
@@ -287,10 +299,10 @@ describe("a permission set in each of the settings' layers", () => {
   });
 
   it("reads the shared root's own three — this machine's, Just you and Shared — with no project named", () => {
-    service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: SHARED_SESSION, permissionSet: { ...shipped("ask-first"), web_fetch: "deny" } });
+    service.writePermissionSetSettings({ id: "ask-first", layer: "machine", project: SHARED_SESSION, permissionSet: { ...asShown("ask-first"), web_fetch: "deny" } });
     const shared = service.readPermissionSetSettings({ project: SHARED_SESSION, usedBy: false });
     expect(shared.records.find((r) => r.id === "ask-first")!.files.map((f) => f.layer)).toEqual(["machine", "system"]);
-    expect(() => service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: SHARED_SESSION, permissionSet: shipped("ask-first") })).toThrow(/no projectMachine layer/);
+    expect(() => service.writePermissionSetSettings({ id: "ask-first", layer: "projectMachine", project: SHARED_SESSION, permissionSet: asShown("ask-first") })).toThrow(/no projectMachine layer/);
   });
 });
 
@@ -307,8 +319,10 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
   it("lists every scope's set files, marking the ones the composer's stack is built of", () => {
     const tree = service.permissionSetTree({ project: dir, permissionSet: STACK });
     expect(tree.scopes.map((scope) => scope.scope)).toEqual(["built in", "global", "project"]);
-    // The shipped conversation sets are at the top level: the scope's own sets, in no bucket.
-    expect(tree.scopes[0]!.buckets.map((bucket) => bucket.name)).toEqual(["base", "improve"]);
+    // The shipped conversation sets are at the top level: the scope's own sets, in no bucket — the bases,
+    // the simulation's sandbox and the security profiles each in theirs.
+    expect(tree.scopes[0]!.buckets.map((bucket) => bucket.name)).toEqual(["base", "improve", "security"]);
+    expect(tree.scopes[0]!.buckets.find((bucket) => bucket.name === "security")!.sets.map((set) => set.id)).toEqual(["security/guarded", "security/standard", "security/strict"]);
     expect(tree.scopes[0]!.sets.map((set) => [set.name, set.icon, set.inStack])).toEqual([
       ["ask-first", "ask", true],
       ["auto", "smart", false],
@@ -326,7 +340,11 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
 
   it("composes the whole stack, every line tagged with the layer that decided it", () => {
     const view = service.permissionStack({ project: dir, permissionSet: STACK });
+    // ask-first stands on security/standard, which stands on security/guarded: the bottom file is the
+    // three of them, oldest first (base → security → the set's own lines).
     expect(view.layers.map((layer) => [layer.id, layer.scope, layer.role])).toEqual([
+      ["security/guarded", "built in", "bottom"],
+      ["security/standard", "built in", "bottom"],
       ["ask-first", "built in", "bottom"],
       ["web/docs", "project", "named"],
       ["runtime", "runtime", "runtime"],
@@ -337,6 +355,9 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
     expect(line("web_fetch")).toMatchObject({ layer: "ask-first", places: { "docs.example.com": { decision: "allow", layer: "web/docs" } } });
     expect(line("web_search")).toMatchObject({ unavailable: "tools" });
     expect(line("read_file").places["$PROJECT"]).toEqual({ decision: "ask", layer: "ask-first" });
+    // What the security profiles say comes through, tagged with the profile that said it.
+    expect(line("git push")).toMatchObject({ layer: "security/standard", value: "ask" });
+    expect(line("git push --force")).toMatchObject({ layer: "security/guarded", value: "deny" });
   });
 
   it("saves the stack as a set: its layers and the tools layer's own lines — and refuses what ships and a stack it cannot read", () => {
@@ -345,6 +366,8 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
     expect(JSON.parse(readFileSync(join(dir, ".jaira", "permission-sets", "mine", "docs-writer.json"), "utf8"))).toEqual(STACK);
     // It reads back as the stack it was: the preset, then the docs layer, then its own lines.
     expect(service.permissionStack({ project: dir, permissionSet: { layers: ["$/permission-sets/mine/docs-writer"] } }).layers.map((layer) => layer.id)).toEqual([
+      "security/guarded",
+      "security/standard",
       "ask-first",
       "web/docs",
       "mine/docs-writer",
@@ -359,7 +382,11 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
     service.savePermissionStack({ project: dir, layer: "project", bucket: "mine", name: "built", permissionSet: STACK });
     const view = service.permissionStack({ project: dir, permissionSet: { layers: ["$/permission-sets/read-only", "$/permission-sets/mine/built"] } });
     expect(view.layers.map((layer) => [layer.id, layer.role, layer.via])).toEqual([
+      ["security/guarded", "bottom", "$/permission-sets/read-only"],
       ["read-only", "bottom", "$/permission-sets/read-only"],
+      // A file built of a set built of a profile: each profile once more, inside the one segment it came through.
+      ["security/guarded", "named", "$/permission-sets/mine/built"],
+      ["security/standard", "named", "$/permission-sets/mine/built"],
       ["ask-first", "named", "$/permission-sets/mine/built"],
       ["web/docs", "named", "$/permission-sets/mine/built"],
       ["mine/built", "named", "$/permission-sets/mine/built"],

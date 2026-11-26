@@ -5,7 +5,7 @@
  * a background start (ruling 5).
  */
 import { describe, expect, it } from "vitest";
-import { lowerPermissionSet, parsePermissionSet, type PermissionSetDecl } from "@jaira/shared";
+import { LINES_NO_SET_JUDGES, lowerPermissionSet, parsePermissionSet, type PermissionSetDecl } from "@jaira/shared";
 import { shellPermissionSetOf } from "../src/commandParts";
 import { CommandGrants, ESCAPE_REASON, allowsCall, commandDecisionOf, compilePolicy, decideCommand, decideLeftRunning, leftRunningVerdict } from "../src/policy";
 
@@ -111,7 +111,9 @@ describe("a line started to keep running (ruling 1)", () => {
 });
 
 describe("the escapes are refused (ruling 7)", () => {
-  const OPEN = shellOf({ shell: "allow", "shell --run_in_background": "allow" });
+  // The refusal is a LINE (`shell --untracked`, as `security/guarded` ships it), not a rule in code.
+  const OPEN = shellOf({ shell: "allow", "shell --run_in_background": "allow", "shell --untracked": "deny" });
+  const NO_LINE = shellOf({ shell: "allow", "shell --run_in_background": "allow" });
   it.each([
     ["Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{CommandLine='npx one dev'}", "powershell"],
     ["Invoke-WmiMethod -Class Win32_Process -Name Create -ArgumentList notepad", "powershell"],
@@ -129,9 +131,12 @@ describe("the escapes are refused (ruling 7)", () => {
   ] as const)("%s", (line, dialect) => {
     const decision = decideCommand({}, line, dialect, { permissionSet: OPEN });
     expect(decision.action).toBe("deny");
-    expect(decision.reason).toBe(ESCAPE_REASON);
-    // The built-ins switch does not lift it: it is about what JaiRA can track, not a workspace's floor.
-    expect(decideCommand({ builtins: false }, line, dialect, { permissionSet: OPEN }).action).toBe("deny");
+    expect(decision.reason).toBe(`the permission set's 'shell --untracked' is deny — ${ESCAPE_REASON}`);
+    expect(decision.parts.parts.some((part) => part.decidedBy?.source === "permissionSet" && part.decidedBy.entry === "shell --untracked")).toBe(true);
+    // Where no set judges the line, the shipped `security/standard` (over guarded) refuses it the same way.
+    expect(decideCommand({ fallback: LINES_NO_SET_JUDGES }, line, dialect).action).toBe("deny");
+    // A set with no `shell --untracked` line judges it as the ordinary command it is.
+    expect(decideCommand({}, line, dialect, { permissionSet: NO_LINE }).reason).not.toContain(ESCAPE_REASON);
   });
 
   it.each([["crontab -l"], ["crontab -r"], ["at -l"], ["Invoke-CimMethod -ClassName Win32_Share -MethodName Create"], ["launchctl list"]])("lets %s be", (line) => {
@@ -139,11 +144,11 @@ describe("the escapes are refused (ruling 7)", () => {
   });
 
   it("is lifted only by a background line NAMING the program, which then answers for it", () => {
-    const named = shellOf({ shell: "allow", "shell --run_in_background": "allow", "shell --run_in_background schtasks": "ask" });
+    const named = shellOf({ shell: "allow", "shell --run_in_background": "allow", "shell --untracked": "deny", "shell --run_in_background schtasks": "ask" });
     const decision = decideCommand({}, "schtasks /create /tn x /tr y", "cmd", { permissionSet: named });
     expect(decision.action).toBe("require_approval");
     expect(decision.parts.parts[0]?.decidedBy).toMatchObject({ source: "permissionSet", entry: "shell --run_in_background schtasks" });
-    expect(decideCommand({}, "systemd-run --user npm start", "posix", { permissionSet: shellOf({ shell: "allow", "shell --run_in_background systemd-run": "allow" }) }).action).toBe("allow");
+    expect(decideCommand({}, "systemd-run --user npm start", "posix", { permissionSet: shellOf({ shell: "allow", "shell --untracked": "deny", "shell --run_in_background systemd-run": "allow" }) }).action).toBe("allow");
     // The bare background line does not lift it.
     expect(decideCommand({}, "schtasks /create /tn x /tr y", "cmd", { permissionSet: OPEN }).action).toBe("deny");
   });

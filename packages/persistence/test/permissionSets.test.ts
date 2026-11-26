@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { shippedLayer, testHome } from "@jaira/testing";
-import { PERMISSION_SET_MARKERS, subjectKindOf } from "@jaira/shared";
+import { isPermissionSetInstructionKey, PERMISSION_SET_MARKERS, subjectKindOf } from "@jaira/shared";
 import { environmentOf as callEnvironmentOf, loadBundle, snapshotHash } from "@declarative-ai/hw";
 import { initProject, openProject, type Project } from "../src/project";
 import { ensureSnapshot, loadSnapshot, readWorkflowFiles } from "../src/snapshots";
@@ -20,10 +20,22 @@ import { listPermissionSets, loadWorkflowBundle, readPermissionSets } from "../s
 import { browseWorkflows } from "../src/workflows";
 import { workflowLoadOptions } from "../src/workflowRefs";
 
+/** A shipped set file, as it says. */
+const shippedFile = (id: string): Record<string, unknown> => JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${id}.json`, import.meta.url)), "utf8")) as Record<string, unknown>;
 /** The shipped `read-only`, as its file says. */
-const SHIPPED_READ_ONLY = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/read-only.json", import.meta.url)), "utf8")) as Record<string, string>;
-/** A map's shell lines besides the shell's own: commands (`git status`, `vitest -u`), runners (`runner:*`) and `script`. */
-const commandLinesOf = (map: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(map).filter(([subject]) => ["command", "runner", "script"].includes(subjectKindOf(subject))));
+const SHIPPED_READ_ONLY = shippedFile("read-only") as Record<string, string>;
+/** The security profile `read-only` stands on (`"layers"`, 2026-11-25): what destroys work is refused. */
+const SHIPPED_GUARDED = shippedFile("security/guarded");
+/**
+ * A map's shell lines besides the shell's own: commands (`git status`, `vitest -u`), runners (`runner:*`)
+ * and `script` — each written as one decision (a place map lowers under `places`). A file's
+ * instructions (`layers`, `description`) are no line.
+ */
+const commandLinesOf = (map: Record<string, unknown>): Record<string, string> =>
+  Object.fromEntries(Object.entries(map).filter(([subject, value]) => typeof value === "string" && !isPermissionSetInstructionKey(subject) && ["command", "runner", "script"].includes(subjectKindOf(subject)))) as Record<string, string>;
+/** A map's command lines written as a place map (`rm -r`, by where it removes). */
+const commandPlacesOf = (map: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(map).filter(([subject, value]) => typeof value === "object" && value !== null && !isPermissionSetInstructionKey(subject) && subjectKindOf(subject) === "command"));
 
 let dir: string;
 let project: Project;
@@ -401,6 +413,10 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       "improve/simulation",
       "read-only",
       "read-only-scratch",
+      // The security profiles a set stands on (2026-11-25), to read, copy and stack like any other.
+      "security/guarded",
+      "security/standard",
+      "security/strict",
     ]);
     expect(listed.every((t) => t.root === project.paths.builtIn.dir && !t.overrides)).toBe(true);
   });
@@ -483,13 +499,16 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           // The flag lines (decision 0032, ruling 1a), under their own names, which no tool is called by:
           // read back from here by the narrowing and the shell's judge.
           "shell --run_in_background": "deny",
+          // guarded's: a start out of every tree JaiRA follows is refused.
+          "shell --untracked": "deny",
           ...PERMISSION_SET_MARKERS,
         },
         implementations: {},
         other: "deny",
         // A line written as a place map (the `.jaira/` lines, 2026-11-17) lowers to its own mode here
         // and its map under `places`.
-        subjects: { shell: "deny", ...commandLinesOf(SHIPPED_READ_ONLY), script: "deny", "runner:*": "allow" },
+        // And the lines of the security profile it stands on, `guarded`: what destroys work is refused.
+        subjects: { shell: "deny", ...commandLinesOf(SHIPPED_GUARDED), ...commandLinesOf(SHIPPED_READ_ONLY), script: "deny", "runner:*": "allow" },
         // Beside `subjects`: the file they came from, which is what an approval names.
         source: "$/permission-sets/read-only",
         functions: {},
@@ -501,6 +520,8 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           // What the session started, read freely (decision 0032, ruling 4): an OWNER rule (decision 0023
           // §3.1, amended 2026-11-23), the line's own mode beside it, since `tools` holds its loosest.
           read_process: { "**": "ask", "owner=session": "allow" },
+          // guarded's: removing a repository's .git, by any of the shell's spellings.
+          ...commandPlacesOf(SHIPPED_GUARDED),
         },
       },
     });
@@ -528,6 +549,9 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       ["improve/simulation", "system"],
       ["read-only", "project"],
       ["read-only-scratch", "system"],
+      ["security/guarded", "system"],
+      ["security/standard", "system"],
+      ["security/strict", "system"],
     ]);
     // The override is offered as the map it RESOLVES to — what picking its row would write.
     const overridden = read.find((t) => t.id === "read-only")!.decl;

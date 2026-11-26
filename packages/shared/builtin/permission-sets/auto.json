@@ -1,4 +1,5 @@
 {
+  "layers": ["$SYSTEM/permission-sets/security/standard"],
   "read_file": { "**": "ask", "$PROJECT": "smart", "$WORKTREE": "smart", "$AGENT_WORKSPACE": "smart", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },
   "glob": { "**": "ask", "$PROJECT": "smart", "$WORKTREE": "smart", "$AGENT_WORKSPACE": "smart", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },
   "grep": { "**": "ask", "$PROJECT": "smart", "$WORKTREE": "smart", "$AGENT_WORKSPACE": "smart", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },

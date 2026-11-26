@@ -3,17 +3,65 @@
  * vs. the spec §11.2/§11.3 lists"). The invariants: SPEC §11.2's list is denied,
  * §11.3's classes ask, the strictest verdict on a line wins, and anything
  * unparsable escalates rather than passing.
+ *
+ * None of it is a rule in code (the person, 2026-11-25: "there shouldnt be built in rules. all rules
+ * should go through permissions"): §11.2's list is `security/guarded`'s lines, §11.3's classes are
+ * `security/standard`'s, and a line no permission set judges answers to the project policy's fallback
+ * — `base/allow-all` under `security/standard` ({@link LINES_NO_SET_JUDGES}).
  */
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { PermissionRequest, SmartApprover } from "@declarative-ai/permissions";
-import { askingParts, entriesToRemember, parsePermissionSet, type CommandDialect } from "@jaira/shared";
+import {
+  LINES_NO_SET_JUDGES,
+  SECURITY_PROFILES,
+  askingParts,
+  entriesToRemember,
+  mergeLayerDecls,
+  parsePermissionSet,
+  resolvePermissionSetDecl,
+  shippedStack,
+  type CommandDialect,
+  type PermissionSetIssue,
+} from "@jaira/shared";
 import { shellPermissionSetOf } from "../src/commandParts";
+import { namedPlacesOf } from "../src/linePlaces";
 import { CommandGrants, commandDecisionOf, compilePolicy, decideCommand, policyCanEscalate, projectPolicy, type JairaPolicy, type PolicyAuditEntry } from "../src/policy";
 
+/** No fallback: a line no permission set judges is judged by nothing. */
 const OPEN: JairaPolicy = {};
-const action = (line: string, policy: JairaPolicy = OPEN): string => decideCommand(policy, line).action;
+/** The project's policy: a line no set judges answers to the shipped `base/allow-all` under `security/standard`. */
+const PROJECT_POLICY: JairaPolicy = projectPolicy();
+const action = (line: string, policy: JairaPolicy = PROJECT_POLICY): string => decideCommand(policy, line).action;
+
+/** A shipped set file's own lines, `layers` and all, as written. */
+const file = (name: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url)), "utf8")) as Record<string, unknown>;
+
+/** The shipped security profiles a stack names, oldest first, each with the profiles it layers. */
+const PROFILE_FILES = {
+  guarded: ["security/guarded"],
+  standard: ["security/guarded", "security/standard"],
+  strict: ["security/guarded", "security/standard", "security/strict"],
+} as const;
+
+/**
+ * A project's own lines stacked as a project stacks them: `base/allow-all`, a security profile over it,
+ * and these lines on top — one set, a newer layer's line overriding the same line below, the most
+ * specific matching line deciding.
+ */
+const over = (profile: keyof typeof PROFILE_FILES, own: Record<string, unknown>) =>
+  shellPermissionSetOf(
+    parsePermissionSet(
+      mergeLayerDecls([
+        { id: "allow-all", decl: file("base/allow-all") },
+        ...PROFILE_FILES[profile].map((name) => ({ id: name, decl: file(name) })),
+        { id: "own", decl: own },
+      ]).decl,
+    ).permissionSet,
+  )!;
 
 describe("SPEC §11.2 — destructive git is denied", () => {
   it.each([
@@ -37,17 +85,28 @@ describe("SPEC §11.2 — destructive git is denied", () => {
   });
 
   it("denies the same operations however they are dressed up", () => {
-    // The parsed-intent property: these are all `git reset --hard`.
+    // The parsed-intent property: these are all `git reset --hard`, refused by guarded's line.
     for (const line of [
       "git -C /tmp/repo reset --hard",
-      "git -c core.pager=cat reset --hard",
       `sh -c "git reset --hard"`,
       "env FOO=1 git reset --hard",
       "sudo git reset --hard",
       "/usr/bin/git reset --hard",
     ]) {
       expect(action(line), line).toBe("deny");
+      expect(decideCommand(PROJECT_POLICY, line).parts.parts.find((p) => p.verdict === "denied")?.decidedBy, line).toMatchObject({ source: "permissionSet", entry: "git reset --hard" });
     }
+  });
+
+  it("denies it dressed with a configuring flag (`git -c …`) — the part the parser cannot vouch for is still refused by the line", () => {
+    // The `-c` makes the part one the parser cannot vouch for (it asks at least); the refusal beside
+    // that must still stand, as it did when the floor was code.
+    expect(action("git -c core.pager=cat reset --hard")).toBe("deny");
+  });
+
+  it("is the profile's to refuse: with no set and no fallback nothing judges it", () => {
+    expect(action("git reset --hard", OPEN)).toBe("allow");
+    expect(action("rm -rf .git", OPEN)).toBe("allow");
   });
 
   it("leaves constructive git alone (SPEC §11.2 allows commit/branch/inspect)", () => {
@@ -57,7 +116,9 @@ describe("SPEC §11.2 — destructive git is denied", () => {
   });
 });
 
-describe("SPEC §11.3 — these require approval", () => {
+describe("SPEC §11.3 — these require approval (security/standard's lines)", () => {
+  // Where a line runs, as JaiRA tells the gate: `~` is the home a credentials place is written from.
+  const placed = { root: "/repo", places: { root: "/repo", named: namedPlacesOf("/repo") } };
   it.each([
     ["git push origin main", "pushes"],
     ["git merge feature/x", "merges"],
@@ -74,7 +135,17 @@ describe("SPEC §11.3 — these require approval", () => {
     ["cat .env", "secrets"],
     ["cat ~/.ssh/id_rsa", "secrets"],
   ])("asks for %s (%s)", (line) => {
-    expect(action(line)).toBe("require_approval");
+    const decision = decideCommand(PROJECT_POLICY, line, "posix", placed);
+    expect(decision.action).toBe("require_approval");
+    // A line asked — not a rule in code.
+    expect(decision.parts.parts.find((p) => p.verdict === "asks")?.decidedBy.source).toBe("permissionSet");
+  });
+
+  it("says which line asked", () => {
+    expect(decideCommand(PROJECT_POLICY, "git push origin main").reason).toBe("the permission set's 'git push' is ask");
+    expect(decideCommand(PROJECT_POLICY, "cat .env").reason).toBe("the permission set's 'read_file' in **/.env is ask");
+    // `cat` is `read_file`: standard's credential places on that line answer it, as they answer a direct read.
+    expect(decideCommand(PROJECT_POLICY, "cat ~/.ssh/id_rsa", "posix", placed).parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "read_file", place: "**/*id_rsa*" });
   });
 
   it("asks for a remote script piped into a shell", () => {
@@ -93,10 +164,10 @@ describe("verdict combination", () => {
   });
 
   it("reports which command caused the verdict", () => {
-    const decision = decideCommand(OPEN, "npm test && git push --force");
+    const decision = decideCommand(PROJECT_POLICY, "npm test && git push --force");
     expect(decision.action).toBe("deny");
     expect(decision.command).toMatchObject({ program: "git", subcommand: "push" });
-    expect(decision.reason).toMatch(/force push/);
+    expect(decision.reason).toBe("the permission set's 'git push --force' is deny");
   });
 });
 
@@ -124,37 +195,48 @@ describe("unparsable input escalates", () => {
   });
 });
 
-describe("the project's policy is the built-ins, and a permission set's command lines are what a project says", () => {
-  const lines = (map: Record<string, string>) => ({ permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", ...map }).permissionSet)! });
+describe("the project's policy is the shipped security profile, and a permission set's command lines are what a project says", () => {
+  /** The project's lines over `base/allow-all` and `security/standard`. */
+  const lines = (map: Record<string, string>) => ({ permissionSet: over("standard", { shell: "allow", ...map }) });
 
-  it("allows what no built-in names, with no permission set", () => {
-    expect(action("some-unknown-tool")).toBe("allow");
+  it("allows what no line names, with no permission set and no fallback", () => {
+    expect(action("some-unknown-tool", OPEN)).toBe("allow");
     expect(decideCommand(OPEN, "some-unknown-tool").parts.parts[0]?.decidedBy.source).toBe("default");
+    // The project policy's fallback allows it by its `shell` line.
+    expect(action("some-unknown-tool")).toBe("allow");
+    expect(decideCommand(PROJECT_POLICY, "some-unknown-tool").parts.parts[0]?.decidedBy).toMatchObject({ source: "permissionSet", entry: "shell" });
   });
 
-  it("lets the built-ins be turned off, and that is the only thing the project policy says", () => {
-    // With the built-ins off, even destructive git is allowed — the opt-out exists, and it is explicit.
-    expect(action("git reset --hard", { builtins: false })).toBe("allow");
-    expect(action("git push origin main", { builtins: false })).toBe("allow");
-    expect(action("git reset --hard", projectPolicy({ functions: { shell: { builtins: true } } }))).toBe("deny");
-    expect(projectPolicy({ functions: { shell: { builtins: false } } })).toEqual({ builtins: false });
+  it("is `base/allow-all` under `security/standard`, whatever the settings say — a stale `functions.shell.builtins` is ignored", () => {
+    expect(projectPolicy()).toEqual({ fallback: LINES_NO_SET_JUDGES });
+    expect(projectPolicy({ functions: { shell: { builtins: false } } })).toEqual({ fallback: LINES_NO_SET_JUDGES });
+    expect(LINES_NO_SET_JUDGES).toEqual(shippedStack(["$SYSTEM/permission-sets/base/allow-all", SECURITY_PROFILES.standard]));
+    expect(action("git reset --hard", projectPolicy({ functions: { shell: { builtins: false } } }))).toBe("deny");
+    // With no fallback nothing judges a line no set judges — destructive git included.
+    expect(action("git reset --hard", OPEN)).toBe("allow");
+    expect(action("git push origin main", OPEN)).toBe("allow");
   });
 
-  it("relaxes a built-in ask by naming the command, tightens what the built-ins ignore, and never opens the floor", () => {
+  it("relaxes a profile's ask by naming the command in a newer layer, tightens what the profile leaves alone, and does not reach a more specific refusal below", () => {
     const set = lines({ "git push": "allow", "npm test": "deny" });
     expect(decideCommand(OPEN, "git push origin main", "posix", set).action).toBe("allow");
     expect(decideCommand(OPEN, "npm test", "posix", set).action).toBe("deny");
-    // What a rule used to be able to do and a line cannot: `git push` allowed does not allow a force push.
+    // `git push` allowed does not allow a force push: guarded's `git push --force` is the more specific line.
+    expect(decideCommand(OPEN, "git push --force", "posix", set).parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "git push --force" });
     expect(decideCommand(OPEN, "git push --force", "posix", set).action).toBe("deny");
     expect(decideCommand(OPEN, "git reset --hard", "posix", set).action).toBe("deny");
+    // …and the same line in the newer layer is the person's say-so: it overrides the profile's.
+    expect(decideCommand(OPEN, "git push --force", "posix", lines({ "git push --force": "allow" })).action).toBe("allow");
   });
 
   it("matches a line on its flags, the most specific line deciding", () => {
     const set = lines({ docker: "allow", "docker run --privileged": "deny" });
     expect(decideCommand(OPEN, "docker run --privileged x", "posix", set).action).toBe("deny");
     expect(decideCommand(OPEN, "docker ps", "posix", set).action).toBe("allow");
-    // Without the line the built-in deploy class asks.
-    expect(decideCommand(OPEN, "docker ps", "posix", lines({})).action).toBe("require_approval");
+    // Without the line standard's `runner:docker` asks.
+    const bare = decideCommand(OPEN, "docker ps", "posix", lines({}));
+    expect(bare.action).toBe("require_approval");
+    expect(bare.reason).toBe("the permission set's 'runner:docker' is ask");
   });
 });
 
@@ -164,25 +246,24 @@ describe("the project's policy is the built-ins, and a permission set's command 
  * its path, running a file is `script`, anything else is the program and its subcommand.
  */
 describe("a line is judged part by part, against the permission set", () => {
-  const PERMISSION_SET = shellPermissionSetOf(
-    parsePermissionSet({
-      read_file: "allow",
-      glob: "allow",
-      grep: "allow",
-      write_file: "ask",
-      web_fetch: "ask",
-      shell: "ask",
-      script: "ask",
-      "git log": "allow",
-      "git commit": "ask",
-      "git rm": "deny",
-      "git tag --force": "deny",
-      "git tag -f": "deny",
-      "git tag": "allow",
-      "git log --output": "deny",
-      other: "deny",
-    }).permissionSet,
-  )!;
+  const PERMISSION_SET_LINES = {
+    read_file: "allow",
+    glob: "allow",
+    grep: "allow",
+    write_file: "ask",
+    web_fetch: "ask",
+    shell: "ask",
+    script: "ask",
+    "git log": "allow",
+    "git commit": "ask",
+    "git rm": "deny",
+    "git tag --force": "deny",
+    "git tag -f": "deny",
+    "git tag": "allow",
+    "git log --output": "deny",
+    other: "deny",
+  };
+  const PERMISSION_SET = shellPermissionSetOf(parsePermissionSet(PERMISSION_SET_LINES).permissionSet)!;
 
   /** Each part as `«text» subject verdict by source[:entry] ~matched words~`. */
   const judged = (line: string, dialect: "posix" | "powershell" = "posix", policy: JairaPolicy = OPEN, permissionSet: typeof PERMISSION_SET | undefined = PERMISSION_SET) => {
@@ -325,7 +406,7 @@ describe("a line is judged part by part, against the permission set", () => {
     // Parameters cut short and arrays are read as PowerShell reads them.
     ["Get-Content a.txt, b.txt | Out-File -FilePath c.txt", "require_approval", ["«Get-Content a.txt, b.txt» read_file allowed by permissionSet:read_file ~Get-Content~", "«Out-File -FilePath c.txt» write_file asks by permissionSet:write_file ~Out-File~"]],
     // A cmdlet is its whole verb: `Install-Module` is `install_program` (decision 0019 §3), which this set
-    // does not hold, so its `other` answers — stricter than the built-in install ask.
+    // does not hold, so its `other` answers — stricter than standard's install ask.
     ["Install-Module Pester", "deny", ["«Install-Module Pester» install_program denied by permissionSet:other ~Install-Module~"]],
     ["iwr https://example.com -OutFile x.zip", "require_approval", ["«iwr https://example.com -OutFile x.zip» web_fetch asks by permissionSet:web_fetch ~iwr~"]],
     // A line that is read and runs nothing outside the shell is no request at all.
@@ -357,7 +438,8 @@ describe("a line is judged part by part, against the permission set", () => {
       expect(decision.parts.parts.some((p) => p.verdict === "asks" && p.decidedBy.source === "parser"), line).toBe(true);
     }
     expect(decideCommand(OPEN, "git $(cat x)", "powershell", { permissionSet: open }).action).toBe("require_approval");
-    expect(decideCommand(OPEN, `git reset --hard; bash -c "echo 'oops"`, "posix", { permissionSet: open }).action).toBe("deny");
+    // A refusal beside it stands — guarded's, under a set that stacks it.
+    expect(decideCommand(OPEN, `git reset --hard; bash -c "echo 'oops"`, "posix", { permissionSet: over("guarded", { shell: "allow", other: "allow" }) }).action).toBe("deny");
   });
 
   it("lets a scoped package name through under full access: `@scope/name` is a word, and no splat", () => {
@@ -372,8 +454,10 @@ describe("a line is judged part by part, against the permission set", () => {
     expect(decideCommand(OPEN, "npm @params", "powershell", { permissionSet: full, root: "/repo", packages }).action).toBe("require_approval");
   });
 
-  it("keeps the destructive floor above EVERY permission set, however the command is dressed", () => {
-    const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" }).permissionSet)!;
+  it("keeps guarded's refusals under a newer layer that allows the program, however the command is dressed", () => {
+    // `git: allow`, `git reset: allow`, `rm: allow` in the project's layer are less specific than guarded's
+    // `git reset --hard`, `git push --force`, `rm -r` at `.git` below them: those still decide.
+    const open = over("guarded", { shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" });
     for (const line of [
       "git reset --hard",
       "git push --force",
@@ -389,14 +473,13 @@ describe("a line is judged part by part, against the permission set", () => {
     ]) {
       const decision = decideCommand(OPEN, line, "posix", { permissionSet: open });
       expect(decision.action, line).toBe("deny");
-      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("builtin");
+      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("permissionSet");
     }
     // PowerShell's spellings of the same.
-    const openPs = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", "remove-item": "allow", other: "allow" }).permissionSet)!;
+    const openPs = over("guarded", { shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", "remove-item": "allow", other: "allow" });
     for (const line of [
       "git reset --hard",
       "Remove-Item -Recurse -Force .git",
-      "rm -r .git",
       `cmd /c "rd /s /q .git"`,
       "if ($true) { git push --force }",
       "Get-ChildItem | ForEach-Object { git reset --hard }",
@@ -408,8 +491,29 @@ describe("a line is judged part by part, against the permission set", () => {
     ]) {
       const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
       expect(decision.action, line).toBe("deny");
-      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("builtin");
+      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("permissionSet");
     }
+  });
+
+  it("refuses PowerShell's `rm -r .git` under guarded — `-r` is `-Recurse`, and `.git` the path it removes", () => {
+    const openPs = over("guarded", { shell: "allow", write_file: "allow", "remove-item": "allow", other: "allow" });
+    for (const line of ["rm -r .git", "Remove-Item -r .git"]) {
+      const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
+      expect(decision.action, line).toBe("deny");
+      // `rm` is PowerShell's alias of `Remove-Item`: guarded's `rm -r` and `remove-item -recurse` both name it.
+      expect(decision.parts.parts[0]?.decidedBy, line).toMatchObject({ source: "permissionSet", place: "**/.git" });
+      expect(["rm -r", "remove-item -recurse"], line).toContain((decision.parts.parts[0]?.decidedBy as { entry?: string }).entry);
+    }
+  });
+
+  it("has no floor of its own: a set that stacks no profile is obeyed, and a newer layer's same line overrides guarded's", () => {
+    const bare = shellPermissionSetOf(parsePermissionSet({ shell: "allow", git: "allow", rm: "allow", write_file: "allow", other: "allow" }).permissionSet)!;
+    for (const line of ["git reset --hard", "git push --force", "rm -rf .git"]) expect(decideCommand(OPEN, line, "posix", { permissionSet: bare }).action, line).toBe("allow");
+    const lifted = over("guarded", { shell: "allow", "git reset --hard": "allow" });
+    expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: lifted }).parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "git reset --hard" });
+    expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: lifted }).action).toBe("allow");
+    // …and only that line: guarded's others still refuse.
+    expect(decideCommand(OPEN, "git push --force", "posix", { permissionSet: lifted }).action).toBe("deny");
   });
 
   it("asks about PowerShell code nobody can read, whatever the permission set allows — and never throws on it", () => {
@@ -421,37 +525,43 @@ describe("a line is judged part by part, against the permission set", () => {
     }
   });
 
-  it("composes with the built-ins: the floor first, then the permission set", () => {
-    // An entry that NAMES the program replaces a built-in ask — naming it is the decision the built-in stood in for…
-    const named = shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git push": "allow", npm: "allow" }).permissionSet)!;
+  it("composes in one stack: the most specific line decides, and a newer layer's same line overrides", () => {
+    // A line in the project's layer that NAMES the command replaces the profile's ask for it…
+    const named = over("standard", { shell: "allow", "git push": "allow", npm: "allow" });
     expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: named }).action).toBe("allow");
-    expect(decideCommand(OPEN, "npm install left-pad", "posix", { permissionSet: named }).action).toBe("allow");
-    // …and the shell's own `allow` does not: "any other command" is not a statement about pushing.
-    const blanket = shellPermissionSetOf(parsePermissionSet({ shell: "allow" }).permissionSet)!;
+    // …but naming only the program does not reach a more specific line below: standard's `npm install` asks.
+    expect(decideCommand(OPEN, "npm install left-pad", "posix", { permissionSet: named }).reason).toBe("the permission set's 'npm install' is ask");
+    expect(decideCommand(OPEN, "npm install left-pad", "posix", { permissionSet: over("standard", { "npm install": "allow" }) }).action).toBe("allow");
+    // The shell's own `allow` does not either: "any other command" is not a statement about pushing.
+    const blanket = over("standard", { shell: "allow" });
     expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: blanket }).action).toBe("require_approval");
+    expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: over("standard", { git: "allow" }) }).action).toBe("require_approval");
     expect(decideCommand(OPEN, "git status", "posix", { permissionSet: blanket }).action).toBe("allow");
-    // A command nothing names answers to the shell's own line, the built-ins still above it.
-    expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "deny", "git status": "allow" }).permissionSet)! }).action).toBe("deny");
+    // A command nothing names answers to the shell's own line, the newest layer's.
+    expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: over("standard", { shell: "deny", "git status": "allow" }) }).action).toBe("deny");
     expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: blanket }).action).toBe("allow");
-    // With the built-ins off, the permission set is the only authority.
-    expect(decideCommand({ builtins: false }, "git push origin main", "posix", { permissionSet: blanket }).action).toBe("allow");
-    expect(decideCommand({ builtins: false }, "git reset --hard", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git reset": "ask" }).permissionSet)! }).action).toBe("require_approval");
+    // A set that stacks no profile is the only authority.
+    const unstacked = shellPermissionSetOf(parsePermissionSet({ shell: "allow" }).permissionSet)!;
+    expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: unstacked }).action).toBe("allow");
+    expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git reset": "ask" }).permissionSet)! }).action).toBe("require_approval");
     // A shell line naming a FUNCTION (`"smart"`, decision 0023 §1) hands every part nothing else names
     // to it: the gate is asked, and the approver puts the part to the function.
     const deferring = shellPermissionSetOf(parsePermissionSet({ shell: "smart" }).permissionSet)!;
     expect(decideCommand(OPEN, "git status", "posix", { permissionSet: deferring }).action).toBe("require_approval");
     expect(decideCommand(OPEN, "git push", "posix", { permissionSet: deferring }).action).toBe("require_approval");
     // A subject the permission set does not hold is not offered: it asks.
-    expect(judged("rm x", "posix", OPEN, blanket).parts).toEqual(["«rm x» write_file asks by permissionSet ~rm~"]);
+    expect(judged("rm x", "posix", OPEN, unstacked).parts).toEqual(["«rm x» write_file asks by permissionSet ~rm~"]);
     // An explicit entry for a utility's PROGRAM beats the standard tool it would otherwise be.
     expect(judged("rm x", "posix", OPEN, shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", rm: "deny" }).permissionSet)!).parts).toEqual(["«rm x» write_file denied by permissionSet:rm ~rm~"]);
   });
 
-  it("with no permission set a line answers to the built-ins alone, and still comes apart", () => {
-    const decision = decideCommand(OPEN, "rm foo.txt && git push");
+  it("with no permission set a line answers to the policy's fallback set, and still comes apart", () => {
+    const decision = decideCommand(PROJECT_POLICY, "rm foo.txt && git push");
     expect(decision.action).toBe("require_approval");
-    expect(decision.parts.parts.map((p) => `${p.subject} ${p.verdict} ${p.decidedBy.source}`)).toEqual(["write_file allowed default", "git push asks builtin"]);
+    expect(decision.parts.parts.map((p) => `${p.subject} ${p.verdict} ${p.decidedBy.source}:${p.decidedBy.entry}`)).toEqual(["write_file allowed permissionSet:write_file", "git push asks permissionSet:git push"]);
     expect(decision.parts.parts[1]!.matched.map((m) => "rm foo.txt && git push".slice(m.start, m.end))).toEqual(["git push"]);
+    // With no fallback either, nothing judges it — and it still comes apart.
+    expect(decideCommand(OPEN, "rm foo.txt && git push").parts.parts.map((p) => `${p.subject} ${p.verdict} ${p.decidedBy.source}`)).toEqual(["write_file allowed default", "git push allowed default"]);
   });
 
   it("remembers an answer for the asking PARTS at a chosen width — never the line", () => {
@@ -470,9 +580,9 @@ describe("a line is judged part by part, against the permission set", () => {
     expect(second.parts.parts.map((p) => `${p.decidedBy.source}:${p.decidedBy.entry}`)).toEqual(["remembered:git", "remembered:rm"]);
     // …a part that still asks still asks…
     expect(decideCommand(OPEN, "git commit -m x && terraform apply", "posix", { permissionSet: PERMISSION_SET, grants }).action).toBe("require_approval");
-    // …and a remembered width never lifts a deny: the permission set's, or the floor's.
+    // …and a remembered width never lifts a deny: the permission set's own, or a profile's it stacks.
     expect(decideCommand(OPEN, "git rm a.txt", "posix", { permissionSet: PERMISSION_SET, grants }).action).toBe("deny");
-    expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: PERMISSION_SET, grants }).action).toBe("deny");
+    expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: over("guarded", PERMISSION_SET_LINES), grants }).action).toBe("deny");
     // A width no asking part offers is not stored — so the line itself never can be.
     expect(new CommandGrants().rememberParts(first.parts, "allow", [line, "git log"])).toEqual(["rm", "git commit"]);
   });
@@ -493,9 +603,14 @@ describe("CommandGrants lets go of an answer by the key it lists it by (decision
 
 // --- `.jaira/`: the shipped sets' lines, not a rule (2026-11-17) ---------------
 
-/** A set as JaiRA ships it. */
-const shipped = (name: string) =>
-  parsePermissionSet(JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url), "utf8")) as unknown).permissionSet;
+/** A set as JaiRA ships it, with the layers it names (`security/guarded`, `security/standard`) under its own lines. */
+const shipped = (name: string) => {
+  const issues: PermissionSetIssue[] = [];
+  const read = (reference: string) => ({ value: file(reference.replace(/^\$SYSTEM\/permission-sets\//, "")), key: reference, from: reference });
+  const decl = resolvePermissionSetDecl(file(name), read, "", issues);
+  expect(issues.filter((issue) => issue.severity === "error"), name).toEqual([]);
+  return parsePermissionSet(decl!).permissionSet;
+};
 
 const SHIPPED = ["full", "auto", "ask-first", "read-only", "read-only-scratch"];
 const PROJECT = "/work/app";
@@ -577,7 +692,7 @@ describe("`.jaira/` is the shipped sets' to refuse, by their lines", () => {
     opened.entries["write_file"] = { ...opened.entries["write_file"]!, places: { ...opened.entries["write_file"]!.places, "$PROJECT/.jaira/workflows/**/*": "allow" } };
     expect(under(opened, "echo x > .jaira/workflows/plan.json").action).toBe("allow");
     expect(under(opened, "echo x > .jaira/settings.json").action).toBe("deny");
-    // A set with no such line, and no set at all: the built-ins know nothing of `.jaira/`.
+    // A set with no such line, and no set at all (nor a fallback): nothing else knows `.jaira/`.
     const open = parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", other: "allow" }).permissionSet;
     expect(under(open, "echo x > .jaira/settings.json").action).toBe("allow");
     expect(decideCommand(OPEN, "echo x > .jaira/settings.json && cat .jaira/settings.json").action).toBe("allow");
@@ -618,14 +733,16 @@ describe("compilePolicy", () => {
   });
 
   it("maps policy actions onto smart verdicts", async () => {
-    expect(await verdict(OPEN, "shell", { command: "git status" })).toBe("allow");
-    expect(await verdict(OPEN, "shell", { command: "git reset --hard" })).toBe("deny");
+    expect(await verdict(PROJECT_POLICY, "shell", { command: "git status" })).toBe("allow");
+    expect(await verdict(PROJECT_POLICY, "shell", { command: "git reset --hard" })).toBe("deny");
     // require_approval escalates to the human gate.
-    expect(await verdict(OPEN, "shell", { command: "git push" })).toBe("ask");
+    expect(await verdict(PROJECT_POLICY, "shell", { command: "git push" })).toBe("ask");
+    // With no fallback, nothing judges them.
+    expect(await verdict(OPEN, "shell", { command: "git reset --hard" })).toBe("allow");
   });
 
   it("leaves .jaira/ to the permission set's lines, for command and file tools alike", async () => {
-    // With no set, the approver refuses only what the built-ins refuse: they know nothing of `.jaira/`.
+    // With no set and no fallback the approver refuses nothing — nothing in it knows `.jaira/`.
     expect(await verdict(OPEN, "shell", { command: "cat .jaira/settings.json" })).toBe("allow");
     expect(await verdict(OPEN, "show_artifact", { path: ".jaira/tasks/x.json", content: "x" })).toBe("allow");
     expect(await verdict(OPEN, "show_artifact", { path: "src/x.html", content: "x" })).toBe("allow");
@@ -710,11 +827,11 @@ describe("compilePolicy", () => {
 
   it("records every decision for the audit trail (§10.2)", async () => {
     const audit: PolicyAuditEntry[] = [];
-    await verdict(OPEN, "shell", { command: "git push --force" }, audit);
+    await verdict(PROJECT_POLICY, "shell", { command: "git push --force" }, audit);
     expect(audit).toHaveLength(1);
     expect(audit[0]).toMatchObject({ tool: "shell", command: "git push --force", action: "deny", sessionId: "s1" });
     expect(audit[0]!.parsed).toMatchObject({ program: "git", subcommand: "push" });
-    expect(audit[0]!.reason).toMatch(/force push/);
+    expect(audit[0]!.reason).toBe("the permission set's 'git push --force' is deny");
   });
 
   it("parses PowerShell for a native project and POSIX for a WSL one", () => {
@@ -732,10 +849,11 @@ describe("compilePolicy", () => {
 
 describe("policyCanEscalate", () => {
   it("is true whenever a human could be asked — which is what §8.2 gates on", () => {
-    // The built-ins carry SPEC §11.3's approval classes, so they can always ask.
-    expect(policyCanEscalate({})).toBe(true);
-    // With them off the project says nothing that asks; what a state's permission set asks is gated with the state.
-    expect(policyCanEscalate({ builtins: false })).toBe(false);
+    // The project policy's fallback (standard's SPEC §11.3 lines) can always ask.
+    expect(policyCanEscalate(PROJECT_POLICY)).toBe(true);
+    expect(policyCanEscalate({ fallback: shippedStack(["$SYSTEM/permission-sets/base/allow-all"]) })).toBe(true);
+    // With no fallback the project says nothing that asks; what a state's permission set asks is gated with the state.
+    expect(policyCanEscalate(OPEN)).toBe(false);
   });
 });
 
@@ -860,16 +978,17 @@ describe("a command runner's gate", () => {
 describe("set_env (decision 0007 §4, amended 2026-11-25 (latest))", () => {
   const env = (name: string): string | undefined => ({ PATH: "/usr/bin", http_proxy: "http://corp" })[name];
   /** Each `set_env` part as `subject verdict by source[:entry]`. */
-  const setEnv = (line: string, lines?: Record<string, string>, dialect: CommandDialect = "posix"): string[] => {
-    const permissionSet = lines !== undefined ? shellPermissionSetOf(parsePermissionSet({ shell: "allow", ...lines }).permissionSet)! : undefined;
+  const setEnv = (line: string, lines?: Record<string, string>, dialect: CommandDialect = "posix", profile?: keyof typeof PROFILE_FILES): string[] => {
+    const permissionSet =
+      lines === undefined ? undefined : profile !== undefined ? over(profile, { shell: "allow", ...lines }) : shellPermissionSetOf(parsePermissionSet({ shell: "allow", ...lines }).permissionSet)!;
     return decideCommand(OPEN, line, dialect, { env, ...(permissionSet !== undefined ? { permissionSet } : {}) })
       .parts.parts.filter((p) => p.kind === "env")
       .map((p) => `${p.subject} ${p.verdict} by ${p.decidedBy.source}${p.decidedBy.entry !== undefined ? `:${p.decidedBy.entry}` : ""}`);
   };
 
   it("asks with no set to judge it, as setting a variable always did — and only for one a program reads", () => {
-    expect(setEnv("read PATH; git status")).toEqual(["set_env PATH asks by builtin"]);
-    expect(setEnv("read -r http_proxy; curl x")).toEqual(["set_env http_proxy asks by builtin"]);
+    expect(setEnv("read PATH; git status")).toEqual(["set_env PATH asks by default"]);
+    expect(setEnv("read -r http_proxy; curl x")).toEqual(["set_env http_proxy asks by default"]);
     expect(setEnv("read -r LINE; echo $LINE")).toEqual([]);
     expect(setEnv("local GIT_DIR=/tmp/x; git status")).toEqual([]);
     expect(setEnv("export E=/x; git status")).toEqual(["set_env E asks by default"]);
@@ -887,10 +1006,19 @@ describe("set_env (decision 0007 §4, amended 2026-11-25 (latest))", () => {
     expect(setEnv("Set-Item env:NODE_ENV x", { set_env: "allow" }, "powershell")).toEqual(["set_env NODE_ENV allowed by permissionSet:set_env"]);
   });
 
-  it("keeps a variable that makes a program run something else asking, unless a line names it", () => {
-    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "allow" })).toEqual(["set_env PATH asks by builtin"]);
-    expect(setEnv("export GIT_SSH_COMMAND=x; git fetch", { set_env: "allow" })).toEqual(["set_env GIT_SSH_COMMAND asks by builtin"]);
-    expect(setEnv("export PATH=/tmp/x; git status", { "set_env PATH": "allow" })).toEqual(["set_env PATH allowed by permissionSet:set_env PATH"]);
+  it("keeps a variable that makes a program run something else asking under standard, unless a newer line names it", () => {
+    // standard's `set_env PATH` and its `set_env GIT_*` family are more specific than the bare `set_env`.
+    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "allow" }, "posix", "standard")).toEqual(["set_env PATH asks by permissionSet:set_env PATH"]);
+    expect(setEnv("export GIT_SSH_COMMAND=x; git fetch", { set_env: "allow" }, "posix", "standard")).toEqual(["set_env GIT_SSH_COMMAND asks by permissionSet:set_env GIT_*"]);
+    expect(setEnv("export PATH=/tmp/x; git status", { "set_env PATH": "allow" }, "posix", "standard")).toEqual(["set_env PATH allowed by permissionSet:set_env PATH"]);
+    // The bare line is no more specific in the newer layer: the line naming the variable still decides.
+    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "deny" }, "posix", "standard")).toEqual(["set_env PATH asks by permissionSet:set_env PATH"]);
+    expect(setEnv("export PATH=/tmp/x; git status", { "set_env PATH": "deny" }, "posix", "standard")).toEqual(["set_env PATH denied by permissionSet:set_env PATH"]);
+    // The project policy's fallback is standard too.
+    expect(setEnv("export PATH=/tmp/x; git status").length).toBe(1);
+    expect(decideCommand(PROJECT_POLICY, "export PATH=/tmp/x; git status", "posix", { env }).parts.parts[0]!.decidedBy).toMatchObject({ source: "permissionSet", entry: "set_env PATH" });
+    // A set that stacks no profile is obeyed: its `set_env` answers.
+    expect(setEnv("export PATH=/tmp/x; git status", { set_env: "allow" })).toEqual(["set_env PATH allowed by permissionSet:set_env"]);
     expect(setEnv("export PATH=/tmp/x; git status", { set_env: "deny" })).toEqual(["set_env PATH denied by permissionSet:set_env"]);
   });
 

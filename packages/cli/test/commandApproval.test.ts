@@ -20,6 +20,7 @@ import {
   handedToCodex,
   newRegistry,
   permissionFunctionRunner,
+  projectPolicy,
   registerApprovalPrompt,
   type ApprovalRequest,
   type HandedEnvironment,
@@ -32,12 +33,13 @@ import { cliApprovals, governRun, renderApproval, unattendedRefusal } from "../s
 let dir: string;
 
 /**
- * A harmless line a BUILT-IN asks about: naming `.env` is touching a credentials path, and `node
- * --version` prints its version and reads nothing. `run_command` has no permission set in reach, so the
- * built-ins are what judge it.
+ * A harmless line the shipped `security/standard` asks about: naming `.env` is touching a credentials
+ * path (its `shell` line's place `**\/.env`), and `node --version` prints its version and reads nothing.
+ * `run_command` has no permission set in reach, so its line answers to what a line no set judges answers
+ * to — `base/allow-all` under `security/standard`: lines like any other, no rule in code.
  */
 const LINE = "node --version .env";
-const ASKED = "the command touches a credentials path";
+const ASKED = "the permission set's 'shell' in **/.env is ask";
 
 function write(relPath: string, body: unknown): void {
   const file = join(dir, relPath);
@@ -116,7 +118,7 @@ describe("a run started by jaira, at a terminal", () => {
     // its rule matched, and a row per part with its subject, verdict and what decided it.
     expect(cli.err()).toContain(`$ ${LINE}`);
     expect(cli.err()).toMatch(/\n {6}1{19}\n {6}\^{4}\n/);
-    expect(cli.err()).toMatch(/1\s+node --version \.env\s+node\s+ASKS\s+built-in: the command touches a credentials path/);
+    expect(cli.err()).toMatch(/1\s+node --version \.env\s+node\s+ASKS\s+permission set "shell" in \*\*\/\.env/);
     expect(cli.asked()[0]).toMatch(/\[y\] allow once {2}\[r\] allow node for this run {2}\[n\] deny/);
   });
 
@@ -166,28 +168,37 @@ describe("a run started by jaira, at a terminal", () => {
 });
 
 describe("a run started by jaira, with nobody to ask", () => {
-  it("REFUSES, naming what would let the line run — the terminal, or the setting that asked", async () => {
+  it("REFUSES, naming what would let the line run — the terminal — and the line that asked", async () => {
     const cli = io();
     expect(await run(cli, "check")).toBe(1);
     const reason = JSON.stringify(reportOf(cli));
     expect(reason).toContain(`command refused: ${ASKED}; nobody was asked: this jaira run has no terminal`);
     expect(reason).toMatch(/run it at a terminal to be asked/);
-    // A built-in asked and no permission set judges `run_command`'s line, so only turning the built-ins off answers it.
-    expect(reason).toMatch(/nothing short of turning the built-ins off lets \\"node\\" run unasked here/);
     expect(cli.err()).toMatch(/^refused: shell: node --version \.env — nobody was asked/m);
   });
 
-  it("refuses a BUILT-IN ask with the setting that would answer it, and runs nothing", async () => {
+  it("refuses what security/standard asks about, saying which line asked, and runs nothing", async () => {
     const cli = io();
     expect(await run(cli, "push", "--non-interactive")).toBe(1);
     const reason = JSON.stringify(reportOf(cli));
+    expect(reason).toContain("command refused: the permission set's 'git push' is ask");
     expect(reason).toMatch(/--non-interactive refuses every approval/);
-    expect(reason).toContain('\\"functions\\": { \\"shell\\": { \\"builtins\\": false } } in .jaira/settings.json');
-    // `run_command` has no permission set in reach, so a permission set line would be advice that changes nothing.
-    expect(reason).not.toMatch(/permission set/);
-    // …and the setting it names does answer it: with the built-ins off, the line is allowed.
-    expect(decideCommand({ builtins: false }, "git push origin main").action).toBe("allow");
-    expect(decideCommand({}, "git push origin main").action).toBe("require_approval");
+    // A line no set judges answers to the project's policy — `security/standard`'s `git push: ask` — and a policy with no fallback judges nothing.
+    const judged = decideCommand(projectPolicy(), "git push origin main");
+    expect(judged.action).toBe("require_approval");
+    expect(judged.parts.parts[0]?.decidedBy).toMatchObject({ source: "permissionSet", entry: "git push" });
+    expect(decideCommand({}, "git push origin main").action).toBe("allow");
+  });
+
+  it("never advises a permission set that does not reach the line: `run_command`'s answers to security/standard whatever the state declares", async () => {
+    // A state that declares a set allowing the push is still asked: `run_command` reads no state's permission set.
+    write(".jaira/workflows/pushset.json", { ...(commandState("git push origin main") as Record<string, unknown>), environment: { tools: { "git push": "allow", other: "allow" } } });
+    const cli = io();
+    expect(await run(cli, "pushset", "--non-interactive")).toBe(1);
+    const reason = JSON.stringify(reportOf(cli));
+    expect(reason).toContain("command refused: the permission set's 'git push' is ask");
+    // So advice to write that very set changes nothing (the old advice was the built-ins switch, which is gone).
+    expect(reason).not.toMatch(/write a permission set on the state/);
   });
 
   it("refuses --approve ask with no terminal as a usage error, before anything is made", async () => {
@@ -208,13 +219,13 @@ describe("the request as a person reads it", () => {
 
   it("names the permission set line too where a PERMISSION_SET judged the line — an agent's shell, not run_command", () => {
     const command = "git push origin main";
-    const parts = { ...decideCommand({}, command).parts, permissionSet: "$/permission-sets/feature/build" };
+    const parts = { ...decideCommand(projectPolicy(), command).parts, permissionSet: "$/permission-sets/feature/build" };
     const request: ApprovalRequest = { requestId: "r", tool: "shell", command, input: { command }, sessionId: "s", at: 0, parts };
     expect(unattendedRefusal(request, "flag")).toMatch(/write a "git push": "allow" line in the permission set \$\/permission-sets\/feature\/build$/);
     // The line, numbered by part, with the words that matched underneath, and the permission set named.
     const drawn = renderApproval(request);
     expect(drawn).toContain(`$ ${command}`);
-    expect(drawn).toMatch(/1\s+git push origin main\s+git push\s+ASKS\s+built-in: pushes publish work/);
+    expect(drawn).toMatch(/1\s+git push origin main\s+git push\s+ASKS\s+permission set "git push"/);
     expect(drawn).toContain("permission set: $/permission-sets/feature/build");
   });
 

@@ -25,9 +25,23 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { READ_ONLY_PRESET_TOOLS, SMART_MODE, type PermissionSetMode } from "../src/operationVocabulary";
 import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
-import { heldTools, isPermissionSetInstructionKey, linePlaces, offeredTools, parsePermissionSet, toolImplementations, toolModes, type PermissionSet } from "../src/permissionSets";
+import {
+  heldTools,
+  isPermissionSetInstructionKey,
+  linePlaces,
+  offeredTools,
+  OTHER_SUBJECT,
+  parsePermissionSet,
+  PERMISSION_SET_LAYERS_KEY,
+  resolvePermissionSetDecl,
+  toolImplementations,
+  toolModes,
+  type PermissionSet,
+  type PermissionSetIssue,
+} from "../src/permissionSets";
 import { resolvePlace } from "../src/places";
 import { composePermissionSetLayers } from "../src/permissionLayers";
+import { LINES_NO_SET_JUDGES, SECURITY_PROFILES, shippedStack } from "../src/securityProfiles";
 
 /**
  * Each tool's mode IN THE PROJECT — what the frozen presets were about. Since decision 0023 §7.1 a
@@ -46,6 +60,40 @@ const PERMISSION_SETS = join(dirname(fileURLToPath(import.meta.url)), "..", "bui
 const topLevel = (): string[] => readdirSync(PERMISSION_SETS, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
 
 const shipped = (id: string): unknown => JSON.parse(readFileSync(join(PERMISSION_SETS, `${id}.json`), "utf8"));
+
+/**
+ * A set file's OWN lines — what it writes, without its instructions. Since 2026-11-25 every top-level
+ * set starts with `"layers"`, naming the security profile it stands on ("a base layer for
+ * allow/deny/ask, then a security layer, then a project layer"); `layers` is followed before the lines
+ * are read, so what the frozen presets are held to is what the file writes over it.
+ */
+const ownLines = (id: string): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(shipped(id) as Record<string, unknown>).filter(([key]) => !isPermissionSetInstructionKey(key)));
+
+/** A shipped file as the stack it names — every `$SYSTEM/permission-sets/…` reference read from disk — merged. */
+const stacked = (id: string): { decl: Record<string, unknown> | undefined; issues: PermissionSetIssue[] } => {
+  const issues: PermissionSetIssue[] = [];
+  const prefix = "$SYSTEM/permission-sets/";
+  const decl = resolvePermissionSetDecl(
+    shipped(id),
+    (reference) => {
+      if (!reference.startsWith(prefix)) throw new Error(`'${reference}' is not a set JaiRA ships`);
+      return { value: shipped(reference.slice(prefix.length)), key: reference, from: reference };
+    },
+    "",
+    issues,
+  );
+  return { decl, issues };
+};
+
+/** The security profile each top-level set stands on. */
+const PROFILE_OF: Record<string, string> = {
+  "ask-first": SECURITY_PROFILES.standard,
+  auto: SECURITY_PROFILES.standard,
+  full: SECURITY_PROFILES.guarded,
+  "read-only": SECURITY_PROFILES.guarded,
+  "read-only-scratch": SECURITY_PROFILES.guarded,
+};
 
 /** FROZEN — `PERMISSION_PRESETS` as it stood at a1a0581, the last commit that had it. */
 const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: string) => PermissionSetMode }> = [
@@ -138,7 +186,7 @@ const PRESET_TOOLS = CONVERSATION_TOOLS.filter((name) => !WORKFLOW_TOOLS.include
 
 describe("the top level is the four presets, written down, and read-only-scratch", () => {
   it.each(FROZEN_PRESETS)("$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
-    const { permissionSet, issues } = parsePermissionSet(shipped(file));
+    const { permissionSet, issues } = parsePermissionSet(ownLines(file));
     expect(issues).toEqual([]);
     // The map the preset wrote for the tools it knew, the table's answer for the workflow tools, and
     // decision 0010's table for the Git tools.
@@ -159,7 +207,7 @@ describe("the top level is the four presets, written down, and read-only-scratch
   });
 
   it("read-only allows exactly the frozen list, and that list is still in the vocabulary", () => {
-    const { permissionSet } = parsePermissionSet(shipped("read-only"));
+    const { permissionSet } = parsePermissionSet(ownLines("read-only"));
     const allowed = Object.entries(projectModes(permissionSet))
       .filter(([name, mode]) => mode === "allow" && !WORKFLOW_TOOLS.includes(name) && TABLED[name] === undefined)
       .map(([name]) => name);
@@ -177,7 +225,7 @@ describe("the top level is the four presets, written down, and read-only-scratch
 
 describe("the workflow tools", () => {
   it("are held and HANDED OVER by the top-level sets: named, and served since step 6", () => {
-    const { permissionSet } = parsePermissionSet(shipped("full"));
+    const { permissionSet } = parsePermissionSet(ownLines("full"));
     for (const name of WORKFLOW_TOOLS) {
       expect(heldTools(permissionSet)).toContain(name);
       expect(offeredTools(permissionSet)).toContain(name);
@@ -220,7 +268,7 @@ describe("a start that keeps running, and what a session started (decision 0032)
   };
 
   it.each(["ask-first", "read-only", "read-only-scratch", "auto", "full"])("%s writes them at the ruled mode — a start as a flag line, the session's own as an owner rule", (file) => {
-    const { permissionSet, issues } = parsePermissionSet(shipped(file));
+    const { permissionSet, issues } = parsePermissionSet(ownLines(file));
     expect(issues).toEqual([]);
     expect(permissionSet.entries["shell --run_in_background"], file).toEqual({ kind: "tool-flag", mode: BACKGROUND[file] });
     for (const [tool, modes] of Object.entries(SESSION)) {
@@ -231,7 +279,7 @@ describe("a start that keeps running, and what a session started (decision 0032)
   });
 
   it("a simulation's pass never starts what keeps running", () => {
-    expect(parsePermissionSet(shipped("improve/simulation")).permissionSet.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "deny" });
+    expect(parsePermissionSet(ownLines("improve/simulation")).permissionSet.entries["shell --run_in_background"]).toEqual({ kind: "tool-flag", mode: "deny" });
   });
 });
 
@@ -251,10 +299,106 @@ describe("every shipped permission set", () => {
           expect(mode, `${bucket}/${file}: ${subject}`).not.toBe("unavailable");
           expect(parsePermissionSet({ [subject]: mode }).issues, `${bucket}/${file}: ${subject}`).toEqual([]);
         }
-        // `other` is the LAST line, where a person reading the file looks for it.
-        expect(Object.keys(map).at(-1), `${bucket}/${file}`).toBe("other");
+        // `other` is the LAST line, where a person reading the file looks for it — except in a security
+        // profile, which says nothing of what it does not name: that is the layers' around it to say.
+        if (bucket === "security") expect(Object.keys(map), `${bucket}/${file}`).not.toContain(OTHER_SUBJECT);
+        else expect(Object.keys(map).at(-1), `${bucket}/${file}`).toBe("other");
       }
     }
+  });
+});
+
+/**
+ * The security profiles (2026-11-25): "there shouldnt be built in rules. all rules should go through
+ * permissions" — what the built-in floor refused or asked is these files' lines, and a stack is a base,
+ * a security profile over it, and the project's own lines on top.
+ */
+describe("the security profiles, and the sets that stand on them", () => {
+  const PROFILES = readdirSync(join(PERMISSION_SETS, "security")).map((file) => file.replace(/\.json$/, "")).sort();
+
+  /** Every decision a line writes — its own word and each place's. */
+  const decisionsIn = (value: unknown): unknown[] => (typeof value === "object" && value !== null ? Object.values(value) : [value]);
+
+  it("ships guarded, standard and strict, each named by the reference SECURITY_PROFILES gives it", () => {
+    expect(PROFILES).toEqual(["guarded", "standard", "strict"]);
+    expect(SECURITY_PROFILES).toEqual(Object.fromEntries(PROFILES.map((name) => [name, `$SYSTEM/permission-sets/security/${name}`])));
+  });
+
+  it.each([
+    ["guarded", [], "deny"],
+    ["standard", [SECURITY_PROFILES.guarded], "ask"],
+    ["strict", [SECURITY_PROFILES.standard], "deny"],
+  ] as const)("%s stands on %j and only ever says %s — never allows, never says `other`", (name, layers, word) => {
+    const file = shipped(`security/${name}`) as Record<string, unknown>;
+    expect(file[PERMISSION_SET_LAYERS_KEY] ?? []).toEqual(layers);
+    expect(typeof file["description"]).toBe("string");
+    expect(parsePermissionSet(ownLines(`security/${name}`)).issues).toEqual([]);
+    for (const [subject, value] of Object.entries(ownLines(`security/${name}`))) for (const decision of decisionsIn(value)) expect(decision, `${name}: ${subject}`).toBe(word);
+    const { decl, issues } = stacked(`security/${name}`);
+    expect(issues).toEqual([]);
+    expect(parsePermissionSet(decl).permissionSet.other).toBeUndefined();
+  });
+
+  it("guarded refuses what destroys work; standard asks before what leaves the machine; strict refuses that", () => {
+    const at = (name: string) => parsePermissionSet(stacked(`security/${name}`).decl).permissionSet.entries;
+    for (const name of PROFILES) {
+      for (const line of ["git push --force", "git reset --hard", "git rebase", "shell --untracked"]) expect(at(name)[line]?.mode, `${name}: ${line}`).toBe("deny");
+      expect(at(name)["rm -r"]?.places?.["**/.git"], name).toBe("deny");
+    }
+    expect(at("guarded")["git push"]).toBeUndefined();
+    for (const line of ["git push", "git merge", "curl", "npm install", "npm publish", "power", "install_program", "set_env PATH"]) expect(at("standard")[line]?.mode, line).toBe("ask");
+    expect(at("standard")["shell"]?.places?.["**/.env"]).toBe("ask");
+    // strict refuses the network, installs and publishes outright; a push and a merge still only ask.
+    for (const line of ["curl", "npm install", "npm publish", "install_program", "terraform"]) expect(at("strict")[line]?.mode, line).toBe("deny");
+    for (const line of ["git push", "git merge", "power"]) expect(at("strict")[line]?.mode, line).toBe("ask");
+  });
+
+  it("shippedStack reads the profiles as the files on disk say them", () => {
+    for (const name of PROFILES) {
+      const reference = SECURITY_PROFILES[name as keyof typeof SECURITY_PROFILES];
+      expect(shippedStack([reference]), name).toEqual(parsePermissionSet(stacked(`security/${name}`).decl).permissionSet);
+    }
+    expect(() => shippedStack(["$SYSTEM/permission-sets/full"])).toThrow(/not a set JaiRA ships/);
+  });
+
+  it("judges a line no permission set judges as allow-all under standard: allowed, but a push asks and a force push is refused", () => {
+    expect(LINES_NO_SET_JUDGES.other).toBe("allow");
+    expect(LINES_NO_SET_JUDGES.entries["shell"]?.mode).toBe("allow");
+    expect(LINES_NO_SET_JUDGES.entries["git push"]?.mode).toBe("ask");
+    expect(LINES_NO_SET_JUDGES.entries["git push --force"]?.mode).toBe("deny");
+    expect(LINES_NO_SET_JUDGES.entries["power"]?.mode).toBe("ask");
+  });
+
+  it.each(Object.entries(PROFILE_OF))("%s stands on %s — its first key, and the only layer it names", (file, profile) => {
+    const decl = shipped(file) as Record<string, unknown>;
+    expect(Object.keys(decl)[0]).toBe(PERMISSION_SET_LAYERS_KEY);
+    expect(decl[PERMISSION_SET_LAYERS_KEY]).toEqual([profile]);
+  });
+
+  it("names a profile for every top-level set", () => {
+    expect(topLevel().map((file) => file.replace(/\.json$/, "")).sort()).toEqual(Object.keys(PROFILE_OF).sort());
+  });
+
+  it.each(Object.keys(PROFILE_OF))("%s as a stack: the profile's lines it does not write come through, and its own win", (file) => {
+    const { decl, issues } = stacked(file);
+    expect(issues).toEqual([]);
+    const { permissionSet, issues: parsed } = parsePermissionSet(decl);
+    expect(parsed).toEqual([]);
+    const own = parsePermissionSet(ownLines(file)).permissionSet;
+    // Every one refuses what destroys work.
+    for (const line of ["git push --force", "git push -f", "git reset --hard", "git rebase", "shell --untracked"]) expect(permissionSet.entries[line]?.mode, `${file}: ${line}`).toBe("deny");
+    expect(permissionSet.entries["rm -r"]?.places?.["**/.git"], file).toBe("deny");
+    // ask-first and auto ask before a push, a merge and an install on the shell; full and the read-only
+    // sets write no line for them (full lets the shell's own git push through as its `shell` line says).
+    const standard = PROFILE_OF[file] === SECURITY_PROFILES.standard;
+    for (const line of ["git push", "git merge", "npm install", "curl"]) expect(permissionSet.entries[line]?.mode, `${file}: ${line}`).toBe(standard ? "ask" : undefined);
+    // The set's own lines are what it says alone: a profile under it never changes one.
+    for (const [subject, entry] of Object.entries(own.entries)) {
+      const got = permissionSet.entries[subject];
+      if (entry.places === undefined) expect(got?.mode, `${file}: ${subject}`).toEqual(entry.mode);
+      else for (const [place, decision] of Object.entries(entry.places)) expect(got?.places?.[place], `${file}: ${subject} ${place}`).toEqual(decision);
+    }
+    expect(permissionSet.other).toEqual(own.other);
   });
 });
 
@@ -264,7 +408,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
   const CREDENTIALS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws", "~/.claude/.credentials.json", "~/.codex/auth.json"];
   /** A line's answer at one path, as a call's place is judged: the most specific place, else the line's own mode. */
   const at = (file: string, tool: string, path: string): PermissionSetMode | undefined => {
-    const { permissionSet } = parsePermissionSet(shipped(file));
+    const { permissionSet } = parsePermissionSet(ownLines(file));
     const entry = permissionSet.entries[tool]!;
     const place = resolvePlace({ ...(entry.mode !== undefined ? { "**": entry.mode } : {}), ...entry.places }, "path", path, options);
     return place?.decision ?? entry.mode;
@@ -297,7 +441,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
   });
 
   it.each(["read-only", "read-only-scratch", "ask-first", "auto", "full"])("%s asks at every credential place, inside the project too", (file) => {
-    const { permissionSet } = parsePermissionSet(shipped(file));
+    const { permissionSet } = parsePermissionSet(ownLines(file));
     for (const tool of ["read_file", "glob", "grep"]) for (const place of CREDENTIALS) expect(linePlaces(permissionSet)[tool]?.[place], `${file} ${tool} ${place}`).toBe("ask");
     expect(at(file, "read_file", `${ROOT}/config/server.pem`)).toBe("ask");
     expect(at(file, "read_file", "C:/Users/me/.aws/credentials")).toBe("ask");
@@ -313,7 +457,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
   it("read-only-scratch is read-only, except that it writes and edits in the agent's own folder", () => {
     const scratch = shipped("read-only-scratch") as Record<string, unknown>;
     const readOnly = shipped("read-only") as Record<string, unknown>;
-    expect(parsePermissionSet(scratch).issues).toEqual([]);
+    expect(parsePermissionSet(ownLines("read-only-scratch")).issues).toEqual([]);
     // Every other line, in the same order, is read-only's.
     expect(Object.keys(scratch)).toEqual(Object.keys(readOnly));
     for (const key of Object.keys(readOnly)) if (key !== "edit" && key !== "write_file") expect(scratch[key], key).toEqual(readOnly[key]);
@@ -343,10 +487,10 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
       for (const upper of presets) {
         if (lower === upper) continue;
         const composed = composePermissionSetLayers([
-          { id: lower, decl: shipped(lower) as Record<string, unknown> },
-          { id: upper, decl: shipped(upper) as Record<string, unknown> },
+          { id: lower, decl: ownLines(lower) },
+          { id: upper, decl: ownLines(upper) },
         ]).permissionSet;
-        const alone = parsePermissionSet(shipped(upper)).permissionSet;
+        const alone = parsePermissionSet(ownLines(upper)).permissionSet;
         for (const [subject, entry] of Object.entries(alone.entries)) {
           const got = composed.entries[subject];
           expect({ mode: got?.mode, places: got?.places }, `${upper} over ${lower}: ${subject}`).toEqual({ mode: entry.mode, places: entry.places });
@@ -357,8 +501,8 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
 
   it("full laid on ask-first reads, globs and greps in the project without asking", () => {
     const composed = composePermissionSetLayers([
-      { id: "ask-first", decl: shipped("ask-first") as Record<string, unknown> },
-      { id: "full", decl: shipped("full") as Record<string, unknown> },
+      { id: "ask-first", decl: ownLines("ask-first") },
+      { id: "full", decl: ownLines("full") },
     ]).permissionSet;
     for (const tool of ["read_file", "glob", "grep"]) {
       const entry = composed.entries[tool]!;
@@ -420,7 +564,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     it("is a line like any other: a layer above opens what it names, and the rest stays shut", () => {
       const over = (layer: Record<string, unknown>) => {
         const entry = composePermissionSetLayers([
-          { id: "full", decl: shipped("full") as Record<string, unknown> },
+          { id: "full", decl: ownLines("full") },
           { id: "project", decl: layer },
         ]).permissionSet.entries["write_file"]!;
         const map = { ...(entry.mode !== undefined ? { "**": entry.mode } : {}), ...entry.places };
@@ -441,7 +585,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
   });
 
   it("auto judges a push with smart, and asks before pushing main, master or a release branch", () => {
-    const { permissionSet } = parsePermissionSet(shipped("auto"));
+    const { permissionSet } = parsePermissionSet(ownLines("auto"));
     const push = permissionSet.entries["git_push"]!;
     expect(push.mode).toEqual(SMART_MODE);
     const map = { "**": push.mode!, ...push.places };

@@ -350,7 +350,9 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     // Where a line runs, and every path a part of it names as a file tool (decision 0023 §3.1).
     scope: "path",
     // Decision 0032: a line started to keep running is a permission of its own, `shell --run_in_background`.
-    flags: { run_in_background: { type: "boolean" } },
+    // `shell --untracked`: a line that starts a process out of every tree JaiRA follows (`setsid`, `schtasks
+    // /create`, `crontab`) — no call argument, read off the line itself; `shell --untracked schtasks` names one.
+    flags: { run_in_background: { type: "boolean" }, untracked: { type: "boolean" } },
   },
   // The System tools (decision 0019, `runtime/systemTools.ts`): the machine the engine runs on and its
   // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change. Each is scoped by

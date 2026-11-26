@@ -809,7 +809,7 @@ function assertCapabilities(
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run it at a terminal, where jaira asks, or pass --approve deny to refuse every approval it meets; " +
-        "or run this task in the JaiRA app, or set functions.shell.builtins to false in .jaira/settings.json if this workspace is disposable",
+        "or run this task in the JaiRA app",
     );
   }
 }

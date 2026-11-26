@@ -49,6 +49,7 @@ export * from "./toolFlags";
 export * from "./toolDisplay";
 export * from "./agentTools";
 export * from "./permissionSets";
+export * from "./securityProfiles";
 export * from "./permissionLayers";
 export * from "./permissionSetTree";
 export * from "./places";

@@ -7,13 +7,17 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { isPermissionDenied, type Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { lowerPermissionSet, parsePermissionSet, PERMISSION_SET_MARKERS, permissionSetOfEnvironment, type ChatSettings, type PermissionSet } from "@jaira/shared";
+import { lowerPermissionSet, mergeLayerDecls, parsePermissionSet, PERMISSION_SET_MARKERS, permissionSetOfEnvironment, type ChatSettings, type PermissionSet } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
-import { commandDecisionOf, compilePolicy } from "../src/policy";
+import { commandDecisionOf, compilePolicy, projectPolicy } from "../src/policy";
 import { noteCallDialect } from "../src/callDialect";
 import { planAgentTools } from "../src/agentTools";
 import { gateTools, registerAllTools } from "../src/tools";
 import { newRegistry } from "../src/wiring";
+
+/** A shipped security profile's own lines (`permission-sets/security/<name>.json`). */
+const profile = (name: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/security/${name}.json`, import.meta.url)), "utf8")) as Record<string, unknown>;
 
 const MAP = { read_file: "allow", shell: "ask", write_file: "deny", other: "deny" } as const;
 
@@ -42,24 +46,30 @@ describe("compilePolicy", () => {
   });
 
   it("with no permission set, gives the command tools smart and nothing else", () => {
-    expect(compilePolicy({}).baseline).toEqual(compilePolicy({ builtins: false }, {}).baseline);
+    expect(compilePolicy(projectPolicy()).baseline).toEqual(compilePolicy({}, {}).baseline);
     expect(compilePolicy({}).baseline?.tools?.["shell"]).toBe("smart");
     expect(compilePolicy({}).baseline?.default).toBeUndefined();
   });
 
-  it("JUDGES a shell line against the permission set's command subjects — and keeps the floor above them", () => {
-    const permissionSet = parsePermissionSet({ shell: "allow", "git push": "allow", "git reset": "allow" }).permissionSet;
+  it("JUDGES a shell line against the permission set's command subjects — the profile's more specific lines still standing", () => {
+    // The project's lines over `security/standard` (over `security/guarded`): one stack, the most specific line deciding.
+    const overStandard = (lines: Record<string, unknown>) =>
+      parsePermissionSet(mergeLayerDecls([{ id: "guarded", decl: profile("guarded") }, { id: "standard", decl: profile("standard") }, { id: "project", decl: lines }]).decl).permissionSet;
+    const permissionSet = overStandard({ shell: "allow", "git push": "allow", "git reset": "allow" });
     const policy = compilePolicy({}, { permissionSet });
     const smart = (command: string) => policy.smart!["shell"]!({ tool: "shell", input: { command }, sessionId: "s" } as never);
     // Not folded into the baseline: `git push` is not a tool, and nothing there would read it.
     expect(policy.baseline?.tools?.["git push"]).toBeUndefined();
-    // An entry that NAMES the command replaces the built-in ask it stood in for…
+    // A newer layer's line NAMING the command overrides the profile's ask for it…
     expect(smart("git push")).toBe("allow");
-    // …and with no such entry the built-in ask still stands.
-    expect(compilePolicy({}, { permissionSet: parsePermissionSet({ shell: "allow" }).permissionSet }).smart!["shell"]!({ tool: "shell", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
-    // The destructive floor is above every permission set: naming the command does not open it.
+    // …and with no such line the profile's ask still stands.
+    expect(compilePolicy({}, { permissionSet: overStandard({ shell: "allow" }) }).smart!["shell"]!({ tool: "shell", input: { command: "git push" }, sessionId: "s" } as never)).toBe("ask");
+    // The profile's more specific denies are not reached by a wider line: naming `git push` does not open a forced push.
     expect(smart("git push --force")).toBe("deny");
     expect(smart("git reset --hard")).toBe("deny");
+    // With no profile in the stack, nothing of it applies.
+    const bare = compilePolicy({}, { permissionSet: parsePermissionSet({ shell: "allow", "git push": "allow", "git reset": "allow" }).permissionSet });
+    expect(bare.smart!["shell"]!({ tool: "shell", input: { command: "git reset --hard" }, sessionId: "s" } as never)).toBe("allow");
   });
 
   it("reads a STATE's command subjects off the lowered block, at the moment of decision", () => {
@@ -78,10 +88,14 @@ describe("compilePolicy", () => {
     expect(narrowed("git commit -m x")).toMatchObject({ mode: "deny", parts: ["git commit:denied"] });
     expect(narrowed("cd src && cat a.ts")).toMatchObject({ mode: undefined, smart: "allow", parts: ["read_file:allowed"] });
     expect(narrowed("cat a.ts > b.ts")).toMatchObject({ mode: "deny", parts: ["read_file:allowed", "write_file:denied"] });
-    // A block with no `subjects` says nothing about parts: only a deny narrows, and the approver decides.
+    // A block with no `subjects` says nothing about parts: the policy's fallback judges them — the project's
+    // (`security/standard`) refuses a hard reset; only a deny narrows, and the approver decides the rest.
     const silent = { tools: { read_file: "allow" } };
-    expect(policy.scopeOf!({ name: "shell" }, { command: "git push" } as never, silent as never)).toBeUndefined();
-    expect(policy.scopeOf!({ name: "shell" }, { command: "git reset --hard" } as never, silent as never)).toBe("deny");
+    const project = compilePolicy(projectPolicy());
+    expect(project.scopeOf!({ name: "shell" }, { command: "git push" } as never, silent as never)).toBeUndefined();
+    expect(project.scopeOf!({ name: "shell" }, { command: "git reset --hard" } as never, silent as never)).toBe("deny");
+    // A policy with no fallback judges nothing there.
+    expect(policy.scopeOf!({ name: "shell" }, { command: "git reset --hard" } as never, silent as never)).toBeUndefined();
     // …and an agent's own shell is the same tool under another name.
     expect(policy.scopeOf!({ name: "Bash" }, { command: "git commit -m x" } as never, block as never)).toBe("deny");
   });

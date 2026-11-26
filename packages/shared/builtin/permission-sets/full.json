@@ -1,4 +1,5 @@
 {
+  "layers": ["$SYSTEM/permission-sets/security/guarded"],
   "read_file": { "**": "allow", "$PROJECT": "allow", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },
   "glob": { "**": "allow", "$PROJECT": "allow", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },
   "grep": { "**": "allow", "$PROJECT": "allow", "$WORKTREE": "allow", "$AGENT_WORKSPACE": "allow", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask", "~/.jaira/system/machine.key": "deny" },
@@ -7,10 +8,6 @@
   "show_artifact": "allow",
   "shell": { "**": "allow", "$PROJECT/.jaira": "deny", "$PROJECT/.jaira/**/*": "deny", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny" },
   "shell --run_in_background": "allow",
-  "git push": "allow",
-  "git push --delete": "ask",
-  "git push -d": "ask",
-  "git merge": "allow",
   "runner:*": { "**": "allow", "$PROJECT/.jaira": "deny", "$PROJECT/.jaira/**/*": "deny", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny" },
   "script": { "**": "allow", "$PROJECT/.jaira": "deny", "$PROJECT/.jaira/**/*": "deny", "$WORKTREE/.jaira": "deny", "$WORKTREE/.jaira/**/*": "deny", "~/.jaira/system/machine.key": "deny" },
   "read_system": "allow",

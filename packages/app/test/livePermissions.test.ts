@@ -157,7 +157,8 @@ describe("a permission set picked while a program conversation answers (decision
       stacks.push(...[...(session().livePermissions.get(taskId) ?? [])].map((cell) => cell.stack?.layers.map((layer) => layer.id)));
     };
     await say(taskId, "two", { permissionSet: { layers: ["$/permission-sets/auto"] } as never });
-    expect(stacks).toEqual([["full", "tools"]]);
+    // `full` stands on the security profile it names (`security/guarded`, 2026-11-25), its layer under it.
+    expect(stacks).toEqual([["security/guarded", "full", "tools"]]);
   });
 });
 
@@ -204,8 +205,8 @@ describe("a conversation keeps what its composer was left at", { timeout: 60_000
       .filter((row) => (JSON.parse(row.request_json) as { functionRef?: string }).functionRef === "input" && row.result_json !== null)
       .map((row) => (JSON.parse(row.result_json!) as { value?: { settings?: unknown } }).value?.settings);
     expect(sent).toEqual([kept, { ...kept, model: "fake/chosen" }]);
-    // And the reply was decided under the stack kept.
-    expect([...(session().livePermissions.get(taskId) ?? [])].map((cell) => cell.stack?.layers.map((layer) => layer.id)[0])).toEqual(["read-only"]);
+    // And the reply was decided under the stack kept: read-only, over the security profile it stands on.
+    expect([...(session().livePermissions.get(taskId) ?? [])].map((cell) => cell.stack?.layers.map((layer) => layer.id))).toEqual([["security/guarded", "read-only"]]);
   });
 
   it("keeps a conversation pinned to a set by its name from before the move on that set, renamed, when its stack is cleared (2026-11-09)", async () => {

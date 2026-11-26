@@ -27,10 +27,10 @@ const FACTS: MachineFacts = {
 const MACHINE: MachineFactsSource = { facts: FACTS, read: async () => undefined };
 const setOf = (decl: PermissionSetDecl) => parsePermissionSet(decl).permissionSet;
 const block = (decl: PermissionSetDecl) => lowerPermissionSet(setOf(decl), "$/permission-sets/x/y").permissions!;
-const policy = compilePolicy({ builtins: false }, { workspaceRoot: ROOT, machine: MACHINE });
+const policy = compilePolicy({}, { workspaceRoot: ROOT, machine: MACHINE });
 const judge = (decl: PermissionSetDecl, tool: string, input: Record<string, unknown>) => policy.scopeOf!({ name: tool }, input as FunctionInputs, block(decl) as never);
 const decide = (decl: PermissionSetDecl, line: string, dialect: CommandDialect = "posix") =>
-  decideCommand({ builtins: false }, line, dialect, { permissionSet: shellPermissionSetOf(setOf(decl))!, root: ROOT, places: { root: ROOT, facts: FACTS } });
+  decideCommand({}, line, dialect, { permissionSet: shellPermissionSetOf(setOf(decl))!, root: ROOT, places: { root: ROOT, facts: FACTS } });
 
 describe("a direct call, by every kind of place its resource has", () => {
   it("read_system: what it reads, and on which machine", () => {

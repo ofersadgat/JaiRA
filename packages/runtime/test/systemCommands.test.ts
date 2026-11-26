@@ -5,7 +5,7 @@
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { parsePermissionSet, takeApart, type CommandDialect } from "@jaira/shared";
+import { parsePermissionSet, resolvePermissionSetDecl, takeApart, type CommandDialect, type PermissionSetIssue } from "@jaira/shared";
 import { noteCallDialect } from "../src/callDialect";
 import { classifyRequest } from "../src/commandParts";
 import { compilePolicy } from "../src/policy";
@@ -117,7 +117,15 @@ describe("a System command is the System tool", () => {
 });
 
 describe("a System command, judged by the shipped sets", () => {
-  const shipped = (name: string) => parsePermissionSet(JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url), "utf8"))).permissionSet;
+  const file = (name: string): unknown => JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url), "utf8"));
+  /** A shipped set as the stack it names (`"layers"`: its security profile), every layer read from disk. */
+  const shipped = (name: string) => {
+    const prefix = "$SYSTEM/permission-sets/";
+    const issues: PermissionSetIssue[] = [];
+    const decl = resolvePermissionSetDecl(file(name), (reference) => ({ value: file(reference.slice(prefix.length)), key: reference, from: reference }), "", issues);
+    expect(issues.filter((issue) => issue.severity === "error")).toEqual([]);
+    return parsePermissionSet(decl!).permissionSet;
+  };
   const judge = (name: string) => {
     const smart = compilePolicy({}, { permissionSet: shipped(name) }).smart!["shell"]!;
     return (command: string, dialect: CommandDialect = "posix") => {
@@ -144,10 +152,14 @@ describe("a System command, judged by the shipped sets", () => {
     expect(auto("Stop-Process -Name x", "powershell")).toBe("ask");
   });
 
-  it("asks before `power` even in full, as before a push", () => {
+  it("judges `power` by the set's line: full allows it, a set standing on security/standard asks", () => {
+    // No rule in code asks on top of the set (the person, 2026-11-25: "all rules should go through permissions").
     const full = judge("full");
     expect(full("Get-Process", "powershell")).toBe("allow");
-    expect(full("shutdown -h now")).toBe("ask");
-    expect(full("Restart-Computer", "powershell")).toBe("ask");
+    expect(full("shutdown -h now")).toBe("allow");
+    expect(full("Restart-Computer", "powershell")).toBe("allow");
+    const askFirst = judge("ask-first");
+    expect(askFirst("shutdown -h now")).toBe("ask");
+    expect(askFirst("Restart-Computer", "powershell")).toBe("ask");
   });
 });

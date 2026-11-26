@@ -390,6 +390,14 @@ const PS_READ: UtilitySpec = { tool: "read_file", paths: "all", valueFlags: PS_V
 const PS_LIST: UtilitySpec = { tool: "glob", paths: "all", valueFlags: PS_VALUE_PARAMS, pathParams: PS_PATH_PARAMS };
 const PS_SEARCH: UtilitySpec = { tool: "grep", paths: "after-first", valueFlags: PS_VALUE_PARAMS, patternFlags: ["-pattern"], pathParams: PS_PATH_PARAMS };
 const PS_WRITE: UtilitySpec = { tool: "write_file", paths: "all", valueFlags: PS_VALUE_PARAMS, pathParams: PS_PATH_PARAMS };
+/**
+ * `Remove-Item`'s own: it takes only these values, so a short switch reads as its switch — `-r` is
+ * `-Recurse`, where the shared list would read it as `-ReadCount` and take the path after it for its value.
+ */
+const PS_REMOVE: UtilitySpec = {
+  ...PS_WRITE,
+  valueFlags: ["-filter", "-include", "-exclude", "-credential", "-stream", "-erroraction", "-ea", "-warningaction", "-wa", "-errorvariable", "-ev", "-outvariable", "-ov", "-outbuffer", "-ob", "-pipelinevariable", "-pv", "-informationaction", "-infa", "-informationvariable", "-iv"],
+};
 const PS_WRITE_FIRST: UtilitySpec = { tool: "write_file", paths: "first", valueFlags: PS_VALUE_PARAMS, pathParams: PS_PATH_PARAMS };
 const PS_FETCH: UtilitySpec = { tool: "web_fetch", paths: "none", url: true, valueFlags: [...PS_VALUE_PARAMS, ...PS_PATH_PARAMS], urlParams: ["-uri"] };
 
@@ -434,7 +442,7 @@ export const POWERSHELL_UTILITIES: Readonly<Record<string, UtilitySpec>> = {
   "convert-path": PS_LIST,
   "select-string": PS_SEARCH,
   findstr: { tool: "grep", paths: "after-first" },
-  "remove-item": PS_WRITE,
+  "remove-item": PS_REMOVE,
   "move-item": PS_WRITE,
   "copy-item": PS_WRITE,
   "rename-item": PS_WRITE_FIRST,

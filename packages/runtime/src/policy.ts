@@ -4,8 +4,9 @@
  * This module decides what a given tool call is allowed to do, and compiles that
  * decision procedure into the `ExecPolicy` the engine and the delegated adapters
  * enforce (`@declarative-ai/permissions`). What a state may do is its PERMISSION_SET (decision
- * 0007); what stands above every permission set is JaiRA's own floor, which a project can turn
- * off and nothing else (`functions.shell.builtins`). There is no project rule list: a
+ * 0007), and nothing else: there are no built-in rules — what JaiRA once refused or asked about on its
+ * own is the shipped security profiles' lines (`permission-sets/security/`), stacked under a set like
+ * any layer, and what a line no set judges answers to ({@link JairaPolicy.fallback}). There is no project rule list: a
  * command a project wants answered is a line under the `shell` tool of its permission sets
  * (decision 0007, amended 2026-09-23).
  *
@@ -39,14 +40,16 @@
  */
 import type { FunctionInputs } from "@declarative-ai/exec";
 import type { AuthoredPermissions, ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict, ToolGate } from "@declarative-ai/permissions";
-import { DIRECTORY_CHANGERS, controlsWhatRuns, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type EnvironmentLookup, type ParsedCommand } from "@jaira/shared";
+import { DIRECTORY_CHANGERS, LINES_NO_SET_JUDGES, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type EnvironmentLookup, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
 import { blockNowOf, REVEALS, RESOURCE_JUDGES, type ResourceVerdict } from "./resourceJudges";
 import { MachineFactsCache, type MachineFactsSource, type MachineReading } from "./machineFacts";
 import {
   SHELL_SUBJECT,
   answerOfLines,
+  argumentAnswerOf,
   backgroundAnswerOf,
+  untrackedAnswerOf,
   backgroundWidthsOf,
   classifyRequest,
   lookUp,
@@ -59,6 +62,7 @@ import {
   subjectWordSpans,
   type ClassifiedPart,
   type PartPlaces,
+  type PermissionSetAnswer,
   type ShellPermissionSet,
 } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
@@ -148,35 +152,20 @@ import { deniedEarlier, refusalWords, takeRefusal, type RefusedBy } from "./refu
 /** What a line comes to — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
 
-/** A matcher over parsed intent (never a regex over the raw string) — how the floor names what it refuses. */
-interface FloorMatcher {
-  /** Program name, already normalized (`git`, `npm`, `curl`). */
-  program?: string;
-  /** Subcommand (`push`, `publish`). */
-  subcommand?: string;
-  /** Any of these flags present is enough. */
-  anyFlag?: string[];
-}
-
-interface FloorRule {
-  match: FloorMatcher;
-  reason: string;
-}
-
 /**
- * What a project says about JaiRA's own policy: whether the built-in floor stands
- * (`functions.shell.builtins`). Everything else a line is judged by is the permission set.
- *
- * An empty policy is the built-ins on, which is the safe default.
+ * What a line is judged by when no permission set judges it — a state that declares none, a CLI's
+ * `run_command`: the set {@link LINES_NO_SET_JUDGES} names. There is no rule in code: every verdict is a
+ * set's line (the person, 2026-11-25: "there shouldnt be built in rules. all rules should go through
+ * permissions").
  */
 export interface JairaPolicy {
-  /** Turn off the SPEC §11.2/§11.3 built-ins (a disposable workspace, and tests). */
-  builtins?: boolean;
+  /** The set a line no other set judges answers to. Absent: such a line is allowed. */
+  fallback?: PermissionSet;
 }
 
-/** The project's policy, read off its configuration. */
-export function projectPolicy(config: { functions: { shell: { builtins: boolean } } }): JairaPolicy {
-  return config.functions.shell.builtins ? {} : { builtins: false };
+/** The project's policy: what a line no set judges answers to — the shipped `base/allow-all` under `security/standard`. */
+export function projectPolicy(_config?: unknown): JairaPolicy {
+  return { fallback: LINES_NO_SET_JUDGES };
 }
 
 /** Tools whose input is a command line, and therefore parsed rather than trusted. */
@@ -205,56 +194,6 @@ const COMMAND_KEYS = ["command", "cmd", "script", "input", "commandLine"];
 /** Input keys that carry a PAYLOAD — the bytes a producing tool is about to keep. */
 const CONTENT_KEYS = ["content", "text"];
 
-// --- SPEC §11.2: destructive git (deny) --------------------------------------
-
-const DESTRUCTIVE: FloorRule[] = [
-  { match: { program: "git", subcommand: "push", anyFlag: ["--force", "-f", "--force-with-lease"] }, reason: "force push rewrites published history" },
-  { match: { program: "git", subcommand: "push", anyFlag: ["--mirror"] }, reason: "mirror push overwrites every ref" },
-  { match: { program: "git", subcommand: "reset", anyFlag: ["--hard"] }, reason: "hard reset discards work" },
-  { match: { program: "git", subcommand: "rebase" }, reason: "rebase rewrites history" },
-  { match: { program: "git", subcommand: "filter-branch" }, reason: "filter-branch rewrites history" },
-  { match: { program: "git", subcommand: "filter-repo" }, reason: "filter-repo rewrites history" },
-  { match: { program: "git", subcommand: "gc" }, reason: "gc can drop unreachable objects" },
-  { match: { program: "git", subcommand: "prune" }, reason: "prune drops unreachable objects" },
-  { match: { program: "git", subcommand: "clean", anyFlag: ["-f", "-fd", "-fdx", "--force"] }, reason: "clean deletes untracked files" },
-];
-
-// --- SPEC §11.3: require approval -------------------------------------------
-
-const NETWORK_PROGRAMS = new Set([
-  "curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet",
-  // PowerShell's, by the cmdlet's own name (`iwr` and Windows PowerShell's `curl` are `invoke-webrequest`).
-  "invoke-webrequest", "invoke-restmethod", "start-bitstransfer", "send-mailmessage", "new-pssession", "enter-pssession",
-]);
-const PUBLISH: Array<[string, string]> = [
-  ["npm", "publish"],
-  ["pnpm", "publish"],
-  ["yarn", "publish"],
-  ["cargo", "publish"],
-  ["gem", "push"],
-  ["twine", "upload"],
-];
-/** PowerShell's publishing and installing cmdlets — the cmdlet is the whole verb. */
-const PUBLISH_CMDLETS = new Set(["publish-module", "publish-script", "publish-psresource"]);
-const INSTALL_CMDLETS = new Set(["install-module", "install-package", "install-script", "install-psresource", "update-module", "update-script", "update-psresource", "save-module", "save-script"]);
-const INSTALLERS = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "gem", "cargo", "apt", "apt-get", "brew", "choco", "winget", "scoop"]);
-const INSTALL_SUBCOMMANDS = new Set(["install", "add", "i", "ci", "update", "upgrade"]);
-/** `Start-Process`'s parameters, for reading them cut short (`-Cred`, `-Verb`). */
-const START_PROCESS_PARAMETERS = ["-filepath", "-argumentlist", "-credential", "-verb", "-workingdirectory", "-windowstyle", "-wait", "-passthru", "-nonewwindow", "-loaduserprofile", "-redirectstandardoutput", "-redirectstandarderror", "-redirectstandardinput", "-environment", "-useshellexecute"];
-/** `Invoke-Command`'s parameters that run it on another machine. */
-const REMOTE_PARAMETERS = ["-computername", "-cn", "-session", "-hostname", "-vmname", "-vmid", "-vmguid", "-containerid", "-connectionuri", "-uri", "-sshconnection"];
-
-/** Whether a command deletes recursively: `rm -r`, PowerShell's `Remove-Item -Recurse` (cut short too), cmd's `rd /s`. */
-function deletesRecursively(command: ParsedCommand): boolean {
-  if (command.program === "rm") return command.flags.some((f) => /^-[a-z]*[rR]/.test(f));
-  if (command.program === "remove-item") return command.flags.some((f) => powershellParameter(f, ["-recurse"]) !== undefined || /^-r$/i.test(f));
-  if (["rd", "rmdir", "del", "erase"].includes(command.program)) return commandWords(command).some((w) => /^\/s$/i.test(w));
-  return false;
-}
-const DEPLOY_PROGRAMS = new Set(["kubectl", "helm", "terraform", "vercel", "netlify", "fly", "heroku", "aws", "gcloud", "az", "docker"]);
-/** Paths that hold credentials — reading them is an approval, not a free action. */
-const SECRET_PATTERNS = [/(^|[\\/])\.env(\.|$)/i, /(^|[\\/])\.ssh([\\/]|$)/i, /(^|[\\/])\.aws([\\/]|$)/i, /(^|[\\/])\.npmrc$/i, /id_rsa/i, /credentials/i, /secrets?\./i];
-
 /**
  * Every non-flag word of a command.
  *
@@ -265,13 +204,6 @@ const SECRET_PATTERNS = [/(^|[\\/])\.env(\.|$)/i, /(^|[\\/])\.ssh([\\/]|$)/i, /(
  */
 export function commandWords(command: ParsedCommand): string[] {
   return command.subcommand !== undefined ? [command.subcommand, ...command.args] : [...command.args];
-}
-
-function matches(matcher: FloorMatcher, command: ParsedCommand): boolean {
-  if (matcher.program !== undefined && matcher.program !== command.program) return false;
-  if (matcher.subcommand !== undefined && matcher.subcommand !== command.subcommand) return false;
-  if (matcher.anyFlag !== undefined && !matcher.anyFlag.some((f) => command.flags.includes(f))) return false;
-  return true;
 }
 
 // --- decision 0032, ruling 7: what starts a process out of JaiRA's sight (deny) ---------------------
@@ -330,69 +262,6 @@ export function startsUntracked(command: ParsedCommand): boolean {
       return false;
   }
 }
-
-/**
- * The built-in verdict for one command, or undefined when no built-in applies.
- *
- * The escapes ({@link startsUntracked}) are among them, refused first. `judgePart` reads those apart from
- * the rest, because they stand whether `functions.shell.builtins` is on or off — that switch turns off
- * the floor a disposable workspace does not need, and an escape is not about the workspace: it is a
- * process nobody can list or stop after the task, wherever it runs — and only a `shell
- * --run_in_background` line naming the program lifts it.
- */
-export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; reason: string } | undefined {
-  if (startsUntracked(command)) return { action: "deny", reason: ESCAPE_REASON };
-  for (const rule of DESTRUCTIVE) {
-    if (matches(rule.match, command)) return { action: "deny", reason: rule.reason };
-  }
-  // `rm -rf .git`, `Remove-Item -Recurse .git`, `rd /s .git` — the non-git ways to destroy history.
-  if (deletesRecursively(command) && commandWords(command).some((a) => /(^|[\\/])\.git([\\/]|$)/.test(a))) {
-    return { action: "deny", reason: "removing .git destroys the repository" };
-  }
-
-  // `git push origin +main`: a `+` on a refspec forces that ref as `--force` does — refused like it, so a
-  // set that lets pushes through (`full`'s `git push: allow`) never lets a forced one through with them.
-  if (command.program === "git" && command.subcommand === "push" && command.args.some((arg) => arg.startsWith("+"))) {
-    return { action: "deny", reason: "force push rewrites published history" };
-  }
-
-  const ask = (reason: string): { action: PolicyAction; reason: string } => ({ action: "require_approval", reason });
-
-  if (command.program === "git") {
-    if (command.subcommand === "push") return ask("pushes publish work");
-    if (command.subcommand === "merge") return ask("merges change shared history");
-    if (command.subcommand === "config" && command.flags.includes("--global")) return ask("global config affects every repository");
-    // Listing them (`git remote -v`, `git remote show origin`, `get-url`) changes nothing.
-    if (command.subcommand === "remote" && REMOTE_CHANGES.has(command.args[0] ?? "")) return ask("changing remotes redirects where work is published");
-  }
-  if (NETWORK_PROGRAMS.has(command.program)) {
-    // Fetching a script and piping it to a shell is the shape worth naming.
-    return ask(`${command.program} accesses the network`);
-  }
-  if (command.program === "invoke-command" && command.flags.some((f) => powershellParameter(f, REMOTE_PARAMETERS) !== undefined)) {
-    return ask("invoke-command runs it on another machine");
-  }
-  if (PUBLISH.some(([program, sub]) => command.program === program && command.subcommand === sub) || PUBLISH_CMDLETS.has(command.program)) {
-    return ask("publishing a package is public and irreversible");
-  }
-  if ((INSTALLERS.has(command.program) && command.subcommand !== undefined && INSTALL_SUBCOMMANDS.has(command.subcommand)) || INSTALL_CMDLETS.has(command.program)) {
-    return ask("installing packages runs third-party code");
-  }
-  if (command.program === "start-process") {
-    const words = command.words ?? [];
-    const elevated = words.some((w, i) => {
-      if (powershellParameter(w.value, START_PROCESS_PARAMETERS) === "-credential") return true;
-      return powershellParameter(w.value, START_PROCESS_PARAMETERS) === "-verb" && /^runas/i.test(words[i + 1]?.value ?? "");
-    });
-    if (elevated) return ask("start-process starts it as another user");
-  }
-  if (DEPLOY_PROGRAMS.has(command.program)) return ask(`${command.program} can deploy or change infrastructure`);
-  if (commandWords(command).some((a) => SECRET_PATTERNS.some((p) => p.test(a)))) return ask("the command touches a credentials path");
-  return undefined;
-}
-
-/** `git remote`'s subcommands that change where work goes; the rest only look. */
-const REMOTE_CHANGES: ReadonlySet<string> = new Set(["add", "rename", "remove", "rm", "set-url", "set-head", "set-branches", "prune", "update"]);
 
 /** Strictest wins, so nothing benign on the same line can soften a verdict. */
 const RANK: Record<PolicyAction, number> = { allow: 0, require_approval: 1, deny: 2 };
@@ -686,7 +555,10 @@ const SCOPED_PACKAGE = /^@[a-z0-9][\w.-]*\/[\w.-]+(@[^/\\\s]*)?$/i;
  * flag (`--output=dist/x`, `cp --target-directory=.jaira/x`) is one the part names, for every path line.
  */
 function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: readonly string[] | undefined, placeOptions: PlaceOptions, expand: (word: string) => string = (word) => word): PartPlaces & { primary(kind: PlaceKind, line: string): string | undefined } {
-  const at = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+  // `~/.ssh` is where `~` is, as a place's `~` is; anything else relative is where the part acts.
+  const home = placeOptions.named?.["~"];
+  const at = (path: string): string =>
+    /^~([\\/]|$)/.test(path) ? (home !== undefined ? `${home}${path.slice(1)}` : path) : isAbsolutePath(path) || here === undefined ? path : absolutize(path, here);
   const resolve = (path: string): string => at(expand(path));
   const paths = part.paths.filter((path) => path !== "{}").map(resolve);
   const named = part.command !== undefined && part.kind !== "tool" && part.kind !== "redirect" ? commandWords(part.command).map(expand).filter(looksLikePath).map(at) : [];
@@ -720,6 +592,13 @@ function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: r
   };
   return {
     of,
+    words: () =>
+      part.command === undefined
+        ? []
+        : [...commandWords(part.command), ...part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : []))]
+            .map((word) => word.replace(/^@/, ""))
+            .filter((word) => word.length > 0 && !word.includes("://"))
+            .map(resolve),
     options: placeOptions,
     resource: (line) => partResourceOf(part, line, placeOptions),
     // The place the dialog offers widths of: a path the part names before the directory it runs in.
@@ -879,23 +758,55 @@ interface Composed {
 
 const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VERDICT_RANK[a] > VERDICT_RANK[b];
 
+/** The fallback set as a shell line reads it, made once per set. */
+const SHELL_FALLBACKS = new WeakMap<PermissionSet, ShellPermissionSet | undefined>();
+function fallbackJudging(policy: JairaPolicy): ShellPermissionSet | undefined {
+  const set = policy.fallback;
+  if (set === undefined) return undefined;
+  if (!SHELL_FALLBACKS.has(set)) SHELL_FALLBACKS.set(set, shellPermissionSetOf(set));
+  return SHELL_FALLBACKS.get(set);
+}
+
+/** A line's answer as a part's verdict, naming the line, its place and the layer that wrote it. */
+function composedOf(answer: PermissionSetAnswer & { mode: PermissionSetMode }, part: ClassifiedPart, stack: PermissionStackDecl | undefined): Composed {
+  const reference = modeFunction(answer.mode);
+  const at = answer.place !== undefined ? ` in ${answer.place}` : "";
+  const layer = answer.entry !== undefined ? layerOfLine(stack, answer.entry, answer.place) : undefined;
+  return {
+    verdict: verdictOfMode(answer.mode),
+    source: "permissionSet",
+    ...(answer.entry !== undefined ? { entry: answer.entry } : {}),
+    ...(layer !== undefined ? { layer } : {}),
+    ...(reference !== undefined ? { function: reference } : {}),
+    ...(answer.place !== undefined ? { place: answer.place } : {}),
+    reason:
+      answer.entry === undefined
+        ? `the permission set does not hold '${part.subject}'`
+        : reference !== undefined
+          ? `the permission set's '${answer.entry}'${at} is decided by the function '${reference}'`
+          : `the permission set's '${answer.entry}'${at} is ${modeWord(answer.mode)}`,
+    ...(answer.matched !== undefined ? { matched: answer.matched } : {}),
+  };
+}
+
 /**
  * Judge one part. `undefined` when it is no request at all (`cd foo`, `echo hi`).
  *
- * The order, and what each layer may do. No step knows `.jaira/`: the shipped sets refuse writing
- * there with LINES, read at (2) like any other place (2026-11-17).
+ * The order, and what each layer may do. Nothing here is a rule of its own: every verdict is a LINE of
+ * the set judging the part — the state's, the conversation's, or, where none judges it, the policy's
+ * fallback ({@link JairaPolicy.fallback}: `base/allow-all` under `security/standard`). What a security
+ * profile refuses or asks about (force pushes, the network, credentials) is its lines, read here like
+ * any other (the person, 2026-11-25: "all rules should go through permissions").
  *
- *  1. The BUILT-INS (unless `functions.shell.builtins` is off): the destructive floor (deny), else a
- *     built-in ask, else nothing — `default`, which allows.
- *  2. The PERMISSION_SET's answer for the part's subject ({@link lookUp}: the most specific line, the
- *     most specific of its places that matches where the part acts, a place that matches nothing
- *     falling to a less specific line). It composes with (1) as the STRICTER of the two,
- *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
- *     or the `default` — naming it is the decision those two stand in for. It never replaces the
- *     floor: the floor stays above every permission set. An entry that names a FUNCTION answers `function`,
- *     which ranks between `allowed` and `asks`: the function is asked unless something stricter
- *     already answered — a built-in ask on a push is still a person's to answer, unless the entry
- *     that names the function names the program too.
+ *  1. A part that starts a process out of every tree JaiRA follows ({@link startsUntracked}) answers
+ *     first to the `shell --untracked` lines ({@link untrackedAnswerOf}) — then, where none speaks, to
+ *     its own lines as any command.
+ *  2. The set's answer for the part's subject ({@link lookUp}: the most specific line, the most specific
+ *     of its places that matches where the part acts, a place that matches nothing falling to a less
+ *     specific line); then the `shell` line's PLACES at the words the part is handed
+ *     ({@link argumentAnswerOf}), the stricter of the two — a place on `shell` is about what any command
+ *     may touch there. An entry that names a FUNCTION answers `function`, which ranks between `allowed`
+ *     and `asks`.
  *  3. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
  *     never allowed without a person, whatever the permission set hands it to.
  *  4. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied` — at its
@@ -905,85 +816,38 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
  *     Strictest again, and after (4): a remembered `rm` does not open a place the floor shut.
  */
 function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined, where: PartPlaces): Composed | undefined {
-  // (1) the built-ins — an escape first, which stands whatever `functions.shell.builtins` says (see
-  // `builtinVerdict`): another program starting a process out of every tree JaiRA follows is refused,
-  // unless a `shell --run_in_background` line NAMING the program says otherwise, and then that line is
-  // what answers for it (decision 0032, ruling 7) — the generic `shell --run_in_background` does not.
-  let fromPolicy: Composed | undefined;
-  const escape = part.command !== undefined && startsUntracked(part.command);
-  if (escape) {
-    const lifted = options.permissionSet !== undefined ? backgroundAnswerOf(options.permissionSet, part.command, where) : undefined;
-    if (lifted?.specific === true && lifted.mode !== undefined && lifted.entry !== undefined) {
-      const reference = modeFunction(lifted.mode);
-      const at = lifted.place !== undefined ? ` in ${lifted.place}` : "";
-      const layer = layerOfLine(options.stack, lifted.entry, lifted.place);
-      fromPolicy = {
-        verdict: verdictOfMode(lifted.mode),
-        source: "permissionSet",
-        entry: lifted.entry,
-        ...(layer !== undefined ? { layer } : {}),
-        ...(reference !== undefined ? { function: reference } : {}),
-        ...(lifted.place !== undefined ? { place: lifted.place } : {}),
-        reason: reference !== undefined ? `the permission set's '${lifted.entry}'${at} is decided by the function '${reference}'` : `the permission set's '${lifted.entry}'${at} is ${modeWord(lifted.mode)}`,
-      };
-    } else fromPolicy = { verdict: "denied", source: "builtin", reason: ESCAPE_REASON };
-  } else if (policy.builtins !== false) {
-    if (part.kind === "env") {
-      // `PATH`, `LD_PRELOAD`, `GIT_*`: a variable that makes an allowed program run something else asks —
-      // unless a `set_env` line names it (decision 0007 §4, amended 2026-11-25 (latest)).
-      const name = part.subject.slice(part.subject.indexOf(" ") + 1);
-      if (controlsWhatRuns(name)) fromPolicy = { verdict: "asks", source: "builtin", reason: `${name} can make the programs after it run something else` };
-    } else if (part.command !== undefined) {
-      const builtin = builtinVerdict(part.command);
-      if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
-      // `shutdown`, `Restart-Computer`, `systemctl reboot`: the power tool, which always asks (decision 0019 §6).
-      else if (part.tool === "power") fromPolicy = { verdict: "asks", source: "builtin", reason: "it restarts, shuts down, sleeps or locks the machine" };
-    } else if (part.paths.some((p) => SECRET_PATTERNS.some((s) => s.test(p)))) {
-      fromPolicy = { verdict: "asks", source: "builtin", reason: "the redirect touches a credentials path" };
-    }
-  }
+  // `cd`, `echo`, `true`: no request at all.
+  if (part.noRequest === true) return undefined;
+  const judging = options.permissionSet;
 
-  // `cd`, `echo`, `true`: a request only when something above made it one.
-  if (part.noRequest === true && (fromPolicy === undefined || fromPolicy.verdict === "allowed")) return undefined;
+  // With no set at all, a variable still asks (decision 0007 §4) and anything else is allowed.
+  let composed: Composed =
+    part.kind === "env"
+      ? { verdict: "asks", source: "default", reason: `it sets ${part.subject.slice(part.subject.indexOf(" ") + 1)}, which can change what runs after it` }
+      : { verdict: "allowed", source: "default", reason: "no permission set judges it" };
 
-  // Setting a variable with no permission set to say so asks, as it always did (decision 0007 §4,
-  // amended 2026-11-25 (latest)); under a set its lines decide — and with none of them, ask (`lookUp`).
-  const envDefault: Composed | undefined =
-    part.kind === "env" && options.permissionSet === undefined ? { verdict: "asks", source: "default", reason: `it sets ${part.subject.slice(part.subject.indexOf(" ") + 1)}, which can change what runs after it` } : undefined;
-  let composed: Composed = fromPolicy ?? envDefault ?? { verdict: "allowed", source: "default", reason: "no built-in applies" };
-
-  // (2) the permission set
-  if (options.permissionSet !== undefined && part.noRequest !== true) {
-    const answer = lookUp(options.permissionSet, part, where);
+  if (judging !== undefined) {
+    // (1) a start JaiRA could not follow, then (2) the part's own lines.
+    const escape = part.command !== undefined && startsUntracked(part.command) ? untrackedAnswerOf(judging, part.command, where) : undefined;
+    const answer = escape?.mode !== undefined ? escape : lookUp(judging, part, where);
     if (answer.mode !== undefined) {
-      const reference = modeFunction(answer.mode);
-      const at = answer.place !== undefined ? ` in ${answer.place}` : "";
-      const layer = answer.entry !== undefined ? layerOfLine(options.stack, answer.entry, answer.place) : undefined;
-      const fromPermissionSet: Composed = {
-        verdict: verdictOfMode(answer.mode),
-        source: "permissionSet",
-        ...(answer.entry !== undefined ? { entry: answer.entry } : {}),
-        ...(layer !== undefined ? { layer } : {}),
-        ...(reference !== undefined ? { function: reference } : {}),
-        ...(answer.place !== undefined ? { place: answer.place } : {}),
-        reason:
-          answer.entry === undefined
-            ? `the permission set does not hold '${part.subject}'`
-            : reference !== undefined
-              ? `the permission set's '${answer.entry}'${at} is decided by the function '${reference}'`
-              : `the permission set's '${answer.entry}'${at} is ${modeWord(answer.mode)}`,
-        ...(answer.matched !== undefined ? { matched: answer.matched } : {}),
-      };
-      const builtinAsk = composed.source === "builtin" && composed.verdict === "asks";
-      if (answer.specific && (composed.source === "default" || builtinAsk)) composed = fromPermissionSet;
-      else if (isStricter(fromPermissionSet.verdict, composed.verdict)) composed = fromPermissionSet;
-      else if (fromPermissionSet.verdict === composed.verdict && composed.source === "default") composed = fromPermissionSet;
-      // Both ask: the permission set's entry is the one a person can change, and the built-in is why it matters.
-      else if (fromPermissionSet.verdict === composed.verdict && builtinAsk) composed = { ...fromPermissionSet, reason: `${fromPermissionSet.reason} — ${composed.reason}` };
+      composed = composedOf({ ...answer, mode: answer.mode }, part, options.stack);
+      // What a refused escape can do instead, said to the agent.
+      if (escape?.mode !== undefined && composed.verdict === "denied") composed = { ...composed, reason: `${composed.reason} — ${ESCAPE_REASON}` };
+    }
+    const touched = argumentAnswerOf(judging, part, where);
+    if (touched?.mode !== undefined) {
+      const fromPlaces = composedOf({ ...touched, mode: touched.mode }, part, options.stack);
+      if (isStricter(fromPlaces.verdict, composed.verdict)) composed = fromPlaces;
     }
   }
 
-  // (3) what the parser cannot vouch for
+  // (3) what the parser cannot vouch for asks — unless a line it does match refuses it: `git -c x reset
+  // --hard` is still `git reset --hard`, and a flag the parser cannot model must not soften a refusal to a question.
+  if (part.unmodelled !== undefined && part.kind !== "unparsed" && part.command !== undefined && judging !== undefined && composed.verdict !== "denied") {
+    const read = lookUp(judging, { ...part, unmodelled: undefined }, where);
+    if (read.mode === "deny") composed = composedOf({ ...read, mode: read.mode }, part, options.stack);
+  }
   if (part.unmodelled !== undefined && composed.verdict !== "denied") {
     composed = { verdict: "asks", source: "parser", reason: part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled };
   }
@@ -1111,7 +975,10 @@ function backgroundPart(started: ReadonlyArray<{ command?: ParsedCommand; where:
  * one approval, carrying every part, each asking part with the place widths it may be remembered at
  * (`CommandPart.where`).
  */
-export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix", options: DecideCommandOptions = {}): CommandDecision {
+export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix", given: DecideCommandOptions = {}): CommandDecision {
+  // A line no set judges answers to the policy's fallback set, in every step that reads one.
+  const fallback = given.permissionSet === undefined ? fallbackJudging(policy) : undefined;
+  const options: DecideCommandOptions = fallback !== undefined ? { ...given, permissionSet: fallback } : given;
   const taken = takeApart(line, dialect, [], options.env !== undefined ? { env: options.env } : {});
   const parts: CommandPart[] = [];
   const commands: Array<ParsedCommand | undefined> = [];
@@ -1313,13 +1180,13 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
 /**
  * Whether the project's policy can ever escalate a call to a human.
  *
- * True with the built-ins on, because SPEC §11.3's classes are all `require_approval`; with them
- * off nothing the project says asks — what a state's permission set asks is the state's own, and gated
- * with it. This is what capability gating (DESIGN §8.2) checks a runtime against — a policy that
- * cannot ask needs nothing enforced interactively.
+ * True wherever a line no set judges answers to a set ({@link JairaPolicy.fallback}) — `security/standard`
+ * asks — and what a state's own permission set asks is the state's own, and gated with it. This is what
+ * capability gating (DESIGN §8.2) checks a runtime against — a policy that cannot ask needs nothing
+ * enforced interactively.
  */
 export function policyCanEscalate(policy: JairaPolicy): boolean {
-  return policy.builtins !== false;
+  return policy.fallback !== undefined;
 }
 
 /** Pull a command string out of a tool's inputs, if it has one. */
@@ -1627,7 +1494,6 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         ? decideMappedMcpCall(tool, input, mapping, judging.permissionSet, judging.source, {
             shell: (call) => lineDecisionFor(call, block, SHELL_SUBJECT).parts,
             scope: (name, call) => places?.({ name } as never, call as never, block as never),
-            builtins: policy.builtins !== false,
             ...(options.grants !== undefined ? { grants: options.grants } : {}),
           })
         : decideMcpCall(tool, judging.permissionSet, judging.source, options.grants, judging.stack);
@@ -1797,14 +1663,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // The executor's scope floor, as the callback every consumer of a policy already knows how to read.
   // A state's say about where is on its set's lines, and the narrowing below reads it.
   const places = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
-  // What, by the call: the line's own judgement — and a tool that always asks (`power`,
-  // `install_program`) asks at least, whatever its line says. Both gates read this one.
-  const alwaysAsks = (tool: { name: string }): boolean => policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name);
+  // What, by the call: the line's own judgement. Both gates read this one. (`power` and
+  // `install_program` ask where a set's line says so — `security/standard` does — never by a rule here.)
   const narrowing: ScopeNarrowing = Object.assign(
-    (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) =>
-      alwaysAsks(tool) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored),
+    (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) => commandNarrowing(tool, input, authored),
     {
-      narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => alwaysAsks(tool) || mayNarrow(commandNarrowing, tool, authored),
+      narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => mayNarrow(commandNarrowing, tool, authored),
       prepare: preparePrograms,
     },
   );
@@ -2065,7 +1929,7 @@ export function leftRunningVerdict(
   options: { dialect?: CommandDialect; grants?: CommandGrants; root?: string; places?: PlaceOptions } = {},
 ): LeftRunningVerdict {
   if (permissionSet === undefined) return "ask";
-  const judged = decideCommand({ builtins: false }, left.command, options.dialect ?? "posix", {
+  const judged = decideCommand({}, left.command, options.dialect ?? "posix", {
     permissionSet,
     background: true,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
@@ -2140,12 +2004,6 @@ export function decideLeftRunning(policy: ExecPolicy | undefined, authored: unkn
 /** The stricter of two modes, either of which may be unsaid. */
 const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): PermissionMode => (a !== undefined && MODE_RANK[a] > MODE_RANK[b] ? a : b);
 
-/**
- * The tools a person is always asked about, as a push is: `power` takes the machine away, and
- * `install_program` runs third-party code, which is the install ask the shell's package managers have
- * (decision 0019 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
- */
-export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_program"]);
 
 /** A call a rule refused, as `CompilePolicyOptions.onRefused` is told it. */
 export interface RuleRefusal {
@@ -2384,8 +2242,6 @@ export interface MappedCallJudges {
   shell?: (input: Record<string, unknown>) => CommandApproval;
   /** What the scope tables say about the call's place, for a tool that takes one. */
   scope?: (tool: string, input: Record<string, unknown>) => PermissionMode | undefined;
-  /** `power` and `install_program` always ask, unless `functions.shell.builtins` is off. */
-  builtins?: boolean;
   grants?: CommandGrants;
 }
 
@@ -2486,15 +2342,12 @@ export function decideMappedMcpCall(tool: string, input: unknown, mapping: McpTo
           ...(reference !== undefined ? { function: reference } : {}),
           reason: `'${tool}' counts as ${call.tool}: ${reference !== undefined ? `decided by the function '${reference}'` : modeWord(mode)}`,
         };
-  if (judges.builtins === true && ALWAYS_ASKING_TOOLS.has(call.tool) && VERDICT_RANK[composed.verdict] < VERDICT_RANK.asks) {
-    composed = { verdict: "asks", source: "builtin", reason: `'${tool}' counts as ${call.tool}, which always asks` };
-  }
   const where = judges.scope?.(call.tool, call.input);
   if (where === "deny" && composed.verdict !== "denied") composed = { verdict: "denied", source: "scope", reason: `'${tool}' counts as ${call.tool}, and the scope tables refuse where it would act` };
   else if (where === "ask" && VERDICT_RANK[composed.verdict] < VERDICT_RANK.asks) composed = { verdict: "asks", source: "scope", reason: `'${tool}' counts as ${call.tool}, and the scope tables ask where it would act` };
   if (composed.verdict === "asks") {
     const remembered = judges.grants?.answerFor([call.tool]);
-    if (remembered !== undefined && composed.source !== "builtin") composed = { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
+    if (remembered !== undefined) composed = { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
   }
   const spec = TOOL_SPEC_BY_NAME.get(call.tool);
   const paths = (spec?.pathArgs ?? []).flatMap((arg) => (typeof call.input[arg] === "string" ? [call.input[arg] as string] : []));
@@ -2550,7 +2403,6 @@ export function allowsCall(
           packages: where.packages,
           ...(call["run_in_background"] === true ? { background: true } : {}),
         }).parts,
-      builtins: policy.builtins !== false,
     }).action === "allow";
   }
   const bare = mcp?.tool ?? name;

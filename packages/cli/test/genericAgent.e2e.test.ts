@@ -57,14 +57,15 @@ function writeConfig(config: Record<string, unknown>): void {
 }
 
 /**
- * A generic agent only runs at all under a policy that never escalates — SPEC
- * §11.3's built-in approval classes are all `require_approval`, so leaving the
- * built-ins on means §8.2 refuses a runtime that enforces nothing. Turning them off
- * is the project saying "this workspace is disposable", which is the only honest way
- * to run a policy-weak agent.
+ * A project's policy can always escalate now: a line no permission set judges answers to the shipped
+ * `security/standard`, which asks — the built-ins switch that let a "disposable workspace" turn that off
+ * is gone (the person, 2026-11-25: "there shouldnt be built in rules. all rules should go through
+ * permissions"). So §8.2 refuses a binary that enforces nothing (`policyEnforcement: "none"`) on every
+ * project. What gets past the gate is a registration whose own tools are declared off and pointed at the
+ * bridge (`mcp.builtinsOff`, `policyEnforcement: "config"`) — held to the state's permission set there.
  */
-function neverEscalates(agent: Record<string, unknown>): Record<string, unknown> {
-  return { agents: { genericCli: [agent] }, functions: { shell: { builtins: false } } };
+function bridged(agent: Record<string, unknown>): Record<string, unknown> {
+  return { agents: { genericCli: [{ ...agent, mcp: { env: { JAIRA_MCP_URL: "{mcpUrl}" }, builtinsOff: true } }] } };
 }
 
 beforeEach(() => {
@@ -93,30 +94,19 @@ async function cli(args: string[]): Promise<{ code: number; out: string; err: st
 }
 
 describe("generic-cli agent through the CLI", () => {
-  it("runs the configured binary and returns its stdout as the state's output", async () => {
-    writeConfig(neverEscalates({ command: process.execPath, args: [agentScript, "{prompt}"] }));
+  it("lets a bridged registration past the gate — and then holds it to a permission set the state must declare", async () => {
+    writeConfig(bridged({ command: process.execPath, args: [agentScript, "{prompt}"] }));
 
     const res = await cli(["run", "--root", "solo", "--inputs", '{"instruction":"tidy the imports"}']);
 
-    expect(res.code).toBe(0);
-    const report = JSON.parse(res.out) as {
-      status: string;
-      outputs?: { report?: { content?: string } };
-    };
-    expect(report.status).toBe("completed");
-    // A blob-kind output slot is registered as an artifact, so the text arrives as
-    // the artifact's inline content.
-    expect(report.outputs?.report?.content).toBe("did: tidy the imports");
-  });
-
-  it("fails the state with the binary's own complaint when it exits non-zero", async () => {
-    writeFileSync(agentScript, `process.stderr.write("model unavailable");\nprocess.exit(3);\n`, "utf8");
-    writeConfig(neverEscalates({ command: process.execPath, args: [agentScript] }));
-
-    const res = await cli(["run", "--root", "solo", "--inputs", '{"instruction":"x"}']);
-
+    // Past §8.2 (no "enforces no policy"), to the function itself, which refuses a call no set holds:
+    // the binary would run with its own shell, which nothing here can put to the project's policy.
     expect(res.code).toBe(1);
-    expect(res.out).toMatch(/model unavailable/);
+    expect(res.err).not.toMatch(/enforces no policy/);
+    const report = JSON.parse(res.out) as { status: string; failure?: { reason?: string } };
+    expect(report.status).toBe("failed");
+    expect(report.failure?.reason).toMatch(/generic-cli: this state declares no permission set/);
+    expect(res.out).not.toMatch(/did: tidy the imports/);
   });
 
   it("refuses the run when the project's policy can escalate (DESIGN §8.2)", async () => {
@@ -124,7 +114,7 @@ describe("generic-cli agent through the CLI", () => {
     // approval is meaningless against it — refusing beats running it unguarded.
     writeConfig({
       agents: { genericCli: [{ command: process.execPath, args: [agentScript, "{prompt}"] }] },
-      // The built-ins are on: a push asks, so this project can escalate.
+      // A line no permission set judges answers to security/standard, which asks: this project can escalate.
     });
 
     const res = await cli(["run", "--root", "solo", "--inputs", '{"instruction":"x"}']);
@@ -132,6 +122,9 @@ describe("generic-cli agent through the CLI", () => {
     expect(res.code).toBe(1);
     expect(res.err).toMatch(/enforces no policy/);
     expect(res.err).toMatch(/solo/);
+    // Refused before it ran (the binary would have echoed what it was told) — and that it was refused at all
+    // is the proof the CLI registered it: an unregistered ref is not the gate's business.
+    expect(res.out + res.err).not.toMatch(/did: /);
   });
 
   it("fails honestly when nothing is configured", async () => {

@@ -2,7 +2,7 @@
  * A RUN's policy, built one way for every host that starts one (DESIGN §10.1, decision 0007).
  *
  * The app's `startRun` and the `jaira` CLI both start workflow runs, and what governs a run — the
- * built-in floor (`functions.shell.builtins`), the executor's scope floor, the size above which a produced payload asks,
+ * set a line no other set judges answers to, the executor's scope floor, the size above which a produced payload asks,
  * the per-run memory of answered parts, the audit — must not depend on which of them started it. It
  * did: the CLI handed `executeWorkflow` no policy at all, so a CLI run judged no line, bounded no
  * place and audited nothing. So the one recipe lives here and both hosts call it; what differs

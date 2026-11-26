@@ -8,6 +8,7 @@
  * engine (`permissionFunctionRunner`) — except where a test is about the approver's own rules and a
  * runner stub says exactly what is being held.
  */
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { eventually } from "@jaira/testing";
 import { PermissionLedger, isPermissionDenied, withPermission } from "@declarative-ai/permissions";
@@ -17,6 +18,7 @@ import {
   APPROVAL_PROMPT_FUNCTION,
   SMART_FUNCTION,
   lowerPermissionSet,
+  mergeLayerDecls,
   parsePermissionSet,
   type PermissionFunctionRequest,
   type PermissionSetDecl,
@@ -148,6 +150,14 @@ describe("a function decides a tool call before anybody is asked", () => {
   });
 });
 
+/** A shipped security profile's own lines (`permission-sets/security/<name>.json`). */
+const profile = (name: string): Record<string, unknown> =>
+  JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/security/${name}.json`, import.meta.url), "utf8")) as Record<string, unknown>;
+
+/** `lines` over `security/standard` (over `security/guarded`), as a project stacks its set: one stack, the most specific line deciding. */
+const overStandard = (lines: PermissionSetDecl): PermissionSetDecl =>
+  mergeLayerDecls([{ id: "guarded", decl: profile("guarded") }, { id: "standard", decl: profile("standard") }, { id: "project", decl: lines }]).decl as PermissionSetDecl;
+
 describe("a shell line whose lines name functions is decided PER PART", () => {
   it("hands each part to its function on its own, and runs the line when every part may", async () => {
     const { call, asked, ran, decided } = gated({ shell: "judge", "git status": "allow", other: "deny" }, "shell", {
@@ -173,15 +183,15 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("asks the person about what still asks, with each function's answer on the request", async () => {
-    // A built-in ask (a push) is stricter than a function on `shell`: the function is not asked about it.
-    const { call, asked, hub, decided } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
+    // The profile's `git push: ask` is a more specific line than `shell`: it decides the push, and the function is not asked about it.
+    const { call, asked, hub, decided } = gated(overStandard({ shell: "judge", other: "deny" }), "shell", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git push origin main" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(decided.map((r) => r.part?.text)).toEqual(["cargo check"]);
     expect(asked).toHaveLength(1);
     expect(asked[0]!.parts!.parts.map((p) => ({ text: p.text, verdict: p.verdict, source: p.decidedBy.source, fn: p.decidedBy.function }))).toEqual([
       { text: "cargo check", verdict: "allowed", source: "function", fn: "judge" },
-      { text: "git push origin main", verdict: "asks", source: "builtin", fn: undefined },
+      { text: "git push origin main", verdict: "asks", source: "permissionSet", fn: undefined },
     ]);
     hub.decide(asked[0]!.requestId, "allow");
     await pending;
@@ -194,8 +204,9 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
     expect(decided).toMatchObject([{ subject: "git push", part: { program: "git", subcommand: "push", args: ["origin", "main"] } }]);
   });
 
-  it("never hands a function what the floor, a rule's deny or the parser already answered", async () => {
-    const { call, decided, asked, hub } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
+  it("never hands a function what a profile's deny, a rule's deny or the parser already answered", async () => {
+    // `security/guarded`'s `git reset --hard: deny` is more specific than `shell`: the function never sees it.
+    const { call, decided, asked, hub } = gated(overStandard({ shell: "judge", other: "deny" }), "shell", { run: allowIf(() => true) });
     expect(isPermissionDenied((await call({ command: "git reset --hard" })) as never)).toBe(true);
     // `cat` is `read_file`, which this set does not hold: its `other` refuses it.
     expect(isPermissionDenied((await call({ command: "cat notes.md" })) as never)).toBe(true);

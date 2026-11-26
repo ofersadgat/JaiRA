@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PermissionRequest } from "@declarative-ai/permissions";
 import { initProject, openProject, type Project } from "@jaira/persistence";
-import { ApprovalHub, compilePolicy, type ApprovalRequest, type PolicyAuditEntry } from "@jaira/runtime";
+import { ApprovalHub, compilePolicy, projectPolicy, type ApprovalRequest, type PolicyAuditEntry } from "@jaira/runtime";
 import { testHome } from "@jaira/testing";
 
 let dir: string;
@@ -52,7 +52,7 @@ describe("ApprovalHub", () => {
 
   it("explains why it is asking, using the policy's reason", async () => {
     const hub = new ApprovalHub({ onRequest: () => undefined, nextId: () => "a1" });
-    const policy = compilePolicy({}, { onDecision: hub.noteDecision });
+    const policy = compilePolicy(projectPolicy(), { onDecision: hub.noteDecision });
     // Run the policy first, exactly as a real call does: its audit entry carries
     // the reason the approval prompt should show.
     await policy.smart!["shell"]!(request("npm publish"));
@@ -136,7 +136,7 @@ describe("policy → approval → audit", () => {
     const audit: PolicyAuditEntry[] = [];
     const hub = new ApprovalHub({ onRequest: () => undefined, nextId: () => "a1" });
     const policy = compilePolicy(
-      {},
+      projectPolicy(),
       {
         onDecision: (entry) => {
           audit.push(entry);
@@ -156,7 +156,7 @@ describe("policy → approval → audit", () => {
 
     // 1. Allowed outright.
     expect(await policy.smart!["shell"]!(request("git status"))).toBe("allow");
-    // 2. Blocked by the §11.2 list.
+    // 2. Refused by the security profile the project's fallback stands on (security/guarded, under standard).
     expect(await policy.smart!["shell"]!(request("git reset --hard"))).toBe("deny");
     // 3. Escalated, then approved by a human for the whole run.
     expect(await policy.smart!["shell"]!(request("git push origin main"))).toBe("ask");

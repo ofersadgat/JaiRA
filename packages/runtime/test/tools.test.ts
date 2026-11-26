@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, withPermission, type Approver } from "@declarative-ai/permissions";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { READ_ONLY_PRESET_TOOLS } from "@jaira/shared";
-import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
+import { compilePolicy, projectPolicy, type PolicyAuditEntry } from "../src/policy";
 import { createShellTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
 import { GIT_TOOL_NAMES } from "../src/gitTools";
@@ -83,10 +83,11 @@ describe("the whole gate: tool call → policy → verdict", () => {
    * Wrap the tool exactly as a composed runtime does: the ledger holds the compiled
    * baseline, `smart` is this tool's approver from the compiled policy, and
    * `approve` is the human gate. With no approver supplied, an `ask` denies — the
-   * safe unattended default.
+   * safe unattended default. The project's policy: a line no permission set judges answers to the
+   * shipped `base/allow-all` under `security/standard` — its lines, not rules in code.
    */
   function gated(approve?: Approver, audit: PolicyAuditEntry[] = []) {
-    const policy = compilePolicy({}, { onDecision: (e) => audit.push(e) });
+    const policy = compilePolicy(projectPolicy(), { onDecision: (e) => audit.push(e) });
     const ledger = new PermissionLedger({ baseline: policy.baseline ?? {} });
     const smart = policy.smart?.["shell"];
     const tool = withPermission(createShellTool({ cwd: dir }), {
@@ -112,7 +113,7 @@ describe("the whole gate: tool call → policy → verdict", () => {
     // The agent's loop sees a denial result and continues — it is not an exception.
     expect(isPermissionDenied(result as never)).toBe(true);
     expect(result.exitCode).toBeUndefined();
-    expect(audit.at(-1)).toMatchObject({ action: "deny", reason: expect.stringMatching(/hard reset/) as unknown as string });
+    expect(audit.at(-1)).toMatchObject({ action: "deny", reason: expect.stringMatching(/'git reset --hard' is deny/) as unknown as string });
   }, 60_000);
 
   it("escalates an approval class to the human, and runs it once allowed", async () => {

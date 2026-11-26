@@ -322,21 +322,6 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
             },
           },
         },
-        shell: {
-          type: "object",
-          title: "shell",
-          description:
-            "The shell tool — bash, PowerShell or cmd, whichever runs the line. What a line may run is each permission set's shell line and the command lines under it (git push, npm install); this is what stands above every permission set.",
-          properties: {
-            builtins: {
-              type: "boolean",
-              title: "built-in refusals",
-              default: true,
-              description:
-                "JaiRA's own floor, above every permission set: destructive git (a force push, a hard reset, a rebase) and removing .git are refused; a push, an install, a package publish, a network program or a credentials path asks. Turn it off only for a disposable workspace.",
-            },
-          },
-        },
       },
     },
   },

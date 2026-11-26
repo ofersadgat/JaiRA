@@ -28,7 +28,7 @@ const source = (facts: MachineFacts = FACTS): MachineFactsSource & { asked: Mach
 const setOf = (decl: PermissionSetDecl) => parsePermissionSet(decl).permissionSet;
 const block = (decl: PermissionSetDecl) => lowerPermissionSet(setOf(decl), "$/permission-sets/x/y").permissions!;
 const decide = (decl: PermissionSetDecl, line: string, dialect: CommandDialect = "posix") =>
-  decideCommand({ builtins: false }, line, dialect, { permissionSet: shellPermissionSetOf(setOf(decl))!, root: ROOT, places: { root: ROOT, facts: FACTS } });
+  decideCommand({}, line, dialect, { permissionSet: shellPermissionSetOf(setOf(decl))!, root: ROOT, places: { root: ROOT, facts: FACTS } });
 const targets = (line: string, dialect: CommandDialect = "posix") => processTargetsOf(parseCommand(line, dialect).commands[0]!, dialect);
 
 describe("what a process command is about", () => {

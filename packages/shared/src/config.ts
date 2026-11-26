@@ -503,7 +503,6 @@ function parsePermissions(raw: unknown): JairaPermissionsConfig {
 export interface JairaFunctionsConfig {
   smart: JairaSmartConfig;
   review_artifacts: JairaReviewArtifactsConfig;
-  shell: JairaShellConfig;
 }
 
 /**
@@ -515,16 +514,6 @@ export interface JairaReviewArtifactsConfig {
   publish: PublishMode;
   /** The quiet window after a comment on the forge, as a duration (`"10m"`); `"0"` settles on the first. A state's `remote.settle_after` overrides it. */
   settleAfter: string;
-}
-
-/** The `shell` tool's own defaults. What a line may run is each permission set's `shell` line and its command lines. */
-export interface JairaShellConfig {
-  /**
-   * JaiRA's built-in refusals and questions (SPEC §11.2/§11.3): destructive git and `rm -r .git` are
-   * refused, a push, an install, a package publish, a network program and a credentials path ask.
-   * They stand above every permission set. `false` turns them off — for a disposable workspace, and tests.
-   */
-  builtins: boolean;
 }
 
 /**
@@ -917,7 +906,6 @@ export function defaultFunctions(): JairaFunctionsConfig {
   return {
     smart: {},
     review_artifacts: { publish: DEFAULT_PUBLISH_MODE, settleAfter: DEFAULT_SETTLE_AFTER },
-    shell: { builtins: true },
   };
 }
 
@@ -966,13 +954,12 @@ function parseFunctions(raw: unknown): JairaFunctionsConfig {
     }
   }
 
+  // `functions.shell.builtins` turned JaiRA's built-in refusals off. There are none any more — what they
+  // refused or asked is `security/*` lines — so a settings file that still says it reads, and it means nothing.
   if (block["shell"] !== undefined) {
     const shell = plainObject(block["shell"], "config.functions.shell");
     allowedFields(shell, ["builtins"], "config.functions.shell");
-    if (shell["builtins"] !== undefined) {
-      if (typeof shell["builtins"] !== "boolean") throw new Error("config.functions.shell.builtins must be true or false");
-      out.shell.builtins = shell["builtins"];
-    }
+    if (shell["builtins"] !== undefined && typeof shell["builtins"] !== "boolean") throw new Error("config.functions.shell.builtins must be true or false");
   }
   return out;
 }

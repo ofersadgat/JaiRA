@@ -608,11 +608,30 @@ function commandEntriesOf(permissionSet: ShellPermissionSet): CommandEntry[] {
  *    names `-fu`, `git grep -O` names `-Ovim`. Where an allowing and a refusing entry then both
  *    match, they are equally specific and the stricter wins (`matchCommandEntry`).
  */
-const flagMatches = (named: string, given: string): boolean => {
+const flagMatches = (named: string, given: string, cmdlet = false): boolean => {
   if (given === named) return true;
+  // A cmdlet's parameter, as PowerShell reads one: in any case, cut short, its value joined with `:`
+  // (`Remove-Item -r`, `-Recurse:$true` name `remove-item -recurse`).
+  if (cmdlet && /^-[A-Za-z]{2,}$/.test(named)) {
+    const word = given.toLowerCase().split(":")[0]!;
+    return word.length >= 2 && /^-[a-z]/.test(word) && named.toLowerCase().startsWith(word);
+  }
   if (named.startsWith("--")) return !named.includes("=") && given.startsWith(`${named}=`);
   return /^-[A-Za-z0-9]$/.test(named) && /^-[^-]{2,}/.test(given) && given.slice(1).includes(named[1]!);
 };
+
+/**
+ * The flags a command was given, as a line reads them: its own, and `--force` for a push whose refspec
+ * forces (`git push origin +main` is `git push --force` for one ref), so `git push --force` names both.
+ */
+function flagsGiven(command: ParsedCommand): readonly string[] {
+  const forced = command.program === "git" && command.subcommand === "push" && command.args.some((arg) => arg.startsWith("+"));
+  return forced && !command.flags.includes("--force") ? [...command.flags, "--force"] : command.flags;
+}
+
+/** A line's word against the command's: the same, or — ending in `*` — the family it names (`set_env GIT_*`). */
+const subMatches = (named: string, given: string | undefined): boolean =>
+  given !== undefined && (named.length > 1 && named.endsWith("*") ? given.toLowerCase().startsWith(named.slice(0, -1)) : given.toLowerCase() === named);
 
 /** One command entry that matches a command, with the words it matched and how specific it is. */
 export interface CommandMatch {
@@ -634,14 +653,16 @@ export function matchCommandEntries(permissionSet: ShellPermissionSet, command: 
   // `git -C dir commit`: the value `-C` takes is not the subcommand.
   const subs = command.subcommand !== undefined ? operands.slice(operands.findIndex((w) => w.value.toLowerCase() === command.subcommand)) : [];
   const out: Array<CommandMatch & { rank: number }> = [];
+  const given = flagsGiven(command);
+  const cmdlet = command.program.includes("-");
   for (const entry of commandEntriesOf(permissionSet)) {
     if (entry.program !== command.program && entry.program !== command.alias) continue;
-    if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
-    if (!entry.flags.every((f) => command.flags.some((g) => flagMatches(f, g)))) continue;
+    if (!entry.subs.every((s, i) => subMatches(s, subs[i]?.value))) continue;
+    if (!entry.flags.every((f) => given.some((g) => flagMatches(f, g, cmdlet)))) continue;
     const score = entry.subs.length * 2 + entry.flags.length;
     const all = command.words ?? [];
     const program = all[command.programIndex ?? 0];
-    const flagWords = entry.flags.flatMap((f) => all.find((w) => flagMatches(f, w.value)) ?? []);
+    const flagWords = entry.flags.flatMap((f) => all.find((w) => flagMatches(f, w.value, cmdlet)) ?? []);
     out.push({ entry, score, rank: lineRank(permissionSet, entry.key, entry.mode), words: [...(program !== undefined ? [program] : []), ...subs.slice(0, entry.subs.length), ...flagWords] });
   }
   // Array.prototype.sort is stable: among equals, the first written stays first.
@@ -668,6 +689,8 @@ export interface PartPlaces {
   resource?(line: string): ResourcePlaces | undefined;
   /** What a path place is resolved against: the project root and the named places. */
   options?: PlaceOptions | undefined;
+  /** Every word the part is handed, as a path where it acts (`~` and `$VARS` expanded, made absolute) — what `shell`'s places are read at ({@link argumentAnswerOf}). */
+  words?(): readonly string[];
 }
 
 /** One line a part may answer to, in the order it is asked. */
@@ -770,13 +793,13 @@ export function answerOfLines(permissionSet: ShellPermissionSet, keys: readonly 
  * dev`), as a set of their own keyed by that command — so a part is matched to them exactly as to a
  * command line, by program, subcommand and flag ({@link matchCommandEntries}) — and the line each came from.
  */
-function backgroundCommandsOf(permissionSet: ShellPermissionSet): { set: ShellPermissionSet; lineOf: Map<string, string> } {
+function backgroundCommandsOf(permissionSet: ShellPermissionSet, flag = "run_in_background"): { set: ShellPermissionSet; lineOf: Map<string, string> } {
   const entries: Record<string, PermissionSetMode> = {};
   const places: Record<string, Record<string, PermissionSetMode>> = {};
   const lineOf = new Map<string, string>();
   for (const key of new Set([...Object.keys(permissionSet.entries), ...Object.keys(permissionSet.places ?? {})])) {
     const parsed = parseToolFlagSubject(key);
-    if (parsed?.tool !== "shell" || parsed.command === undefined || parsed.flags.length !== 1 || parsed.flags[0]!.name !== "run_in_background" || parsed.flags[0]!.value !== undefined) continue;
+    if (parsed?.tool !== "shell" || parsed.command === undefined || parsed.flags.length !== 1 || parsed.flags[0]!.name !== flag || parsed.flags[0]!.value !== undefined) continue;
     const command = parsed.command.replace(/\s+/g, " ");
     lineOf.set(command, key);
     if (Object.hasOwn(permissionSet.entries, key)) entries[command] = permissionSet.entries[key]!;
@@ -791,7 +814,7 @@ function backgroundCommandsOf(permissionSet: ShellPermissionSet): { set: ShellPe
  * the `shell --run_in_background` lines naming it, most specific first — `shell --run_in_background npm
  * run dev` before `… npm` — then the bare `shell --run_in_background`, each line's places read as a shell
  * line's are (a place none matches passing on to the next line). `specific` says a line NAMING the
- * command answered, which is what lifts the built-in refusal of an escape (`policy.ts`).
+ * command answered.
  *
  * `undefined` when no such line says anything here — the caller's to answer; the policy ASKS.
  */
@@ -801,6 +824,50 @@ export function backgroundAnswerOf(permissionSet: ShellPermissionSet, command: P
   const answer = answerOfLines(permissionSet, [...lines, BACKGROUND_LINE], where);
   if (answer === undefined) return undefined;
   return { ...answer, specific: answer.entry !== undefined && answer.entry !== BACKGROUND_LINE };
+}
+
+/** The line a part that starts a process out of every tree JaiRA follows answers to (`startsUntracked`). */
+export const UNTRACKED_LINE = "shell --untracked";
+
+/**
+ * What a set says about a line that starts a process JaiRA cannot follow (`setsid`, `schtasks /create`,
+ * `crontab`): the `shell --untracked` lines naming the command, then the `shell --run_in_background`
+ * lines naming it (decision 0032, ruling 7: a start the set names as one to keep running is that), then
+ * the bare `shell --untracked` — `security/guarded`'s refusal. `undefined` when none of them speaks: the
+ * part is then any other command, judged by its own lines.
+ */
+export function untrackedAnswerOf(permissionSet: ShellPermissionSet, command: ParsedCommand, where?: PartPlaces): PermissionSetAnswer | undefined {
+  const untracked = backgroundCommandsOf(permissionSet, "untracked");
+  const background = backgroundCommandsOf(permissionSet);
+  const lines = [
+    ...matchCommandEntries(untracked.set, command).map((match) => untracked.lineOf.get(match.entry.key)!),
+    ...matchCommandEntries(background.set, command).map((match) => background.lineOf.get(match.entry.key)!),
+  ];
+  const answer = answerOfLines(permissionSet, [...lines, UNTRACKED_LINE], where);
+  if (answer === undefined) return undefined;
+  return { ...answer, specific: answer.entry !== UNTRACKED_LINE };
+}
+
+/**
+ * What the `shell` line's PLACES say about the words a command is handed — `cat ~/.ssh/config`,
+ * `curl -d @.env …`, `git push --repo=../secrets.json` — whatever line answered the command itself: a
+ * place on `shell` is about what any command may touch there (`security/standard`'s credentials), so a
+ * line naming the program (`git push: allow`) does not walk past it. Only its places, never its `**`:
+ * where nothing it names is touched, it says nothing. `undefined` then, and for a part with no words.
+ */
+export function argumentAnswerOf(permissionSet: ShellPermissionSet, part: ClassifiedPart, where?: PartPlaces): PermissionSetAnswer | undefined {
+  const command = part.command;
+  // A file tool (`cat`, `Get-Content`) answers to its own line's places — `read_file`'s, as a direct call does.
+  if (command === undefined || part.kind === "env" || part.kind === "unparsed" || part.kind === "tool" || part.kind === "redirect") return undefined;
+  const places = placesOfLine(permissionSet, SHELL_SUBJECT);
+  if (places === undefined) return undefined;
+  const named = Object.fromEntries(Object.entries(places).filter(([place]) => place.trim() !== "**"));
+  if (Object.keys(named).length === 0) return undefined;
+  const words = where?.words?.() ?? [];
+  if (words.length === 0) return undefined;
+  const at: PartPlaces = { of: (kind) => (kind === "path" ? words : []), ...(where?.options !== undefined ? { options: where.options } : {}) };
+  const answer = walkLines([{ key: SHELL_SUBJECT, specific: false, places: named }], 0, undefined, { specific: false }, at);
+  return answer.mode === undefined ? undefined : answer;
 }
 
 /**

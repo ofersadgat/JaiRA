@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { happyRules, HUMAN_REVIEW_FUNCTION, JAIRA_TOOLS, specPlanningFiles, writeWorkflowFiles, type FakeRule } from "@jaira/runtime";
-import { subjectKindOf, type ChatSettings, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
+import { resolvePermissionSetDecl, subjectKindOf, type ChatSettings, type PushMessage, type PermissionMode, type PermissionSetDecl } from "@jaira/shared";
 import { eventually, shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 
@@ -166,7 +166,14 @@ describe("the settings a message would run under", () => {
 
   it("names the permission posture after the PERMISSION_SET the map exactly is — a match, never a memory", async () => {
     // The suite runs over an empty built-in layer, so the permission sets that ship are put where a project
-    // would override them: the match is the same whichever layer supplies the file.
+    // would override them: the match is the same whichever layer supplies the file. Each stands on a
+    // security profile it names in what ships (`"layers": ["$SYSTEM/permission-sets/security/…"]`,
+    // 2026-11-25), so what ships is put back under them for the profiles to be read — and the project
+    // opened again, whose layers were resolved before it was.
+    await service.close();
+    shippedLayer();
+    service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
+    await service.open(dir);
     for (const id of ["ask-first", "read-only", "auto", "full", "improve/simulation"]) {
       const file = join(dir, ".jaira", "permission-sets", `${id}.json`);
       mkdirSync(dirname(file), { recursive: true });
@@ -188,14 +195,23 @@ describe("the settings a message would run under", () => {
     // The same map as the lowered fields a state's declaration arrives as is the same permission set: read FROM the shipped file rather
     // than derived, because the file is what the match is against and the modes it gives the workflow
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
-    // Its command, runner and script lines arrive where lowering writes them, in `subjects`.
-    const readOnly = shipped("read-only") as Record<string, PermissionMode>;
+    // Its command, runner and script lines arrive where lowering writes them, in `subjects`. What a state
+    // is handed is the set RESOLVED — the security profile it stands on (`security/guarded`) merged in.
+    const readOnly = resolvePermissionSetDecl(
+      shipped("read-only"),
+      (reference) => ({ value: shipped(reference.replace("$SYSTEM/permission-sets/", "")), key: reference, from: reference }),
+      "",
+      [],
+    ) as Record<string, PermissionMode>;
     const shellLine = (subject: string): boolean => subject === "shell" || ["command", "script", "runner"].includes(subjectKindOf(subject));
-    const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => shellLine(subject)));
+    // A command line written as a place map (guarded's `rm -r` by where it removes) arrives under `places`.
+    const commandPlaces = (subject: string): boolean => subject !== "shell" && shellLine(subject) && typeof readOnly[subject] === "object";
+    const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => shellLine(subject) && !commandPlaces(subject)));
+    const places = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => commandPlaces(subject))) as unknown as Record<string, Record<string, PermissionMode>>;
     const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "shell" || !shellLine(subject)));
-    expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: toolLines, other: "deny", subjects } })).toBe("read-only");
+    expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: toolLines, other: "deny", subjects, places } })).toBe("read-only");
     // A map naming three of the seventeen is not that permission set — it is a map with the rest unticked.
-    expect(posture({ tools: ["read_file", "shell", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");
+    expect(posture({ tools: ["read_file", "shell", "write_file"], permissions: { tools: toolLines, other: "deny", subjects, places } })).toBe("custom");
 
     // The card opens on the bucket whose permission set the map is, and the label is that bucket's: the top level's is "".
     expect(planned({ permissionSet: shipped("read-only") }).available.bucket).toBe("");

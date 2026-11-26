@@ -49,23 +49,6 @@ describe("what the shipped full lets through", () => {
     expect(allowsCall({}, FULL, "git_push", { branch: "main", remote: "gitlab" }, "posix", { root: "/repo" })).toBe(true);
     expect(allowsCall({}, FULL, "open_merge_request", { branch: "feature" }, "posix", { root: "/repo" })).toBe(true);
   });
-
-  // The agent's own shell push is the tool's push (the person, 2026-11-25: "it shouldnt be asking me for
-  // git push permission when it already has it") — never a forced one, and a deletion still asks.
-  it("lets the shell's own push and merge through as the tools are, never a force, and asks before a deletion", () => {
-    const FULL = parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/full.json", import.meta.url)), "utf8")) as unknown).permissionSet;
-    const sh = (command: string): boolean | undefined => allowsCall({}, FULL, "Bash", { command }, "posix", { root: "/repo" });
-    expect(sh("git push github main")).toBe(true);
-    expect(sh("git push github main 2>&1; git status -sb")).toBe(true);
-    expect(sh("git merge feature")).toBe(true);
-    expect(sh("git push --force origin main")).toBe(false);
-    expect(sh("git push origin +main")).toBe(false);
-    expect(sh("git push --delete origin old")).toBe(false);
-    expect(sh("git push -d origin old")).toBe(false);
-    // Listing remotes changes nothing; changing one still asks.
-    expect(sh("git remote -v")).toBe(true);
-    expect(sh("git remote add mirror https://example.com/x.git")).toBe(false);
-  });
 });
 
 describe("what the shipped read-only lets through", () => {

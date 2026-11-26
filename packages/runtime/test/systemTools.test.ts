@@ -1,12 +1,13 @@
 /**
  * The System tools (decision 0019) over a machine that is not this one: what is the same on every
  * operating system — JaiRA's own processes, what `open_app` will not open, a picture's coordinates,
- * the person's Stop, the tools that always ask. `systemWindows.test.ts` runs them on Windows itself.
+ * the person's Stop, the tools the shipped profile asks about. `systemWindows.test.ts` runs them on Windows itself.
  */
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/exec";
 import { TOOL_IMAGES } from "@declarative-ai/json";
-import { parsePermissionSet } from "@jaira/shared";
+import { readFileSync } from "node:fs";
+import { mergeLayerDecls, parsePermissionSet } from "@jaira/shared";
 import { compilePolicy } from "../src/policy";
 import { createSystemTools, inputStepOf, protectedProcesses, registerSystemTools, treeOf, type DrivingEvent } from "../src/systemTools";
 import { gateTools } from "../src/tools";
@@ -233,34 +234,41 @@ describe("where no System tool is built", () => {
   });
 });
 
-describe("the tools that always ask (decision 0019 §6)", () => {
-  const gated = (set: Record<string, unknown>, builtins = true) => {
+describe("the tools that ask by the shipped security profile (decision 0019 §6, now lines)", () => {
+  // `power` and `install_program` no longer ask by a rule in code: `security/standard` asks about them,
+  // a line like any other (the person, 2026-11-25: "all rules should go through permissions").
+  const standard = JSON.parse(readFileSync(new URL("../../shared/builtin/permission-sets/security/standard.json", import.meta.url), "utf8")) as Record<string, unknown>;
+  const gated = (set: Record<string, unknown>, overStandard = true) => {
     const registry = newRegistry();
     registerSystemTools(registry, { backend: fakeMachine(), enginePid: 100 });
     const asked: string[] = [];
-    const permissionSet = parsePermissionSet(set).permissionSet;
+    const decl = overStandard ? mergeLayerDecls([{ id: "standard", decl: standard }, { id: "project", decl: set }]).decl : set;
+    const permissionSet = parsePermissionSet(decl).permissionSet;
     const { tools } = gateTools({
       registry,
-      names: Object.keys(set).filter((k) => k !== "other"),
+      names: ["power", "install_program", "list_processes"],
       sessionId: "s",
       permissionSet,
-      policy: compilePolicy(builtins ? {} : { builtins: false }, { permissionSet }),
+      policy: compilePolicy({}, { permissionSet }),
       approve: (req) => (asked.push(req.tool), { decision: "deny", scope: "once" }),
     });
     return { tools, asked };
   };
 
-  it("asks before `power` and `install_program` even where the set allows them", async () => {
-    const { tools, asked } = gated({ power: "allow", install_program: "allow", list_processes: "allow", other: "deny" });
+  it("asks before `power` and `install_program` in a set standing on security/standard", async () => {
+    const { tools, asked } = gated({ list_processes: "allow", other: "allow" });
     await Promise.resolve(tools["power"]!.run({ action: "lock" } as never, {} as never)).catch(() => undefined);
     await Promise.resolve(tools["install_program"]!.run({ action: "install", id: "jqlang.jq" } as never, {} as never)).catch(() => undefined);
     await tools["list_processes"]!.run({} as never, {} as never);
     expect(asked).toEqual(["power", "install_program"]);
   });
 
-  it("does not, with the built-ins switched off", async () => {
-    const { tools, asked } = gated({ power: "allow", other: "deny" }, false);
-    await tools["power"]!.run({ action: "lock" } as never, {} as never);
-    expect(asked).toEqual([]);
+  it("does not where the set's own line allows them — over the profile, or with no profile at all", async () => {
+    const over = gated({ power: "allow", install_program: "allow", other: "deny" });
+    await over.tools["power"]!.run({ action: "lock" } as never, {} as never);
+    expect(over.asked).toEqual([]);
+    const bare = gated({ power: "allow", other: "deny" }, false);
+    await bare.tools["power"]!.run({ action: "lock" } as never, {} as never);
+    expect(bare.asked).toEqual([]);
   });
 });

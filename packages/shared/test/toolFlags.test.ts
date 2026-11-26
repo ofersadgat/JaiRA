@@ -46,13 +46,21 @@ describe("reading a set with flag lines", () => {
   });
 
   it.each([
-    ["shell --background", "'--background' is not a flag of shell — 'shell' takes --run_in_background"],
+    ["shell --background", "'--background' is not a flag of shell — 'shell' takes --run_in_background, --untracked"],
     ["shell --run_in_background=true", "'--run_in_background' takes no value — write '--run_in_background' alone"],
     ["read_file --path=x", "'--path' is not a flag of read_file — 'read_file' takes no flag — a line for it is 'read_file' alone"],
   ])("refuses '%s', saying what the tool offers", (subject, message) => {
     const { permissionSet, issues } = parsePermissionSet({ [subject]: "allow" });
     expect(issues).toEqual([{ path: subject, message, severity: "error" }]);
     expect(permissionSet.entries).toEqual({});
+  });
+
+  it("reads `shell --untracked` — a start out of every tree JaiRA follows — as a flag line, alone or naming a program", () => {
+    const { permissionSet, issues } = parsePermissionSet({ "shell --untracked": "deny", "shell --untracked schtasks": "ask" });
+    expect(issues).toEqual([]);
+    expect(permissionSet.entries["shell --untracked"]).toEqual({ kind: "tool-flag", mode: "deny" });
+    expect(parseToolFlagSubject("shell --untracked schtasks")).toEqual({ tool: "shell", flags: [{ name: "untracked" }], command: "schtasks" });
+    expect(permissionSet.entries["shell --untracked schtasks"]).toEqual({ kind: "tool-flag", mode: "ask" });
   });
 
   it("refuses unavailable on a flag line", () => {

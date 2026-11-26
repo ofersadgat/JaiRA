@@ -127,10 +127,6 @@ export function valueAt(doc: Record<string, unknown>, path: string): unknown {
 export function defaultsSummary(name: string, writer: Writer | null): string {
   if (defaultsSchemaOf(name) === undefined || writer === null) return "—";
   const block = valueAt(writer.effective, `${DEFAULTS_BLOCK}.${name}`);
-  if (name === "shell") {
-    const builtins = (block as { builtins?: unknown } | undefined)?.builtins;
-    return builtins === false ? "built-in refusals off" : "built-in refusals on";
-  }
   if (name === SMART_FUNCTION) {
     const smart = (block ?? {}) as { model?: unknown; prompt?: unknown };
     return `model: ${typeof smart.model === "string" && smart.model.length > 0 ? smart.model : "machine default"} · prompt: ${typeof smart.prompt === "string" && smart.prompt.length > 0 && smart.prompt !== DEFAULT_SMART_PROMPT ? "its own" : "default"}`;

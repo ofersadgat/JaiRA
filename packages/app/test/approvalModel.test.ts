@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { parsePermissionSet, partAnswersDecision, partAnswersProblem, partApproval, type CommandApproval, type CommandPart, type PendingApproval } from "@jaira/shared";
-import { decideCommand } from "@jaira/runtime";
+import { decideCommand, projectPolicy } from "@jaira/runtime";
 // Not part of the runtime's public surface: the policy is normally handed a lowered block, and this
 // is the one step that turns an authored map into what `decideCommand` takes.
 import { shellPermissionSetOf } from "../../runtime/src/commandParts";
@@ -160,7 +160,15 @@ describe("one row per part", () => {
   it("names the FALLBACK entry for a program no line names, and says so", () => {
     const [row] = partRows(judge("terraform plan -out tf.plan"));
     expect(row).toMatchObject({ subject: "shell", verdict: "asks" });
-    expect(row!.note).toBe("no line names terraform plan — any other command · terraform can deploy or change infrastructure");
+    // No built-in rule adds its own reason (2026-11-25: "all rules should go through permissions"): a
+    // set that stacks no security profile says nothing of terraform but its `shell` line.
+    expect(row!.note).toBe("no line names terraform plan — any other command");
+  });
+
+  it("names the security profile's line for a program the profile names, when no set judges the line", () => {
+    // What a line no set judges answers to — `base/allow-all` under `security/standard` — names terraform.
+    const [row] = partRows(decideCommand(projectPolicy(), "terraform plan -out tf.plan", "posix").parts);
+    expect(row).toMatchObject({ subject: "terraform", verdict: "asks" });
   });
 
   it("indents a part written inside another, and says in words what a part was opened out of when its host is no row", () => {
