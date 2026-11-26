@@ -22,6 +22,7 @@ import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter
 import { boundView, framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
+import { tweaksOf, type TweakLever } from "./canvasTweaks";
 import { Popover } from "./popover";
 
 export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line" | "comment";
@@ -1460,6 +1461,18 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                         stop(file);
                         setFull(file);
                       }}
+                      // Only an artboard that declares levers has a Tweaks button: it chooses the artboard and
+                      // opens the panel on them (the Design type's format: "from the artboard's Tweaks button").
+                      {...(tweaksOf(sourceOf(file)).length > 0
+                        ? {
+                            onTweaks: () => {
+                              setSelection({ kind: "board", file });
+                              setTab("tweaks");
+                              setPanelOpen(true);
+                            },
+                            tweaksOpen: panelOpen && tab === "tweaks" && selection?.kind === "board" && selection.file === file,
+                          }
+                        : {})}
                       {...(onExport !== undefined ? { onDownload: (anchor: Element) => openMenu({ kind: "download", file }, anchor) } : {})}
                     />
                   </div>
@@ -1821,9 +1834,10 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
 
 /**
  * An artboard's controls at the right of its label (Claude Code's canvas): ▶ runs an interactive one where
- * it sits, ■ stops it; ⤢ shows it on its own, filling the editor; ⬇ saves it as a picture or a document.
+ * it sits, ■ stops it; the sliders open its tweaks in the panel, when it declares some; ⤢ shows it on its
+ * own, filling the editor; ⬇ saves it as a picture or a document.
  */
-function LabelControls({ interactive, running, onRun, onStop, onFull, onDownload }: { interactive: boolean; running: boolean; onRun: () => void; onStop: () => void; onFull: () => void; onDownload?: (anchor: Element) => void }): JSX.Element {
+function LabelControls({ interactive, running, onRun, onStop, onFull, onDownload, onTweaks, tweaksOpen = false }: { interactive: boolean; running: boolean; onRun: () => void; onStop: () => void; onFull: () => void; onDownload?: (anchor: Element) => void; onTweaks?: () => void; tweaksOpen?: boolean }): JSX.Element {
   // The label drags its artboard: a press on a control is the control's.
   const own = { onPointerDown: (e: ReactPointerEvent) => e.button === 0 && e.stopPropagation() };
   const chip: CSSProperties = { font: "inherit", fontSize: "1em", lineHeight: 1, width: "1.5em", height: "1.5em", padding: 0, display: "inline-grid", placeItems: "center", border: 0, borderRadius: "0.3em", background: "transparent", color: "#5a5f7a", cursor: "pointer", flexShrink: 0 };
@@ -1839,6 +1853,11 @@ function LabelControls({ interactive, running, onRun, onStop, onFull, onDownload
             <Glyph d={PLAY} size="0.9em" />
           </button>
         )
+      ) : null}
+      {onTweaks !== undefined ? (
+        <button type="button" {...own} onClick={onTweaks} title="Its tweaks, in the panel" aria-label="Tweaks" aria-pressed={tweaksOpen} style={{ ...chip, ...(tweaksOpen ? { background: "#e5e8f1", color: "#4a4fd1" } : {}) }}>
+          <Glyph d={SLIDERS} size="0.9em" />
+        </button>
       ) : null}
       <button type="button" {...own} onClick={onFull} title={interactive ? "Run it on its own, filling the editor" : "See it on its own, filling the editor"} aria-label="Open it on its own" style={chip}>
         <Glyph d={EXPAND} size="0.9em" />
@@ -2227,44 +2246,55 @@ function NoteProperties({ note: n, onChange, onDelete }: { note: CanvasNote; onC
 /** The artboard's `data-props` levers, live in its frame (`dc:props`). */
 function TweaksTab({ file, source, onChange }: { file: string | undefined; source: (file: string) => string; onChange: (file: string, name: string, value: unknown) => void }): JSX.Element {
   if (file === undefined) return <p style={hint}>No artboard yet.</p>;
-  const declared = (parse(source(file)).props ?? {}) as Record<string, { editor?: string | null; default?: unknown; options?: unknown[]; min?: number; max?: number; step?: number }>;
-  const levers = Object.entries(declared).filter(([name, p]) => name !== "$preview" && typeof p.editor === "string");
-  if (levers.length === 0) return <p style={hint}>{file} declares no tweaks.</p>;
+  // Grouped by the `section` each names, in the order the file first names it; a colour's `options` are
+  // its swatches, and a number's `unit` labels it (the Design type's format, "`data-props`").
+  const groups = tweaksOf(source(file));
+  if (groups.length === 0) return <p style={hint}>{file} declares no tweaks.</p>;
   const set = (name: string, value: unknown): void => onChange(file, name, value);
+  const control = (p: TweakLever): JSX.Element => {
+    const { name, value } = p;
+    if (p.editor === "boolean") {
+      return (
+        <Row key={name} label={name}>
+          <input type="checkbox" checked={value === true} onChange={(e) => set(name, e.currentTarget.checked)} />
+        </Row>
+      );
+    }
+    if (p.editor === "enum" && p.options !== undefined) {
+      return (
+        <Row key={name} label={name}>
+          <select value={String(value ?? "")} onChange={(e) => set(name, e.currentTarget.value)} style={input}>
+            {p.options.map((o) => (
+              <option key={String(o)} value={String(o)}>
+                {String(o)}
+              </option>
+            ))}
+          </select>
+        </Row>
+      );
+    }
+    if (p.editor === "color") return <ColorField key={name} label={name} value={String(value ?? "")} swatches={p.swatches} onCommit={(v) => set(name, v)} />;
+    if (p.editor === "range" || p.editor === "int" || p.editor === "float") {
+      const n = Number(value ?? 0);
+      return (
+        <Row key={name} label={name}>
+          <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
+            <input type={p.editor === "range" ? "range" : "number"} min={p.min} max={p.max} step={p.step ?? (p.editor === "int" ? 1 : 0.1)} value={n} onChange={(e) => set(name, Number(e.currentTarget.value))} style={{ ...input, flex: 1 }} />
+            {p.editor === "range" ? <span style={unitText}>{`${String(n)}${p.unit ?? ""}`}</span> : p.unit !== undefined ? <span style={unitText}>{p.unit}</span> : null}
+          </span>
+        </Row>
+      );
+    }
+    return <Field key={name} label={name} value={String(value ?? "")} onCommit={(v) => set(name, v)} />;
+  };
   return (
     <Section title={`Tweaks · ${file}`}>
-      {levers.map(([name, p]) => {
-        const value = p.default;
-        if (p.editor === "boolean") {
-          return (
-            <Row key={name} label={name}>
-              <input type="checkbox" checked={value === true} onChange={(e) => set(name, e.currentTarget.checked)} />
-            </Row>
-          );
-        }
-        if (p.editor === "enum" && Array.isArray(p.options)) {
-          return (
-            <Row key={name} label={name}>
-              <select value={String(value ?? "")} onChange={(e) => set(name, e.currentTarget.value)} style={input}>
-                {p.options.map((o) => (
-                  <option key={String(o)} value={String(o)}>
-                    {String(o)}
-                  </option>
-                ))}
-              </select>
-            </Row>
-          );
-        }
-        if (p.editor === "color") return <ColorField key={name} label={name} value={String(value ?? "")} onCommit={(v) => set(name, v)} />;
-        if (p.editor === "range" || p.editor === "int" || p.editor === "float") {
-          return (
-            <Row key={name} label={name}>
-              <input type={p.editor === "range" ? "range" : "number"} min={p.min} max={p.max} step={p.step ?? (p.editor === "int" ? 1 : 0.1)} value={Number(value ?? 0)} onChange={(e) => set(name, Number(e.currentTarget.value))} style={input} />
-            </Row>
-          );
-        }
-        return <Field key={name} label={name} value={String(value ?? "")} onCommit={(v) => set(name, v)} />;
-      })}
+      {groups.map((g, i) => (
+        <div key={g.section ?? ""} role="group" aria-label={g.section ?? "Tweaks"} style={{ marginTop: i === 0 ? 0 : 10 }}>
+          {g.section !== undefined ? <h6 style={{ margin: "0 0 6px", fontSize: 11.5, fontWeight: 600, color: "var(--text, #121526)" }}>{g.section}</h6> : null}
+          {g.levers.map(control)}
+        </div>
+      ))}
     </Section>
   );
 }
@@ -2320,15 +2350,44 @@ function Field({ label, value, onCommit }: { label: string; value: string; onCom
   );
 }
 
-function ColorField({ label, value, onCommit }: { label: string; value: string; onCommit: (value: string) => void }): JSX.Element {
+/**
+ * A colour: its picker and its written value, and, when the design offers some, a row of swatches above
+ * them — a press on one sets it, the one in use is marked, and the picker stays for any other colour.
+ */
+function ColorField({ label, value, swatches, onCommit }: { label: string; value: string; swatches?: readonly string[] | undefined; onCommit: (value: string) => void }): JSX.Element {
   const hex = /^#[0-9a-f]{6}$/i.test(value.trim()) ? value.trim() : "#ffffff";
+  const current = value.trim().toLowerCase();
+  const fields = (
+    <span style={{ display: "flex", gap: 6 }}>
+      <input type="color" aria-label={`${label}: another colour`} value={hex} onChange={(e) => onCommit(e.currentTarget.value)} style={{ width: 28, height: 22, padding: 0, border: "1px solid var(--line, #e0e3ec)", borderRadius: 4 }} />
+      <input key={value} aria-label={`${label}: value`} defaultValue={value} onBlur={(e) => e.currentTarget.value !== value && onCommit(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} style={{ ...input, flex: 1 }} />
+    </span>
+  );
+  if (swatches === undefined || swatches.length === 0) return <Row label={label}>{fields}</Row>;
+  // Not a <label>: it would hand every press inside it to its first control, the first swatch.
   return (
-    <Row label={label}>
-      <span style={{ display: "flex", gap: 6 }}>
-        <input type="color" value={hex} onChange={(e) => onCommit(e.currentTarget.value)} style={{ width: 28, height: 22, padding: 0, border: "1px solid var(--line, #e0e3ec)", borderRadius: 4 }} />
-        <input key={value} defaultValue={value} onBlur={(e) => e.currentTarget.value !== value && onCommit(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()} style={{ ...input, flex: 1 }} />
+    <div style={{ display: "grid", gridTemplateColumns: "64px 1fr", gap: 6, alignItems: "start", marginBottom: 6, fontSize: 12 }}>
+      <span style={{ color: "var(--dim, #5a5f7a)", paddingTop: 4 }}>{label}</span>
+      <span style={{ display: "grid", gap: 5, minWidth: 0 }}>
+        <span role="group" aria-label={`${label} swatches`} style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {swatches.map((s) => {
+            const on = s.toLowerCase() === current;
+            return (
+              <button
+                key={s}
+                type="button"
+                aria-pressed={on}
+                aria-label={s}
+                title={s}
+                onClick={() => !on && onCommit(s)}
+                style={{ width: 22, height: 22, padding: 0, borderRadius: "50%", background: s, cursor: "pointer", border: "1px solid rgba(18,21,38,.18)", boxShadow: on ? "0 0 0 2px var(--panel, #fff), 0 0 0 4px var(--accent, #4a4fd1)" : "none", margin: on ? 2 : 0 }}
+              />
+            );
+          })}
+        </span>
+        {fields}
       </span>
-    </Row>
+    </div>
   );
 }
 
@@ -2365,4 +2424,6 @@ const panel: CSSProperties = { position: "absolute", top: 46, right: 8, bottom: 
 const tabButton: CSSProperties = { font: "inherit", fontSize: 12, padding: "8px 8px 7px", border: 0, background: "transparent", cursor: "pointer" };
 const input: CSSProperties = { font: "inherit", fontSize: 12, border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "2px 7px", background: "var(--panel, #fff)", color: "var(--text, #121526)", minWidth: 0 };
 const hint: CSSProperties = { margin: 12, fontSize: 12, color: "var(--dim, #5a5f7a)" };
+/** A number's unit, or a slider's value with it, after the control. */
+const unitText: CSSProperties = { fontSize: 11.5, color: "var(--dim, #5a5f7a)", whiteSpace: "nowrap", flexShrink: 0, fontVariantNumeric: "tabular-nums" };
 const layer: CSSProperties = { display: "block", width: "100%", textAlign: "left", font: "inherit", fontSize: 12, padding: "4px 2px", border: 0, background: "transparent", color: "var(--text, #121526)", cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
