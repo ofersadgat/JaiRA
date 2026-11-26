@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter, insertElement, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
-import { boundView, framePoint, frameWheel, wheelView } from "./canvasBoard";
+import { boundView, framePanPoint, framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 import { leverCount, tweaksOf, type TweakGroup, type TweakLever } from "./canvasTweaks";
@@ -585,17 +585,14 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         return;
       }
       if (data.type === "dc:pan" && typeof data.x === "number" && typeof data.y === "number") {
-        // The middle button dragged inside a frame: where the pointer is, placed in the window by where
-        // the frame stands now; the board pans by how far that moved. Committed at once (`flushSync`), so
-        // the frame's next report is measured against the board as it now stands.
+        // The middle button dragged inside a frame: the board pans by how far the pointer moved on the
+        // screen (`framePanPoint`), which the frame moving under it does not enter.
         const el = frameEls.current.get(file);
         if (el === undefined) return;
-        const box = el.getBoundingClientRect();
-        const scale = el.offsetWidth > 0 ? box.width / el.offsetWidth : 1;
-        const p = { x: box.left + data.x * scale, y: box.top + data.y * scale };
+        const p = framePanPoint(el, event.data);
         const was = framePan.current;
         framePan.current = data.phase === "end" ? null : p;
-        if (data.phase === "start" || was === null) return;
+        if (data.phase !== "move" || was === null) return;
         moved.current = true;
         flushSync(() => setView((v) => ({ ...v, x: v.x + p.x - was.x, y: v.y + p.y - was.y })));
         return;

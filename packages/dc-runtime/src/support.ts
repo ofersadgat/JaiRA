@@ -134,10 +134,14 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
 
   /**
    * The middle button pans the canvas, whatever the mode: a press inside a frame is the frame's, so the
-   * drag is told to the host rather than started here — WHERE the pointer is, in this frame's own pixels
-   * (`dc:pan`, `phase` start | move | end), which the host places in its window by where the frame stands
-   * as it reads it. Not how far it moved: the host pans the frame under the pointer as it goes, and a
-   * distance measured here is measured against a frame that has since moved (40 px panned 26, or 119).
+   * drag is told to the host rather than started here (`dc:pan`, `phase` start | move | end) — where the
+   * pointer is on the SCREEN (`sx`, `sy`), which no frame's position enters, and the host pans by how far
+   * that moved. The pointer in this frame's own pixels (`x`, `y`) is sent too, for a host that predates
+   * `sx`, but it cannot be panned by: the host moves the frame under the pointer as it goes, and this
+   * frame's `clientX` is reckoned against where the frame stood when the event was made, a step or two
+   * behind where the host has put it — a delta measured here was off (40 px panned 26, or 119), and so
+   * was the host placing these pixels by where the frame stands as it reads the message, which jittered
+   * back and forth by the moves still in flight (2026-11-25).
    * Registered first, so no edit-mode listener sees it, and the browser's own autoscroll never starts.
    */
   /**
@@ -151,7 +155,7 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
   let panning = false;
   const panEnds = (event: PointerEvent): void => {
     panning = false;
-    post({ type: "dc:pan", phase: "end", x: event.clientX, y: event.clientY });
+    post({ type: "dc:pan", phase: "end", x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY });
   };
   window.addEventListener(
     "pointerdown",
@@ -160,7 +164,7 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
       event.preventDefault();
       event.stopImmediatePropagation();
       panning = true;
-      post({ type: "dc:pan", phase: "start", x: event.clientX, y: event.clientY });
+      post({ type: "dc:pan", phase: "start", x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY });
     },
     true,
   );
@@ -170,7 +174,7 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
       if (!panning) return;
       event.stopImmediatePropagation();
       if ((event.buttons & MIDDLE) === 0) panEnds(event);
-      else post({ type: "dc:pan", phase: "move", x: event.clientX, y: event.clientY });
+      else post({ type: "dc:pan", phase: "move", x: event.clientX, y: event.clientY, sx: event.screenX, sy: event.screenY });
     },
     true,
   );

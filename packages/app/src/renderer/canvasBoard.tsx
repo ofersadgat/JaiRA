@@ -66,6 +66,20 @@ export function framePoint(frame: HTMLIFrameElement, x: number, y: number): { x:
 }
 
 /**
+ * Where a middle-button pan inside a frame has the pointer (`dc:pan`), for the board to pan by how far it
+ * moved between two reports. On the screen (`sx`, `sy`) when the frame says: a place in the frame's own
+ * pixels is reckoned against where the frame stood when the pointer moved, while the board has panned it
+ * since by the moves still in flight, and placing it by where the frame stands now jittered the pan back
+ * and forth (2026-11-25). Screen pixels are CSS pixels at the window's zoom, the board's own, whatever
+ * scale the artboard is drawn at. A frame whose runtime predates `sx` is placed as before (`framePoint`).
+ */
+export function framePanPoint(frame: HTMLIFrameElement, data: unknown): { x: number; y: number } {
+  const d = data as { x?: unknown; y?: unknown; sx?: unknown; sy?: unknown };
+  if (typeof d.sx === "number" && typeof d.sy === "number") return { x: d.sx, y: d.sy };
+  return framePoint(frame, typeof d.x === "number" ? d.x : 0, typeof d.y === "number" ? d.y : 0);
+}
+
+/**
  * A wheel an artboard passed up (`dc:wheel`: where in its pixels, by how much, Ctrl held), or null. A
  * wheel over a frame is the frame's document's and never reaches the board's own listener.
  */
@@ -249,17 +263,15 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
   useEffect(() => {
     const onMessage = (event: MessageEvent): void => {
       const data = event.data as { type?: string; href?: string; phase?: string; x?: number; y?: number } | null;
-      // The middle button dragged inside a running frame: where the pointer is, placed in the window by
-      // where the frame stands now; the board pans by how far that moved, committed at once.
+      // The middle button dragged inside a running frame: the board pans by how far the pointer moved on
+      // the screen (`framePanPoint`), committed at once.
       if (data?.type === "dc:pan" && typeof data.x === "number" && typeof data.y === "number") {
         const el = [...frames.current.values()].find((f) => f.contentWindow === event.source);
         if (el === undefined) return;
-        const box = el.getBoundingClientRect();
-        const scale = el.offsetWidth > 0 ? box.width / el.offsetWidth : 1;
-        const p = { x: box.left + data.x * scale, y: box.top + data.y * scale };
+        const p = framePanPoint(el, data);
         const was = framePan.current;
         framePan.current = data.phase === "end" ? null : p;
-        if (data.phase === "start" || was === null) return;
+        if (data.phase !== "move" || was === null) return;
         moved.current = true;
         flushSync(() => setView((v) => (v === null ? v : { ...v, x: v.x + p.x - was.x, y: v.y + p.y - was.y })));
         return;
