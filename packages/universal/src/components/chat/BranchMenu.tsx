@@ -243,7 +243,7 @@ export function BranchMenu({ anchor, project, workspace, asking, onClose }: { an
 }
 
 /** How long ago, in one short word: `now`, `5m`, `3h`, `2d`, `4w`, `1y`. */
-function ago(at: number): string {
+export function ago(at: number): string {
   const s = Math.max(0, (Date.now() - at) / 1000);
   if (s < 60) return "now";
   if (s < 3600) return `${Math.floor(s / 60)}m`;

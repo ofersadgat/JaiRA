@@ -123,6 +123,47 @@ describe("what git says of a checkout", () => {
     git(dir, "commit", "-q", "-am", "second");
     expect(await reader.aheadOfUpstream()).toBe(1);
     expect(await reader.changedLines()).toEqual({ added: 0, removed: 0 });
+    expect(await reader.aheadBehind()).toEqual({ ahead: 1, behind: 0 });
+    expect(await reader.upstream()).toEqual({ name: "origin/main", remote: "origin" });
+    expect((await reader.commits("@{upstream}..HEAD")).map((c) => c.subject)).toEqual(["second"]);
+  });
+
+  it("pushes, fetches and pulls, and commits all and lists what is uncommitted", async () => {
+    const remote = temp("remote");
+    git(remote, "init", "-q", "--bare", "-b", "main");
+    const mine = temp("mine");
+    repository(mine);
+    git(mine, "remote", "add", "origin", remote);
+    git(mine, "push", "-q", "-u", "origin", "main");
+    const theirs = temp("theirs");
+    git(theirs, "clone", "-q", remote, ".");
+    git(theirs, "config", "user.email", "t@example.com");
+    git(theirs, "config", "user.name", "Them");
+    writeFileSync(join(theirs, "theirs.txt"), "from them\n");
+    git(theirs, "add", ".");
+    git(theirs, "commit", "-q", "-m", "theirs");
+    git(theirs, "push", "-q");
+
+    const reader = new Git({ exec: new NodeExec({}), repoDir: mine });
+    // Not fetched yet: nothing to pull, as far as the checkout knows.
+    expect(await reader.aheadBehind()).toEqual({ ahead: 0, behind: 0 });
+    await reader.fetch("origin");
+    expect(await reader.aheadBehind()).toEqual({ ahead: 0, behind: 1 });
+    expect((await reader.commits("HEAD..@{upstream}")).map((c) => c.subject)).toEqual(["theirs"]);
+    await reader.pull("ff");
+    expect(await reader.aheadBehind()).toEqual({ ahead: 0, behind: 0 });
+
+    writeFileSync(join(mine, "notes.txt"), "one\nTWO\n");
+    writeFileSync(join(mine, "brand-new.txt"), "fresh\n");
+    const diff = (await reader.workingDiff())!;
+    expect(diff.untracked).toEqual(["brand-new.txt"]);
+    expect(diff.patch).toContain("+TWO");
+    expect(await reader.untrackedDiff("brand-new.txt")).toContain("+fresh");
+    await reader.commitAll("mine");
+    expect(await reader.status()).toEqual([]);
+    expect(await reader.aheadBehind()).toEqual({ ahead: 1, behind: 0 });
+    await reader.push();
+    expect(await reader.aheadBehind()).toEqual({ ahead: 0, behind: 0 });
   });
 
   it("knows a folder its repository ignores is no part of that checkout", async () => {

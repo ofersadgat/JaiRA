@@ -12,8 +12,10 @@ import { Float } from "../floats/Float";
 import { Icon } from "../panel/Icon";
 import { BrandIcon } from "../settings/bits";
 import { BranchMenu } from "./BranchMenu";
+import { ChangesMenu } from "./ChangesMenu";
 import { useAnchorRect } from "./ComposerCards";
 import { Spinner } from "./Spinner";
+import { SyncMenu } from "./SyncMenu";
 
 /**
  * The environment bar: the session's shell environment, in a tray tucked under the composer (decision
@@ -24,7 +26,10 @@ import { Spinner } from "./Spinner";
  * from the workspace, so they should be individual buttons"): the machine opens the machines, the
  * workspace that machine's workspaces (`EnvironmentList`). Before a conversation starts, and while it
  * waits, a choice is where it will run; once it runs, a choice MOVES it there (decision 0013 ruling 7).
- * The branch opens the workspace's branches (`BranchMenu`). What it says is `environmentModel.ts`'s.
+ * The branch opens the workspace's branches (`BranchMenu`), `↑n ↓m` the commits to push and to pull
+ * (`SyncMenu`), and `+a −d` the uncommitted changes (`ChangesMenu`) — the person, 2026-11-25: "the
+ * section for commits ahead/behind should be able to be interacted with as should the section for
+ * additions/removals". What it says is `environmentModel.ts`'s.
  * How it looks:
  *
  *   the tray           the composer's width, its top 22 under the composer's frame; row, centred, gap
@@ -61,7 +66,9 @@ export function EnvironmentBar({
   const [ref, measure] = useAnchorRect();
   const [wsRef, measureWs] = useAnchorRect();
   const [open, setOpen] = useState<{ at: FloatRect; scope: ListScope } | null>(null);
-  const [branchAt, setBranchAt] = useState<FloatRect | null>(null);
+  // The checkout's menus: its branches, its commits to push and pull, its uncommitted changes.
+  const [gitMenu, setGitMenu] = useState<{ kind: "branch" | "sync" | "changes"; at: FloatRect } | null>(null);
+  const gitMenuAt = (kind: "branch" | "sync" | "changes") => (at: FloatRect) => setGitMenu((was) => (was?.kind === kind ? null : { kind, at }));
   // One line at every width: the bar's width, the left's as written out, and the checkout's with each
   // number of its facts dropped (`gitDropOf`) — the last two measured off screen, in the ruler below.
   const [width, setWidth] = useState(0);
@@ -170,10 +177,22 @@ export function EnvironmentBar({
       {/* The checkout at the right end, with as many of its facts as the line has room for. */}
       {bar.git !== undefined ? (
         <View marginLeft="auto" minWidth={0} flexShrink={1}>
-          <GitLine t={t} git={gitAtDrop(bar.git, drop)} {...(bar.checkout !== undefined ? { onBranch: (at: FloatRect) => setBranchAt((was) => (was === null ? at : null)) } : {})} />
+          <GitLine
+            t={t}
+            git={gitAtDrop(bar.git, drop)}
+            {...(bar.checkout !== undefined ? { onBranch: gitMenuAt("branch"), onSync: gitMenuAt("sync"), onChanges: gitMenuAt("changes") } : {})}
+          />
         </View>
       ) : null}
-      {branchAt !== null && bar.checkout !== undefined ? <BranchMenu anchor={branchAt} project={bar.checkout} workspace={bar.workspace?.text ?? "the workspace"} asking={asking} onClose={() => setBranchAt(null)} /> : null}
+      {gitMenu !== null && bar.checkout !== undefined ? (
+        gitMenu.kind === "branch" ? (
+          <BranchMenu anchor={gitMenu.at} project={bar.checkout} workspace={bar.workspace?.text ?? "the workspace"} asking={asking} onClose={() => setGitMenu(null)} />
+        ) : gitMenu.kind === "sync" ? (
+          <SyncMenu anchor={gitMenu.at} project={bar.checkout} onClose={() => setGitMenu(null)} />
+        ) : (
+          <ChangesMenu anchor={gitMenu.at} project={bar.checkout} onClose={() => setGitMenu(null)} />
+        )
+      ) : null}
       {open !== null && onChoose !== undefined ? (
         <EnvironmentList
           anchor={open.at}
@@ -205,6 +224,8 @@ export function GitLine({
   face = FACE,
   link = true,
   onBranch,
+  onSync,
+  onChanges,
 }: {
   t: Tokens;
   git: GitFacts;
@@ -214,9 +235,15 @@ export function GitLine({
   link?: boolean;
   /** The branch is a button: it opens the branch menu, under it. */
   onBranch?: ((at: FloatRect) => void) | undefined;
+  /** `↑n ↓m` is a button: it opens the sync menu, under it. */
+  onSync?: ((at: FloatRect) => void) | undefined;
+  /** `+a −d` is a button: it opens the changes menu, under it. */
+  onChanges?: ((at: FloatRect) => void) | undefined;
 }): JSX.Element {
   const num = { ...face, tabular: true };
   const [branchRef, measureBranch] = useAnchorRect();
+  const [syncRef, measureSync] = useAnchorRect();
+  const [changesRef, measureChanges] = useAnchorRect();
   const request = (hovered: boolean): ReactNode =>
     git.request === undefined ? null : (
       <>
@@ -252,12 +279,37 @@ export function GitLine({
           </Txt>
         </View>
       ) : null}
-      {git.ahead !== undefined ? (
-        <Txt spec={num} numberOfLines={1} flexShrink={0} {...({ title: "commits not pushed" } as object)}>
+      {git.ahead !== undefined && onSync !== undefined ? (
+        <RNView ref={syncRef} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
+          <Press onPress={() => measureSync(onSync)} label={`${git.ahead}: commits to push and to pull. Push or pull`} title="Commits to push and to pull" {...({ "aria-haspopup": "dialog" } as object)}>
+            {({ hovered }) => (
+              <Txt spec={num} numberOfLines={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                {git.ahead}
+              </Txt>
+            )}
+          </Press>
+        </RNView>
+      ) : git.ahead !== undefined ? (
+        <Txt spec={num} numberOfLines={1} flexShrink={0} {...({ title: "commits to push (↑) and to pull (↓)" } as object)}>
           {git.ahead}
         </Txt>
       ) : null}
-      {git.added !== undefined && git.removed !== undefined ? (
+      {git.added !== undefined && git.removed !== undefined && onChanges !== undefined ? (
+        <RNView ref={changesRef} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
+          <Press onPress={() => measureChanges(onChanges)} label={`${git.added} ${git.removed}: lines changed since the last commit. See, commit or stash them`} title="Uncommitted changes" {...({ "aria-haspopup": "dialog" } as object)} flexDirection="row" alignItems="center" gap={4}>
+            {({ hovered }) => (
+              <>
+                <Txt spec={{ ...num, color: "ok" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                  {git.added}
+                </Txt>
+                <Txt spec={{ ...num, color: "bad" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                  {git.removed}
+                </Txt>
+              </>
+            )}
+          </Press>
+        </RNView>
+      ) : git.added !== undefined && git.removed !== undefined ? (
         <View flexDirection="row" alignItems="center" gap={4} {...({ title: "lines changed since the last commit" } as object)}>
           <Txt spec={{ ...num, color: "ok" }}>{git.added}</Txt>
           <Txt spec={{ ...num, color: "bad" }}>{git.removed}</Txt>

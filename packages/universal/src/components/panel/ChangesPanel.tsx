@@ -216,6 +216,12 @@ const FILE_INK: Record<FileChange["action"], { icon: string; name: string; lette
   modify: { icon: "warn", name: "text", letter: "warn" },
 };
 
+/** The files as the Changes panel draws them — folders that fold, a file's lines a press away — for a list of files with no task behind it (the composer's changes menu). */
+export function ChangedFiles({ files }: { files: readonly FileChange[] }): JSX.Element {
+  const t = useTokens();
+  return <FileTree files={files} ctx={{ currentTask: "", t }} />;
+}
+
 /** `FileTree`: the files as folders, each folding; a file's hunks a press away. */
 function FileTree({ files, ctx }: { files: readonly FileChange[]; ctx: Ctx }): JSX.Element {
   const t = ctx.t;

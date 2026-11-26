@@ -42,7 +42,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget, WorkspaceBranches, WorkspaceSwitchRequest, WorkspaceSwitchResult, ConversationMoveOut } from "./machines";
+import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget, WorkspaceBranches, WorkspaceChanges, WorkspaceSwitchRequest, WorkspaceSwitchResult, WorkspaceSync, WorkspaceSyncAction, ConversationMoveOut } from "./machines";
 import type { CliCommandStatus, EngineStatus, QuitChoice, QuitState, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -2872,6 +2872,16 @@ export interface IpcContract {
   "workspace:branches": { request: { project: string; asking?: string }; response: WorkspaceBranches };
   /** Switch a workspace's branch. Uncommitted changes and no `dirty` answer: `needs: "dirty"`, nothing moved. */
   "workspace:switchBranch": { request: WorkspaceSwitchRequest; response: WorkspaceSwitchResult };
+  /** A workspace's branch against its upstream — the commits a push would send and a pull would bring (the composer's sync menu). `fetch`: ask the remote first. */
+  "workspace:sync": { request: { project: string; fetch?: boolean }; response: WorkspaceSync };
+  /** Push the workspace's branch, or pull its upstream into it; answers with where it stands after. Git's refusal is the error. */
+  "workspace:syncRun": { request: { project: string; action: WorkspaceSyncAction }; response: WorkspaceSync };
+  /** A workspace's uncommitted changes, file by file with their lines (the composer's changes menu). */
+  "workspace:changes": { request: { project: string }; response: WorkspaceChanges };
+  /** Commit everything uncommitted in a workspace as `message`; answers with what is left. */
+  "workspace:commit": { request: { project: string; message: string }; response: WorkspaceChanges };
+  /** Put a workspace's uncommitted changes, new files too, on git's stash; answers with what is left. */
+  "workspace:stash": { request: { project: string }; response: WorkspaceChanges };
   /** A folder's git state on the machine that holds it — what copying it would bring. */
   "workspace:inspect": { request: { dir: string; machine?: string }; response: WorkspaceCheckout };
   /** Where a new workspace would go and what its setup would take there, before anything happens. */
@@ -3172,6 +3182,11 @@ export const IPC_CHANNELS = [
   "forge:branches",
   "workspace:branches",
   "workspace:switchBranch",
+  "workspace:sync",
+  "workspace:syncRun",
+  "workspace:changes",
+  "workspace:commit",
+  "workspace:stash",
   "workspace:inspect",
   "workspace:plan",
   "workspace:create",

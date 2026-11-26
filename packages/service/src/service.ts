@@ -557,6 +557,11 @@ import {
   type WorkspaceBranches,
   type WorkspaceSwitchRequest,
   type WorkspaceSwitchResult,
+  type WorkspaceSync,
+  type WorkspaceSyncAction,
+  type WorkspaceChanges,
+  type FileChange,
+  parseUnifiedDiff,
   type ConversationMoveOut,
   type PlacementAsk,
   type PlacementNote,
@@ -1650,6 +1655,16 @@ function logOverrideFor(policy: LogPolicy, scope: string, tag: string | undefine
 
 /** How long what a checkout said of itself is believed before it is asked again. */
 const WORKSPACE_LOOK_MS = 4_000;
+
+/** The composer's changes menu: the files it lists, the lines it carries in all, and the new files it reads. */
+const CHANGE_FILES = 400;
+const CHANGE_LINES = 8_000;
+const CHANGE_UNTRACKED_READ = 40;
+
+/** What git said when it refused, for the person: its stderr, else the error's own words. */
+function gitSaid(e: unknown): string {
+  return e instanceof ExecError ? e.result.stderr.trim() || e.result.stdout.trim() || e.message : (e as Error).message;
+}
 
 /** One machine's half of an environment, as it answers `fleet:environment`: by its own directories. */
 interface LocalEnvironment {
@@ -3552,11 +3567,11 @@ export class AppService {
       try {
         // A folder its repository ignores is no checkout of it: the enclosing branch is not its own.
         if ((await git.isRepo()) && !(await git.isIgnored())) {
-          const [branch, ahead, lines] = await Promise.all([git.currentBranch(), git.aheadOfUpstream(), git.changedLines()]);
+          const [branch, counts, lines] = await Promise.all([git.currentBranch(), git.aheadBehind(), git.changedLines()]);
           const mergeRequest = branch !== undefined ? await this.mergeRequestOf(session, git, branch, entry) : undefined;
           found = {
             ...(branch !== undefined ? { branch } : {}),
-            ...(ahead !== undefined ? { ahead } : {}),
+            ...(counts !== undefined ? counts : {}),
             ...(lines !== undefined ? lines : {}),
             ...(mergeRequest !== undefined ? { mergeRequest } : {}),
           };
@@ -3645,6 +3660,147 @@ export class AppService {
     void this.lookAtWorkspace(session, 0).catch(() => undefined);
     void this.checkHeads().catch(() => undefined);
     return { switched: true, branch: now, ...(stashed !== undefined ? { stashed } : {}) };
+  }
+
+  /**
+   * A workspace's branch against its upstream, for the composer's sync menu (`workspace:sync`): the
+   * commits a push would send and a pull would bring. With `fetch`, the remote is asked first — what
+   * the bar's ↓ counts is only as new as the last fetch — and a fetch that fails says why without
+   * taking the rest with it.
+   */
+  async workspaceSync(project: string, fetch = false): Promise<WorkspaceSync> {
+    const session = this.session(project);
+    const git = this.workspaceGitOf(session);
+    if (!(await git.isRepo())) throw this.refusal("project", `${session.dir} is not a git checkout`);
+    let fetchFailed: string | undefined;
+    if (fetch) {
+      const upstream = await git.upstream();
+      // `.` is a branch of this same checkout: there is nothing to fetch.
+      if (upstream !== undefined && upstream.remote !== "" && upstream.remote !== ".") {
+        try {
+          await git.fetch(upstream.remote);
+        } catch (e) {
+          fetchFailed = gitSaid(e);
+        }
+      }
+    }
+    const sync = await this.syncOf(git);
+    void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    return { ...sync, ...(fetchFailed !== undefined ? { fetchFailed } : {}) };
+  }
+
+  /**
+   * Push a workspace's branch, or pull its upstream into it (`workspace:syncRun`). Git's refusal — a
+   * push behind its upstream, a fast-forward the branch has diverged from, a pull that would overwrite
+   * uncommitted files — is the error, in git's words. A pull that moved the commit runs the setup's
+   * again steps, as any moved commit does.
+   */
+  async workspaceSyncRun(project: string, action: WorkspaceSyncAction): Promise<WorkspaceSync> {
+    const session = this.session(project);
+    const git = this.workspaceGitOf(session, 150_000);
+    const doing = action === "push" ? "push" : "pull";
+    try {
+      if (action === "push") await git.push();
+      else await git.pull(action === "pull-ff" ? "ff" : action === "pull-rebase" ? "rebase" : "merge");
+    } catch (e) {
+      void this.lookAtWorkspace(session, 0).catch(() => undefined);
+      throw this.refusal("project", `git could not ${doing} in ${session.dir}: ${gitSaid(e)}`, { project: session.key });
+    }
+    this.log({ level: "info", source: "project", message: `${session.dir}: ${action === "push" ? "pushed" : `pulled (${action.slice("pull-".length)})`}`, project: session.key });
+    void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    if (action !== "push") void this.checkHeads().catch(() => undefined);
+    return this.syncOf(git);
+  }
+
+  private async syncOf(git: Git): Promise<WorkspaceSync> {
+    const [branch, upstream, counts, status] = await Promise.all([git.currentBranch(), git.upstream(), git.aheadBehind(), git.status()]);
+    const has = upstream !== undefined && counts !== undefined;
+    const [ahead, behind] = has ? await Promise.all([counts.ahead > 0 ? git.commits("@{upstream}..HEAD", 30) : [], counts.behind > 0 ? git.commits("HEAD..@{upstream}", 30) : []]) : [[], []];
+    return {
+      ...(branch !== undefined ? { branch } : {}),
+      ...(upstream !== undefined ? { upstream: upstream.name } : {}),
+      ahead,
+      behind,
+      aheadCount: counts?.ahead ?? 0,
+      behindCount: counts?.behind ?? 0,
+      dirtyCount: status.length,
+    };
+  }
+
+  /** A workspace's uncommitted changes, file by file with their lines (`workspace:changes`, the composer's changes menu). */
+  async workspaceChanges(project: string): Promise<WorkspaceChanges> {
+    const session = this.session(project);
+    const git = this.workspaceGitOf(session);
+    if (!(await git.isRepo())) throw this.refusal("project", `${session.dir} is not a git checkout`);
+    return this.changesOf(git);
+  }
+
+  /** Commit everything uncommitted in a workspace (`workspace:commit`); git's refusal is the error. */
+  async commitWorkspace(project: string, message: string): Promise<WorkspaceChanges> {
+    const session = this.session(project);
+    const said = message.trim();
+    if (said === "") throw this.refusal("project", "a commit needs a message");
+    const git = this.workspaceGitOf(session);
+    try {
+      await git.commitAll(said);
+    } catch (e) {
+      throw this.refusal("project", `git could not commit in ${session.dir}: ${gitSaid(e)}`, { project: session.key });
+    }
+    this.log({ level: "info", source: "project", message: `${session.dir}: committed "${said.split("\n")[0]}"`, project: session.key });
+    void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    void this.checkHeads().catch(() => undefined);
+    return this.changesOf(git);
+  }
+
+  /** Put a workspace's uncommitted changes, new files too, on git's stash (`workspace:stash`). */
+  async stashWorkspace(project: string): Promise<WorkspaceChanges> {
+    const session = this.session(project);
+    const git = this.workspaceGitOf(session);
+    const name = `JaiRA: uncommitted on ${(await git.currentBranch()) ?? "a detached HEAD"}, put aside from the composer`;
+    try {
+      await git.stash(name);
+    } catch (e) {
+      throw this.refusal("project", `git could not stash in ${session.dir}: ${gitSaid(e)}`, { project: session.key });
+    }
+    this.log({ level: "info", source: "project", message: `${session.dir}: its uncommitted changes are on the stash ("${name}")`, project: session.key });
+    void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    return this.changesOf(git);
+  }
+
+  /**
+   * The working tree against its last commit, as the Changes panel draws files. A very large change is
+   * cut: past {@link CHANGE_LINES} lines the files come without theirs, and past {@link CHANGE_FILES}
+   * they are only counted.
+   */
+  private async changesOf(git: Git): Promise<WorkspaceChanges> {
+    const diff = await git.workingDiff();
+    if (diff === undefined) {
+      const status = await git.status();
+      return { files: status.slice(0, CHANGE_FILES).map((e) => ({ path: e.path, action: "create", hunks: [], calls: [] })), count: status.length, unborn: true };
+    }
+    const patches = parseUnifiedDiff(diff.patch);
+    for (const path of diff.untracked.slice(0, CHANGE_UNTRACKED_READ)) {
+      const added = await git.untrackedDiff(path);
+      const [file] = added === undefined ? [] : parseUnifiedDiff(added);
+      patches.push(file !== undefined ? { ...file, path, action: "create" } : { path, action: "create", hunks: [], added: 0, removed: 0 });
+    }
+    for (const path of diff.untracked.slice(CHANGE_UNTRACKED_READ)) patches.push({ path, action: "create", hunks: [], added: 0, removed: 0 });
+    let budget = CHANGE_LINES;
+    const files: FileChange[] = patches.slice(0, CHANGE_FILES).map((p) => {
+      const lines = p.hunks.reduce((n, h) => n + h.lines.length, 0);
+      const shown = lines <= budget;
+      if (shown) budget -= lines;
+      return {
+        path: p.path,
+        action: p.action === "update" ? "modify" : p.action,
+        // Only a rename came from somewhere: the parse names every file's old side.
+        ...(p.action === "rename" && p.fromPath !== undefined && p.fromPath !== p.path ? { from: p.fromPath } : {}),
+        ...(p.binary === undefined ? { added: p.added, removed: p.removed } : {}),
+        hunks: shown ? p.hunks.map((h) => ({ header: h.header, lines: h.lines.map((l) => `${l.kind === "add" ? "+" : l.kind === "del" ? "-" : " "}${l.text}`) })) : [],
+        calls: [],
+      };
+    });
+    return { files, count: patches.length };
   }
 
   /**

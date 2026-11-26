@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import type { FakeRule } from "@jaira/runtime";
 import { AppService, hostEngine, loopbackTailnet, serviceHandlers, type HostedEngine } from "@jaira/service";
-import type { ChatThreadView, ProjectSummary, PushMessage, WorkspaceBranches, WorkspaceSwitchResult } from "@jaira/shared";
+import type { ChatThreadView, ProjectSummary, PushMessage, WorkspaceBranches, WorkspaceChanges, WorkspaceSwitchResult, WorkspaceSync } from "@jaira/shared";
 import { eventually, shippedLayer } from "@jaira/testing";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 import { pairMachines } from "./pairMachines";
@@ -219,5 +219,39 @@ describe("the composer's branch menu", { timeout: 60_000 }, () => {
     const carried = await m.call<WorkspaceSwitchResult>("workspace:switchBranch", { project: key, branch: "fresh", create: true, dirty: "carry" });
     expect(carried).toMatchObject({ switched: true, branch: "fresh" });
     expect(git(dir, "status", "--porcelain")).toContain("new.txt");
+  });
+});
+
+describe("the composer's changes and sync menus", { timeout: 60_000 }, () => {
+  it("lists what is uncommitted with its lines, commits it, and says what a push would send", async () => {
+    const m = await machine("desk");
+    const dir = await clone(m.service, m.base);
+    const key = m.service.listProjects().find((p) => p.identity !== undefined)!.project;
+    expect(await m.call<WorkspaceChanges>("workspace:changes", { project: key })).toEqual({ files: [], count: 0 });
+
+    writeFileSync(join(dir, "added.txt"), "one\ntwo\n");
+    const changes = await m.call<WorkspaceChanges>("workspace:changes", { project: key });
+    expect(changes.count).toBe(1);
+    expect(changes.files[0]).toMatchObject({ path: "added.txt", action: "create", added: 2, removed: 0 });
+    expect(changes.files[0]!.hunks.flatMap((h) => h.lines)).toEqual(["+one", "+two"]);
+    expect(changes.files[0]!.from).toBeUndefined();
+    writeFileSync(join(dir, "notes.txt"), "one\nmore\n");
+    const both = await m.call<WorkspaceChanges>("workspace:changes", { project: key });
+    expect(both.files.find((f) => f.path === "notes.txt")).toMatchObject({ action: "modify", added: 1, removed: 0 });
+    expect(both.files.find((f) => f.path === "notes.txt")!.from).toBeUndefined();
+
+    await expect(m.call("workspace:commit", { project: key, message: "  " })).rejects.toThrow(/needs a message/);
+    expect(await m.call<WorkspaceChanges>("workspace:commit", { project: key, message: "add a file" })).toEqual({ files: [], count: 0 });
+    // Never pushed: no upstream to compare with, and nothing to fetch.
+    expect(await m.call<WorkspaceSync>("workspace:sync", { project: key, fetch: true })).toEqual({ branch: "main", ahead: [], behind: [], aheadCount: 0, behindCount: 0, dirtyCount: 0 });
+    // Tracking a branch of its own a commit ahead of it: one to pull, and the pull brings it.
+    git(dir, "branch", "kept");
+    git(dir, "branch", "--set-upstream-to", "kept", "main");
+    git(dir, "reset", "-q", "--hard", "HEAD~1");
+    const sync = await m.call<WorkspaceSync>("workspace:sync", { project: key, fetch: true });
+    expect(sync).toMatchObject({ branch: "main", upstream: "kept", aheadCount: 0, behindCount: 1, dirtyCount: 0 });
+    expect(sync.behind.map((c) => c.subject)).toEqual(["add a file"]);
+    expect(await m.call<WorkspaceSync>("workspace:syncRun", { project: key, action: "pull-ff" })).toMatchObject({ aheadCount: 0, behindCount: 0 });
+    expect(git(dir, "log", "-1", "--format=%s")).toBe("add a file");
   });
 });

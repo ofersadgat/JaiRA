@@ -229,6 +229,78 @@ export class Git implements GitRead, GitLifecycle {
   }
 
   /**
+   * Commits on the current branch its upstream does not have, and the upstream's the branch does not —
+   * as of the last fetch. Undefined when the branch has no upstream (never pushed, or detached).
+   */
+  async aheadBehind(): Promise<{ ahead: number; behind: number } | undefined> {
+    const counts = await this.tryRun(["rev-list", "--left-right", "--count", "HEAD...@{upstream}"]);
+    const m = counts === undefined ? null : /^(\d+)\s+(\d+)$/.exec(counts);
+    return m === null ? undefined : { ahead: Number(m[1]), behind: Number(m[2]) };
+  }
+
+  /** The upstream of the current branch (`origin/main`), and its remote's name; undefined with none. */
+  async upstream(): Promise<{ name: string; remote: string } | undefined> {
+    const branch = await this.currentBranch();
+    if (branch === undefined) return undefined;
+    const [name, remote] = await Promise.all([this.tryRun(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]), this.tryRun(["config", "--get", `branch.${branch}.remote`])]);
+    return name === undefined || name === "" ? undefined : { name, remote: remote !== undefined && remote !== "" ? remote : name.slice(0, Math.max(0, name.indexOf("/"))) };
+  }
+
+  /** Bring the remote's branches up to date (`fetch`, pruning the ones it no longer has). */
+  async fetch(remote: string): Promise<void> {
+    await this.run(["fetch", "--prune", remote], { timeoutMs: 120_000 });
+  }
+
+  /** Send the current branch to its upstream: a fast-forward or git's refusal. */
+  async push(): Promise<void> {
+    await this.run(["push"], { timeoutMs: 120_000 });
+  }
+
+  /**
+   * Bring the upstream's commits into the current branch: `ff` only where the branch has none of its
+   * own (else git refuses), `rebase` puts its own on top of them, `merge` joins the two. Uncommitted
+   * changes are put aside and back around a rebase (`--autostash`); a merge or fast-forward carries them
+   * where git can, and refuses, naming the files, where it cannot.
+   */
+  async pull(mode: "ff" | "rebase" | "merge"): Promise<void> {
+    await this.run(["pull", "--no-edit", ...(mode === "ff" ? ["--ff-only"] : mode === "rebase" ? ["--rebase", "--autostash"] : ["--no-rebase"])], { timeoutMs: 120_000 });
+  }
+
+  /** Commit everything in the working tree — changed, new and removed files alike — as `message`. */
+  async commitAll(message: string): Promise<void> {
+    await this.run(["add", "--all"]);
+    await this.run(["commit", "--quiet", "-m", message]);
+  }
+
+  /** The commits of `range` (`a..b`), newest first, at most `limit`. */
+  async commits(range: string, limit = 50): Promise<CommitRow[]> {
+    const out = await this.tryRun(["log", `--max-count=${limit}`, "--format=%H%x00%h%x00%ct%x00%an%x00%s", range, "--"]);
+    if (out === undefined || out === "") return [];
+    return out.split("\n").flatMap((line) => {
+      const [hash, short, date, author, ...subject] = line.split("\0");
+      if (hash === undefined || short === undefined) return [];
+      return [{ hash, short, ...(date !== undefined && /^\d+$/.test(date) ? { at: Number(date) * 1000 } : {}), ...(author !== undefined && author !== "" ? { author } : {}), subject: subject.join("\0") }];
+    });
+  }
+
+  /**
+   * The working tree against the last commit, staged or not, as a unified diff — and the files git
+   * does not track yet, by name (`status`), since `diff HEAD` cannot see them. Undefined on an unborn
+   * branch, where there is no last commit.
+   */
+  async workingDiff(): Promise<{ patch: string; untracked: string[] } | undefined> {
+    const [patch, status] = await Promise.all([this.tryRunRaw(["diff", "--no-color", "--find-renames", "--no-ext-diff", "HEAD", "--"]), this.status()]);
+    if (patch === undefined) return undefined;
+    return { patch, untracked: status.filter((e) => e.x === "?" && e.y === "?").map((e) => e.path) };
+  }
+
+  /** A file git does not track yet, as a diff that adds it (`diff --no-index`, which exits 1 for "they differ"). */
+  async untrackedDiff(path: string): Promise<string | undefined> {
+    const result = await this.options.exec.run("git", ["diff", "--no-color", "--no-index", "--", "/dev/null", path], this.opts());
+    return result.code === 0 || result.code === 1 ? result.stdout : undefined;
+  }
+
+  /**
    * Lines added and removed in the working tree since the last commit, staged or not. Files git does
    * not track yet are not counted: it has no earlier side to count them against. Undefined on an unborn
    * branch.
@@ -426,6 +498,16 @@ export class Git implements GitRead, GitLifecycle {
     }
     return entries;
   }
+}
+
+/** A commit, as the composer's sync menu lists it. */
+export interface CommitRow {
+  hash: string;
+  short: string;
+  /** When it was committed, in ms. */
+  at?: number;
+  author?: string;
+  subject: string;
 }
 
 /** A branch of a checkout, as the composer's branch menu lists it. */

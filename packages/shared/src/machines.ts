@@ -5,6 +5,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { ChatSettings } from "./operationVocabulary";
 import type { SettingsSyncView } from "./settingsSync";
+import type { FileChange } from "./changeLog";
 
 export type MachineOsTag = "windows" | "mac" | "linux";
 
@@ -399,6 +400,8 @@ export interface WorkspaceGit {
   branch?: string;
   /** Commits on the branch that its upstream does not have. Absent with no upstream. */
   ahead?: number;
+  /** Commits on its upstream the branch does not have, as of the last fetch. Absent with no upstream. */
+  behind?: number;
   /** Lines added and removed in the working tree since the last commit. */
   added?: number;
   removed?: number;
@@ -444,6 +447,50 @@ export interface WorkspaceSwitchRequest {
   /** The conversation asking, by task id: not counted among the others at work. Not `taskId`, which
    * would send the request to that task's home instead of the workspace named. */
   asking?: string;
+}
+
+/** A commit, as the composer's sync menu lists it. */
+export interface WorkspaceCommit {
+  hash: string;
+  short: string;
+  /** When it was committed, in ms. */
+  at?: number;
+  author?: string;
+  subject: string;
+}
+
+/**
+ * A workspace's branch against its upstream (`workspace:sync`, the composer's sync menu): the commits
+ * a push would send and those a pull would bring, newest first (the first 30 of each; the counts are
+ * all of them). No upstream: nothing to compare, and the menu says so.
+ */
+export interface WorkspaceSync {
+  branch?: string;
+  /** `origin/main`. */
+  upstream?: string;
+  ahead: WorkspaceCommit[];
+  behind: WorkspaceCommit[];
+  aheadCount: number;
+  behindCount: number;
+  /** Files changed or new since the last commit: a pull that cannot carry them refuses. */
+  dirtyCount: number;
+  /** Why the fetch asked for did not happen; the counts are then as of the last one that did. */
+  fetchFailed?: string;
+}
+
+/** What the sync menu does: send the branch's commits, or bring its upstream's (`ff`, `rebase`, `merge`). */
+export type WorkspaceSyncAction = "push" | "pull-ff" | "pull-rebase" | "pull-merge";
+
+/**
+ * A workspace's working tree against its last commit (`workspace:changes`, the composer's changes
+ * menu): each file changed, new or removed, with its lines, as a task's Changes panel draws them.
+ */
+export interface WorkspaceChanges {
+  files: FileChange[];
+  /** Every file, where {@link files} stops short (a very large change). */
+  count: number;
+  /** No commit yet: there is nothing to compare against. */
+  unborn?: true;
 }
 
 /** A switch made, or what it needs the person to decide first. */

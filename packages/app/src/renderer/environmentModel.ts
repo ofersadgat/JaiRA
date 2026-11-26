@@ -4,8 +4,8 @@
  * ruled 2026-10-02). Pure: `environmentStore.ts` fetches the view, `EnvironmentBar.tsx` draws this.
  *
  *   the bar      left: the machine's icon, then `machine / workspace`; right: the checkout — its branch,
- *                what is unpushed, the lines changed since the last commit, its merge request. The right
- *                is empty until a workspace is decided.
+ *                what is unpushed and what is not pulled, the lines changed since the last commit, its
+ *                merge request. The right is empty until a workspace is decided.
  *   the list     Automatic, then each machine (its first workspace with room) and each of its workspaces
  *                (that one). A machine that cannot be reached is listed and cannot be chosen.
  *
@@ -76,7 +76,7 @@ export function metersOf(machine: Pick<EnvironmentMachine, "cpu" | "memoryFree" 
 /** A checkout's facts as they are written, in the bar and in the list alike. */
 export interface GitFacts {
   branch?: string;
-  /** "↑2": commits its upstream does not have. */
+  /** "↑2 ↓1": commits its upstream does not have, and its upstream's it does not. */
   ahead?: string;
   /** "+128" and "−34": lines changed since the last commit. */
   added?: string;
@@ -111,7 +111,8 @@ export function gitFactsOf(git: WorkspaceGit | undefined): GitFacts | undefined 
   if (git === undefined) return undefined;
   const out: GitFacts = {};
   if (git.branch !== undefined) out.branch = git.branch;
-  if ((git.ahead ?? 0) > 0) out.ahead = `↑${git.ahead}`;
+  const sync = [(git.ahead ?? 0) > 0 ? `↑${git.ahead}` : undefined, (git.behind ?? 0) > 0 ? `↓${git.behind}` : undefined].filter((s) => s !== undefined);
+  if (sync.length > 0) out.ahead = sync.join(" ");
   if ((git.added ?? 0) + (git.removed ?? 0) > 0) {
     out.added = `+${git.added ?? 0}`;
     out.removed = `−${git.removed ?? 0}`;

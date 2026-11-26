@@ -115,10 +115,16 @@ describe("what a checkout says", () => {
   });
 
   it("leaves out what is nothing: no commits ahead, no lines changed", () => {
-    expect(gitFactsOf({ branch: "main", ahead: 0, added: 0, removed: 0 })).toEqual({ branch: "main" });
+    expect(gitFactsOf({ branch: "main", ahead: 0, behind: 0, added: 0, removed: 0 })).toEqual({ branch: "main" });
     expect(gitFactsOf({ added: 3 })).toEqual({ added: "+3", removed: "−0" });
     expect(gitFactsOf({})).toBeUndefined();
     expect(gitFactsOf(undefined)).toBeUndefined();
+  });
+
+  it("writes what is not pulled beside what is not pushed, each only when there is some", () => {
+    expect(gitFactsOf({ branch: "main", ahead: 2, behind: 3 })!.ahead).toBe("↑2 ↓3");
+    expect(gitFactsOf({ branch: "main", ahead: 0, behind: 1 })!.ahead).toBe("↓1");
+    expect(gitFactsOf({ branch: "main", ahead: 4, behind: 0 })!.ahead).toBe("↑4");
   });
 
   it("numbers a pull request with #, and says draft, merged and closed in their tones", () => {
