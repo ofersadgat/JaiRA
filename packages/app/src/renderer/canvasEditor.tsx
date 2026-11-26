@@ -22,7 +22,7 @@ import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter
 import { boundView, framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
-import { leverCount, tweaksOf, type TweakLever } from "./canvasTweaks";
+import { leverCount, tweaksOf, type TweakGroup, type TweakLever } from "./canvasTweaks";
 import { Popover } from "./popover";
 
 export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line" | "comment";
@@ -166,6 +166,7 @@ const GROUPS: Record<ToolGroup, CanvasTool[]> = { pen: ["pen", "line", "arrow"],
 const groupOf = (tool: CanvasTool): ToolGroup | undefined => (Object.keys(GROUPS) as ToolGroup[]).find((g) => GROUPS[g].includes(tool));
 
 const CARET = "M6 9l6 6 6-6";
+const CHEVRON_RIGHT = "M9 6l6 6-6 6";
 const PLAY = "M8 5.5v13l10-6.5z";
 const STOP = "M7 7h10v10H7z";
 const SLIDERS = "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4";
@@ -373,11 +374,16 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   /** Which tool each group's button stands for: the last one picked from it. */
   const [groupPick, setGroupPick] = useState<Record<ToolGroup, CanvasTool>>({ pen: "pen", shape: "rect" });
   /** The one menu open: a tool group's, the zoom's, the pages', or an artboard's downloads. */
-  const [menu, setMenu] = useState<{ kind: "group"; group: ToolGroup } | { kind: "zoom" } | { kind: "pages" } | { kind: "layers" } | { kind: "download"; file: string } | null>(null);
+  const [menu, setMenu] = useState<{ kind: "group"; group: ToolGroup } | { kind: "zoom" } | { kind: "pages" } | { kind: "layers" } | { kind: "tweaks" } | { kind: "download"; file: string } | null>(null);
   const menuAnchor = useRef<Element | null>(null);
   const menuBox = useRef<HTMLDivElement | null>(null);
+  /** The Tweaks menu's submenu: the artboard whose levers it holds, beside that artboard's entry. */
+  const [sub, setSub] = useState<string | null>(null);
+  const subAnchor = useRef<Element | null>(null);
+  const subBox = useRef<HTMLDivElement | null>(null);
   const openMenu = (next: NonNullable<typeof menu>, anchor: Element): void => {
     menuAnchor.current = anchor;
+    setSub(null);
     setMenu((was) => (was !== null && JSON.stringify(was) === JSON.stringify(next) ? null : next));
   };
   // A press anywhere else, or Esc, puts the menu away (a float's dismissal is its host's).
@@ -385,7 +391,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     if (menu === null) return;
     const away = (e: Event): void => {
       const target = e.target as Node | null;
-      if (target !== null && (menuBox.current?.contains(target) === true || menuAnchor.current?.contains(target) === true)) return;
+      if (target !== null && (menuBox.current?.contains(target) === true || menuAnchor.current?.contains(target) === true || subBox.current?.contains(target) === true)) return;
       setMenu(null);
     };
     const key = (e: KeyboardEvent): void => {
@@ -1310,6 +1316,10 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
    */
   const current = selection !== null && selection.kind !== "note" && index.boards[selection.file] !== undefined ? selection.file : undefined;
   const currentLayer = layers.find((l) => l.file === current);
+  /** Every tweak declared on this page: the Tools bar's Tweaks button shows only while there is one. */
+  const tweakTotal = layers.reduce((n, l) => n + l.levers, 0);
+  /** Keeps a tweak: the prop's default in the artboard's `data-props`, saved with the canvas. */
+  const setTweak = (file: string, name: string, value: unknown): void => changeSource(file, setPropDefault(sourceOf(file), name, value));
   /** Choose an artboard from a list (the layer menu, the Tweaks tab's): selected, and brought into view. */
   const pickLayer = (file: string): void => {
     setGroup([]);
@@ -1660,6 +1670,15 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             {currentLayer !== undefined && currentLayer.levers > 0 ? <Glyph d={SLIDERS} size={12} /> : null}
             <Glyph d={CARET} size={10} />
           </button>
+          {/* Only while an artboard on this page declares tweaks: each one's levers, a submenu away. */}
+          {tweakTotal > 0 ? (
+            <button type="button" aria-label="Tweaks" aria-haspopup="menu" aria-expanded={menu?.kind === "tweaks"} title="Tweaks on this page" onClick={(e) => openMenu({ kind: "tweaks" }, e.currentTarget)} style={{ ...textButton, background: menu?.kind === "tweaks" ? "var(--fill-ghost-selected, #e5e8f1)" : "transparent" }}>
+              <Glyph d={SLIDERS} size={14} />
+              Tweaks
+              <span style={countChip}>{tweakTotal}</span>
+              <Glyph d={CARET} size={10} />
+            </button>
+          ) : null}
           <span style={divider} />
           {(["pointer", "hand", "text", "artboard", "note"] as const).map((which) => toolButtonFor(toolOf(which)))}
           {toolButtonFor(toolOf(groupPick.pen), "pen")}
@@ -1753,7 +1772,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                 source={(file) => sourceOf(file)}
                 // A tweak is kept as the prop's default in the artboard's `data-props`: saved with the
                 // canvas, and drawn again from the source like every other change.
-                onChange={(file, name, value) => changeSource(file, setPropDefault(sourceOf(file), name, value))}
+                onChange={setTweak}
               />
             ) : (
               tab === "layers" ? (
@@ -1843,6 +1862,40 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       {p.name}
                     </button>
                   ))
+                : menu.kind === "tweaks"
+                  ? layers
+                      .filter((l) => l.levers > 0)
+                      .map((l) => {
+                        // Hover or a press opens its submenu beside it. A press never closes it: the hover
+                        // that comes before every mouse press has already opened it.
+                        const open = (el: Element): void => {
+                          subAnchor.current = el;
+                          setSub(l.file);
+                        };
+                        return (
+                          <button
+                            key={l.file}
+                            type="button"
+                            role="menuitem"
+                            aria-haspopup="menu"
+                            aria-expanded={sub === l.file}
+                            title={l.title}
+                            onPointerEnter={(e) => e.pointerType === "mouse" && open(e.currentTarget)}
+                            onClick={(e) => open(e.currentTarget)}
+                            onKeyDown={(e) => {
+                              if (e.key === "ArrowRight" || e.key === "Enter") {
+                                e.preventDefault();
+                                open(e.currentTarget);
+                              }
+                            }}
+                            style={{ ...menuItem, maxWidth: 340, background: sub === l.file ? "var(--fill-ghost-selected, #e5e8f1)" : "transparent", fontWeight: l.file === current ? 600 : 400 }}
+                          >
+                            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.title}</span>
+                            <LeverChip count={l.levers} />
+                            <Glyph d={CHEVRON_RIGHT} size={12} />
+                          </button>
+                        );
+                      })
                 : menu.kind === "layers"
                   ? layers.length === 0
                     ? <span style={{ ...menuItem, cursor: "default", color: "var(--dim, #5a5f7a)" }}>No artboards on this page</span>
@@ -1880,6 +1933,26 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       </button>
                     ))
                   : null}
+        </Popover>
+      ) : null}
+      {/* The Tweaks menu's submenu: the chosen artboard's levers, live, beside its entry. */}
+      {menu?.kind === "tweaks" && sub !== null && index.boards[sub] !== undefined ? (
+        <Popover
+          ref={subBox}
+          data-canvas-keys={keysId}
+          anchor={subAnchor}
+          side="right"
+          align="start"
+          gap={2}
+          role="menu"
+          aria-label={`Tweaks of ${layers.find((l) => l.file === sub)?.title ?? sub}`}
+          style={{ ...menuCard, width: 280, padding: "10px 12px", display: "block", fontSize: 12 }}
+          onPointerDown={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft" && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement)) setSub(null);
+          }}
+        >
+          <TweakControls groups={tweaksOf(sourceOf(sub))} onChange={(name, value) => setTweak(sub, name, value)} />
         </Popover>
       ) : null}
     </div>
@@ -2335,7 +2408,22 @@ function TweaksTab({ file, layers, onPick, source, onChange }: { file: string | 
       </>
     );
   }
-  const set = (name: string, value: unknown): void => onChange(file, name, value);
+  return (
+    <>
+      {list}
+      <Section title={`Tweaks · ${file}`}>
+        <TweakControls groups={groups} onChange={(name, value) => onChange(file, name, value)} />
+      </Section>
+    </>
+  );
+}
+
+/**
+ * One artboard's levers, under the sections they name: the Tweaks tab's body, and the Tweaks menu's
+ * submenu, so a tweak is the same control wherever it is reached.
+ */
+function TweakControls({ groups, onChange }: { groups: readonly TweakGroup[]; onChange: (name: string, value: unknown) => void }): JSX.Element {
+  const set = onChange;
   const control = (p: TweakLever): JSX.Element => {
     const { name, value } = p;
     if (p.editor === "boolean") {
@@ -2374,15 +2462,12 @@ function TweaksTab({ file, layers, onPick, source, onChange }: { file: string | 
   };
   return (
     <>
-      {list}
-      <Section title={`Tweaks · ${file}`}>
-        {groups.map((g, i) => (
-          <div key={g.section ?? ""} role="group" aria-label={g.section ?? "Tweaks"} style={{ marginTop: i === 0 ? 0 : 10 }}>
-            {g.section !== undefined ? <h6 style={{ margin: "0 0 6px", fontSize: 11.5, fontWeight: 600, color: "var(--text, #121526)" }}>{g.section}</h6> : null}
-            {g.levers.map(control)}
-          </div>
-        ))}
-      </Section>
+      {groups.map((g, i) => (
+        <div key={g.section ?? ""} role="group" aria-label={g.section ?? "Tweaks"} style={{ marginTop: i === 0 ? 0 : 10 }}>
+          {g.section !== undefined ? <h6 style={{ margin: "0 0 6px", fontSize: 11.5, fontWeight: 600, color: "var(--text, #121526)" }}>{g.section}</h6> : null}
+          {g.levers.map(control)}
+        </div>
+      ))}
     </>
   );
 }
