@@ -4,6 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { PanelEntry } from "@jaira/ui/panelStack";
 import {
   SPLIT_PANE_MIN,
+  bodyKeyOf,
   closePane,
   focusOn,
   followOf,
@@ -390,7 +391,7 @@ function Pane({ pane, room, roomBox, narrow, width, lead, gutter }: { pane: numb
             {room}
           </View>
         ) : null}
-        {isRoom(top) ? null : face === null ? <PanelEmpty>Opening…</PanelEmpty> : <PaneBody key={top.key} entry={top} face={face} onOpen={(entry) => splitView.set(openInPane(splitView.get(), pane, entry))} />}
+        {isRoom(top) ? null : face === null ? <PanelEmpty>Opening…</PanelEmpty> : <PaneBody key={bodyKeyOf(top)} entry={top} face={face} onOpen={(entry) => splitView.set(openInPane(splitView.get(), pane, entry))} />}
       </View>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </View>

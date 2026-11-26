@@ -183,9 +183,13 @@ export interface ChatSurface {
   /** The started run walked into — see `ChatState.walkedInto` — and the way in and back out (null). */
   walkedInto?: string | undefined;
   onWalkInto: (instanceId: string | null) => void;
-  /** The subagents walked into — see `ChatState.walkedChain` — and the way in and back out (null). */
+  /**
+   * The subagents walked into — see `ChatState.walkedChain` — and the way in and back out (null). `at`:
+   * the instance whose session holds the walk's first call — the conversation's thread, or the run its
+   * first step's `host` names — which a pane keys the subagent's entry by (`subagentEntryOf`).
+   */
   walkedChain?: ReadonlyArray<{ call: string; name: string; host?: string }> | undefined;
-  onWalkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string; host?: string }> | null) => void;
+  onWalkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string; host?: string }> | null, at?: { instanceId: string; stateId: string }) => void;
 }
 
 type Actions = ReturnType<typeof useApp>["actions"];

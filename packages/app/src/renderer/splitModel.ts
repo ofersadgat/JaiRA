@@ -23,7 +23,7 @@
  * Pure: a value in, a new value out. The shell holds the split (`viewState.ts`' `splitView`) and the
  * panes draw it (`SplitPane.tsx`); the rules are tested here without a window.
  */
-import type { PanelEntry } from "./panelStack";
+import type { PanelEntry, SubagentWalkStep } from "./panelStack";
 import type { PublishedRef } from "./transcriptRows";
 
 /** Where an artifact, or anything a pane can hold, can be put: the first pane (the main view), the second (a split), the side panel. */
@@ -350,13 +350,52 @@ export function taskPaneEntryOf(taskId: string, project?: string): PanelEntry {
 }
 
 /**
- * What an entry stands under, as a pane would open it: an artifact under its conversation; a run's
- * subagent, a rerun, a command's terminal, a step of a task's run under its task. A conversation, a
- * task, a state, the room's own view stand alone.
+ * A subagent of a task's conversation as an entry: `at` is the instance whose session holds the walk's
+ * first call (the conversation's own thread, or the run it started that the first step's `host` names),
+ * `chain` the walk to it, outermost first. Keyed by its host and its own call, as the side panel keys one.
+ */
+export function subagentEntryOf(taskId: string, project: string | undefined, at: { instanceId: string; stateId: string }, chain: readonly SubagentWalkStep[]): PanelEntry {
+  const last = chain[chain.length - 1]!;
+  return {
+    kind: "subagent",
+    key: `subagent:${at.instanceId}:${last.call}`,
+    taskId,
+    ...(project !== undefined ? { project } : {}),
+    step: { instanceId: at.instanceId, stateId: at.stateId, sidechain: last.call, name: last.name },
+    chain,
+  };
+}
+
+/**
+ * The walk a subagent entry stands for, as the conversation's thread walks it (`ChatSurface.walkedChain`):
+ * its own `chain`, else its call alone under its host — which the thread reads as its own subagent when
+ * the host is not a run it started.
+ */
+export function walkOfEntry(entry: PaneEntry | undefined | null): readonly SubagentWalkStep[] | undefined {
+  if (entry?.kind !== "subagent" || entry.step.sidechain === undefined) return undefined;
+  if (entry.chain !== undefined && entry.chain.length > 0) return entry.chain;
+  return [{ call: entry.step.sidechain, name: entry.step.name ?? "subagent", host: entry.step.instanceId }];
+}
+
+/**
+ * What a pane's body is keyed by: a task's entries — the task, its subagents — by the task, so walking
+ * in and out of its subagents is the one thread drawn again, not a new one read from nothing.
+ */
+export function bodyKeyOf(entry: PaneEntry): string {
+  return entry.kind === "subagent" ? `task:${entry.taskId}` : entry.key;
+}
+
+/**
+ * What an entry stands under, as a pane would open it: an artifact under its conversation; a subagent
+ * under the one that started it, the first under its task; a rerun, a command's terminal, a step of a
+ * task's run under its task. A conversation, a task, a state, the room's own view stand alone.
  */
 export function parentOf(entry: PaneEntry): PaneEntry | undefined {
   const published = publishedOfEntry(entry);
   if (published !== undefined) return taskPaneEntryOf(published.ref.taskId, published.project);
+  if (entry.kind === "subagent" && entry.chain !== undefined && entry.chain.length > 1) {
+    return subagentEntryOf(entry.taskId, entry.project, { instanceId: entry.step.instanceId, stateId: entry.step.stateId }, entry.chain.slice(0, -1));
+  }
   if (entry.kind === "subagent" || entry.kind === "rerun" || entry.kind === "terminal") return taskPaneEntryOf(entry.taskId, entry.project);
   if (entry.kind === "convo" && entry.step !== undefined) return taskPaneEntryOf(entry.taskId, entry.project);
   return undefined;

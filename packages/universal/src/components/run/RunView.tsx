@@ -1,6 +1,6 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import type { InstanceNode, StateView } from "@jaira/shared/browser";
+import type { InstanceNode, PendingInteraction, StateView } from "@jaira/shared/browser";
 import type { FileSurfaceContext, FileSurfaceProps } from "@jaira/ui/fileTypes";
 import { runColumnsOf, runDragOffersOf, runsByChild, standingOn } from "@jaira/ui/runBoardModel";
 import { nodeAt } from "@jaira/ui/trail";
@@ -39,7 +39,7 @@ export function RunView({ context }: { context: FileSurfaceContext }): JSX.Eleme
   if (tail?.sidechain !== undefined) {
     return (
       <Composite>
-        <SidechainConversation step={tail} detail={detail} source={sourceOf(context)} />
+        <SidechainConversation step={tail} detail={detail} source={sourceOf(context)} {...gateOf(context)} />
       </Composite>
     );
   }
@@ -86,7 +86,7 @@ export function CompositeView({ state, context }: FileSurfaceProps & { state: St
   if (at.sidechain !== undefined && tailStep !== undefined) {
     return (
       <Composite>
-        <SidechainConversation step={tailStep} detail={detail} source={sourceOf(context)} />
+        <SidechainConversation step={tailStep} detail={detail} source={sourceOf(context)} {...gateOf(context)} />
       </Composite>
     );
   }
@@ -154,12 +154,17 @@ function sourceOf(context: FileSurfaceContext): TranscriptSource {
   };
 }
 
+/** The gate the task is parked on, and how to answer it, as a run's page is handed it. */
+function gateOf(context: FileSurfaceContext): { gate: PendingInteraction; onGate: (value: unknown) => void } | Record<string, never> {
+  return context.runGate !== undefined && context.onRunGate !== undefined ? { gate: context.runGate, onGate: context.onRunGate } : {};
+}
+
 /** The conversation reading, from the context: `RunConversation` with the run's gate, its re-run and resume. */
 function Conversation({ context, parent, bookmarks = false }: { context: FileSurfaceContext; parent: InstanceNode | undefined; bookmarks?: boolean }): JSX.Element {
   const detail = context.detail;
   if (detail === null) return <Empty>Select a run to see what it said.</Empty>;
   const source = sourceOf(context);
-  const gate = context.runGate !== undefined && context.onRunGate !== undefined ? { gate: context.runGate, onGate: context.onRunGate } : {};
+  const gate = gateOf(context);
   // A gate, the agent's question and its approval each hold the run WAITING (`RunConversation`'s `asking`).
   const asking = (context.runGate !== undefined && context.onRunGate !== undefined) || source.question !== undefined || source.approval !== undefined;
   return (

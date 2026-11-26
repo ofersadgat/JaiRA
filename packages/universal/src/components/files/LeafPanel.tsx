@@ -55,7 +55,14 @@ export function LeafPanel({ context }: { context: FileSurfaceContext }): JSX.Ele
         <SidechainConversation
           step={tail}
           detail={context.detail}
-          source={{ sessions: context.sessions ?? {}, onLoadSessions: context.onLoadSessions ?? (() => undefined), liveTurn: context.liveTurn, ...(onWalkIntoSidechain !== undefined ? { onWalkIntoSidechain } : {}) }}
+          source={{
+            sessions: context.sessions ?? {},
+            onLoadSessions: context.onLoadSessions ?? (() => undefined),
+            liveTurn: context.liveTurn,
+            ...(onWalkIntoSidechain !== undefined ? { onWalkIntoSidechain } : {}),
+            ...(context.runApproval !== undefined && context.onRunApproval !== undefined ? { approval: context.runApproval, onApproval: context.onRunApproval } : {}),
+          }}
+          {...(context.runGate !== undefined && context.onRunGate !== undefined ? { gate: context.runGate, onGate: context.onRunGate } : {})}
         />
       </View>
     );

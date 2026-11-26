@@ -22,6 +22,16 @@ import type { PublishedRef } from "./transcriptRows";
 import type { TrailStep } from "./trail";
 import { terminalTitleOf } from "./terminalModel";
 
+/**
+ * One step of a walk into a conversation's subagents (`ChatState.walkedChain`): the call that started it,
+ * its name, and — on the first, for a subagent of a run the conversation started — that run's instance.
+ */
+export interface SubagentWalkStep {
+  call: string;
+  name: string;
+  host?: string;
+}
+
 /** The tabs a task root offers. The rail's icons are these, in this order. */
 export const TASK_TABS = ["conversation", "steps", "changes", "outputs", "configuration"] as const;
 export type TaskTab = (typeof TASK_TABS)[number];
@@ -64,7 +74,13 @@ export type PanelEntry =
   | { kind: "preview"; key: string; preview: PinnedValue; within?: ShownSet }
   /** What one `show_artifact` call showed together: the level between a conversation and one of them. */
   | { kind: "shown"; key: string; set: ShownSet }
-  | { kind: "subagent"; key: string; taskId: string; project?: string; step: TrailStep }
+  /**
+   * A subagent's conversation. `step` is its host instance and its call (`step.sidechain`); `chain`, the
+   * walk to it from the conversation that holds it, outermost first, ending at that call — what a pane
+   * draws it by (the conversation's thread walked into it, `ChatThread`) and its crumbs climb. Absent on
+   * one opened from a run's page: the call alone, its host `step.instanceId`.
+   */
+  | { kind: "subagent"; key: string; taskId: string; project?: string; step: TrailStep; chain?: readonly SubagentWalkStep[] }
   | { kind: "rerun"; key: string; taskId: string; project?: string }
   /** A shell command's terminal (decision 0028): `terminalEntryOf` makes it, keyed by task and call. */
   | { kind: "terminal"; key: string; taskId: string; project?: string; callId: string; command: string; dialect: CommandDialect };

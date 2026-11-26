@@ -4,6 +4,9 @@ import {
   NO_SPLIT,
   ROOM,
   artifactEntryOf,
+  bodyKeyOf,
+  subagentEntryOf,
+  walkOfEntry,
   followedSplit,
   litPlacesOf,
   closePane,
@@ -105,6 +108,35 @@ describe("the panes", () => {
     expect(keys(trailOf({ kind: "rerun", key: "rerun:a", taskId: "a" }))).toEqual(["task:a", "rerun:a"]);
     expect(keys(trailOf(ROOM))).toEqual(["room"]);
     expect(parentOf({ kind: "state", key: "state:p:wf/a", stateId: "wf/a", project: "p", tab: "run" })).toBeUndefined();
+  });
+
+  it("stands a subagent under the one that started it, the first under its task", () => {
+    const at = { instanceId: "i-1", stateId: "chat" };
+    const nested = subagentEntryOf("a", "p", at, [
+      { call: "c1", name: "Explore" },
+      { call: "c2", name: "Port the pipeline" },
+    ]);
+    expect(nested.key).toBe("subagent:i-1:c2");
+    expect(keys(trailOf(nested))).toEqual(["task:a", "subagent:i-1:c1", "subagent:i-1:c2"]);
+    // The same key as the side panel gives one opened from a run's page, which has no walk of its own.
+    const bare: PanelEntry = { kind: "subagent", key: "subagent:i-1:c2", taskId: "a", step: { instanceId: "i-1", stateId: "chat", sidechain: "c2", name: "Port" } };
+    expect(keys(trailOf(bare))).toEqual(["task:a", "subagent:i-1:c2"]);
+  });
+
+  it("draws a subagent as its conversation walked into it: the walk it stands for, keyed by its task", () => {
+    const entry = subagentEntryOf("a", undefined, { instanceId: "i-1", stateId: "chat" }, [{ call: "c1", name: "Explore" }]);
+    expect(walkOfEntry(entry)).toEqual([{ call: "c1", name: "Explore" }]);
+    // One without a walk: its call alone, under the instance it was opened on (the thread reads a host
+    // that is no run it started as its own).
+    expect(walkOfEntry({ kind: "subagent", key: "subagent:r-1:c9", taskId: "a", step: { instanceId: "r-1", stateId: "wf/run", sidechain: "c9", name: "Fix" } })).toEqual([{ call: "c9", name: "Fix", host: "r-1" }]);
+    expect(walkOfEntry(task("a"))).toBeUndefined();
+    // The task and its subagents are one body: walking in and out redraws one thread, not a new one.
+    expect(bodyKeyOf(entry)).toBe(bodyKeyOf(task("a")));
+    expect(bodyKeyOf(artifactEntryOf(ref("x")))).toBe("artifact:x");
+    // Walking in from the conversation, then out by its crumb: steps on the pane's path, ‹ coming back.
+    const walked = pushPath(path(task("a")), entry);
+    expect(keys(walked.entries)).toEqual(["task:a", "subagent:i-1:c1"]);
+    expect(keys(paneBack(walked).entries)).toEqual(["task:a"]);
   });
 });
 

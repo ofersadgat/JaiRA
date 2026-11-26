@@ -1,12 +1,11 @@
 import type { JSX, ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
-import { isConversation, isProcessTaskId } from "@jaira/shared/browser";
+import { isProcessTaskId } from "@jaira/shared/browser";
 import type { PanelEntry } from "@jaira/ui/panelStack";
 import { publishedOfEntry, taskOfEntry, taskPaneEntryOf } from "@jaira/ui/splitModel";
 import { useTaskRun } from "@jaira/ui/taskRun";
-import { ChatThread } from "../components/chat/ChatThread";
-import { usePaneChatSurface } from "../components/chat/surface";
+import { ConversationView, isConversationTask } from "../components/chat/ConversationView";
 import { PanelEmpty } from "../components/panel/PanelViews";
 import { PreviewCard } from "../components/panel/PreviewCard";
 import { PublishedView } from "../components/panel/PublishedView";
@@ -28,11 +27,14 @@ import { useShell } from "./shell";
  *   a conversation   the Chat room's thread (`ChatThread`) with its composer, over the conversation's
  *                    own run (`useTaskRun`, `usePaneChatSurface`): what it says, what it asks, what is
  *                    sent from its box — all by its own id
+ *   its subagent     that same thread walked into it — its page, what it asks, the pills, the box — as
+ *                    the main view walks into one; a walk in or out is a step on the pane's path
  *   a task's run     its conversation as the run is read (`TaskConversation`, by the panel's face of
- *                    its Conversation tab, without the panel's head and tabs)
+ *                    its Conversation tab, without the panel's head and tabs); one of its subagents,
+ *                    the subagent's page (`SidechainConversation`), with what it asks
  *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`): its title bar, its places
- *   anything else    a value, a state, a subagent's conversation: its face's body alone, filling the
- *                    pane or scrolling in it (padding 12 12 18)
+ *   anything else    a value, a state, a re-run's form: its face's body alone, filling the pane or
+ *                    scrolling in it (padding 12 12 18)
  *
  * `onOpen` puts something on THIS pane's path: a conversation the thread links to.
  */
@@ -49,7 +51,7 @@ export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (en
   const task = taskOfEntry(entry);
   // A process task (decision 0032) has no run or conversation to read: its face is its task view.
   if (task !== undefined && isProcessTaskId(task.taskId)) return <FaceBody face={face(entry)} />;
-  if (task !== undefined && entry.kind !== "subagent" && entry.kind !== "rerun") return <PaneTask key={task.taskId} taskId={task.taskId} project={task.project} face={face} onOpen={onOpen} />;
+  if (task !== undefined && entry.kind !== "rerun") return <PaneTask key={task.taskId} entry={entry} taskId={task.taskId} project={task.project} face={face} onOpen={onOpen} />;
   return <FaceBody face={face(entry)} />;
 }
 
@@ -74,23 +76,21 @@ function FaceBody({ face }: { face: PanelFace }): JSX.Element {
   );
 }
 
-/** A task on a pane's path: its run read on its own, drawn as a conversation's thread or as a run. */
-function PaneTask({ taskId, project, face, onOpen }: { taskId: string; project: string | undefined; face: (entry: PanelEntry) => PanelFace; onOpen: (entry: PanelEntry) => void }): JSX.Element {
+/**
+ * A task on a pane's path — the task itself, or one of its subagents: its run read on its own, drawn as
+ * a conversation's thread (walked into the subagent the entry is, as the main view walks into one) or as
+ * a run (the entry's face: the task's conversation, a subagent's page).
+ */
+function PaneTask({ entry, taskId, project, face, onOpen }: { entry: PanelEntry; taskId: string; project: string | undefined; face: (entry: PanelEntry) => PanelFace; onOpen: (entry: PanelEntry) => void }): JSX.Element {
   const context = useFileSurfaces();
   const { state } = useShell();
   const run = useTaskRun(taskId, project, context);
-  const chat = <PaneChat taskId={taskId} project={project} run={{ detail: run.detail, conversation: run.context.conversation, liveTurn: run.context.liveTurn }} onOpen={onOpen} />;
+  const chat = <ConversationView entry={entry} taskId={taskId} project={project} run={{ detail: run.detail, conversation: run.context.conversation, liveTurn: run.context.liveTurn }} onOpen={onOpen} />;
+  const at = { chatTaskId: state.chat.taskId, conversations: state.allConversations };
   // The Chat room's own conversation is a conversation before its run can say so (its opening message).
-  if (state.chat.taskId === taskId) return chat;
+  if (isConversationTask(at, taskId, null)) return chat;
   if (run.failed !== null) return <PanelEmpty>{"Could not read this task: "}{run.failed}</PanelEmpty>;
   if (run.detail === null) return <PanelEmpty>Reading the task…</PanelEmpty>;
-  // A conversation: one the chat started, or one the Chat room lists (a chat workflow's task, however made).
-  if (isConversation(run.detail) || state.allConversations.some((c) => c.taskId === taskId)) return chat;
-  return <FaceBody face={face(taskPaneEntryOf(taskId, project))} />;
-}
-
-/** A conversation on a pane's path: the Chat room's thread and composer, about this conversation. */
-function PaneChat({ taskId, project, run, onOpen }: { taskId: string; project: string | undefined; run: Parameters<typeof usePaneChatSurface>[2]; onOpen: (entry: PanelEntry) => void }): JSX.Element {
-  const surface = usePaneChatSurface(taskId, project, run, (id, at) => onOpen(taskPaneEntryOf(id, at)));
-  return <ChatThread surface={surface} key={taskId} />;
+  if (isConversationTask(at, taskId, run.detail)) return chat;
+  return <FaceBody face={face(entry.kind === "subagent" ? entry : taskPaneEntryOf(taskId, project))} />;
 }

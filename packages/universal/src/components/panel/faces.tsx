@@ -41,6 +41,7 @@ import { StepsBody } from "./StepsView";
 import { TaskConversation } from "./TaskConversation";
 import { ValueView } from "./ValueView";
 import { SidechainConversation } from "../run/SidechainConversation";
+import { ConversationView } from "../chat/ConversationView";
 import { ConfigCard as WorkflowConfigCard } from "../workflow/ConfigPanel";
 import { StatePanel } from "../workflow/StatePanel";
 import { RevealContext } from "../chat/StartedTaskLine";
@@ -66,6 +67,10 @@ export interface FaceHost {
   landing?: { taskId: string; instance: string; at: number } | null | undefined;
   /** The gate any task is parked on, wherever its panel is — for a task the store is not holding (`OwnRun`). */
   gateOf?: ((taskId: string) => { gate: PendingInteraction; onGate: (value: unknown) => void } | undefined) | undefined;
+  /** Whether a task is drawn as a conversation (`isConversationTask`) — the same rule a pane draws it by. */
+  isConversation?: ((taskId: string, detail: TaskDetail | null) => boolean) | undefined;
+  /** Any task's agent's pending approval, and how to answer it — what a subagent's page of that task draws. */
+  approvalOf?: ((taskId: string) => Pick<TranscriptSource, "approval" | "onApproval"> | undefined) | undefined;
   startAgain: (taskId: string) => void;
   resume: (taskId: string) => void;
   cancel: (taskId: string) => void;
@@ -73,8 +78,11 @@ export interface FaceHost {
   reviewChanges: (taskId: string) => void;
   /** ⇤ — the task's conversation into the main view. */
   adoptTask: (taskId: string, project: string | undefined, workflow: string) => void;
-  /** ⇤ — a subagent's conversation into the main view (`useAdoptSubagent`). */
-  adoptSubagent: (taskId: string, project: string | undefined, step: TrailStep) => void;
+  /**
+   * ⇤ — a subagent's conversation into the main view: a conversation's, its entry on the main pane's path
+   * (drawn as the main view walks into one); a run's, walked into in the Tasks room (`useAdoptSubagent`).
+   */
+  adoptSubagent: (taskId: string, project: string | undefined, step: TrailStep, entry?: PanelEntry) => void;
   /** ⇥ — the conversation back out of the main view, into the panel. */
   giveBack?: (() => void) | undefined;
   /** Take the main view's conversation to a step; absent when the main view is not the conversation. */
@@ -178,6 +186,25 @@ function openTask(host: FaceHost, taskId: string, project: string | undefined): 
 
 function pushPreview(host: FaceHost, item: PinnedValue): void {
   host.onStack((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
+}
+
+/**
+ * A conversation, or one of its subagents, as it is drawn wherever it stands (`ConversationView`), over
+ * the run the host holds for it: a walk in or out, a link to another conversation, a step on this stack.
+ */
+function conversationOf(host: FaceHost, entry: PanelEntry, detail: TaskDetail | null, project: string | undefined): ReactNode {
+  const taskId = "taskId" in entry && entry.taskId !== undefined ? entry.taskId : (detail?.taskId ?? "");
+  return (
+    <View flex={1} minHeight={0} flexDirection="column">
+      <ConversationView
+        entry={entry}
+        taskId={taskId}
+        project={project}
+        run={{ detail, conversation: host.source.conversation, liveTurn: host.source.liveTurn }}
+        onOpen={(next) => host.onStack((was) => push(was, next))}
+      />
+    </View>
+  );
 }
 
 /** A subagent's conversation on top of the panel's stack — where "walk in →" goes in the panel. */
@@ -378,6 +405,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         if (detail === null) return reading();
         switch (entry.tab) {
           case "conversation":
+            // A conversation is drawn as it is wherever it stands — the main view's, a pane's (`ConversationView`).
+            if (loaded && host.isConversation?.(detail.taskId, detail) === true) return conversationOf(host, entry, detail, project);
             return loaded ? (
               <TaskConversation
                 detail={detail}
@@ -567,16 +596,29 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
 
     case "subagent": {
       const name = entry.step.name ?? entry.step.sidechain ?? entry.step.stateId;
+      // What its task asks — the agent's approval, a gate one of its calls asked — drawn in the page
+      // when it is this subagent's (`SidechainConversation`), wherever the page is.
+      const approval = host.approvalOf?.(entry.taskId);
+      const asked = host.gateOf?.(entry.taskId) ?? (host.gate !== undefined && (host.gate.taskId === entry.taskId || host.gate.about === entry.taskId) ? { gate: host.gate, onGate: host.onGate } : undefined);
       return {
         title: name,
         titleText: name,
-        verbs: [{ icon: "adopt", label: "Show this conversation in the main view", onClick: () => host.adoptSubagent(entry.taskId, entry.project, entry.step) }],
+        verbs: [{ icon: "adopt", label: "Show this conversation in the main view", onClick: () => host.adoptSubagent(entry.taskId, entry.project, entry.step, entry) }],
         body: !loaded ? (
           reading()
+        ) : host.isConversation?.(entry.taskId, detail) === true ? (
+          // A conversation's subagent: the conversation walked into it, as the main view and a pane draw it.
+          conversationOf(host, entry, detail, entry.project ?? host.project)
         ) : (
           // The conversation lays itself out to the column; its doorways push further in.
           <View flex={1} minHeight={0} flexDirection="column">
-            <SidechainConversation step={entry.step} detail={detail} source={host.source} onOpen={(node, call, nested) => openSubagent(host, entry.taskId, entry.project, node, call, nested)} />
+            <SidechainConversation
+              step={entry.step}
+              detail={detail}
+              source={approval !== undefined ? { ...host.source, ...approval } : host.source}
+              {...(asked !== undefined ? asked : {})}
+              onOpen={(node, call, nested) => openSubagent(host, entry.taskId, entry.project, node, call, nested)}
+            />
           </View>
         ),
         scroll: false,

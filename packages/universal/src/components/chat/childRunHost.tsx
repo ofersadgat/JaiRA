@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { InstanceNode, SessionView, WorkflowOutcome } from "@jaira/shared/browser";
+import type { ApprovalScope, InstanceNode, PendingApproval, PendingInteraction, SessionView, WorkflowOutcome } from "@jaira/shared/browser";
+import type { ApprovalAnswerExtras } from "@jaira/ui/approvalSurfaceTypes";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { childRunFor, childRunsOf, keysTo, runningStepOf, scopedWaits, stepsIn, waitsOf, type RunWait } from "@jaira/ui/childRunModel";
 import { chainScopedWaits, endedAgentsOf, subagentOfApproval, subagentOfCall, subagentsOf, withSubagentWaits, type Subagent } from "@jaira/ui/subagentModel";
@@ -9,22 +10,26 @@ import { useNow } from "@jaira/ui/workSummaryContext";
 import { useRunContext } from "../run/runContext";
 import { OutcomeHostContext } from "../panel/outcomeHost";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
-import { SubagentHostContext } from "../panel/subagentHost";
 import { Transcript } from "../panel/SessionTranscript";
 import { ChildRunLine, WaitPills, WAIT_PILLS_HEIGHT } from "./ChildRun";
 import { StartedTaskLine, type NestHandle } from "./StartedTaskLine";
-import { SubagentPage } from "./SubagentPage";
 import { SidechainConversation } from "../run/SidechainConversation";
 import { View } from "@tamagui/core";
-import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { nodeAt } from "@jaira/ui/trail";
 import { LIVE_PILL_HEIGHT } from "./Paper";
 import type { AgentHost } from "../panel/AgentRail";
-import type { PanelEntry } from "@jaira/ui/panelStack";
-import { topOfPath } from "@jaira/ui/splitModel";
+import type { PanelEntry, SubagentWalkStep } from "@jaira/ui/panelStack";
+import { subagentEntryOf, topOfPath } from "@jaira/ui/splitModel";
 import { placeEntry } from "../../app/places";
 import { splitView } from "../../app/viewState";
 import { panelTop } from "../panel/panelBridge";
+
+/** A subagent of the conversation walked into, and what is asked that is its own. */
+export interface WalkedSubagent {
+  sub: Subagent;
+  approval?: { pending: PendingApproval; onDecide: (decision: "allow" | "deny", scope: ApprovalScope, extras?: ApprovalAnswerExtras) => void };
+  gate?: { pending: PendingInteraction; onGate: (value: unknown) => void };
+}
 
 /** "9:37 PM": when a wait began, on a pill. */
 const shortClock = (at: number): string => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -61,7 +66,10 @@ export function useChildRunHost(
   startedHost: (taskId: string, nest: NestHandle) => ReactNode | undefined;
   /** An agent's lane on the rail (`AgentRail.tsx`): what it is doing, and where it can be opened. */
   agentHost: AgentHost;
+  /** A run walked into (its page), or a subagent of one; a subagent of the conversation's own is `walkedSub`. */
   walkedIn: ReactNode | null;
+  /** The conversation's subagent walked into: drawn on the conversation's own page (`AgentPage`). */
+  walkedSub: WalkedSubagent | null;
   pills: ReactNode | null;
   /** What the thread leaves free at its end so the pills cover none of it. */
   pillSpace: number;
@@ -100,16 +108,22 @@ export function useChildRunHost(
   const now = useNow(runs.some(live) || [...subagents.values()].some((sub) => sub.running));
   // A subagent of a run the conversation started, walked into: its conversation is the run's, so the run
   // is where you stand for what waits (its scope), and the page reads the run's session.
-  const runHost = surface.walkedChain?.[0]?.host;
-  const hostRun = runHost !== undefined ? runs.find((run) => keysTo([run], runHost) !== undefined) : undefined;
+  // A first step's host that is no run the conversation started is the conversation's own thread: a
+  // subagent entry opened from its page names the instance it stands on, which is that thread's.
+  const namedHost = surface.walkedChain?.[0]?.host;
+  const hostRun = namedHost !== undefined ? runs.find((run) => keysTo([run], namedHost) !== undefined) : undefined;
+  const runHost = hostRun !== undefined ? namedHost : undefined;
   const walked = surface.walkedInto !== undefined ? runs.find((run) => run.instanceId === surface.walkedInto) : hostRun;
   const scope = walked !== undefined ? [keyOf(walked)] : [];
   // The subagent walked into, while every call of the chain is still one this conversation holds.
   const walkedChain = runHost === undefined ? (surface.walkedChain ?? []).map((step) => step.call) : [];
   const walkedSub = walkedChain.length > 0 && walkedChain.every((call) => subagents.has(call)) ? subagents.get(walkedChain[walkedChain.length - 1]!) : undefined;
   /** A run's page going into a subagent of its own: walked into from the conversation, the run its first crumb. */
-  const openRunSubagent = (node: InstanceNode, call: string, name: string): void => surface.onWalkIntoSubagent([{ call, name, host: node.instanceId }]);
-  const walkInto = (sub: Subagent): void => surface.onWalkIntoSubagent(sub.chain.map((call) => ({ call, name: subagents.get(call)?.name ?? "subagent" })));
+  const openRunSubagent = (node: InstanceNode, call: string, name: string): void => surface.onWalkIntoSubagent([{ call, name, host: node.instanceId }], { instanceId: node.instanceId, stateId: node.stateId });
+  /** Where the conversation's own subagents are: its thread's instance. */
+  const threadAt = threadSession !== null ? { instanceId: threadSession.instanceId, stateId: threadSession.stateId } : undefined;
+  const chainOf = (sub: Subagent): SubagentWalkStep[] => sub.chain.map((call) => ({ call, name: subagents.get(call)?.name ?? "subagent" }));
+  const walkInto = (sub: Subagent): void => surface.onWalkIntoSubagent(chainOf(sub), threadAt);
   const tookOf = (sub: Subagent): string =>
     sub.startedAt === undefined ? "" : `${secondsOf(Math.max(0, (sub.running ? now : (sub.lastAt ?? sub.startedAt)) - sub.startedAt))}${sub.running ? " so far" : ""}`;
 
@@ -233,16 +247,11 @@ export function useChildRunHost(
   // main view (walked into, as a substate), a pane beside this one, the side panel.
   const split = splitView.use();
   const panelOnTop = panelTop.use();
-  const agentEntry = (call: string, name: string): PanelEntry | undefined =>
-    threadSession === null || surface.taskId === null || surface.taskId === undefined
-      ? undefined
-      : {
-          kind: "subagent",
-          key: `subagent:${threadSession.instanceId}:${call}`,
-          taskId: surface.taskId,
-          ...(surface.project !== null && surface.project !== undefined ? { project: surface.project } : {}),
-          step: { instanceId: threadSession.instanceId, stateId: threadSession.stateId, sidechain: call, name },
-        };
+  const agentEntry = (call: string, name: string): PanelEntry | undefined => {
+    if (threadAt === undefined || surface.taskId === null || surface.taskId === undefined) return undefined;
+    const sub = subagents.get(call);
+    return subagentEntryOf(surface.taskId, surface.project ?? undefined, threadAt, sub !== undefined ? chainOf(sub) : [{ call, name }]);
+  };
   const shownKeys = new Set([topOfPath(split.panes[1])?.key, panelOnTop?.key].filter((key): key is string => key !== undefined));
   const agentHost: AgentHost = {
     info: (call) => {
@@ -323,39 +332,20 @@ export function useChildRunHost(
   const hostStep = surface.walkedChain?.[surface.walkedChain.length - 1];
   const walkedIn =
     hostRun !== undefined && hostNode !== undefined && hostStep !== undefined && detail !== null ? (
-      // A run's subagent: the run's own session, its approval asked at its call when it is the run's.
+      // A run's subagent: the run's own session, the run's approval and a gate one of its calls asked
+      // drawn in it when they are this subagent's (`SidechainConversation`).
       <View flex={1} minHeight={0} paddingBottom={showPills ? WAIT_PILLS_HEIGHT : 0}>
-        <ApprovalAskContext.Provider
-          value={
-            approvalRun?.instanceId === hostRun.instanceId && surface.approval !== undefined && surface.onApproval !== undefined
-              ? { pending: surface.approval, onDecide: (decision, how, extras) => surface.onApproval!(surface.approval!.requestId, decision, how, extras) }
-              : undefined
+        <SidechainConversation
+          step={{ instanceId: runHost!, stateId: hostNode.stateId, sidechain: hostStep.call, name: hostStep.name }}
+          detail={detail}
+          source={sourceOf(hostRun)}
+          {...gate}
+          onOpen={(node, call, name) =>
+            surface.onWalkIntoSubagent([...(surface.walkedChain ?? []), { call, name, ...(node.instanceId !== runHost ? { host: node.instanceId } : {}) }], { instanceId: hostNode.instanceId, stateId: hostNode.stateId })
           }
-        >
-          <SidechainConversation
-            step={{ instanceId: runHost!, stateId: hostNode.stateId, sidechain: hostStep.call, name: hostStep.name }}
-            detail={detail}
-            source={sourceOf(hostRun)}
-            onOpen={(node, call, name) => surface.onWalkIntoSubagent([...(surface.walkedChain ?? []), { call, name, ...(node.instanceId !== runHost ? { host: node.instanceId } : {}) }])}
-          />
-        </ApprovalAskContext.Provider>
-      </View>
-    ) : walkedSub !== undefined ? (
-      <SubagentHostContext.Provider value={subagentHost}>
-        <SubagentPage
-          sub={walkedSub}
-          session={threadSession}
-          live={threadLive}
-          {...(approvalSub?.call === walkedSub.call && surface.approval !== undefined && surface.onApproval !== undefined
-            ? { approval: surface.approval, onApproval: (decision, how, extras) => surface.onApproval!(surface.approval!.requestId, decision, how, extras) }
-            : {})}
-          {...(gateSub?.call === walkedSub.call && surface.gate !== undefined && surface.onGate !== undefined
-            ? { gate: surface.gate, onGate: (value: unknown) => surface.onGate!(surface.gate!.requestId, value) }
-            : {})}
-          bottomInset={showPills ? WAIT_PILLS_HEIGHT : 0}
         />
-      </SubagentHostContext.Provider>
-    ) : walked === undefined || detail === null ? null : (
+      </View>
+    ) : walkedSub !== undefined ? null : walked === undefined || detail === null ? null : (
       <OutcomeHostContext.Provider value={undefined}>
         <RunTranscript
           detail={detail}
@@ -382,5 +372,20 @@ export function useChildRunHost(
     [surface, context, detail, runs, subagents, waits, open, now, threadSession, threadLive, split, panelOnTop],
   );
 
-  return { ...hosts, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined, ownGate: surface.gate?.callId !== undefined && gateSub === undefined };
+  // The subagent walked into: the conversation's page draws it, as it draws the conversation's own agent
+  // (`AgentPage`) — with the approval and the gate that are its own.
+  const walkedPage: WalkedSubagent | null =
+    walkedSub === undefined
+      ? null
+      : {
+          sub: walkedSub,
+          ...(approvalSub?.call === walkedSub.call && surface.approval !== undefined && surface.onApproval !== undefined
+            ? { approval: { pending: surface.approval, onDecide: (decision, how, extras) => surface.onApproval!(surface.approval!.requestId, decision, how, extras) } }
+            : {}),
+          ...(gateSub?.call === walkedSub.call && surface.gate !== undefined && surface.onGate !== undefined
+            ? { gate: { pending: surface.gate, onGate: (value: unknown) => surface.onGate!(surface.gate!.requestId, value) } }
+            : {}),
+        };
+
+  return { ...hosts, walkedIn, walkedSub: walkedPage, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined, ownGate: surface.gate?.callId !== undefined && gateSub === undefined };
 }

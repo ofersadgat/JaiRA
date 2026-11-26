@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExte
 import { terminals } from "@jaira/ui/terminalStore";
 import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION, type TaskDetail } from "@jaira/shared/browser";
+import { isConversationTask } from "../components/chat/ConversationView";
 import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
 import { projectName } from "@jaira/ui/projects";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
+import { askOfTask } from "@jaira/ui/approvalCall";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { focusRuleOf, isRoom, leavePane, parentOf, pushPath, setPath, topOfPath, type PaneEntry } from "@jaira/ui/splitModel";
@@ -30,6 +32,7 @@ import { useTokens } from "../tokens";
 import { useShell } from "./shell";
 import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, paneFaces, sheetAsk, splitHere, splitView } from "./viewState";
 import { usePhone } from "./phone";
+import { placeEntry } from "./places";
 import { useColumnsFit } from "./columnsFit";
 
 /**
@@ -233,6 +236,13 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       const asking = parkedGateOf(state.pending, taskId);
       return asking === undefined ? undefined : { gate: asking, onGate: (value: unknown) => actions.answer(asking.requestId, value) };
     },
+    // Which tasks are drawn as conversations: the rule a pane draws them by.
+    isConversation: (taskId, known) => isConversationTask({ chatTaskId: state.chat.taskId, conversations: state.allConversations }, taskId, known),
+    // Any task's agent's approval, wherever its subagent's page is — not only the selected one's.
+    approvalOf: (taskId) => {
+      const asking = askOfTask(state.approvals, taskId);
+      return asking === undefined ? undefined : { approval: asking, onApproval: (decision, scope, extras) => actions.decideApproval(asking.requestId, decision, scope, extras) };
+    },
     startAgain,
     resume: (taskId) => void actions.resumeTask(taskId, selectedProject),
     cancel: (taskId) => actions.cancelTask(taskId, selectedProject),
@@ -244,7 +254,14 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       actions.setView("tasks");
       actions.openTask(taskId, at ?? state.at ?? "", workflow);
     },
-    adoptSubagent,
+    // A conversation's subagent goes on the main pane's path, drawn as that pane walks into one; a phone
+    // has no panes, and a run's subagent is walked into in the Tasks room.
+    adoptSubagent: (taskId, at, step, entry) => {
+      const known = detail?.taskId === taskId ? detail : (heldDetails[taskId] ?? null);
+      const conversation = isConversationTask({ chatTaskId: state.chat.taskId, conversations: state.allConversations }, taskId, known);
+      if (entry !== undefined && conversation && !phone) placeEntry("main", entry, phone);
+      else adoptSubagent(taskId, at, step);
+    },
     ...(conversationInMain && detail !== null
       ? {
           // ⇥: back out of the main view — the board with the task selected, its conversation here.
