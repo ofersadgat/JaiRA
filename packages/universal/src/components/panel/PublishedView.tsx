@@ -10,6 +10,7 @@ import type { ShownSet } from "@jaira/ui/panelStack";
 import { usePhone } from "../../app/phone";
 import { dragFrom } from "../../app/placeDrag";
 import { pressPlace, surfaceOf, usePlacesHere, useLitPlaces } from "../../app/places";
+import { useConversationPublishes, useFollowPublishes } from "../../app/conversationPublishes";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
 import { Press, Txt, viewScrollbarProps } from "../../primitives";
@@ -111,6 +112,37 @@ export function PublishedView({
   const project = artifacts?.project !== undefined ? { project: artifacts.project } : {};
   const taskId = artifacts?.taskId ?? published.taskId;
 
+  /**
+   * Filling a place, it is drawn where its conversation may not be — the main view stands in the
+   * conversation's place — so it reads the conversation's publishes itself (`useConversationPublishes`):
+   * opened from a call, it goes on to the run's later publish as the conversation's card does (the person,
+   * 2026-11-26: "if its rendering 3 / 10 and I open it full screen, I want the artifact to update as claude
+   * continues"); and a version Claude published past the one on screen — a later turn's, which it does not
+   * go on to — is said on its version picker (`newer`).
+   */
+  const said = useConversationPublishes(fill ? taskId : null, artifacts?.project);
+  useFollowPublishes(said.successors);
+  const claudes = said.newest.get(published.url);
+  // One this view is about to go on to (the same run's) is not news: only a later turn's is.
+  const goesOn = following !== undefined && said.successors.has(`${published.url}@${String(following)}`);
+  const newer = claudes !== undefined && claudes > version && !goesOn ? claudes : null;
+  useEffect(() => {
+    if (newer === null) return undefined;
+    let live = true;
+    // The menu lists it, and a canvas's editor gives way to its board (a save over an older version is refused).
+    void invoke("artifact:versions", { taskId, artifact: published.id, ...project })
+      .then((list) => {
+        if (!live) return;
+        setVersions(list);
+        setNewest(list.at(-1)?.version ?? newer);
+      })
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [newer, taskId, published.id]);
+
   useEffect(() => {
     let live = true;
     void invoke("artifact:versions", { taskId, artifact: published.id, ...project })
@@ -201,7 +233,7 @@ export function PublishedView({
         ...at,
         title: "Version",
         items: [...list].reverse().map((v) => ({
-          label: `v${v.version}${v.version === published.version ? " · this call" : ""}`,
+          label: `v${v.version}${v.version === published.version ? " · this call" : ""}${newer !== null && v.author === "model" && v.version > version ? " · new" : ""}`,
           note: `${v.author === "person" ? "your edit" : "Claude"} · ${when(v.createdAt)}`,
           checked: v.version === version,
           onSelect: () => {
@@ -276,12 +308,33 @@ export function PublishedView({
     </View>
   );
 
+  // A newer version Claude published: a dot and "vN new" in --accent beside the version on screen.
   const segment = (
-    <Press onPress={openVersions} title="Which version" {...({ "aria-haspopup": "menu" } as object)} paddingVertical={1} paddingHorizontal={7} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+    <Press
+      onPress={openVersions}
+      title={newer !== null ? `Which version — Claude published v${String(newer)}` : "Which version"}
+      {...({ "aria-haspopup": "menu" } as object)}
+      flexDirection="row"
+      alignItems="center"
+      gap={5}
+      paddingVertical={1}
+      paddingHorizontal={7}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
       {({ hovered }) => (
-        <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: hovered ? "text" : "tok-hint" }} numberOfLines={1}>
-          v{version} ▾
-        </Txt>
+        <>
+          <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: hovered ? "text" : "tok-hint" }} numberOfLines={1}>
+            v{version} ▾
+          </Txt>
+          {newer !== null ? (
+            <>
+              <View width={6} height={6} borderRadius={3} backgroundColor={t.v("accent") as never} />
+              <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 600, color: "accent" }} numberOfLines={1}>
+                v{newer} new
+              </Txt>
+            </>
+          ) : null}
+        </>
       )}
     </Press>
   );

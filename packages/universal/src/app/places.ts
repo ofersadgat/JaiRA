@@ -121,7 +121,7 @@ export function placeArtifact(target: Place, ref: PublishedRef, artifacts: Artif
     // before it). Its head's crumbs say where it stands: its conversation › it.
     openAt(open, entry);
   } else {
-    artifactInMain.set({ published: ref, artifacts });
+    artifactInMain.set({ published: ref, artifacts, ...(follows !== undefined ? { follows } : {}) });
     if (phone) sheetAsk.set({ detent: "peek", at: Date.now() });
   }
 }
@@ -193,14 +193,19 @@ export function placeEntry(target: Place, entry: PanelEntry, phone: boolean): vo
 
 /**
  * A conversation's publishes, as its transcript reads them (`publishSuccessorsOf`): every view opened
- * from a call a later one in the same run replaced goes on to that one — both panes' paths and the side
- * panel's stack, in place, no step added to either.
+ * from a call a later one in the same run replaced goes on to that one — both panes' paths, the side
+ * panel's stack and an artifact drawn over the room, in place, no step added to any.
  */
 export function followPublishes(successors: ReadonlyMap<string, PublishedRef>): void {
   if (successors.size === 0) return;
   const split = splitView.get();
   const moved = followedSplit(split, successors);
   if (moved !== split) splitView.set(moved);
+  const main = artifactInMain.get();
+  if (main?.follows !== undefined) {
+    const next = successors.get(`${main.published.url}@${String(main.follows)}`);
+    if (next !== undefined && next.version !== main.follows) artifactInMain.set({ ...main, published: next, follows: next.version });
+  }
   panelOnStack.get()?.((was) => followedStack(was, successors));
 }
 

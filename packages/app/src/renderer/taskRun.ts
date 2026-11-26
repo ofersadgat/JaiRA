@@ -37,7 +37,7 @@ export function useTaskRun(taskId: string, project: string | undefined, host: Fi
   // The run's views, from the window's store (decision 0018): held while it is shown, read again
   // whenever its records move. Its transcripts are held still while a turn streams — the live tail
   // is drawing that turn — and read as it ends.
-  const [liveTurn, setLiveTurn] = useState<FileSurfaceContext["liveTurn"]>(null);
+  const liveTurn = useLiveTurnOf(taskId, project);
   const streaming = liveTurn !== null;
   const detailHeld = useView("task:detail", { taskId });
   const conversationHeld = useView("task:conversation", { taskId });
@@ -64,15 +64,53 @@ export function useTaskRun(taskId: string, project: string | undefined, host: Fi
   }, [open, openViews]);
   const failed = detailHeld.error ?? null;
 
-  // Another task: another run, nothing open in it yet, no tail.
+  // Another task: another run, nothing open in it yet.
   useEffect(() => {
     setOpen([]);
-    setLiveTurn(null);
   }, [taskId]);
 
-  // The live tail: seeded from main, then folded from the pushes about this task (decision 0018 §10's
-  // deltas). A settled call ends it, and the transcripts held still while it streamed are read.
+  const loadSessions = useCallback((wanted: ReadonlyArray<{ instanceId: string }>) => {
+    setOpen((was) => {
+      const add = wanted.map((one) => sessionKey(one)).filter((id) => !was.includes(id));
+      return add.length === 0 ? was : [...was, ...new Set(add)];
+    });
+  }, []);
+
+  const context = useMemo<FileSurfaceContext>(
+    () => ({
+      ...host,
+      ...(project !== undefined ? { project } : {}),
+      selected: taskId,
+      detail,
+      conversation,
+      sessions,
+      onLoadSessions: loadSessions,
+      onLoadSession: (instanceId: string) => loadSessions([{ instanceId }]),
+      sessionHistory: history,
+      records,
+      session: null,
+      sessionInstance: null,
+      liveTurn,
+      // The host's walk is about ITS task; this run has none.
+      trail: [],
+      trailState: null,
+    }),
+    [host, project, taskId, detail, conversation, sessions, loadSessions, history, records, liveTurn],
+  );
+
+  return { detail, failed, context };
+}
+
+/**
+ * One task's live tail, on its own: seeded from main, then folded from the pushes about this task
+ * (decision 0018 §10's deltas). A settled call ends it (null), and what was held still while it streamed
+ * is read. Another task starts with none; null reads nothing.
+ */
+export function useLiveTurnOf(taskId: string | null, project: string | undefined): FileSurfaceContext["liveTurn"] {
+  const [liveTurn, setLiveTurn] = useState<FileSurfaceContext["liveTurn"]>(null);
   useEffect(() => {
+    setLiveTurn(null);
+    if (taskId === null) return undefined;
     let mounted = true;
     /** The tail as last drawn, which the folds below go on from when nothing waits to be drawn. */
     let drawn: LiveTurn | null = null;
@@ -106,35 +144,5 @@ export function useTaskRun(taskId: string, project: string | undefined, host: Fi
       off();
     };
   }, [taskId, project]);
-
-  const loadSessions = useCallback((wanted: ReadonlyArray<{ instanceId: string }>) => {
-    setOpen((was) => {
-      const add = wanted.map((one) => sessionKey(one)).filter((id) => !was.includes(id));
-      return add.length === 0 ? was : [...was, ...new Set(add)];
-    });
-  }, []);
-
-  const context = useMemo<FileSurfaceContext>(
-    () => ({
-      ...host,
-      ...(project !== undefined ? { project } : {}),
-      selected: taskId,
-      detail,
-      conversation,
-      sessions,
-      onLoadSessions: loadSessions,
-      onLoadSession: (instanceId: string) => loadSessions([{ instanceId }]),
-      sessionHistory: history,
-      records,
-      session: null,
-      sessionInstance: null,
-      liveTurn,
-      // The host's walk is about ITS task; this run has none.
-      trail: [],
-      trailState: null,
-    }),
-    [host, project, taskId, detail, conversation, sessions, loadSessions, history, records, liveTurn],
-  );
-
-  return { detail, failed, context };
+  return liveTurn;
 }

@@ -40,7 +40,7 @@ export const runMode = shared<"board" | "conversation">("board");
  * The published artifact drawn over the main view (`ArtifactInMain.tsx`), put there by its Main view
  * place button (`places.ts`) from wherever it was drawn: the conversation, the side panel, a split.
  */
-export const artifactInMain = shared<{ published: PublishedRef; artifacts: ArtifactSurface } | null>(null);
+export const artifactInMain = shared<{ published: PublishedRef; artifacts: ArtifactSurface; /** The publish call it goes on from (`artifactEntryOf`'s `follows`). */ follows?: number | undefined } | null>(null);
 
 /**
  * The split (decision 0025, `splitModel.ts`): the right pane's path, which pane is focused, which shows

@@ -23,7 +23,7 @@ export function ArtifactInMain({ at = null }: { /** What the column is showing: 
   if (held === null) return null;
   return (
     <View position="absolute" top={0} right={0} bottom={inset} left={0} zIndex={10} backgroundColor={t.v("bg") as never} flexDirection="column" minHeight={0}>
-      <PublishedView key={`${held.published.id}@${String(held.published.version)}`} published={held.published} artifacts={held.artifacts} fill onBack={() => artifactInMain.set(null)} />
+      <PublishedView key={`${held.published.id}@${String(held.published.version)}`} published={held.published} artifacts={held.artifacts} fill follows={held.follows} onBack={() => artifactInMain.set(null)} />
     </View>
   );
 }
