@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Pressable, type GestureResponderEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { LANE_PITCH, agentRailOf, gutterOf, laneHueOf, leftLaneXOf, runningCallsOf, trunkXOf, type AgentLane, type AgentRail, type LaneMark } from "@jaira/ui/agentRail";
+import { agentRailOf, gutterOf, laneHueOf, laneXOf, runningCallsOf, trunkXOf, type AgentLane, type AgentRail, type LaneMark } from "@jaira/ui/agentRail";
 import type { RunWait } from "@jaira/ui/childRunModel";
 import { subagentLineOf } from "@jaira/ui/subagentModel";
 import type { ToolEntry, TranscriptEntry } from "@jaira/ui/transcript";
@@ -26,16 +26,24 @@ import { cssColour } from "./Rail";
  * The agents a conversation started, drawn on a rail beside it (`agentRail.ts` says which lane is what;
  * the person's rulings, 2026-11-14, rounds 1–5):
  *
+ * An agent's rail is always right of the rail of the agent that started it (2026-11-25): the trunk at
+ * the gutter's left edge, the lanes of the agents it started in columns to its right, and an opened
+ * agent's own rail, nested, right of all of them.
+ *
  *   the trunk            the conversation: a 2px line at the gutter's `trunkXOf`, --rule (a nested
  *                        agent's conversation: the agent's own hue, being its lane)
- *   a waited-for agent   its line on a knot on the trunk; folded, the rail's bump with a plus; opened,
- *                        a curve to the right into its conversation, nested, and a join back under it
- *   a background agent   its knot curves to the LEFT into its column and runs down the gutter beside the
+ *   a waited-for agent   its line on a knot on the trunk; folded, the rail's bump with a plus (out past
+ *                        the gutter's columns); opened, a curve to the right into its conversation,
+ *                        nested, and a join back under it
+ *   a background agent   its knot curves right into its column and runs down the gutter beside the
  *                        conversation — to its live end (a dot, level with the foot) while it runs, and
  *                        back into the trunk where it returned or where the conversation began to wait
- *                        for it (the crossover: on through the trunk to the right)
- *   brought here         a background agent opened in this conversation: its lane on the right, its knot
- *                        filled; pressing its lane sends it back
+ *                        for it (the crossover: on from the trunk into its nest)
+ *   brought here         a background agent opened in this conversation: drawn as a waited-for one, its
+ *                        knot filled; pressing its lane sends it back
+ *   resumed              a lane runs only while its agent does: an agent continued after it returned is
+ *                        a new lane from the call that resumed it ("resumed …"), in the agent's hue, and
+ *                        opened, holds only what that run said
  *
  * Hovering a lane lights it and brings out a stack of four round buttons ON the lane at the pointer
  * (4C, with the square, round 5): the lane's own click (bring here, send back, fold or show here), the
@@ -81,7 +89,8 @@ interface RailCtx {
   open: ReadonlySet<string>;
   toggle: (key: string) => void;
   register: (key: string, extra?: Extra) => (el: unknown) => void;
-  forkOf: (call: string) => ToolEntry | undefined;
+  /** The call that started a lane, by the lane's key (an agent's own call for its first run). */
+  forkOf: (key: string) => ToolEntry | undefined;
   sidechainOf: ((call: string) => TranscriptEntry[]) | undefined;
   streaming: ReadonlySet<string>;
   working: boolean;
@@ -89,22 +98,41 @@ interface RailCtx {
   artifacts: ArtifactSurface | undefined;
   /** An agent's conversation, nested beside its lane, with its lane as its trunk (lit with it). */
   nested: (entries: TranscriptEntry[], working: boolean, hue: string, lit: boolean) => ReactNode;
-  /** The lane lit under the pointer, held here so a nested conversation's trunk lights with it. */
+  /** The lane (its key) lit under the pointer, held here so a nested conversation's trunk lights with it. */
   lit: string | null;
-  setLit: (call: string | null) => void;
-  /** The background agent whose stretch is laid out side by side with the conversation (⧉). */
+  setLit: (key: string | null) => void;
+  /** The background lane (its key) whose stretch is laid out side by side with the conversation (⧉). */
   sideBySide: string | null;
-  setSideBySide: (call: string | null) => void;
+  setSideBySide: (key: string | null) => void;
 }
 
 const RailContext = createContext<RailCtx | null>(null);
 
-/** The key a lane's rows are measured and opened under: its call, and `@cross` for its crossover's nest. */
-const keyOf = (call: string, mark: LaneMark, part: Part): string => `${call}:${mark}:${part}`;
-const openKey = (call: string, mark: LaneMark): string => (mark === "cross" ? `${call}@cross` : call);
+/** The key a lane's rows are measured and opened under: its own key, and `@cross` for its crossover's nest. */
+const keyOf = (lane: string, mark: LaneMark, part: Part): string => `${lane}:${mark}:${part}`;
+const openKey = (lane: string, mark: LaneMark): string => (mark === "cross" ? `${lane}@cross` : lane);
 
-/** How a nested conversation stands inside its row: its trunk under the parent's lane, 18 out. */
+/**
+ * How a nested conversation stands inside its row: its trunk (its own gutter's left edge) just right of
+ * the column's start, so right of every lane of this conversation's gutter.
+ */
 const NEST_LEFT = -4;
+
+/**
+ * What one run of an agent said: its conversation from the call that started this run to the one that
+ * resumed it next. An entry with no time of its own goes with the one before it.
+ */
+function runOf(ctx: RailCtx, lane: AgentLane, chain: TranscriptEntry[]): TranscriptEntry[] {
+  const from = lane.resumed !== undefined ? ctx.forkOf(lane.key)?.at : undefined;
+  const to = lane.next !== undefined ? ctx.forkOf(lane.next)?.at : undefined;
+  if (from === undefined && to === undefined) return chain;
+  let last = from ?? Number.NEGATIVE_INFINITY;
+  return chain.filter((one) => {
+    const at = (one as { at?: number }).at;
+    if (typeof at === "number") last = at;
+    return (from === undefined || last >= from) && (to === undefined || last < to);
+  });
+}
 
 /**
  * The rail around a conversation's column: its context, the props its column takes (a ref, and a layout
@@ -185,14 +213,18 @@ export function useRailFrame({
   }, [on, measure]);
   const forks = useMemo(() => {
     const map = new Map<string, ToolEntry>();
-    for (const [entry, at] of rail.marks) if (at.mark === "fork" && entry.kind === "tool") map.set(at.lane.call, entry);
+    for (const [entry, at] of rail.marks) if (at.mark === "fork" && entry.kind === "tool") map.set(at.lane.key, entry);
     return map;
   }, [rail]);
   const ctx = useMemo<RailCtx>(
     () => ({ rail, hueOf: (call) => laneHueOf(rail, call), open, toggle, register, forkOf: (call) => forks.get(call), sidechainOf, streaming, working, onOpenSidechain, artifacts, nested, lit, setLit, sideBySide, setSideBySide }),
     [rail, open, toggle, register, forks, sidechainOf, streaming, working, onOpenSidechain, artifacts, nested, lit, sideBySide],
   );
-  const columnProps = on ? { ref: (el: unknown) => void (column.current = el), onLayout: () => measure(), position: "relative" } : {};
+  // The column is held from its first draw, rail or not: a host's View attaches the ref it mounted with,
+  // so one handed over only once the conversation's agents arrived (a record read after the first draw)
+  // was never called, and the rail was measured against nothing and never drawn.
+  const holdColumn = useCallback((el: unknown) => void (column.current = el), []);
+  const columnProps = on ? { ref: holdColumn, onLayout: () => measure(), position: "relative" } : { ref: holdColumn };
   const overlay = on ? <RailOverlay ctx={ctx} geo={geo} trunkColour={lane} trunkLit={laneLit} /> : null;
   return { on, ctx, gutter: gutterOf(rail.columns), columnProps, overlay };
 }
@@ -269,14 +301,16 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
   const t = useTokens();
   const lane = mark.lane;
   const call = lane.call;
+  // The call that started the agent (its name, its kind), and the one that started this run of it.
   const fork = ctx?.forkOf(call);
-  const chain = useMemo(() => (ctx?.sidechainOf !== undefined ? ctx.sidechainOf(call) : []), [ctx, call]);
-  const ended = lane.back !== undefined;
-  const running = ctx !== null && !ended && (ctx.streaming.has(call) || (ctx.working && (fork?.result === undefined || lane.background)));
+  const own = ctx?.forkOf(lane.key);
+  const whole = useMemo(() => (ctx?.sidechainOf !== undefined ? ctx.sidechainOf(call) : []), [ctx, call]);
+  // Only what this run said: an agent resumed later is another lane.
+  const chain = useMemo(() => (ctx !== null ? runOf(ctx, lane, whole) : whole), [ctx, lane, whole]);
+  const ended = lane.back !== undefined || lane.next !== undefined;
+  const running = ctx !== null && !ended && (ctx.streaming.has(call) || (ctx.working && (own?.result === undefined || lane.background)));
   const now = useNow(running);
   const local = useMemo(() => (fork !== undefined ? subagentLineOf(fork, chain, ctx?.sidechainOf, running) : undefined), [fork, chain, ctx, running]);
-  const streaming = ctx?.streaming;
-  const innerColumns = useMemo(() => agentRailOf(chain, runningCallsOf(chain, streaming ?? new Set(), running)).columns, [chain, streaming, running]);
   // Waited for from its crossover on: what it said from that point.
   const since = entry.kind === "tool" ? entry.at : undefined;
   const files = useMemo(() => (mark.mark === "fork" ? shownInChain(chain, ctx?.sidechainOf) : undefined), [mark.mark, chain, ctx]);
@@ -285,7 +319,12 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
   // Agents started together are drawn once, by the first of them (`BatchRow`).
   if (lane.inBatch !== undefined) return null;
   if (lane.batch !== undefined && mark.mark === "fork") return <BatchRow lane={lane} ctx={ctx} />;
-  const known = host?.info?.(call);
+  // What the host knows is of the agent as a whole: of one run of several, what it did is that run's own,
+  // and only its latest run can be waiting or doing anything.
+  const told = host?.info?.(call);
+  const perRun = lane.resumed !== undefined || lane.next !== undefined;
+  const known: Partial<NonNullable<typeof told>> | undefined =
+    told === undefined || !perRun ? told : { name: told.name, ...(told.kind !== undefined ? { kind: told.kind } : {}), ...(ended ? { waits: [] } : { waits: told.waits, ...(told.running !== undefined ? { running: told.running } : {}) }) };
   const sub = local?.sub;
   const name = known?.name ?? sub?.name ?? "agent";
   const kind = known?.kind ?? sub?.kind ?? "agent";
@@ -295,13 +334,13 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
   const steps = known?.steps ?? sub?.steps ?? 0;
   const walkIn = host?.walkIn !== undefined ? () => host.walkIn!(call, name) : ctx.onOpenSidechain !== undefined ? () => ctx.onOpenSidechain!(call, name) : undefined;
   const hue = ctx.hueOf(call);
-  const key = openKey(call, mark.mark);
+  const key = openKey(lane.key, mark.mark);
   const isOpen = ctx.open.has(key);
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
 
   if (mark.mark === "back") {
     return (
-      <View ref={ctx.register(keyOf(call, "back", "head")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
+      <View ref={ctx.register(keyOf(lane.key, "back", "head")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
         <Icon name="check" size={13} color={String(t.v("ok"))} />
         <Txt spec={{ ...words, weight: 600, color: "text" }} flexShrink={1} ellip>
           {name}
@@ -318,10 +357,10 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
 
   const nest = isOpen ? (
     <>
-      <View ref={ctx.register(keyOf(call, mark.mark, "nest"), { trunk: trunkXOf(innerColumns) }) as never} marginLeft={NEST_LEFT - innerColumns * LANE_PITCH} minWidth={0}>
-        {ctx.nested(fromCross, running, hue, ctx.lit === call)}
+      <View ref={ctx.register(keyOf(lane.key, mark.mark, "nest"), { trunk: trunkXOf() }) as never} marginLeft={NEST_LEFT} minWidth={0}>
+        {ctx.nested(fromCross, running, hue, ctx.lit === lane.key)}
       </View>
-      <View ref={ctx.register(keyOf(call, mark.mark, "foot")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
+      <View ref={ctx.register(keyOf(lane.key, mark.mark, "foot")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
         {running ? <Pulse /> : <Icon name="check" size={13} color={String(t.v("ok"))} />}
         <Txt spec={{ voice: "data", scale: 11 / 12, color: "text" }} flexShrink={1} ellip>
           {name}
@@ -338,9 +377,9 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
 
   return (
     <View flexDirection="column" minWidth={0}>
-      <View ref={ctx.register(keyOf(call, mark.mark, "head")) as never} minWidth={0}>
+      <View ref={ctx.register(keyOf(lane.key, mark.mark, "head")) as never} minWidth={0}>
         <ChildRunLine
-          verb={mark.mark === "cross" ? "waiting for" : kind}
+          verb={mark.mark === "cross" ? "waiting for" : lane.resumed !== undefined ? "resumed" : kind}
           name={name}
           goTitle={`open ${name} as the main view`}
           waits={waits}
@@ -375,7 +414,8 @@ const LIT = "brightness(1.4) saturate(1.4)";
 const midOf = (r: Rect): number => r.y + Math.min(r.h, 34) / 2;
 
 interface Hit {
-  call: string;
+  /** The lane's key. */
+  key: string;
   x: number;
   top: number;
   bottom: number;
@@ -385,11 +425,11 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
   const t = useTokens();
   const hovers = useCanHover();
   const host = useContext(AgentHostContext);
-  const [point, setPoint] = useState<{ call: string; sx: number; sy: number } | null>(null);
-  const hot = point !== null && ctx.lit === point.call ? point : null;
-  const setHot = (next: { call: string; sx: number; sy: number } | null): void => {
+  const [point, setPoint] = useState<{ key: string; sx: number; sy: number } | null>(null);
+  const hot = point !== null && ctx.lit === point.key ? point : null;
+  const setHot = (next: { key: string; sx: number; sy: number } | null): void => {
     setPoint(next);
-    ctx.setLit(next?.call ?? null);
+    ctx.setLit(next?.key ?? null);
   };
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
@@ -408,26 +448,27 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
 
   /** The right side of a lane: into its nest and back out under it, or the bump of a folded one. */
   const rightOf = (lane: AgentLane, mark: LaneMark, head: Rect, colour: string, lit: boolean, from: number): void => {
-    const nest = geo.rects.get(keyOf(lane.call, mark, "nest"));
-    const foot = geo.rects.get(keyOf(lane.call, mark, "foot"));
+    const nest = geo.rects.get(keyOf(lane.key, mark, "nest"));
+    const foot = geo.rects.get(keyOf(lane.key, mark, "foot"));
     const mid = midOf(head);
-    if (open.has(openKey(lane.call, mark)) && nest !== undefined) {
-      const extra = geo.extras.get(keyOf(lane.call, mark, "nest"));
+    if (open.has(openKey(lane.key, mark)) && nest !== undefined) {
+      const extra = geo.extras.get(keyOf(lane.key, mark, "nest"));
       const inner = nest.x + (extra?.trunk ?? 9);
       shapes.push({ kind: "path", d: `M${from} ${mid} C ${from} ${mid + 7}, ${inner} ${nest.y - 6}, ${inner} ${nest.y}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
       // A band has no trunk of its own: the lane runs down its side, drawn here.
       if (extra?.draw === true) shapes.push({ kind: "path", d: `M${inner} ${nest.y} V ${nest.y + nest.h}`, stroke: colour, strokeWidth: 2, linecap: "butt", ...(lit ? { filter: LIT } : {}) });
-      hits.push({ call: lane.call, x: inner, top: nest.y, bottom: nest.y + nest.h });
+      hits.push({ key: lane.key, x: inner, top: nest.y, bottom: nest.y + nest.h });
       if (foot !== undefined) {
         const fm = midOf(foot);
         shapes.push({ kind: "path", d: `M${inner} ${nest.y + nest.h} C ${inner} ${fm - 5}, ${X} ${fm - 7}, ${X} ${fm}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
       }
       return;
     }
-    // Folded: out and straight back in, under the knot (`rail.ts` bumpPath).
-    const b = X + LANE_PITCH;
+    // Folded: out and straight back in, under the knot (`rail.ts` bumpPath) — out past the gutter's
+    // columns, so it crosses no lane running down them.
+    const b = laneXOf(rail.columns + 1);
     shapes.push({ kind: "path", d: `M${X} ${mid} C ${X} ${mid + 5}, ${b} ${mid + 4}, ${b} ${mid + 9} C ${b} ${mid + 14}, ${X} ${mid + 13}, ${X} ${mid + 17}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
-    hits.push({ call: lane.call, x: X + 9, top: mid - 6, bottom: mid + 17 });
+    hits.push({ key: lane.key, x: b - 6, top: mid - 6, bottom: mid + 17 });
   };
 
   // Where each block of the conversation starts, by its time: where a wait that began then is marked.
@@ -436,29 +477,29 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
   for (const lane of rail.lanes) {
     if (lane.inBatch !== undefined) continue;
     const colour = cssColour(t, ctx.hueOf(lane.call));
-    const lit = hot?.call === lane.call;
-    const head = geo.rects.get(keyOf(lane.call, "fork", "head"));
+    const lit = hot?.key === lane.key;
+    const head = geo.rects.get(keyOf(lane.key, "fork", "head"));
     if (head === undefined) continue;
     const mid = midOf(head);
-    const brought = lane.background && open.has(lane.call);
+    const brought = lane.background && open.has(lane.key);
     if (!lane.background || brought) {
       rightOf(lane, "fork", head, colour, lit, X);
       knot(X, mid, colour, lit, brought);
       if (!brought) {
-        if (!open.has(lane.call)) shapes.push({ kind: "path", d: `M${X - 2.2} ${mid} H ${X + 2.2} M${X} ${mid - 2.2} V ${mid + 2.2}`, stroke: colour, strokeWidth: 1.5 });
+        if (!open.has(lane.key)) shapes.push({ kind: "path", d: `M${X - 2.2} ${mid} H ${X + 2.2} M${X} ${mid - 2.2} V ${mid + 2.2}`, stroke: colour, strokeWidth: 1.5 });
       }
     } else if (lane.column > 0) {
-      const lx = leftLaneXOf(rail.columns, lane.column);
+      const lx = laneXOf(lane.column);
       const bottom = head.y + head.h;
       const endMark: LaneMark | undefined = lane.cross !== undefined ? "cross" : lane.back !== undefined ? "back" : undefined;
-      const end = endMark !== undefined ? geo.rects.get(keyOf(lane.call, endMark, "head")) : undefined;
+      const end = endMark !== undefined ? geo.rects.get(keyOf(lane.key, endMark, "head")) : undefined;
       shapes.push({ kind: "path", d: `M${X} ${mid} C ${X} ${mid + 7}, ${lx} ${Math.min(mid + 9, bottom - 4)}, ${lx} ${bottom}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
       // Its end inside a stretch laid out side by side is not drawn as a row: the lane runs to the band's foot.
       const band = geo.rects.get("band:together");
       const stop = end !== undefined ? end.y : endMark === undefined ? h - 14 : band !== undefined && band.y + band.h > bottom ? band.y + band.h : undefined;
       if (stop !== undefined && stop > bottom) {
         shapes.push({ kind: "path", d: `M${lx} ${bottom} V ${stop}`, stroke: colour, strokeWidth: 2, linecap: "butt", ...(lit ? { filter: LIT } : {}) });
-        hits.push({ call: lane.call, x: lx, top: bottom, bottom: stop });
+        hits.push({ key: lane.key, x: lx, top: bottom, bottom: stop });
       }
       if (end !== undefined) {
         const em = midOf(end);
@@ -472,7 +513,7 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
       }
       // Waiting on you: a warn knot with a pause, on the lane where the wait began (the first block that
       // started at or after it; the live end when none has).
-      const waits = endMark === undefined ? (host?.info?.(lane.call)?.waits ?? []) : [];
+      const waits = endMark === undefined && lane.next === undefined ? (host?.info?.(lane.call)?.waits ?? []) : [];
       if (waits.length > 0 && stop !== undefined) {
         const since = Math.min(...waits.map((wait) => wait.since ?? Number.POSITIVE_INFINITY));
         const at = blocks.find((block) => block.at >= since && block.y > bottom);
@@ -487,14 +528,14 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
     // A brought-here agent's crossover and return still say where they were.
     if (brought) {
       for (const m of ["cross", "back"] as const) {
-        const r = geo.rects.get(keyOf(lane.call, m, "head"));
+        const r = geo.rects.get(keyOf(lane.key, m, "head"));
         if (r !== undefined) knot(X, midOf(r), colour, lit);
         if (r !== undefined && m === "cross") rightOf(lane, "cross", r, colour, lit, X);
       }
     }
   }
 
-  const hovered = hot !== null ? rail.lanes.find((lane) => lane.call === hot.call) : undefined;
+  const hovered = hot !== null ? rail.lanes.find((lane) => lane.key === hot.key) : undefined;
   const leave = (): void => {
     clearTimeout(timer.current);
     timer.current = setTimeout(() => setHot(null), 200);
@@ -506,17 +547,17 @@ function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: G
       <Svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} strokeWidth={2} linecap="round" shapes={shapes} box={{ position: "absolute", left: 0, top: 0, pointerEvents: "none" }} />
       {hits.map((hit, i) => (
         <LaneHit
-          key={`${hit.call}:${i}`}
+          key={`${hit.key}:${i}`}
           hit={hit}
           hovers={hovers}
           onPoint={(sx, sy) => {
             stay();
-            setHot({ call: hit.call, sx, sy });
+            setHot({ key: hit.key, sx, sy });
           }}
           onLeave={leave}
           onPress={() => {
-            const lane = rail.lanes.find((one) => one.call === hit.call);
-            if (lane !== undefined && hovers) ctx.toggle(lane.call);
+            const lane = rail.lanes.find((one) => one.key === hit.key);
+            if (lane !== undefined && hovers) ctx.toggle(lane.key);
           }}
         />
       ))}
@@ -597,7 +638,7 @@ interface LaneButton {
 function laneButtons(lane: AgentLane, ctx: RailCtx, host: AgentHost | undefined, phone: boolean): LaneButton[] {
   const fork = ctx.forkOf(lane.call);
   const name = fork !== undefined ? (subagentNameOf(fork) ?? "agent") : "agent";
-  const open = ctx.open.has(lane.call);
+  const open = ctx.open.has(lane.key);
   const lit = host?.litOf?.(lane.call) ?? { beside: false, panel: false };
   const first: { icon: IconName; say: string } = lane.background
     ? open
@@ -607,14 +648,14 @@ function laneButtons(lane: AgentLane, ctx: RailCtx, host: AgentHost | undefined,
       ? { icon: "fold", say: "Fold it" }
       : { icon: "unfold", say: "Show it here" };
   const walkIn = host?.walkIn ?? ctx.onOpenSidechain;
-  const together = ctx.sideBySide === lane.call;
+  const together = ctx.sideBySide === lane.key;
   const buttons: LaneButton[] = [
-    { icon: first.icon, say: first.say, ...(lane.background ? { note: open ? "its lane goes back to the left" : "its lane moves to the right" } : {}), on: false, go: () => ctx.toggle(lane.call) },
+    { icon: first.icon, say: first.say, ...(lane.background ? { note: open ? "its lane goes back down the gutter" : "its conversation opens here" } : {}), on: false, go: () => ctx.toggle(lane.key) },
     { icon: "placeMain", say: "Open as the main view", note: "like entering a substate", on: false, go: walkIn !== undefined ? () => walkIn(lane.call, name) : undefined },
     { icon: "placeSplit", say: "Open beside", note: "in a split pane", on: lit.beside, go: !phone && host?.beside !== undefined ? () => host.beside!(lane.call, name) : undefined },
     { icon: "placePanel", say: "Open in the side panel", on: lit.panel, go: host?.panel !== undefined ? () => host.panel!(lane.call, name) : undefined },
     ...(lane.background && lane.column > 0 && !open
-      ? [{ icon: "columns" as const, say: together ? "Back to the conversation alone" : "Side by side with the conversation", note: "what it did while you talked", on: together, go: () => ctx.setSideBySide(together ? null : lane.call) }]
+      ? [{ icon: "columns" as const, say: together ? "Back to the conversation alone" : "Side by side with the conversation", note: "what it did while you talked", on: together, go: () => ctx.setSideBySide(together ? null : lane.key) }]
       : []),
   ];
   return buttons.filter((b) => b.go !== undefined);
@@ -731,8 +772,10 @@ function LaneSheet({ lane, ctx, done }: { lane: AgentLane; ctx: RailCtx; done: (
 function useAgentSays(ctx: RailCtx, lane: AgentLane): { name: string; kind: string; steps: number; took: string; running: boolean; chain: TranscriptEntry[]; walkIn?: () => void } {
   const host = useContext(AgentHostContext);
   const fork = ctx.forkOf(lane.call);
-  const chain = useMemo(() => ctx.sidechainOf?.(lane.call) ?? [], [ctx, lane.call]);
-  const running = ctx.streaming.has(lane.call) || (ctx.working && fork?.result === undefined);
+  // This run's own stretch of the agent's conversation, and whether this run is still going.
+  const chain = useMemo(() => runOf(ctx, lane, ctx.sidechainOf?.(lane.call) ?? []), [ctx, lane]);
+  const own = ctx.forkOf(lane.key);
+  const running = lane.back === undefined && lane.next === undefined && (ctx.streaming.has(lane.call) || (ctx.working && (own?.result === undefined || lane.background)));
   const now = useNow(running);
   const local = useMemo(() => (fork !== undefined ? subagentLineOf(fork, chain, ctx.sidechainOf, running) : undefined), [fork, chain, ctx, running]);
   const known = host?.info?.(lane.call);
@@ -768,7 +811,7 @@ function useAgentSays(ctx: RailCtx, lane: AgentLane): { name: string; kind: stri
 function BatchRow({ lane, ctx }: { lane: AgentLane; ctx: RailCtx }): JSX.Element {
   const t = useTokens();
   const calls = lane.batch ?? [lane.call];
-  const members = calls.map((call) => ctx.rail.lanes.find((one) => one.call === call)!).filter((one) => one !== undefined);
+  const members = calls.map((call) => ctx.rail.lanes.find((one) => one.key === call)!).filter((one) => one !== undefined);
   const says = members.map((member) => useAgentSays(ctx, member)); // eslint-disable-line react-hooks/rules-of-hooks -- a batch's members are fixed for its row
   const [tabbed, setTabbed] = useState(members.length > 2);
   const [chosen, setChosen] = useState(0);
@@ -958,7 +1001,7 @@ export function bandRunsOf(agent: readonly TranscriptEntry[], here: readonly Tra
 export function TimeBand({ lane, ctx, here, draw }: { lane: AgentLane; ctx: RailCtx; here: readonly TranscriptEntry[]; draw: (entries: TranscriptEntry[]) => ReactNode }): JSX.Element {
   const t = useTokens();
   const one = useAgentSays(ctx, lane);
-  const fork = ctx.forkOf(lane.call);
+  const fork = ctx.forkOf(lane.key);
   const from = fork?.at;
   const agent = useMemo(() => (from === undefined ? one.chain : one.chain.filter((entry) => ((entry as { at?: number }).at ?? from) >= from)), [one.chain, from]);
   const runs = useMemo(() => bandRunsOf(agent, here), [agent, here]);

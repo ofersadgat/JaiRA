@@ -304,7 +304,7 @@ export const Transcript = memo(function Transcript({
     });
   // A background agent laid out side by side (⧉): the conversation from its start to where its lane
   // ends drawn by time beside it, in place of those rows.
-  const together = frame.on && frame.ctx.sideBySide !== null ? frame.ctx.rail.lanes.find((one) => one.call === frame.ctx.sideBySide && one.column > 0) : undefined;
+  const together = frame.on && frame.ctx.sideBySide !== null ? frame.ctx.rail.lanes.find((one) => one.key === frame.ctx.sideBySide && one.column > 0) : undefined;
   const drawn: ReactNode = ((): ReactNode => {
     if (together === undefined) return drawBlocks(blocks, 0, blocks.length);
     const to = together.cross ?? together.back ?? shown.length;

@@ -1,11 +1,11 @@
 /**
  * A conversation's agents as lanes (`agentRail.ts`): which wait and which run in the background, where a
  * background agent crosses over (the conversation waits for it) or comes back (its notification), and
- * which gutter column each left lane takes.
+ * which gutter column each lane takes, and an agent resumed after it returned.
  */
 import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
-import { agentIdOf, agentRailOf, gutterOf, leftLaneXOf, notifiedCallOf, trunkXOf, waitedAgentOf } from "../src/renderer/agentRail";
+import { agentIdOf, agentRailOf, gutterOf, laneHueOf, laneXOf, notifiedCallOf, resumedAgentOf, runningCallsOf, trunkXOf, waitedAgentOf } from "../src/renderer/agentRail";
 import type { EventEntry, MessageEntry, ToolEntry, TranscriptEntry } from "../src/renderer/transcript";
 
 const tool = (callId: string, name: string, extra: Partial<ToolEntry> = {}): ToolEntry => ({ kind: "tool", name, summary: "", callId, ...extra }) as ToolEntry;
@@ -34,7 +34,7 @@ describe("reading the record", () => {
 describe("an agent's lane", () => {
   it("is waited for when its call answered with the agent's report", () => {
     const rail = agentRailOf([said("handing it over"), agent("c1", { result: "done", ok: true })]);
-    expect(rail.lanes).toEqual([{ call: "c1", background: false, fork: 1, column: 0 }]);
+    expect(rail.lanes).toEqual([{ key: "c1", call: "c1", background: false, fork: 1, column: 0 }]);
     expect(rail.columns).toBe(0);
   });
 
@@ -84,7 +84,7 @@ describe("agents started together", () => {
   });
 });
 
-describe("left columns", () => {
+describe("gutter columns", () => {
   it("gives two agents running at once two columns, and reuses a column once its lane ended", () => {
     const entries: TranscriptEntry[] = [
       agent("c1", { result: launched("a1") }),
@@ -99,11 +99,60 @@ describe("left columns", () => {
     expect(rail.columns).toBe(2);
   });
 
-  it("puts the trunk past the left columns, each column 18 out from it", () => {
+  it("keeps the trunk at the gutter's left edge, each lane column 18 right of it", () => {
     expect(gutterOf(0)).toBe(20);
     expect(gutterOf(2)).toBe(56);
-    expect(trunkXOf(2)).toBe(45);
-    expect(leftLaneXOf(2, 1)).toBe(27);
-    expect(leftLaneXOf(2, 2)).toBe(9);
+    expect(trunkXOf(2)).toBe(9);
+    expect(laneXOf(1)).toBe(27);
+    expect(laneXOf(2)).toBe(45);
+    // Every lane between the trunk and the conversation (which starts past the gutter).
+    expect(laneXOf(2)).toBeLessThan(gutterOf(2));
+  });
+});
+
+describe("an agent resumed after it returned", () => {
+  const resumes = (callId: string, to: string, answered = true): ToolEntry =>
+    tool(callId, "SendMessage", {
+      args: { to, summary: "more", message: "go on" },
+      ...(answered ? { result: [{ type: "text", text: `{"success":true,"message":"Resuming agent ${to.slice(0, 7)}","resumedAgentId":"${to}"}` }] as unknown as JsonValue } : {}),
+    });
+
+  it("reads the agent a SendMessage resumed, and not a message to a peer", () => {
+    expect(resumedAgentOf(resumes("s1", "a1"))).toBe("a1");
+    expect(resumedAgentOf(resumes("s1", "a1", false))).toBe("a1");
+    expect(resumedAgentOf(tool("s2", "SendMessage", { args: { to: "Another session" }, result: "sent to its inbox" }))).toBeUndefined();
+  });
+
+  it("ends its lane where it returned and starts a new one at the call that resumed it", () => {
+    const entries: TranscriptEntry[] = [agent("c1", { result: launched("a1") }), notified("c1"), said("one more thing"), resumes("s1", "a1"), said("meanwhile"), notified("c1")];
+    const rail = agentRailOf(entries);
+    expect(rail.lanes).toHaveLength(2);
+    expect(rail.lanes[0]).toMatchObject({ key: "c1", call: "c1", fork: 0, back: 1, next: "s1", column: 1 });
+    expect(rail.lanes[1]).toMatchObject({ key: "s1", call: "c1", resumed: 1, background: true, fork: 3, back: 5, column: 1 });
+    expect(rail.marks.get(entries[3]!)).toMatchObject({ mark: "fork", lane: { key: "s1" } });
+    expect(rail.marks.get(entries[5]!)).toMatchObject({ mark: "back", lane: { key: "s1" } });
+  });
+
+  it("resumes an agent the conversation waited for, by the id its report named", () => {
+    const report = [{ type: "text", text: "all done\nagentId: a9 (use SendMessage with to: 'a9')" }] as unknown as JsonValue;
+    const rail = agentRailOf([agent("c1", { result: report }), said("now"), resumes("s1", "a9")], new Set(["s1"]));
+    expect(rail.lanes.map((lane) => [lane.key, lane.background, lane.column])).toEqual([
+      ["c1", false, 0],
+      ["s1", true, 1],
+    ]);
+  });
+
+  it("keeps the agent's hue for every run, and gives the next agent the next hue", () => {
+    const rail = agentRailOf([agent("c1", { result: launched("a1") }), notified("c1"), resumes("s1", "a1"), agent("c2", { result: launched("a2") })]);
+    expect(laneHueOf(rail, "c1")).toBe(laneHueOf(agentRailOf([agent("c1", { result: launched("a1") })]), "c1"));
+    const unresumed = agentRailOf([agent("c1", { result: launched("a1") }), notified("c1"), agent("c2", { result: launched("a2") })]);
+    expect(laneHueOf(rail, "c2")).toBe(laneHueOf(unresumed, "c2"));
+  });
+
+  it("never runs an earlier run on to the foot, though the conversation is still being written", () => {
+    const entries: TranscriptEntry[] = [agent("c1", { result: launched("a1") }), resumes("s1", "a1")];
+    const rail = agentRailOf(entries, runningCallsOf(entries, new Set(), true));
+    expect(rail.lanes[0]!.column).toBe(0);
+    expect(rail.lanes[1]!.column).toBe(1);
   });
 });
