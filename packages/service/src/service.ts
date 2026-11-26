@@ -5669,6 +5669,7 @@ export class AppService {
       project: this.refOf(ownerKey),
       component: request.component,
       inputs: request.inputs,
+      ...(request.callId !== undefined ? { callId: request.callId } : {}),
     };
     // Which project this request's file reads are about, when the session it parked in is not it.
     // See `ProjectSession.subjectProject`: a review runs in the base root and reads another project's.
@@ -7067,7 +7068,12 @@ export class AppService {
         secrets: this.secretResolver(open),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
         ...withForgeCli(this.forgeCli(config.execEnvironment)),
-        publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
+        publishing: { authorize: (request, permitted) => remotePrimitives.publishing.authorize(request, permitted) },
+        // The set the conversation's calls are decided under (`live`, below — read at call time, so a pick
+        // in the composer counts): a push it allows with nobody asked is not asked about again.
+        permits: (tool, args) =>
+          live.permissionSet !== undefined &&
+          allowsCall(projectPolicy(config), live.permissionSet, tool, args, dialectFor(config.execEnvironment), { root: workspace.root, packages: filePackages, mcp: config.mcp }) === true,
         events: this.toolEventWaits(open, taskId),
         modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
         // A CI download is the task's artifact, in its central folder (decision 0016).
@@ -14338,6 +14344,9 @@ export class AppService {
         options: [{ value: "always", label: "Always for this project", description: "sets functions.review_artifacts.publish to allow in this project's settings" }],
       },
       taskId,
+      undefined,
+      // Under the agent's call that asks, where the conversation or its subagent draws it.
+      request.callId,
     );
     // A rejected park is a shutdown or a cancel, never a yes.
     if ("error" in result && result.error !== undefined) return "no";

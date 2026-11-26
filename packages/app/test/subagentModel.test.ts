@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
 import type { RunWait } from "../src/renderer/childRunModel";
 import { secondLine } from "../src/renderer/childRunModel";
-import { subagentLineOf, chainScopedWaits, chainWaitCounts, endedAgentsOf, liveChainOfApproval, namesOf, subagentOfApproval, subagentsOf, withSubagentWaits } from "../src/renderer/subagentModel";
+import { subagentLineOf, chainScopedWaits, chainWaitCounts, endedAgentsOf, liveChainOfApproval, namesOf, subagentOfApproval, subagentOfCall, subagentsOf, withSubagentWaits } from "../src/renderer/subagentModel";
 import type { ToolEntry, TranscriptEntry } from "../src/renderer/transcript";
 
 const tool = (callId: string, name: string, extra: Partial<ToolEntry> = {}): ToolEntry => ({ kind: "tool", name, summary: "", callId, ...extra }) as ToolEntry;
@@ -88,6 +88,17 @@ describe("a subagent's approval", () => {
     expect(secondLine({ ...chainScopedWaits(waits, ["c_outer", "c_inner"])[0]!, note: "a shell command" }, 4, () => "11:22 PM")).toBe("a shell command · 11:22 PM");
     // The conversation's own wait is outside every subagent.
     expect(chainScopedWaits([own], ["c_outer"])).toEqual([]);
+  });
+
+  it("a gate one of its tool calls asked is its wait too, found by the call", () => {
+    const gateWait: RunWait = { instanceId: "", path: [], step: "Push main to GitHub?", kind: "ask", own: true, callId: "c_shell" };
+    expect(subagentOfCall(subs, "c_shell")?.call).toBe("c_inner");
+    expect(subagentOfCall(subs, "toolu_elsewhere")).toBeUndefined();
+    const [wait, approve] = withSubagentWaits([gateWait, own], undefined, subs, subagentOfCall(subs, "c_shell"));
+    expect(wait).toMatchObject({ path: ["Quit dialog for running work", "Build quit-with-running-work dialog"], chain: ["c_outer", "c_inner"], callId: "c_shell" });
+    expect(wait!.own).toBeUndefined();
+    // The approval stays the conversation's: no approval asker was named.
+    expect(approve).toEqual(own);
   });
 
   it("is found from the live turn alone, followed out to the conversation, for the title bar", () => {

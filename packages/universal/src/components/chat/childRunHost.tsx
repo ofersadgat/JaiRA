@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import type { InstanceNode, SessionView, WorkflowOutcome } from "@jaira/shared/browser";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { childRunFor, childRunsOf, keysTo, runningStepOf, scopedWaits, stepsIn, waitsOf, type RunWait } from "@jaira/ui/childRunModel";
-import { chainScopedWaits, endedAgentsOf, subagentOfApproval, subagentsOf, withSubagentWaits, type Subagent } from "@jaira/ui/subagentModel";
+import { chainScopedWaits, endedAgentsOf, subagentOfApproval, subagentOfCall, subagentsOf, withSubagentWaits, type Subagent } from "@jaira/ui/subagentModel";
 import { sidechainEntriesOf, type LiveTail, type TranscriptEntry } from "@jaira/ui/transcript";
 import { secondsOf } from "@jaira/ui/workSummary";
 import { useNow } from "@jaira/ui/workSummaryContext";
@@ -68,6 +68,8 @@ export function useChildRunHost(
   /** Whether the agent's approval, and its question, are the conversation's (so the thread draws them). */
   ownApproval: boolean;
   ownQuestion: boolean;
+  /** Whether a gate an agent's tool call asked is the conversation's own call's — not a subagent's, whose page draws it. */
+  ownGate: boolean;
 } {
   const context = useRunContext();
   const detail = surface.detail;
@@ -86,9 +88,11 @@ export function useChildRunHost(
     });
   }, [threadSession, threadEntries, threadLive, answering]);
   const approvalSub = subagentOfApproval(subagents, surface.approval?.requestId);
+  // A gate an agent's tool call asked (`git_push`'s publish question): the subagent whose call it is, if any.
+  const gateSub = subagentOfCall(subagents, surface.gate?.callId);
   const waits = useMemo(
-    () => withSubagentWaits(waitsOf({ instances, gate: surface.gate, approval: surface.approval, question: surface.question }), approvalSub, subagents),
-    [instances, surface.gate, surface.approval, surface.question, approvalSub, subagents],
+    () => withSubagentWaits(waitsOf({ instances, gate: surface.gate, approval: surface.approval, question: surface.question }), approvalSub, subagents, gateSub),
+    [instances, surface.gate, surface.approval, surface.question, approvalSub, subagents, gateSub],
   );
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
@@ -345,6 +349,9 @@ export function useChildRunHost(
           {...(approvalSub?.call === walkedSub.call && surface.approval !== undefined && surface.onApproval !== undefined
             ? { approval: surface.approval, onApproval: (decision, how, extras) => surface.onApproval!(surface.approval!.requestId, decision, how, extras) }
             : {})}
+          {...(gateSub?.call === walkedSub.call && surface.gate !== undefined && surface.onGate !== undefined
+            ? { gate: surface.gate, onGate: (value: unknown) => surface.onGate!(surface.gate!.requestId, value) }
+            : {})}
           bottomInset={showPills ? WAIT_PILLS_HEIGHT : 0}
         />
       </SubagentHostContext.Provider>
@@ -375,5 +382,5 @@ export function useChildRunHost(
     [surface, context, detail, runs, subagents, waits, open, now, threadSession, threadLive, split, panelOnTop],
   );
 
-  return { ...hosts, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
+  return { ...hosts, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined, ownGate: surface.gate?.callId !== undefined && gateSub === undefined };
 }

@@ -53,6 +53,8 @@ interface Setup {
   events?: EventWaits;
   /** The model behind a call — what a comment is signed with. */
   modelOf?: () => string | undefined;
+  /** What the task's permission set lets through with nobody asked. */
+  permits?: (tool: string, args: Record<string, unknown>) => boolean;
 }
 
 function tools(setup: Setup = {}): Record<string, Tool> {
@@ -66,6 +68,7 @@ function tools(setup: Setup = {}): Record<string, Tool> {
       http: replay.http,
       ...(setup.events !== undefined ? { events: setup.events } : {}),
       ...(setup.modelOf !== undefined ? { modelOf: setup.modelOf } : {}),
+      ...(setup.permits !== undefined ? { permits: setup.permits } : {}),
       publishing: new PublishAuthorizer({
         publish: setup.publish ?? "allow",
         ...(setup.answer !== undefined
@@ -275,6 +278,25 @@ describe("git_push", () => {
       question: "Push task/t-1 to GitLab?",
       confirmLabel: "Push",
     });
+  });
+
+  it("asks nothing when the task's permission set allows the push, and still refuses under deny", async () => {
+    const head = commit();
+    const seen: Array<[string, Record<string, unknown>]> = [];
+    const permits = (tool: string, args: Record<string, unknown>): boolean => {
+      seen.push([tool, args]);
+      return tool === "git_push";
+    };
+    expect(await call(tools({ publish: "ask", answer: "no", permits }), "git_push")).toMatchObject({ ok: true, head });
+    expect(asked).toEqual([]);
+    // Judged at the branch it pushes, so a line with places (`main: ask`) answers for it.
+    expect(seen).toEqual([["git_push", { branch: "task/t-1" }]]);
+    expect(await call(tools({ publish: "deny", permits }), "git_push")).toEqual({
+      error: "this project's policy does not let a workflow publish (functions.review_artifacts.publish is deny) — nothing was pushed",
+    });
+    // A set that does not allow it outright leaves the question to be asked.
+    expect(await call(tools({ publish: "ask", answer: "no", permits: () => false }), "git_push")).toEqual({ error: "publishing was declined — nothing was pushed" });
+    expect(asked).toHaveLength(1);
   });
 
   it("says a declined push was declined", async () => {

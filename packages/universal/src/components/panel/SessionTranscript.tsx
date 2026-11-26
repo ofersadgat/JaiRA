@@ -7,7 +7,7 @@ import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
 import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
-import { CallGateContext, programCallInstance } from "@jaira/ui/programCalls";
+import { CallGateContext } from "@jaira/ui/programCalls";
 import { keptUnderSummary, publishSuccessorsOf, replacedPublishes, type CallSurface } from "@jaira/ui/transcriptRows";
 import { followPublishes } from "../../app/places";
 import { openBlockOf, writingOf } from "@jaira/ui/stillRunning";
@@ -413,8 +413,9 @@ function WorkBlockView({
   if (!marked && (look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise.
   if (entries.length === 1) return <WorkColumn>{rowOf(0)}</WorkColumn>;
-  // A program's call that asks the person keeps its row, and the question under it, out of the fold.
-  const asking = (entry: WorkEntry): boolean => entry.kind === "tool" && entry.callId !== undefined && programCallInstance(entry.callId) !== undefined && callGate?.(entry.callId) !== undefined;
+  // A call that asks the person — a program's, or an agent's tool mid-call — keeps its row, and the
+  // question under it, out of the fold.
+  const asking = (entry: WorkEntry): boolean => entry.kind === "tool" && entry.callId !== undefined && callGate?.(entry.callId) !== undefined;
   const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls, liveCalls) || marks?.has(entry) === true || asking(entry) ? [index] : []));
   return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }

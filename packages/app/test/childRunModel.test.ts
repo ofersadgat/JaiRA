@@ -99,6 +99,13 @@ describe("what it waits on", () => {
     expect(waitsOf({ instances, approval: inRun }).find((w) => w.instanceId === "draft")).toEqual({ instanceId: "draft", path: ["feature", "product", "draft"], step: "git push", verb: "approve", kind: "approve", note: "a shell command", since: T + 9 });
     expect(waitsOf({ instances, approval: own }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "web_fetch", verb: "approve", own: true });
   });
+  it("makes a gate an agent's tool call asked that call's — the conversation's own, never a run's step", () => {
+    const pushGate = { requestId: "g", taskId: "t", project: "p", component: "confirm_action", inputs: {}, callId: "toolu_push", config: { prompt: "Push main to GitHub?" } } as unknown as PendingInteraction;
+    const waits = waitsOf({ instances, gate: pushGate });
+    expect(waits.filter((w) => w.callId !== undefined)).toEqual([{ instanceId: "", path: [], step: "Push main to GitHub?", kind: "ask", own: true, callId: "toolu_push" }]);
+    // The run's own asking state still waits for itself; the gate is not laid on it.
+    expect(waits.filter((w) => w.callId === undefined).map((w) => w.instanceId)).toEqual(["answer"]);
+  });
   it("counts an agent's questions", () => {
     const q = { requestId: "q", questions: [{}], instanceId: "chat:root", at: T } as unknown as PendingQuestion;
     expect(waitsOf({ instances, question: q }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "answer", note: "1 question", own: true });

@@ -200,6 +200,20 @@ export function subagentOfApproval(subagents: ReadonlyMap<string, Subagent>, req
   return found;
 }
 
+/**
+ * The subagent whose own conversation holds the tool call `callId` — the deepest, being the one that made
+ * it. Where a gate that call asked (`PendingInteraction.callId`) is drawn, and where its pill goes.
+ */
+export function subagentOfCall(subagents: ReadonlyMap<string, Subagent>, callId: string | undefined): Subagent | undefined {
+  if (callId === undefined) return undefined;
+  let found: Subagent | undefined;
+  for (const sub of subagents.values()) {
+    if (!sub.entries.some((entry) => entry.kind === "tool" && entry.callId === callId)) continue;
+    if (found === undefined || sub.chain.length > found.chain.length) found = sub;
+  }
+  return found;
+}
+
 /** The names along a chain, outermost first: a wait's path, a breadcrumb. */
 export function namesOf(subagents: ReadonlyMap<string, Subagent>, chain: readonly string[]): string[] {
   return chain.map((call) => subagents.get(call)?.name ?? "subagent");
@@ -208,14 +222,16 @@ export function namesOf(subagents: ReadonlyMap<string, Subagent>, chain: readonl
 /**
  * The waits with an approval a subagent asked for made THAT subagent's: its path the names down to it,
  * its `chain` where a press goes. The conversation's own approval wait (`waitsOf` makes every approval
- * not in a run the conversation's) is replaced.
+ * not in a run the conversation's) is replaced. So is a gate a subagent's tool call asked (`gateAsker`,
+ * {@link subagentOfCall}), which `waitsOf` makes the conversation's until it is known whose call it is.
  */
-export function withSubagentWaits(waits: readonly RunWait[], asker: Subagent | undefined, subagents: ReadonlyMap<string, Subagent>): RunWait[] {
-  if (asker === undefined) return [...waits];
+export function withSubagentWaits(waits: readonly RunWait[], asker: Subagent | undefined, subagents: ReadonlyMap<string, Subagent>, gateAsker?: Subagent): RunWait[] {
+  if (asker === undefined && gateAsker === undefined) return [...waits];
   return waits.map((wait) => {
-    if (wait.kind !== "approve" || wait.own !== true) return wait;
+    const by = wait.own !== true ? undefined : wait.kind === "approve" ? asker : wait.callId !== undefined ? gateAsker : undefined;
+    if (by === undefined) return wait;
     const { own: _own, ...rest } = wait;
-    return { ...rest, path: namesOf(subagents, asker.chain), chain: asker.chain };
+    return { ...rest, path: namesOf(subagents, by.chain), chain: by.chain };
   });
 }
 

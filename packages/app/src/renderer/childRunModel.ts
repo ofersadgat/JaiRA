@@ -148,6 +148,8 @@ export interface RunWait {
   own?: true;
   /** A subagent's wait: the calls that started the subagents down to the one that asks (`subagentModel.ts`). */
   chain?: string[];
+  /** A gate an agent's tool call asked (`PendingInteraction.callId`): the call it is drawn under. */
+  callId?: string;
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -193,8 +195,10 @@ export function waitsOf(input: {
 }): RunWait[] {
   const runs = childRunsOf(input.instances);
   const waits: RunWait[] = [];
+  // A gate an agent's tool call asked is that call's — not the step of whichever run is mid-call.
+  const toolGate = input.gate?.callId !== undefined ? input.gate : undefined;
   for (const run of runs) {
-    for (const node of askingNodes(run, input.gate !== undefined)) {
+    for (const node of askingNodes(run, input.gate !== undefined && toolGate === undefined)) {
       const keys = keysTo([run], node.instanceId) ?? [];
       const note = gateNote(input.gate);
       waits.push({ instanceId: node.instanceId, path: keys.slice(0, -1), step: keys[keys.length - 1] ?? node.stateId, kind: "ask", ...(note !== undefined ? { note } : {}), since: node.startedAt });
@@ -210,6 +214,11 @@ export function waitsOf(input: {
   if (input.question !== undefined) {
     const path = placed(input.question.instanceId);
     waits.push({ instanceId: input.question.instanceId ?? "", path, step: "answer", kind: "ask", note: plural(input.question.questions.length, "question"), since: input.question.at, ...own(path) });
+  }
+  // The conversation's own until a subagent is found holding the call (`withSubagentWaits`).
+  if (toolGate !== undefined) {
+    const prompt = toolGate.config?.prompt?.trim();
+    waits.push({ instanceId: "", path: [], step: prompt !== undefined && prompt.length > 0 ? prompt : toolGate.component, kind: "ask", own: true, callId: toolGate.callId! });
   }
   return waits;
 }

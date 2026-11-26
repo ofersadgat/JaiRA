@@ -104,13 +104,15 @@ export function ChatThread({
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
   // The gate a call of the conversation's own program asks, drawn under that call's row (`CallGateContext`),
-  // as the task view draws a program's (`RunTranscript`'s `ProgramRows`).
+  // as the task view draws a program's (`RunTranscript`'s `ProgramRows`) — or, asked by an agent's tool
+  // mid-call (`git_push`'s publish question), under THAT call's row, here or in a subagent unfolded in place.
   const gate = surface.gate;
   const onGate = surface.onGate;
   const instances = surface.detail?.instances;
   const gateAt = useMemo(() => {
-    if (gate === undefined || onGate === undefined || instances === undefined) return undefined;
-    const asking = askingCallIdOf(instances);
+    if (gate === undefined || onGate === undefined) return undefined;
+    const asking = gate.callId ?? (instances !== undefined ? askingCallIdOf(instances) : undefined);
+    if (asking === undefined) return undefined;
     return (callId: string): ReactNode | undefined => (callId === asking ? <GateSurface key={gate.requestId} pending={gate} onSubmit={(value) => onGate(gate.requestId, value)} plain /> : undefined);
   }, [gate, onGate, instances]);
   // The sizes the person gave its pictures: kept while the conversation is open, dropped when it is left.
@@ -244,9 +246,18 @@ export function ChatThread({
   // A run the conversation started draws its own agent's asks in the run's page (`childRunHost.tsx`).
   const ownApproval = surface.approval !== undefined && surface.onApproval !== undefined && runs.ownApproval;
   const ownQuestion = surface.question !== undefined && surface.onQuestion !== undefined && runs.ownQuestion;
+  // A gate the conversation's own tool call asked, whose call has no row here to hold it (not loaded,
+  // or read back after a restart): drawn under the page, never nowhere.
+  const strayGate =
+    runs.ownGate && gate !== undefined && onGate !== undefined && !m.entries.some((entry) => entry.kind === "tool" && entry.callId === gate.callId) ? gate : undefined;
   const asking =
-    (ownApproval && !m.approvalInThread) || ownQuestion ? (
+    (ownApproval && !m.approvalInThread) || ownQuestion || strayGate !== undefined ? (
       <>
+        {strayGate !== undefined ? (
+          <InlineHost>
+            <GateSurface key={strayGate.requestId} pending={strayGate} onSubmit={(value) => onGate!(strayGate.requestId, value)} plain />
+          </InlineHost>
+        ) : null}
         {ownApproval && !m.approvalInThread && surface.approval !== undefined ? (
           <InlineHost>
             <ApprovalSurface key={surface.approval.requestId} pending={surface.approval} onDecide={(decision, scope, extras) => surface.onApproval!(surface.approval!.requestId, decision, scope, extras)} />

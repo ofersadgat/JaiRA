@@ -334,7 +334,9 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   // Whatever its record says: a call the app closed under reads `canceled` or `interrupted` there, while
   // the gate it parked outlives it and answering it resumes the run (`PendingInteraction.resumes`). The
   // view asks only whether this call is the one the task's pending gate is asking (`askingInstanceOf`).
-  const asked = programState !== undefined && held.callId !== undefined ? callGate?.(held.callId) : undefined;
+  // An agent's own call asks too: a tool that puts a question mid-call (`git_push`'s publish question,
+  // `PendingInteraction.callId`) is asked under its row, as a program's call is under its.
+  const asked = held.callId !== undefined ? callGate?.(held.callId) : undefined;
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   // A shell call JaiRA ran is a terminal (decision 0028): live under its row while it runs, a press away
   // once it has ended, and placeable as an artifact is.

@@ -17,7 +17,9 @@
  *
  * A push leaves the machine, so `git_push` and `open_merge_request` pass the SAME publish question
  * the review primitives do — `functions.review_artifacts.publish`, asked at most once per task
- * ({@link PublishAuthorizer}) — on top of the tool's own permission mode. A comment, a merge and a
+ * ({@link PublishAuthorizer}) — on top of the tool's own permission mode, unless that mode itself let
+ * the call through with nobody asked ({@link GitToolHost.permits}): a set that says `git_push: allow`
+ * is the person's say-so, and asking again behind it is a question nobody expects. A comment, a merge and a
  * close are decided by the tool's mode alone, as `remote_comment`/`remote_merge`/`remote_close` are.
  *
  * `git_push` pushes with the CONNECTION's token, not whatever git would have found: the token is
@@ -96,8 +98,17 @@ export interface GitToolHost {
   readonly execEnv?: ExecEnv;
   /** The connection for a host: its provider and token. Throws {@link NoForgeConnection} when there is none. */
   forge(host: string): ForgeAccess;
-  /** `functions.review_artifacts.publish`. Throws {@link PublishRefusal}; `request` is built only when somebody is asked. */
-  authorizePublish(request: () => Promise<PublishRequest>): Promise<void>;
+  /**
+   * `functions.review_artifacts.publish`. Throws {@link PublishRefusal}; `request` is built only when somebody is asked.
+   * `permitted`: the call's own permission line let it through with nobody asked ({@link permits}).
+   */
+  authorizePublish(request: () => Promise<PublishRequest>, permitted?: boolean): Promise<void>;
+  /**
+   * Whether the permission set the task's calls are decided under lets this call through with nobody
+   * asked — `git_push` under `full`. Then that line answered the publish question for this call, and
+   * `ask` asks nothing more. Absent: no set is known here, and the publish question decides alone.
+   */
+  permits?(tool: string, args: Record<string, unknown>): boolean;
   /** The event hub `wait_for_event` waits on. Absent: no repository watcher runs here, and the tool says so. */
   readonly events?: EventWaits;
   /**
@@ -128,6 +139,8 @@ export interface WorkspaceGitOptions {
   publishing: Pick<PublishAuthorizer, "authorize">;
   /** What `wait_for_event` waits on. Absent: it answers that nothing watches the repository here. */
   events?: EventWaits;
+  /** See {@link GitToolHost.permits}. */
+  permits?: (tool: string, args: Record<string, unknown>) => boolean;
   /** See {@link GitToolHost.modelOf}. */
   modelOf?: (ctx: ExecServices | undefined) => string | undefined;
   /** See {@link GitToolHost.artifacts}. */
@@ -142,7 +155,8 @@ export function workspaceGitHost(options: WorkspaceGitOptions): GitToolHost {
     ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}),
     git: (dir) => new Git({ exec: options.exec, repoDir: dir, ...(options.execEnv !== undefined ? { execEnv: options.execEnv } : {}) }),
     forge: (host) => forgeAccess(options.integrations, host, { secrets: options.secrets, ...(options.http !== undefined ? { http: options.http } : {}), ...(options.cli !== undefined ? { cli: options.cli } : {}) }),
-    authorizePublish: (request) => options.publishing.authorize(request),
+    authorizePublish: (request, permitted) => options.publishing.authorize(request, permitted),
+    ...(options.permits !== undefined ? { permits: options.permits } : {}),
     ...(options.events !== undefined ? { events: options.events } : {}),
     ...(options.modelOf !== undefined ? { modelOf: options.modelOf } : {}),
     ...(options.artifacts !== undefined ? { artifacts: options.artifacts } : {}),
@@ -273,8 +287,8 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
     return head !== undefined && head.startsWith(`${at.remote}/`) ? head.slice(at.remote.length + 1) : "main";
   };
 
-  /** Ask the publish question about this push. */
-  const authorize = async (at: Reached, branch: string, target: string, question: string, confirmLabel: string): Promise<void> => {
+  /** Ask the publish question about this push — unless the call's own permission line already allowed it. */
+  const authorize = async (call: { tool: string; args: Record<string, unknown>; ctx: ExecServices | undefined }, at: Reached, branch: string, target: string, question: string, confirmLabel: string): Promise<void> => {
     try {
       await host.authorizePublish(async () => {
         const identity = await at.git.identity();
@@ -291,8 +305,9 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
           ...(who !== undefined ? { openedBy: `@${who.login}` } : {}),
           question,
           confirmLabel,
+          ...(call.ctx?.toolCallId !== undefined ? { callId: call.ctx.toolCallId } : {}),
         };
-      });
+      }, host.permits?.(call.tool, call.args) === true);
     } catch (e) {
       throw e instanceof PublishRefusal ? new GitToolRefusal(e.message) : e;
     }
@@ -425,7 +440,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
         const target = text(args["target"]) ?? (await defaultTarget(at));
         if (branch === target) throw new GitToolRefusal(`the branch to open from is ${target} itself — a merge request needs a branch of its own`);
         const forge = FORGE_LABELS[at.access.provider.kind];
-        await authorize(at, branch, target, `Push ${branch} to ${forge.name} and open a ${forge.request} into ${target}?`, "Push and open");
+        await authorize({ tool: "open_merge_request", args, ctx }, at, branch, target, `Push ${branch} to ${forge.name} and open a ${forge.request} into ${target}?`, "Push and open");
         const pushed = await push(at, branch);
         const title = text(args["title"]) ?? (await at.git.tryRun(["log", "-1", "--format=%s", `refs/heads/${branch}`])) ?? branch;
         const handle = await at.access.provider.open({
@@ -531,7 +546,7 @@ export function createGitTools(host: GitToolHost): Record<string, Tool> {
       async (args, ctx) => {
         const at = await reach(args, ctx);
         const branch = text(args["branch"]) ?? (await currentBranch(at.git));
-        await authorize(at, branch, branch, `Push ${branch} to ${FORGE_LABELS[at.access.provider.kind].name}?`, "Push");
+        await authorize({ tool: "git_push", args: { ...args, branch }, ctx }, at, branch, branch, `Push ${branch} to ${FORGE_LABELS[at.access.provider.kind].name}?`, "Push");
         const head = await push(at, branch);
         return { ok: true, repository: repository(at), branch, head };
       },

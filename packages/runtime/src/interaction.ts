@@ -51,6 +51,12 @@ export interface HubRequest {
    * exactly one run exists. A registration belongs to one run, so that is where the answer is.
    */
   taskId?: string;
+  /**
+   * The agent's tool call asking it, when a host function asks mid-call — `git_push`'s publish
+   * question, under the agent's `toolu_…`. What lets a view draw the question under that call's row,
+   * in the conversation or a subagent's, rather than nowhere: an agent's turn is no program call.
+   */
+  callId?: string;
 }
 
 type Pending = {
@@ -176,8 +182,10 @@ export class InteractionHub {
     taskId?: string,
     /** Told the request's id the moment it parks — never called for a seeded answer, which parks nothing. */
     onParked?: (requestId: string) => void,
+    /** The agent's tool call asking — see {@link HubRequest.callId}. */
+    callId?: string,
   ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
-    return this.park(component, inputs as FunctionInputs, taskId, onParked);
+    return this.park(component, inputs as FunctionInputs, taskId, onParked, undefined, callId);
   }
 
   private park(
@@ -195,6 +203,7 @@ export class InteractionHub {
      * close abandons them), because what they tell the host about the row differs.
      */
     abortSignal?: AbortSignal,
+    callId?: string,
   ): Promise<FunctionResult<ResolvedValue, WorkflowMetrics>> {
     // The answer somebody already gave, if this is the park it was given for — see {@link seeded}.
     // Consumed before a request id is minted, because there is no request: nothing is shown, nothing
@@ -211,6 +220,7 @@ export class InteractionHub {
       component,
       inputs: inputs as Record<string, JsonValue>,
       ...(taskId !== undefined ? { taskId } : {}),
+      ...(callId !== undefined ? { callId } : {}),
     };
     return new Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>((resolve) => {
       this.pending.set(requestId, { request, resolve });

@@ -496,6 +496,13 @@ export interface PendingInteraction {
   subjectProject?: string;
   /** The registered function name — `choose_option`, `review_artifact`, … */
   component: string;
+  /**
+   * The agent's tool call that asked, when a tool asks mid-call (`git_push`'s publish question): the
+   * `toolu_…` its row in the conversation — or in a subagent's — carries, where the question is drawn
+   * and where the waiting pill goes. Absent: a state's own question, drawn at its program call. Live
+   * only — a gate read back after a restart has lost its call, and is drawn under the thread instead.
+   */
+  callId?: string;
   /** Resolved inputs, including the state's authored `config` surface. */
   inputs: Record<string, JsonValue>;
   /** The parsed component contract, normalized in main so the renderer does not

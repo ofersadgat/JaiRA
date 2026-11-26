@@ -41,6 +41,16 @@ const TABLE: PackageReader = {
 const allows = (name: string, args: unknown): boolean | undefined => allowsCall({}, READ_ONLY, name, args, "posix", { root: "/repo", packages: TABLE });
 const bash = (command: string): boolean | undefined => allows("Bash", { command });
 
+describe("what the shipped full lets through", () => {
+  // What `git_push` asks before publishing (`GitToolHost.permits`): under `full`, nothing more.
+  it("lets a push and a merge request through with nobody asked", () => {
+    const FULL = parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/full.json", import.meta.url)), "utf8")) as unknown).permissionSet;
+    expect(allowsCall({}, FULL, "git_push", { branch: "main" }, "posix", { root: "/repo" })).toBe(true);
+    expect(allowsCall({}, FULL, "git_push", { branch: "main", remote: "gitlab" }, "posix", { root: "/repo" })).toBe(true);
+    expect(allowsCall({}, FULL, "open_merge_request", { branch: "feature" }, "posix", { root: "/repo" })).toBe(true);
+  });
+});
+
 describe("what the shipped read-only lets through", () => {
   it("judges an agent's built-ins as the standard tools they are, and JaiRA's own over the bridge", () => {
     expect(allows("Read", { file_path: "a.ts" })).toBe(true);
