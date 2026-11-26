@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { canonicalModulePath, initProject, userModules, type Project } from "@jaira/persistence";
+import { canonicalModulePath, initProject, mirrorStarted, userModules, type Project } from "@jaira/persistence";
 import { moduleHash } from "@declarative-ai/hw";
 import type { PushMessage } from "@jaira/shared";
 import type { FakeRule } from "@jaira/runtime";
@@ -516,6 +516,19 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
     expect(service.listTasks().find((t) => t.taskId === taskId)?.status).toBe("completed");
     expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ waiting: 0, live: [] });
     service.cancelTask(taskId);
+  });
+
+  it("ends the mirror of a task it started that never ran, once that task is canceled", () => {
+    const { project } = (service as unknown as { session(): { project: Project } }).session();
+    const parent = service.createTask({ title: "Talk", workflow: "session", conversation: true, inputs: { message: "hi", improve: false } });
+    const child = service.createTask({ title: "Review", workflow: "improve/conversation", inputs: { context: { task: parent.taskId } } });
+    project.tasks.write({ ...project.tasks.read(child.taskId)!, origin: { kind: "started", taskId: parent.taskId } } as Parameters<typeof project.tasks.write>[0]);
+    mirrorStarted(project, parent.taskId, { instanceId: "call-5" }, project.tasks.read(child.taskId)!);
+    const ended = () => project.events.list(parent.taskId).some(({ event }) => event.type === "instance.terminated" && event.instanceId === child.taskId);
+    expect(ended()).toBe(false);
+    service.cancelTask(child.taskId);
+    expect(service.listTasks().find((t) => t.taskId === child.taskId)?.status).toBe("canceled");
+    expect(ended()).toBe(true);
   });
 
   // The person, 2026-11-24: "the state of a nested task affecting the color of the parent task ring".

@@ -6927,8 +6927,30 @@ export class AppService {
    * A run is never a tool call's, even when one started it (`start`, `move`, a child): its processes are
    * its own tool calls' terminals, not the caller's (`outsideToolCall`).
    */
-  private startRun(...args: Parameters<AppService["runFromStart"]>): ReturnType<AppService["runFromStart"]> {
-    return outsideToolCall(() => this.runFromStart(...args));
+  private startRun(open: ProjectSession, taskId: string, opts: Parameters<AppService["runFromStart"]>[2]): ReturnType<AppService["runFromStart"]> {
+    return outsideToolCall(async () => {
+      // What starting has taken so far, given back in reverse if it throws before the run loop owns it
+      // — see `StartUnwind`. A start that threw after `beginTaskRun` used to leave the task `running`
+      // under a claim that kept beating: a conversation showing "working" with nothing ever run, and a
+      // second start refused as "already running".
+      const unwind: StartUnwind = [];
+      try {
+        return await this.runFromStart(open, taskId, opts, unwind);
+      } catch (e) {
+        const error = e instanceof Error ? e : new Error(String(e));
+        if (unwind.length > 0) {
+          this.log({ level: "error", source: "run", message: `${taskId} failed as it started: ${error.message}`, project: open.key, taskId, ...stackDetail(error) });
+        }
+        for (const undo of unwind.reverse()) {
+          try {
+            undo(error);
+          } catch (inner) {
+            this.log({ level: "error", source: "run", message: `could not undo part of ${taskId}'s failed start: ${(inner as Error).message}`, project: open.key, taskId, ...stackDetail(inner) });
+          }
+        }
+        throw e;
+      }
+    });
   }
 
   private async runFromStart(
@@ -6975,6 +6997,8 @@ export class AppService {
       /** How placement got the task here (decision 0013 §5): written into its journal once it has begun. */
       placed?: PlacementNote;
     },
+    /** Where each thing taken is given back from, should the start throw — `startRun` runs it. */
+    unwind: StartUnwind = [],
   ): Promise<{ taskId: string }> {
     const project = open.project;
     const config = opts.config;
@@ -7159,6 +7183,18 @@ export class AppService {
       ...(opts.loaded !== undefined ? { continues: true } : {}),
       ...(opts.reopen === true ? { reopen: true } : {}),
     });
+    // The task is `running` from here: a start that fails before its loop does ends it failed, as the
+    // loop's own crash does — unless something on the way (the capability gate) already ended it.
+    unwind.push((error) => {
+      if (project.runtime.get(taskId)?.status !== "running") return;
+      finishTaskRun(project, taskId, "failed", { failure: { classification: "permanent", reason: error.message } });
+      this.publishFor(open, { type: "run:finished", taskId, status: "failed" });
+      open.events.forgetTask(taskId);
+      this.taskEnded(open, taskId, "failed", started.meta.workflow);
+      this.settleWaiters(open, taskId);
+      this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
+    });
     // How it came to run here, and what starting it did — the journal's first row, so the conversation
     // can say it above the message that started it. After the run has begun: a row before that would be
     // history, and a task with history cannot make a fresh start.
@@ -7272,6 +7308,10 @@ export class AppService {
     // What a SKIP leaves in the inbox, read off this run's own journal — see `SkipWithdrawals`.
     const withdrawals = new SkipWithdrawals(project.events.list(taskId).map((row) => row.event));
     open.live.set(taskId, { taskId, abort, done, directed });
+    unwind.push(() => {
+      open.live.delete(taskId);
+      settle();
+    });
 
     // Claim the run (DESIGN §4.2a). Two things follow: another process opening this
     // project will see a live heartbeat and leave the task alone instead of
@@ -7297,6 +7337,11 @@ export class AppService {
       onCancelRequested: () => this.cancelTaskIn(open, taskId),
     });
     observe = owner.observer();
+    unwind.push(() => {
+      output.flush();
+      owner?.release();
+      open.hub.unseed(taskId);
+    });
 
     // Every interactive function the bundle names that the script didn't answer
     // is routed to the renderer.
@@ -7425,6 +7470,7 @@ export class AppService {
     const fakeSource = opts.fake ?? kept?.scripted;
     const fakeRules = fakeSource !== undefined ? parseFakeRules(fakeSource) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
+    unwind.push(() => open.fakeRules.delete(taskId));
     // A conversation still carrying its birth name is given a better one while its first turn runs.
     this.titleConversation(open, taskId, fakeRules);
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
@@ -7493,6 +7539,10 @@ export class AppService {
     });
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(taskId, () => liveFlush.flush());
+    unwind.push(() => {
+      liveFlush.dispose();
+      open.liveFlush.delete(taskId);
+    });
     const onDelta = (delta: Parameters<Parameters<typeof withTurnStream>[0]>[0]): void => {
       // Folded into main's live-turn log FIRST, so the number the push carries is the count a
       // `session:live` snapshot taken now would report — the merge protocol that lets a viewer seed
@@ -7671,6 +7721,9 @@ export class AppService {
 
     // Where `chat:settings` reaches this run's permission set, let go of in the run's `finally`.
     const releasePermissions = this.holdPermissions(open, taskId, live);
+    // The run loop owns all of it from here: its own `catch` and `finally` give back what the steps
+    // above took, so a throw after this point is not the start's to undo.
+    unwind.length = 0;
     void (async () => {
       try {
         // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
@@ -8542,10 +8595,13 @@ export class AppService {
     // was picked needs none of it, which is what lets a pick reach an opening message whose instance
     // the journal does not hold yet.
     let path: ReturnType<AppService["chatContextOf"]>["path"] = [];
-    const host = this.chatHostOf(taskId, project);
+    // The conversation is `open`'s: asked of it by name, since an unnamed lookup refuses the moment a
+    // second project is open — which, from a run's start, left the task `running` with nothing run.
+    const where = project ?? open.key;
+    const host = this.chatHostOf(taskId, where);
     if (host !== null) {
       try {
-        path = this.chatContextOf(taskId, host, project).path;
+        path = this.chatContextOf(taskId, host, where).path;
       } catch (e) {
         if (!(e instanceof NoConversationHere)) throw e;
       }
@@ -11890,6 +11946,10 @@ export class AppService {
       session.project.remotes.stopAwaiting(taskId);
       if (this.cancelable(session, taskId)) {
         cancelTask(session.project, taskId);
+        // No run ends here to say so, so the end of its mirror is written here: a task a conversation
+        // started and that never ran — `queued`, a start that failed — canceled, is over in that
+        // conversation's journal too, as a run's end writes it (`taskEnded`).
+        this.settleStarted(session, taskId, "canceled");
         this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       }
     }
@@ -17646,6 +17706,14 @@ export class AppService {
  * reports all of it, because a message someone typed and pressed Enter on deserves a reason.
  */
 class NoConversationHere extends Error {}
+
+/**
+ * What a run's start has taken — the task's `running` status, its place among the live runs, its job
+ * claim and heartbeat, its live-turn flush — each with the step that gives it back. `runFromStart`
+ * pushes one as it takes each; `startRun` runs them in reverse when the start throws before the run
+ * loop owns them, and the start empties the list the moment it hands them to that loop.
+ */
+type StartUnwind = Array<(error: Error) => void>;
 
 /** The kinds of file a state is, in the order a layer's copy is looked for: JSON first, a script last. */
 const WORKFLOW_FILE_EXTENSIONS = [".json", ".yaml", ".yml", ".ts"] as const;

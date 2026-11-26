@@ -163,6 +163,52 @@ describe("a permission set picked while a program conversation answers (decision
 });
 
 /**
+ * A conversation whose first message picked a permission set, started while a SECOND project is open
+ * (the person, 2026-11-26: "i have a jaira session running ... which jaira says is running, but the
+ * conversation view only shows my original message and nothing else"). The run's start read the set
+ * through an unnamed project lookup, which refuses once two are open: it threw after the task was
+ * `running` and its job claimed, and nothing gave either back.
+ */
+describe("a conversation started with a permission set while another project is open", { timeout: 60_000 }, () => {
+  let other: string;
+  beforeEach(async () => {
+    other = mkdtempSync(join(tmpdir(), "jaira-live-permissions-other-"));
+    initProject(other, testHome());
+    await service.open(other);
+  });
+  afterEach(() => rmSync(other, { recursive: true, force: true }));
+
+  it("answers, under the set it was started with", async () => {
+    const { taskId } = service.createTask({ project: dir, title: titleOf("one"), workflow: CHAT_SESSION, conversation: true, inputs: { message: "one", improve: false } });
+    await service.startTask({ project: dir, taskId, overrides: { permissionSet: { layers: ["$/permission-sets/full"] } as never }, fake: [{ promptIncludes: "one", output: "first answer" }] });
+    await eventually(() => service.sessionHistory({ taskId, project: dir }).length >= 1 && parked(taskId), "the first reply", 20_000);
+    expect(held(taskId)![0]!.entries["shell"]?.mode).toBe("allow");
+  });
+});
+
+/**
+ * Whatever a start throws once the task is `running`, the task ends failed and nothing it took is kept:
+ * not its place among the live runs, not its job claim, whose heartbeat otherwise went on for as long
+ * as the app did — a conversation that read as "working" with nothing run.
+ */
+describe("a start that throws after it has begun", () => {
+  it("ends the task failed and gives back its claim", async () => {
+    jsonConversation(workflowsDir);
+    const { taskId } = service.createTask({ title: titleOf("go"), workflow: CHAT_SESSION, inputs: { message: "go" } });
+    // A step between the claim and the run loop, made to throw.
+    (service as never as { titleConversation: () => void }).titleConversation = () => {
+      throw new Error("a step of the start failed");
+    };
+    await expect(service.startTask({ taskId, fake: [{ output: "done" }] })).rejects.toThrow(/a step of the start failed/);
+    expect(service.taskDetail(taskId).status).toBe("failed");
+    expect(finished(taskId)).toBe(true);
+    const open = session() as Session & { live: Map<string, unknown>; project: { jobs: { liveRunJob(taskId: string, nowMs: number): unknown } } };
+    expect(open.live.has(taskId)).toBe(false);
+    expect(open.project.jobs.liveRunJob(taskId, Date.now())).toBeUndefined();
+  });
+});
+
+/**
  * The composer opens on what the conversation was left at (the person, 2026-10-05: "I start a
  * conversation and then change the permission set to chat/smart then I switch to a different
  * conversation where the composer correctly switches to chat/ask and then I switch back to this current
