@@ -14,14 +14,14 @@ import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 // `git reset --hard: deny` is `security/guarded`'s line — a refusal is a line of the set, never a rule in code.
 const PERMISSION_SET = { shell: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", "git reset --hard": "deny", other: "deny" } as const;
 
-function harness(source?: string) {
+function harness(source?: string, extra: Record<string, string> = {}) {
   const asked: ApprovalRequest[] = [];
   const hub = new ApprovalHub({ onRequest: (request) => void asked.push(request) });
   const audit: PolicyAuditEntry[] = [];
   const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub.grants("t1"), onDecision: (e) => audit.push(e) });
   // What a loaded state holds: the list and the lowered block, whichever form its author wrote.
   // `source` is what lowering a STATE writes beside the subjects: the reference its permission set was named by.
-  const block = { ...lowerPermissionSet(parsePermissionSet(PERMISSION_SET).permissionSet).permissions!, ...(source !== undefined ? { source } : {}) };
+  const block = { ...lowerPermissionSet(parsePermissionSet({ ...PERMISSION_SET, ...extra }).permissionSet).permissions!, ...(source !== undefined ? { source } : {}) };
   const ran: string[] = [];
   const shell: Tool = {
     description: "shell",
@@ -130,13 +130,42 @@ describe("an approval for a shell line", () => {
     await second;
   });
 
-  it("asks about a line it cannot read, and that answer cannot be remembered", async () => {
-    const { run, hub, asked } = harness();
+  it("asks about a line it cannot read, and an answer for this run is remembered as `unparsed`", async () => {
+    const { run, hub, asked, ran } = harness();
     const pending = run("$TOOL --do-it");
     await Promise.resolve();
-    expect(asked[0]!.parts!.parts).toMatchObject([{ kind: "command", verdict: "asks", decidedBy: { source: "parser" }, widths: [] }]);
+    expect(asked[0]!.parts!.parts).toMatchObject([{ kind: "command", verdict: "asks", decidedBy: { source: "parser" }, widths: ["unparsed"] }]);
     hub.decide(asked[0]!.requestId, "allow", "once", []);
     await pending;
-    expect(hub.grants("t1").list()).toEqual({});
+    expect(Object.keys(hub.grants("t1").list())).toEqual(["unparsed"]);
+    // Another line nobody can read runs on that answer; a line that WAS read is still its own lines'.
+    await run("$OTHER --too");
+    expect(asked).toHaveLength(1);
+    expect(ran).toEqual(["$TOOL --do-it", "$OTHER --too"]);
+  });
+
+  it("answers a line it cannot read by the set's `unparsed` line — never by `shell` or `other`", async () => {
+    const allowing = harness(undefined, { unparsed: "allow" });
+    await allowing.run("$TOOL --do-it");
+    expect(allowing.asked).toEqual([]);
+    expect(allowing.ran).toEqual(["$TOOL --do-it"]);
+
+    const refusing = harness(undefined, { unparsed: "deny" });
+    expect(isPermissionDenied(await refusing.run("$TOOL --do-it"))).toBe(true);
+    expect(refusing.asked).toEqual([]);
+
+    // `shell: allow` was written about commands that could be read: it does not reach this one.
+    const shellOnly = harness(undefined, { shell: "allow", other: "allow" });
+    const pending = shellOnly.run("$TOOL --do-it");
+    await Promise.resolve();
+    expect(shellOnly.asked).toHaveLength(1);
+    shellOnly.hub.decide(shellOnly.asked[0]!.requestId, "deny");
+    await pending;
+  });
+
+  it("keeps a refusal a line it does read gives, whatever `unparsed` allows", async () => {
+    const { run, asked } = harness(undefined, { unparsed: "allow" });
+    expect(isPermissionDenied(await run("$TOOL --do-it && git rm a.txt"))).toBe(true);
+    expect(asked).toEqual([]);
   });
 });

@@ -277,12 +277,12 @@ describe("the answer menu", () => {
     expect(menu.notes).toEqual([unwritable]);
   });
 
-  it("offers only once for a line nobody could read, and says why", () => {
+  it("offers a line nobody could read as `unparsed`, for this run or added like any other line", () => {
     const pending = pendingOf(judge("git commit -m 'unterminated"), WRITABLE);
     const menu = answerMenu(pending, "allow");
-    expect(menu.what).toEqual([]);
-    expect(menu.reach.map((r) => r.reach)).toEqual(["once"]);
-    expect(menu.notes[0]).toMatch(/could not be read/);
+    expect(menu.what.map((w) => w.key)).toEqual(["unparsed"]);
+    expect(menu.reach.map((r) => r.reach)).toContain("run");
+    expect(menu.notes.some((note) => /could not be read/.test(note))).toBe(false);
   });
 
   it("keeps the same two buttons for a tool with no command line: once, or this run", () => {

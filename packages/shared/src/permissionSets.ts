@@ -141,6 +141,15 @@ export const SHELL_TOOL = "shell";
  * by the variable's name as a command by its subcommand: `set_env NODE_ENV`, then `set_env`.
  */
 export const SET_ENV_SUBJECT = "set_env";
+/**
+ * The subject that answers for a piece of a shell line the parser could NOT read — a construct it does
+ * not model, a command it cannot vouch for. Nothing can be known about such a piece, so no command, tool
+ * or `shell` line speaks for it and it asks; but a person may still answer it once and for all, as for
+ * any other line: `"unparsed": "allow"` (or `"deny"`), or "for this run" at this width. Only its own line
+ * answers it — never `shell` or `other`, which were written about commands that could be read — and
+ * never a function. A deny from a line that does match the line stands over it.
+ */
+export const UNPARSED_SUBJECT = "unparsed";
 /** The key that starts a permission set from another — the same `$ref` every other block uses. */
 export const PERMISSION_SET_REF_KEY = "$ref";
 /**

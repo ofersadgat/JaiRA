@@ -14,6 +14,7 @@ import {
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
   SET_ENV_SUBJECT,
+  UNPARSED_SUBJECT,
   flagLineModes,
   kindedPlace,
   resolveResource,
@@ -275,7 +276,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   const base = { span, paths: [] as string[], ...(command.via !== undefined ? { via: command.via } : {}), command };
   const program = command.program;
 
-  const undecided: ClassifiedPart = { ...base, kind: "command", subject: SHELL_SUBJECT, matched: programSpan, widths: [], unmodelled: "what runs is decided when the line runs" };
+  const undecided: ClassifiedPart = { ...base, kind: "command", subject: SHELL_SUBJECT, matched: programSpan, widths: [UNPARSED_SUBJECT], unmodelled: "what runs is decided when the line runs" };
   if (programWord?.dynamic === true) return undecided;
 
   // Running a file, named by its path: `./x.sh`, `scripts/smoke.sh`, `build.ps1`.
@@ -286,7 +287,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], paths: [raw], widths: [SCRIPT_SUBJECT] };
   }
 
-  const unmodelledBy = (why: string): ClassifiedPart => ({ ...base, kind: "command", subject: program, matched: programSpan, widths: [], unmodelled: why });
+  const unmodelledBy = (why: string): ClassifiedPart => ({ ...base, kind: "command", subject: program, matched: programSpan, widths: [UNPARSED_SUBJECT], unmodelled: why });
   if (dialect === "powershell") {
     const why = powershellUnmodelled(command, []);
     if (why !== undefined) return unmodelledBy(why);
@@ -464,11 +465,12 @@ function envPartOf(name: string, span: TextSpan, nameSpan: TextSpan, via: string
 export function classifyRequest(request: ShellRequest, dialect: CommandDialect): ClassifiedPart | undefined {
   if (request.kind === "env") return envPartOf(request.name, request.span, request.nameSpan, request.via);
   if (request.kind === "unparsed") {
-    return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
+    return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [UNPARSED_SUBJECT], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
   }
   // Read, and not vouched for: the same as `export PATH=…`, which is a command that asks and says why.
+  // Nothing is known of what it runs, so it is answered as what could not be read: by the `unparsed` line.
   if (request.kind === "unvouched") {
-    return { kind: "command", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
+    return { kind: "command", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [UNPARSED_SUBJECT], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
   }
   // Code nobody can read off the line — a .NET call, a property set — is what `python -c` is.
   if (request.kind === "code") {

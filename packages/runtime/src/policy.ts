@@ -119,6 +119,7 @@ import {
   placeWidthsOf,
   resolvePlaces,
   SCRIPT_SUBJECT,
+  UNPARSED_SUBJECT,
   RESERVED_MCP_SERVERS,
   TOOL_SPEC_BY_NAME,
   type PlaceKind,
@@ -740,6 +741,28 @@ function rememberedReason(remembered: { width: string; decision: "allow" | "deny
   return `'${remembered.width}'${remembered.place !== undefined ? ` in ${remembered.place}` : ""} was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`;
 }
 
+/**
+ * What answers a piece of a line that could not be read ({@link UNPARSED_SUBJECT}): the set's own
+ * `unparsed` line when it allows or refuses — its place never, since nothing is known of where such a
+ * piece acts, and never a function — else an answer remembered for this run at that width, else the
+ * line's `ask`. `undefined` when nothing speaks: the piece asks as the parser says.
+ */
+function unreadableAnswerOf(judging: ShellPermissionSet | undefined, options: DecideCommandOptions, why: string): Composed | undefined {
+  const line = judging !== undefined ? answerOfLines(judging, [UNPARSED_SUBJECT]) : undefined;
+  const mode = line?.mode !== undefined && modeFunction(line.mode) === undefined ? line.mode : undefined;
+  const verdict = mode !== undefined ? verdictOfMode(mode) : undefined;
+  const fromLine = (): Composed => {
+    const layer = layerOfLine(options.stack, UNPARSED_SUBJECT, undefined);
+    return { verdict: verdict!, source: "permissionSet", entry: UNPARSED_SUBJECT, ...(layer !== undefined ? { layer } : {}), reason: `${why} — the permission set's '${UNPARSED_SUBJECT}' is ${modeWord(mode!)}` };
+  };
+  if (verdict === "allowed" || verdict === "denied") return fromLine();
+  const remembered = options.grants?.answerFor([UNPARSED_SUBJECT]);
+  if (remembered !== undefined) {
+    return { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, layer: RUNTIME_LAYER, reason: `${why} — ${rememberedReason(remembered)}` };
+  }
+  return verdict === "asks" ? fromLine() : undefined;
+}
+
 /** A part's answer while it is being composed: the layer that gave it is kept beside it. */
 interface Composed {
   verdict: CommandPartVerdict;
@@ -808,10 +831,12 @@ function composedOf(answer: PermissionSetAnswer & { mode: PermissionSetMode }, p
  *     may touch there. An entry that names a FUNCTION answers `function`, which ranks between `allowed`
  *     and `asks`.
  *  3. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
- *     never allowed without a person, whatever the permission set hands it to.
+ *     never allowed by what the permission set says about commands it could read (`shell`, `other`,
+ *     its program's lines). Only the line written for what could not be read, `unparsed`, answers it
+ *     — or an answer a person gave for this run at that width ({@link unreadableAnswerOf}).
  *  4. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied` — at its
- *     place, where it was kept at one. It never lifts `denied`, and never what the parser could not
- *     read, and never a part a function decides.
+ *     place, where it was kept at one. It never lifts `denied`, and never a part a function decides; what
+ *     the parser could not read was answered at (3).
  *  5. The executor's scope FLOOR's answer for the part's place, by the standard tool the part is.
  *     Strictest again, and after (4): a remembered `rm` does not open a place the floor shut.
  */
@@ -849,7 +874,8 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     if (read.mode === "deny") composed = composedOf({ ...read, mode: read.mode }, part, options.stack);
   }
   if (part.unmodelled !== undefined && composed.verdict !== "denied") {
-    composed = { verdict: "asks", source: "parser", reason: part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled };
+    const why = part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled;
+    composed = unreadableAnswerOf(judging, options, why) ?? { verdict: "asks", source: "parser", reason: why };
   }
 
   // (4) remembered for this run — at the part's place, where the answer was kept at one. The runtime
@@ -1097,7 +1123,8 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
         ...(judged.layer !== undefined ? { layer: judged.layer } : {}),
         reason: judged.reason,
       },
-      widths: classified.widths,
+      // What could not be read is remembered as such: its own widths were never what judged it (step 3).
+      widths: classified.unmodelled !== undefined ? [UNPARSED_SUBJECT] : classified.widths,
       ...(at !== undefined && placeKind !== undefined ? { where: { kind: placeKind, at, widths: placeWidthsOf(placeKind, at, { ...placeOptions, ...(packageOf !== undefined ? { packageOf } : {}) }) } } : {}),
       ...(classified.via !== undefined ? { via: classified.via } : {}),
       ...(runner !== undefined ? { within: runner } : {}),
@@ -1139,6 +1166,31 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
 
   // The strictest PART names the line's reason — ranked by verdict, so an asking part explains an
   // escalation before a part a function is about to decide does.
+  const unreadReason = taken.reason !== undefined ? `command could not be parsed (${taken.reason})` : "command could not be parsed";
+  // A piece of the line nobody could read, with no part of its own: the whole line stands for it, and
+  // is answered as any unreadable piece is — by the `unparsed` line, or for this run, or by a person.
+  if (taken.unparsed && line.trim().length > 0 && !parts.some((part) => part.kind === "unparsed")) {
+    const answer = unreadableAnswerOf(options.permissionSet, options, unreadReason);
+    parts.push({
+      span: { start: 0, end: line.length },
+      matched: [{ start: 0, end: line.length }],
+      text: line,
+      kind: "unparsed",
+      subject: SHELL_SUBJECT,
+      verdict: answer?.verdict ?? "asks",
+      decidedBy:
+        answer !== undefined
+          ? { source: answer.source, ...(answer.entry !== undefined ? { entry: answer.entry } : {}), ...(answer.layer !== undefined ? { layer: answer.layer } : {}), reason: answer.reason }
+          : { source: "parser", reason: unreadReason },
+      widths: [UNPARSED_SUBJECT],
+    });
+    commands.push(undefined);
+  }
+  // Every unreadable piece was ALLOWED by a line or an answer naming it as such (`unparsed`): it no
+  // longer holds the line to a person.
+  const unread = parts.filter((part) => part.kind === "unparsed");
+  const unreadSettled = taken.unparsed && unread.length > 0 && unread.every((part) => part.verdict === "allowed");
+
   let worst: Omit<CommandDecision, "parts"> | undefined;
   let worstVerdict: CommandPartVerdict | undefined;
   parts.forEach((part, index) => {
@@ -1149,13 +1201,14 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     }
   });
 
-  if ((taken.unparsed || line.trim().length === 0) && worstVerdict !== "denied" && worstVerdict !== "asks") {
+  if (((taken.unparsed && !unreadSettled) || line.trim().length === 0) && worstVerdict !== "denied" && worstVerdict !== "asks") {
     // DESIGN §10.1: "Unparsable commands default to require_approval." A deny beside the unreadable
     // piece stands; an allow does not — and neither does a function's: a line with a piece nobody
     // could read asks a PERSON, whatever a function would say about the pieces it can see. An empty
     // line has nothing to judge, and still must not allow. A line that was read and holds no request
     // (`$PSVersionTable`, `x=1`, a comment) runs nothing outside the shell: below, it is allowed.
-    const reason = taken.reason !== undefined ? `command could not be parsed (${taken.reason})` : "command could not be parsed";
+    // An unreadable piece reaches here only still asking; an empty line has nothing to remember.
+    const reason = unreadReason;
     if (!parts.some((part) => part.kind === "unparsed")) {
       parts.push({
         span: { start: 0, end: line.length },
