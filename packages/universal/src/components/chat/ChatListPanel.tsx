@@ -40,6 +40,8 @@ export interface ChatListSurface {
   /** When each working conversation's work counts from — `ChatSurface.workedAt`. */
   workedAt?: Readonly<Record<string, number>> | undefined;
   seen: Readonly<Record<string, number>>;
+  /** Picking a row is looking at it — `ChatSurface.onLooked`. */
+  onLooked?: ((taskId: string) => void) | undefined;
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
   onDelete: (taskIds: readonly string[], project?: string) => void;
@@ -133,7 +135,11 @@ export function ChatListPanel({ surface, find = false, arrange }: { surface: Cha
       }),
     [shown, arrange?.group, arrange?.sort, arrange?.when, arrange?.home, arrange?.pinned, surface.seen, surface.producing, surface.places],
   );
-  const open = (task: ChatRow): void => surface.onOpen(task.taskId, homeOf(task, surface));
+  const open = (task: ChatRow): void => {
+    // Picked in the list is looked at, even the one already open because the window arrived at its project.
+    surface.onLooked?.(task.taskId);
+    surface.onOpen(task.taskId, homeOf(task, surface));
+  };
   const menuAt = (task: ChatRow, x: number, y: number): void =>
     setMenu({
       x,

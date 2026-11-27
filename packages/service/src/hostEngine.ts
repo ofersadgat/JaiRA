@@ -159,6 +159,22 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
   lazy["engine:info"] = (() => control.info()) as Handler;
   lazy["engine:stop"] = (() => control.stop()) as Handler;
   if (options.eager === true) engine();
+  // A device's messages, marked as its own once taken (`deviceAttention.ts`): what the conversation does
+  // next is told to that device alone. The service clears the mark first for every message (the
+  // person's, from anywhere), synchronously, so the mark here is the last word for this one.
+  const deviceSends = (deviceId: string): Record<string, Handler> => ({
+    "chat:send": ((request: { taskId: string }) => {
+      const sent = (dispatchOf()["chat:send"] as (request: unknown) => unknown)(request);
+      engine().turnSenders.fromDevice(request.taskId, deviceId);
+      return sent;
+    }) as Handler,
+    // A conversation started from the device: its opening message is the device's too.
+    "task:create": (async (request: { conversation?: boolean }) => {
+      const made = (await (dispatchOf()["task:create"] as (request: unknown) => unknown)(request)) as { taskId?: string } | undefined;
+      if (request.conversation === true && made?.taskId !== undefined) engine().turnSenders.fromDevice(made.taskId, deviceId);
+      return made;
+    }) as Handler,
+  });
   host = await claimEngine({
     baseDir: options.baseDir,
     kind: options.kind,
@@ -181,7 +197,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
           // A phone or a browser (amended 2026-09-30): a window like the desktop's own — the service's
           // answers, with this connection's current project and limits watch above — less what a window
           // can only do in front of this machine's screen.
-          ...(client.device !== undefined ? { ...deviceViewsOf(), ...deviceRefusals(client.device.kind) } : {}),
+          ...(client.device !== undefined ? { ...deviceViewsOf(), ...deviceRefusals(client.device.kind), ...deviceSends(client.device.id) } : {}),
         },
         closed: () => {
           connections?.drop(client.id);
@@ -203,6 +219,12 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
   });
   if (host === undefined) return undefined;
   const claimed = host;
+  // Beside every push, what it says to the device that sent its conversation's latest message — only
+  // once an engine is built: one never built has sent nothing to anybody.
+  claimed.onBroadcast = (message) => {
+    const routed = service?.deviceAttention(message);
+    if (routed !== undefined) claimed.pushToDevice(routed.deviceId, routed.push);
+  };
   // Where a script run as a plain program reports (decision 0029, ruling 12), beside the pipe — the
   // engine built when the first report arrives, as for any client.
   let scripts: ScriptEndpoint | undefined;

@@ -9,6 +9,7 @@ import { Replayed, TokenRoot, UniversalApp, config, installNativeErrorReporting 
 import { isPhoneWidth } from "@jaira/ui/phoneModel";
 import { Remote, linkOf, type PairLink } from "../Remote";
 import { holdStill } from "./still";
+import { PhoneAttention } from "./PhoneAttention";
 import { StrictLayout } from "./StrictLayout";
 
 /**
@@ -85,7 +86,10 @@ export function NativeApp(): JSX.Element {
                 <IslandsTab />
               </TokenRoot>
             ) : (
-              isPhoneWidth(window.width) ? (
+              <>
+              {/* What needs the person, told while the app is not in front — for conversations sent from here. */}
+              <PhoneAttention />
+              {isPhoneWidth(window.width) ? (
                 // The whole height by size, not flex: in a browser the safe area's box is a block, where
                 // `flex: 1` below it means nothing.
                 <View style={{ height: "100%", width: "100%" }}>
@@ -97,7 +101,8 @@ export function NativeApp(): JSX.Element {
                 <DesktopFrame>
                   <UniversalApp />
                 </DesktopFrame>
-              )
+              )}
+              </>
             )}
           </Remote>
           </StrictLayout>

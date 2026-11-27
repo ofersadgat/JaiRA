@@ -3564,6 +3564,26 @@ export type PushMessage =
    * (`jaira serve`), for the window that is using it to open where the person is (decision 0013 §8).
    */
   | { type: "open:external"; url: string }
+  /**
+   * The person picked a task outside the window — a toast, its Open — and the window is brought
+   * forward on it: a conversation in the Chat room, anything else selected in Tasks. Main to its own
+   * window alone; never on the engine's pipe.
+   */
+  | { type: "task:open"; taskId: string; project?: string }
+  /**
+   * Something in a conversation whose latest message came from THIS device — sent to that device alone
+   * (`deviceAttention.ts`), for its app to show as a notification while it is not in front. `taskId` is
+   * the conversation; `requestId` the ask, which a later `resolved` takes back.
+   */
+  | {
+      type: "attention:device";
+      kind: "asking" | "replied" | "failed" | "resolved";
+      taskId: string;
+      project?: string;
+      title: string;
+      body: string;
+      requestId?: string;
+    }
   /** The fleet changed: a machine came or went, paired or was forgotten, or this one was renamed or published. */
   | { type: "machines:changed"; view: MachinesView }
   /** Settings' warnings and errors changed; the whole board. */

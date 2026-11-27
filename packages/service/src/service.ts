@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { DeviceAttention, TurnSenders, type DeviceAttentionPush, type DeviceTarget } from "./deviceAttention";
 /**
  * The app service (DESIGN §11.2): everything the renderer can ask for, with no
  * Electron in sight.
@@ -8358,6 +8359,9 @@ export class AppService {
     origin: ChatOrigin = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; queued?: QueuedMessageView; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
+    // The person wrote this one: a device that sent the last is no longer the one to tell. A device's own
+    // send is marked again by its connection as it is taken (`hostEngine.ts`), after this line.
+    if (origin.by === undefined) this.turnSenders.fromHere(request.taskId);
     // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
     request = { ...request, message: expandArtifactCommand(request.message) };
     // What ended among the task's background processes since the agent last heard goes with the
@@ -8383,6 +8387,37 @@ export class AppService {
 
   /** Each task's messages in the order they were sent: the last one's delivery, by session and task. */
   private readonly chatDeliveries = new Map<string, Promise<void>>();
+
+  /**
+   * Which paired device sent each conversation's latest message (`deviceAttention.ts`): the host marks
+   * a device's sends after they are taken; every message the person sends otherwise clears it here.
+   */
+  readonly turnSenders = new TurnSenders();
+  private readonly deviceAttentionRouter = new DeviceAttention((project, taskId) => this.deviceTargetOf(project, taskId));
+
+  /** What a push says to the device that sent its conversation's latest message, if one did. */
+  deviceAttention(message: PushMessage): { deviceId: string; push: DeviceAttentionPush } | undefined {
+    if (this.turnSenders.empty && !message.type.endsWith(":resolved")) return undefined;
+    return this.deviceAttentionRouter.route(message);
+  }
+
+  /** The device for a task: its own latest sender, else the nearest conversation above it that has one. */
+  private deviceTargetOf(project: string | undefined, taskId: string): DeviceTarget | undefined {
+    let open: ProjectSession;
+    try {
+      open = this.session(project);
+    } catch {
+      return undefined;
+    }
+    let id: string | undefined = taskId;
+    for (let depth = 0; id !== undefined && depth < 32; depth++) {
+      const meta = open.project.tasks.tryRead(id);
+      const deviceId = this.turnSenders.deviceOf(id);
+      if (deviceId !== undefined) return { deviceId, conversationId: id, title: meta?.title ?? "A conversation" };
+      id = meta?.origin?.taskId ?? meta?.parentTaskId;
+    }
+    return undefined;
+  }
 
   /** {@link sendChatMessage}, once the messages ahead of this one are delivered. */
   private async deliverChatMessage(

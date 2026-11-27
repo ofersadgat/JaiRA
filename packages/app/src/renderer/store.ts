@@ -85,7 +85,7 @@ import type {
 import { withNoticeRead } from "./noticesModel";
 import { appendInstallLog, installLogKey, startedInstallLog, type InstallLog } from "./installLog";
 import { appendJobText, withRecentFolder, withStep, type OpenFlowStart, type WorkspaceJob } from "./openProjectModel";
-import { chatOnArriving } from "./chatArrival";
+import { chatOnArriving, latestUnreadAt, type ArrivalPick } from "./chatArrival";
 import {
   clearedAbove,
   statesPath,
@@ -271,6 +271,17 @@ export async function invoke<C extends IpcChannel>(channel: C, request: IpcReque
  */
 export function subscribe(listener: (message: PushMessage) => void): () => void {
   return bridge().subscribe(listener);
+}
+
+/** The window's own opener, while a store is mounted (`openFromOutside`). */
+let outsideOpener: ((taskId: string, project: string | undefined) => void) | undefined;
+
+/**
+ * Open a task picked outside the window — a notification on a phone, tapped — as a toast's Open does on
+ * the desktop (`task:open`): a conversation in the Chat room, anything else selected in Tasks.
+ */
+export function openFromOutside(taskId: string, project?: string): void {
+  outsideOpener?.(taskId, project);
 }
 
 /** See {@link AppState.inspect}. */
@@ -947,6 +958,12 @@ export interface ChatState {
    * conversation's own.
    */
   walkedChain?: ReadonlyArray<{ call: string; name: string; host?: string }>;
+  /**
+   * The open conversation, when it was opened by ARRIVING at its project (`chatOnArriving`) rather than
+   * picked: not marked read — by `select` or by its thread (`SeenWhileShown`) — until the person presses
+   * or types in its thread, or picks it in the list (`lookAt`). Dropped when another conversation opens.
+   */
+  unseenHold?: string;
 }
 
 /** The rooms — the destinations the sidebar lists. */
@@ -2149,6 +2166,17 @@ export function useApp() {
     return clock > 0 ? clock : null;
   }, []);
 
+  /**
+   * What the Chat room opens on arriving at `at`: its newest unread conversation (`latestUnreadAt`) —
+   * only while the window stands in the Chat room, where another room's arrival leaves the chat to a
+   * new conversation as before.
+   */
+  const arrivalPick = useCallback((at: string | null): ArrivalPick | undefined => {
+    const now = ref.current;
+    if (now.view !== "chat") return undefined;
+    return latestUnreadAt(now, at, now.settings.ui.seen ?? {}, now.settings.ui.groupWorkspaces !== false);
+  }, []);
+
   const refreshDetail = useCallback(
     // The detail is RETURNED, because it is what a navigation seeds the address bar from: the run a
     // path stands on is an instance, and the instance tree is the only record that has one for a state
@@ -2376,7 +2404,11 @@ export function useApp() {
     const current = await invoke("project:current", undefined).catch(() => null);
     const at = current?.dir ?? null;
     // A project opened or made new is arrived at here: its Chat view is a new conversation in it.
-    patch(at !== ref.current.at ? { at, chat: chatOnArriving(ref.current.chat) } : { at });
+    if (at !== ref.current.at) {
+      const pick = arrivalPick(at);
+      patch({ at, chat: chatOnArriving(ref.current.chat, pick) });
+      if (pick !== undefined) actionsRef.current.select(pick.taskId, pick.project ?? undefined);
+    } else patch({ at });
     // A project Settings' path names that the window no longer has is taken out of the path: the pages
     // must not go on saying they edit a document there is no way to reach. Only once the window lists
     // projects at all — before its first list, every project would look closed.
@@ -2527,7 +2559,19 @@ export function useApp() {
       if (kept.view === "chat" && kept.conversation !== null) actions.openConversation(kept.conversation);
       else if (kept.selected !== null) actions.select(kept.selected);
     });
-    return bridge().subscribe((message: PushMessage) => {
+    // A task picked outside the window: a conversation opens in the Chat room, any other is selected in Tasks.
+    const openPicked = (taskId: string, project: string | undefined): void => {
+      const conversation = ref.current.allConversations.find((c) => c.taskId === taskId);
+      if (conversation !== undefined) {
+        actionsRef.current.setView("chat");
+        actionsRef.current.openConversation(taskId, conversation.project ?? project);
+      } else {
+        actionsRef.current.setView("tasks");
+        actionsRef.current.select(taskId, project);
+      }
+    };
+    outsideOpener = openPicked;
+    const unsubscribe = bridge().subscribe((message: PushMessage) => {
       // The cache first (decision 0018): a page is applied, a missed one reconciled. An invalidate is a
       // hint that something moved — after a reconnect, every scope — so the cache asks from its cursor.
       store.push(message);
@@ -2545,6 +2589,10 @@ export function useApp() {
       const about = (message as { project?: string }).project;
       if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.at) return;
       switch (message.type) {
+        case "task:open":
+          // Picked in a toast.
+          openPicked(message.taskId, message.project);
+          break;
         case "store:invalidate":
           if (message.scope === "tasks" || message.scope === "board") {
             void refreshState(ref.current.stateId);
@@ -2662,6 +2710,10 @@ export function useApp() {
         }
       }
     });
+    return () => {
+      unsubscribe();
+      if (outsideOpener === openPicked) outsideOpener = undefined;
+    };
   }, [
     refreshAll,
     refreshTasks,
@@ -2715,7 +2767,8 @@ export function useApp() {
         //
         // Marked to the row's OWN clock rather than to now, for the reason `markProjectSeen` is: a
         // turn landing in the same millisecond as the click is news, and `Date.now()` swallows it.
-        if (taskId !== null) {
+        // Not one opened by arriving at its project, which is not read until it is looked at (`unseenHold`).
+        if (taskId !== null && ref.current.chat.unseenHold !== taskId) {
           const clock = taskClock(taskId);
           if (clock !== null) {
             const next = withSeen(ref.current.settings.ui, taskId, clock);
@@ -2856,13 +2909,16 @@ export function useApp() {
        */
       standOn: (project: string | null) => {
         if (project === ref.current.at) return;
+        const pick = arrivalPick(project);
         patch({
           at: project,
           taskFocus: project,
           trail: [],
           trailState: null,
-          chat: chatOnArriving(ref.current.chat),
+          chat: chatOnArriving(ref.current.chat, pick),
         });
+        // Opened, so its thread is fetched as any opened conversation's is — held unseen (`select` skips it).
+        if (pick !== undefined) actionsRef.current.select(pick.taskId, pick.project ?? undefined);
         // Told to the engine, which is where a reloaded window asks where it stands (`project:current`,
         // the project THIS connection opened last). Without it the address moved only here: a window
         // that crashed while standing on JaiRA came back on mist-server, the last project it had
@@ -3459,9 +3515,11 @@ export function useApp() {
         // Unnamed — a reload restoring it by id — its own project where a list knows it, so the
         // thread's header and composer say where it is rather than where the window stands.
         const at = project ?? (taskId === null ? undefined : projectOfTask(taskId));
-        const { walkedInto: was, walkedChain: wasChain, ...chat } = ref.current.chat;
+        const { walkedInto: was, walkedChain: wasChain, unseenHold: hold, ...chat } = ref.current.chat;
         const same = taskId === chat.taskId;
-        patch({ chat: { ...chat, taskId, project: at ?? null, opening: null, error: null, ...(was !== undefined && same ? { walkedInto: was } : {}), ...(wasChain !== undefined && same ? { walkedChain: wasChain } : {}) } });
+        // The same one opened again (a pane the room follows) keeps its hold; picking it in the list is
+        // a look, and lets it go first (`lookAt`).
+        patch({ chat: { ...chat, taskId, project: at ?? null, opening: null, error: null, ...(was !== undefined && same ? { walkedInto: was } : {}), ...(wasChain !== undefined && same ? { walkedChain: wasChain } : {}), ...(hold !== undefined && same ? { unseenHold: hold } : {}) } });
         actionsRef.current.select(taskId, at);
       },
 
@@ -3951,6 +4009,22 @@ export function useApp() {
       markSeen: (taskId: string, at: number) => {
         const next = withSeen(ref.current.settings.ui, taskId, at);
         if (next !== ref.current.settings.ui) setUi(next);
+      },
+
+      /**
+       * The person looked at a conversation: pressed or typed in its thread, or picked it in the list.
+       * One opened by arriving at its project (`ChatState.unseenHold`) is let go and marked read as far
+       * as it has gone; any other is already marked by opening it, and this does nothing.
+       */
+      lookAt: (taskId: string) => {
+        if (ref.current.chat.unseenHold !== taskId) return;
+        const { unseenHold: _hold, ...chat } = ref.current.chat;
+        patch({ chat });
+        const clock = taskClock(taskId);
+        if (clock !== null) {
+          const next = withSeen(ref.current.settings.ui, taskId, clock);
+          if (next !== ref.current.settings.ui) setUi(next);
+        }
       },
 
       /**

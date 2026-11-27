@@ -58,6 +58,7 @@ import {
 } from "@jaira/service";
 import { UpdateManager, type RestartChoice, type SquirrelPort, type UpdaterPort } from "./updates";
 import { QuitGuard } from "./quitGuard";
+import { DesktopAttention } from "./attentionDesktop";
 import { nativeQuitWords } from "../renderer/quitModel";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
@@ -215,8 +216,33 @@ const baseDir = resolveBaseDir(home);
 // Agent SDK and node-llama-cpp are there.
 const plugins = startPlugins(home ?? defaultBaseDir(), __dirname);
 
+/**
+ * What needs the person, told outside the window (`attentionDesktop.ts`): toasts, the taskbar button's
+ * badge and bar, a flash. Toasts on an installed Windows build are grouped under the installer's
+ * shortcut, which carries the app's id; a development run keeps Electron's own.
+ */
+if (process.platform === "win32" && app.isPackaged) app.setAppUserModelId("com.mistlabs.jaira");
+const attention = new DesktopAttention({
+  window: () => window,
+  invoke: (channel, request) => (link === undefined ? Promise.reject(new Error("the engine is not there yet")) : link.invoke(channel, request)),
+  working: async () => (link === undefined ? false : (await link.runningWork()).some((w) => w.waiting === undefined)),
+  open: (taskId, project) => {
+    if (window === undefined || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    if (taskId !== "") tellWindow({ type: "task:open", taskId, ...(project !== undefined ? { project } : {}) });
+  },
+  warn: (message) => link?.recordApp("warn", message),
+});
+
 /** Tell the window something. The service's pushes and the updater's both go this way. */
 function pushToWindow(message: PushMessage): void {
+  try {
+    attention.push(message);
+  } catch (e) {
+    reportCrash("push", new Error(`attention could not take '${message.type}': ${(e as Error).message}`));
+  }
   // GUARDED, because this is a send into another process and the service treats it as a statement.
   //
   // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
@@ -1448,6 +1474,7 @@ void app.whenReady().then(async () => {
   }
   window = await createWindow();
   link?.recordApp("info", "the window is up");
+  void attention.seed();
 
   // Merge requests somebody is waiting on (decision 0004): look NOW at the two moments a poller's
   // own cadence is wrong by construction. A machine that slept has timers that fire late or not at
@@ -1463,7 +1490,8 @@ void app.whenReady().then(async () => {
   app.on("browser-window-blur", () => {
     leftAt = Date.now();
   });
-  app.on("browser-window-focus", () => {
+  app.on("browser-window-focus", (_event, focused) => {
+    if (focused === window) attention.focused();
     if (leftAt !== undefined && Date.now() - leftAt >= 5 * 60_000) {
       link?.kickRemotes();
       link?.kickRepoWatch();

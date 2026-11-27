@@ -119,6 +119,8 @@ export interface ChatSurface {
   seen: Readonly<Record<string, number>>;
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
   onSeen: (taskId: string, at: number) => void;
+  /** The person looked at a conversation — picked it, or pressed or typed in its thread: one held unseen since arriving (`ChatState.unseenHold`) is let go. */
+  onLooked?: ((taskId: string) => void) | undefined;
   onOpen: (taskId: string | null, project?: string) => void;
   /**
    * Start one. The settings are the composer's, and reach the first message by riding its run.
@@ -268,6 +270,7 @@ export function chatSurfaceOf(
     workedAt: workedAtOf(state.projects),
     seen: state.settings.ui.seen,
     onSeen: actions.markSeen,
+    onLooked: actions.lookAt,
     onOpen: actions.openConversation,
     onNew: actions.newConversation,
     start: conversationStartOf(state.config?.effective, state.workflows),

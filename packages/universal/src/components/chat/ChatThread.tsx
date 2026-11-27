@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
@@ -96,6 +96,8 @@ export function ChatThread({
   // Where it says what the agent is doing: a pill over the thread's end, or the composer's first line.
   const { state: shell } = useShell();
   const place = useMemo(() => lookOf(shell.config).conversation.liveStatus, [shell.config]);
+  // Opened by arriving at its project, it is not read until the person presses or types in it (`ChatState.unseenHold`).
+  const lookedAt = shell.chat.unseenHold !== undefined && shell.chat.unseenHold === surface.taskId ? () => surface.onLooked?.(shell.chat.unseenHold!) : undefined;
   const jumpIf = away ? { onJump: jump } : {};
   const live = surface.live ?? m.afterglow;
   const runs = useChildRunHost(surface, () => jumpRef.current(), m.status !== null && place === "pill" ? <LiveStatusPill status={m.status} {...jumpIf} /> : undefined, {
@@ -175,7 +177,7 @@ export function ChatThread({
     );
   return (
     <PictureSizesContext.Provider value={pictureSizes}>
-    <View flex={1} minHeight={0} minWidth={0} flexDirection="column">
+    <View flex={1} minHeight={0} minWidth={0} flexDirection="column" {...lookProps(lookedAt)}>
       {/* On screen is read: the task this conversation is, in every list at once. */}
       <SeenWhileShown taskId={surface.taskId} />
       {/* Walked into a run the conversation started: that run is the page, and nothing outside it. */}
@@ -468,4 +470,20 @@ function InterruptOffer({ onInterrupt }: { onInterrupt: () => void }): JSX.Eleme
       </Press>
     </View>
   );
+}
+
+/**
+ * A press or a key inside the thread — its transcript or its composer — is the person looking at it. A
+ * capture, so whatever the press is on still gets it; nothing while there is nothing to let go.
+ */
+function lookProps(looked: (() => void) | undefined): Record<string, unknown> {
+  if (looked === undefined) return {};
+  return isWeb
+    ? { onPointerDownCapture: looked, onKeyDownCapture: looked }
+    : {
+        onStartShouldSetResponderCapture: () => {
+          looked();
+          return false;
+        },
+      };
 }

@@ -5,7 +5,7 @@
  * last one still selected, one that had never run, and its box swallowed the prompt).
  */
 import { describe, expect, it } from "vitest";
-import { chatOnArriving } from "../src/renderer/chatArrival";
+import { chatOnArriving, latestUnreadAt } from "../src/renderer/chatArrival";
 import { replyPlaceholder, strandedFor } from "../src/renderer/chatThreadModel";
 import type { ChatState } from "../src/renderer/store";
 
@@ -27,6 +27,34 @@ describe("arriving at a project", () => {
 
   it("keeps a conversation still being started, which lands where it was asked to", () => {
     expect(chatOnArriving({ ...open, busy: true }).busy).toBe(true);
+  });
+
+  it("opens the conversation picked for it held unseen, and lets an old hold go", () => {
+    expect(chatOnArriving({ ...open, unseenHold: "t-old" }, { taskId: "t-new", project: "/b" })).toEqual({ taskId: "t-new", project: "/b", busy: false, opening: null, error: null, unseenHold: "t-new" });
+    expect(chatOnArriving({ ...open, unseenHold: "t-old" }).unseenHold).toBeUndefined();
+  });
+});
+
+describe("the conversation arriving opens", () => {
+  const row = (taskId: string, project: string, updatedAt: number, lastMessageAt?: number) => ({ taskId, title: taskId, workflow: "chat/session", status: "completed", updatedAt, project, ...(lastMessageAt !== undefined ? { lastMessageAt } : {}) }) as never;
+  const projects = [
+    { project: "/a", kind: "user", identity: "host/repo" },
+    { project: "/b", kind: "user", identity: "host/repo" },
+    { project: "/c", kind: "user" },
+  ] as never;
+  const allConversations = [row("t-old", "/a", 10), row("t-new", "/b", 5, 40), row("t-read", "/a", 50), row("t-else", "/c", 99)];
+
+  it("is the one there that moved last since it was read, across the project's workspaces", () => {
+    expect(latestUnreadAt({ allConversations, projects }, "/a", { "t-read": 50 })).toEqual({ taskId: "t-new", project: "/b" });
+  });
+
+  it("is the project's own alone when workspaces are listed apart", () => {
+    expect(latestUnreadAt({ allConversations, projects }, "/a", { "t-read": 50 }, false)).toEqual({ taskId: "t-old", project: "/a" });
+  });
+
+  it("is none where everything is read, or at the root", () => {
+    expect(latestUnreadAt({ allConversations, projects }, "/c", { "t-else": 99 })).toBeUndefined();
+    expect(latestUnreadAt({ allConversations, projects }, null, {})).toBeUndefined();
   });
 });
 

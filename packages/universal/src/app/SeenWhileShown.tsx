@@ -30,8 +30,11 @@ export function SeenWhileShown({ taskId }: { taskId: string | null | undefined }
     [taskId, tasks, allConversations, projects, boards],
   );
   const markSeen = shell?.actions.markSeen;
+  // Opened by arriving at its project, it is on screen but not yet looked at (`ChatState.unseenHold`):
+  // marked once the person presses or types in it, when the hold is let go and this runs again.
+  const held = shell?.state.chat.unseenHold === taskId;
   useEffect(() => {
-    if (taskId !== null && taskId !== undefined && clock > 0) markSeen?.(taskId, clock);
-  }, [taskId, clock, markSeen]);
+    if (taskId !== null && taskId !== undefined && clock > 0 && !held) markSeen?.(taskId, clock);
+  }, [taskId, clock, markSeen, held]);
   return null;
 }

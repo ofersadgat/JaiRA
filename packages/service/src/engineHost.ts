@@ -131,6 +131,21 @@ export class EngineHost {
   /** Send a push to every client past `hello` with this host's contract. */
   broadcast(message: PushMessage): void {
     for (const client of this.clients) if (client.admitted && !client.limited && !client.channel.destroyed) client.channel.send({ t: "push", message });
+    try {
+      this.onBroadcast?.(message);
+    } catch (e) {
+      this.options.log?.("warn", `a push's follow-up failed: ${(e as Error).message}`);
+    }
+  }
+
+  /** Told of every push as it goes out: what the host sends particular clients beside it (`deviceAttention.ts`). */
+  onBroadcast: ((message: PushMessage) => void) | undefined;
+
+  /** Send a push to one paired device's connections alone. */
+  pushToDevice(deviceId: string, message: PushMessage): void {
+    for (const client of this.clients) {
+      if (client.admitted && !client.limited && !client.channel.destroyed && client.info?.device?.id === deviceId) client.channel.send({ t: "push", message });
+    }
   }
 
   /** Disconnect every network client of one machine or device: its token was revoked. */
