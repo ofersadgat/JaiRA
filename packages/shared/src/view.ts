@@ -473,6 +473,12 @@ export interface TaskDetail {
    * and both are read as one conversation (decision 0033 §1). Absent for anything else.
    */
   program?: true;
+  /**
+   * A program conversation the person ENDED: its latest `input()` was answered `null` (`chat:end`), so
+   * it is wrapping up or has finished, and takes no more messages. Absent for one that stopped any other
+   * way, which a message still takes up again.
+   */
+  ended?: true;
   description?: string;
   labels?: string[];
   workflow: string;

@@ -6486,7 +6486,7 @@ export class AppService {
     const placed = viewed.runs.length > 0 ? placedNoteOf(open.project, taskId) : undefined;
     const detail = {
       ...viewed,
-      ...(this.isProgramConversation(open, taskId) ? { program: true as const } : {}),
+      ...(this.isProgramConversation(open, taskId) ? { program: true as const, ...(endedByPerson(open.project, taskId) ? { ended: true as const } : {}) } : {}),
       ...(forward !== undefined && forward.end === undefined ? { fastForward: fastForwardView(forward) } : {}),
       ...(listening.length > 0 ? { listening } : {}),
       ...(placed !== undefined ? { placed } : {}),
@@ -18427,6 +18427,27 @@ function endedMidReply(project: Project, taskId: string): boolean {
     }
   }
   return input === undefined || answered;
+}
+
+/**
+ * Whether the person ENDED a program conversation (`chat:end`, decision 0029 A§2): its latest `input()`
+ * settled with `null`. A rewind past that answer takes it out of the journal, and so the end with it.
+ */
+function endedByPerson(project: Project, taskId: string): boolean {
+  let input: string | undefined;
+  let ended = false;
+  for (const row of project.events.list(taskId)) {
+    if (row.instanceId === undefined) continue;
+    const key = (row.event as { childKey?: string }).childKey;
+    if (row.type === "instance.entered" && key !== undefined && INPUT_CHILD.test(key)) {
+      input = row.instanceId;
+      ended = false;
+    } else if (row.type === "script.call.settled" && row.instanceId === input) {
+      const settled = row.event as { outcome?: string; value?: unknown };
+      ended = settled.outcome === "value" && settled.value === null;
+    }
+  }
+  return ended;
 }
 
 /** `input({ idle })` in milliseconds: seconds as a number, or a number with `ms`, `s`, `m`, `h` or `d`. */

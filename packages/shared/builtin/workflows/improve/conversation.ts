@@ -98,10 +98,13 @@ export default async function review(
     statuses = [...statuses, "proposed"];
   }
   if (proposals.length === 0) return { found: found.lessons.length, applied: statuses.filter((s) => s === "applied").length, statuses };
-  // One review for everything this conversation taught: apply all, or none.
-  const listed = proposals.map((p, i) => "## " + (i + 1) + ".\n\n" + (p.also.length > 0 ? "Learned in '" + p.also + "' too — proposed for every project (Shared).\n\n" : "") + describe(p.plan) + (p.trial.length > 0 ? "\n\n" + p.trial : "")).join("\n\n");
+  // One review for everything this conversation taught: apply all, or none. The prompt is the gate's
+  // heading, so it stays a short question; the proposals are the Markdown body (as in improve/lesson).
+  const items = proposals.map((p) => (p.also.length > 0 ? "Learned in '" + p.also + "' too — proposed for every project (Shared).\n\n" : "") + describe(p.plan) + (p.trial.length > 0 ? "\n\n" + p.trial : ""));
+  const listed = items.length === 1 ? items[0] : items.map((text, i) => "## " + (i + 1) + ".\n\n" + text).join("\n\n");
   const decision = await choose_option({
-    prompt: "This conversation taught " + proposals.length + " lesson(s):\n\n" + listed,
+    prompt: proposals.length === 1 ? "Apply this change to " + proposals[0].plan.target + "?" : "Apply the " + proposals.length + " changes this conversation taught?",
+    body: listed,
     options: [
       { value: "apply", label: "Apply all", description: "Write every change listed." },
       { value: "discard", label: "Discard", description: "Change nothing." },

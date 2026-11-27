@@ -78,12 +78,21 @@ describe("grouping", () => {
     ]);
   });
 
-  it("by status: answering, then unread, then read", () => {
-    expect(shape(arrangeConversations(rows, { group: "status", sort: "when-desc" }, facts))).toEqual([
-      ["Answering", ["t3"]],
-      ["Unread", ["t2"]],
-      ["Read", ["t1", "t4"]],
+  it("by status: open first, then ended, each newest first", () => {
+    // t1 ended; t2 is a program between messages (`completed`, waiting); t3 ended but answering a message; t4 failed.
+    const stood = [
+      { ...rows[0]!, status: "completed" },
+      { ...rows[1]!, status: "completed", waitsForMessage: true },
+      { ...rows[2]!, status: "completed" },
+      { ...rows[3]!, status: "failed" },
+    ] as ChatRow[];
+    expect(shape(arrangeConversations(stood, { group: "status", sort: "when-desc" }, facts))).toEqual([
+      ["Open", ["t2", "t3"]],
+      ["Ended", ["t1", "t4"]],
     ]);
+    // Running, interrupted (resumable) and queued are open.
+    const live = [{ ...rows[0]!, status: "interrupted" }, { ...rows[3]!, status: "running" }] as ChatRow[];
+    expect(shape(arrangeConversations(live, { group: "status", sort: "when-desc" }, facts))).toEqual([["Open", ["t1", "t4"]]]);
   });
 
   it("by workspace: the project's own first", () => {

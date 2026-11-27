@@ -118,6 +118,7 @@ export function Composer({
   onOverrides,
   onSend,
   onStop,
+  onEnd,
   disabled,
   placeholder,
   value,
@@ -139,6 +140,11 @@ export function Composer({
   /** Send it: `false` when nothing took it, so the box keeps what was typed; anything else empties it. */
   onSend: (message: string) => boolean | void;
   onStop?: (() => void) | undefined;
+  /**
+   * End the conversation: while nothing is answering and the box is empty, Stop stands where Send was
+   * and ends it. Absent: no Stop then. Enter on an empty box is not this — it sends nothing.
+   */
+  onEnd?: (() => void) | undefined;
   disabled?: string;
   placeholder?: string;
   value?: string;
@@ -196,6 +202,8 @@ export function Composer({
   const shell = useShellOrNull();
   const down = off ? undefined : routeDownOf(route, shell?.state.probes);
   const canSend = canSendOf(disabled, busy, joinable, down);
+  /** Stop ends the conversation in Send's place: nothing typed or attached, nothing answering, not disabled. */
+  const ending = onEnd !== undefined && !off && busy !== true && draft.trim() === "" && files.length === 0;
   /** The card open, and the box it was opened from — for the stack, the segment's key and what its panel opens on (none: the tools segment's card). */
   const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Tools" | "account" | "context" | "stack"; at: FloatRect; key?: string; door?: StackDoor } | null>(null);
   /** The Tools card on Everything (§7.4) rather than this conversation's lines. */
@@ -598,11 +606,11 @@ export function Composer({
                 {({ hovered }) => <Icon name="clip" size={15} color={String(t.v(hovered ? "text" : "dim"))} />}
               </Press>
               {busy === true && onStop !== undefined ? (
-                <Press onPress={onStop} label="Stop" title="Stop this turn" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("bad") as never}>
-                  <View width={10} height={10} borderRadius={2} backgroundColor={t.v("panel") as never} />
-                </Press>
+                <StopButton t={t} title="Stop this turn" onPress={onStop} />
+              ) : ending ? (
+                <StopButton t={t} title="End this conversation" onPress={onEnd!} />
               ) : null}
-              {busy === true && onStop !== undefined && !canSend ? null : (
+              {(busy === true && onStop !== undefined && !canSend) || ending ? null : (
                 <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy, down)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
               )}
             </View>
@@ -893,6 +901,15 @@ function ContextMeter({ t, context, route, open, onOpen }: { t: Tokens; context:
     </Press>
     </RNView>
     </View>
+  );
+}
+
+/** Stop: a --bad circle with a square — the turn's, or (the box empty, nothing answering) the conversation's end. */
+function StopButton({ t, title, onPress }: { t: Tokens; title: string; onPress: () => void }): JSX.Element {
+  return (
+    <Press onPress={onPress} label="Stop" title={title} width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("bad") as never}>
+      <View width={10} height={10} borderRadius={2} backgroundColor={t.v("panel") as never} />
+    </Press>
   );
 }
 

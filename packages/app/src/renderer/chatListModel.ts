@@ -2,7 +2,7 @@
  * What the conversation list says about each row — `ChatListPanel`'s rules, pure: which rows, in what
  * order, which dot, what the right edge says, and what a row's menu offers.
  */
-import type { TaskSummary } from "@jaira/shared/browser";
+import { isTerminalStatus, type TaskSummary } from "@jaira/shared/browser";
 import type { AskSpec, MenuItem } from "./menuTypes";
 import { seenClockOf } from "./pillModel";
 
@@ -110,7 +110,18 @@ export interface ChatSection<T> {
 }
 
 const DAY_ORDER = ["Today", "Yesterday", "This week", "Older"] as const;
-const STATUS_ORDER = ["Answering", "Unread", "Read"] as const;
+const STATUS_ORDER = ["Open", "Ended"] as const;
+
+/**
+ * Whether a conversation has ended: its run settled, and it is not a program waiting for its next message
+ * (which reads `completed` between messages, `idleStatusOf`) nor answering one. What the Status grouping
+ * cuts the list by (the person, 2026-11-26: "group by terminated / not terminated (not terminated first)
+ * then sort by latest ... The main issue is that it is hard to separate what is done from what isnt"),
+ * where it cut by Answering, Unread and Read — which the row's ring already says.
+ */
+export function hasEnded(task: Pick<TaskSummary, "taskId" | "status" | "waitsForMessage">, producing: Readonly<Record<string, number>>): boolean {
+  return isTerminalStatus(task.status) && task.waitsForMessage !== true && !isAnswering(task as TaskSummary, producing);
+}
 
 /** The day a moment falls in, as the list's groups name it. */
 export function dayOf(at: number, now: number = Date.now()): (typeof DAY_ORDER)[number] {
@@ -125,7 +136,7 @@ export function dayOf(at: number, now: number = Date.now()): (typeof DAY_ORDER)[
 
 /**
  * The rows as the column head arranges them: sorted, then cut into groups in a fixed order (days
- * newest first, Answering before Unread before Read, the project's own workspace before the others).
+ * newest first, Open before Ended, the project's own workspace before the others).
  * `placeOf` names a row's workspace where it is not the project's first (`ChatSurface.places`);
  * `home` names that first one.
  */
@@ -157,11 +168,9 @@ function groupedConversations<T extends ChatRow>(
     how.group === "day"
       ? dayOf(whenOf(row, when), facts.now)
       : how.group === "status"
-        ? isAnswering(row, facts.producing)
-          ? "Answering"
-          : isUnread(row, facts.seen)
-            ? "Unread"
-            : "Read"
+        ? hasEnded(row, facts.producing)
+          ? "Ended"
+          : "Open"
         : (facts.placeOf(row) ?? facts.home);
   const sections: ChatSection<T>[] = [];
   for (const row of sorted) {

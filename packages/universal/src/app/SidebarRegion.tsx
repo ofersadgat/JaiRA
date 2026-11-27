@@ -589,7 +589,8 @@ function ChatDrawer({ find }: { find: boolean }): JSX.Element {
   const several = group !== undefined && group.members.length > 1 && scope.workspace === undefined;
   const groups: ChatGroup[] = several ? [...CHAT_GROUPS] : CHAT_GROUPS.filter((g) => g !== "workspace");
   const arrange: ChatArrange = {
-    group: modeOf(ui, CHAT_GROUP_MODE, groups, "none"),
+    // Open before Ended by default (the person, 2026-11-26: "it is hard to separate what is done from what isnt").
+    group: modeOf(ui, CHAT_GROUP_MODE, groups, "status"),
     sort: modeOf(ui, CHAT_SORT_MODE, CHAT_SORTS, "when-desc"),
     groups,
     home: group === undefined ? "" : homeOf(group, scope),

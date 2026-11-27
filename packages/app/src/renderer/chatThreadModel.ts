@@ -451,6 +451,27 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   };
 
   /**
+   * ENDED: the person ended it (`TaskDetail.ended` — its `input()` answered `null`), so it wraps up and
+   * takes no more messages; the box is disabled. Said at once on the press, before the detail is read
+   * again with the end in it.
+   */
+  const [endedHere, setEndedHere] = useState<string | null>(null);
+  const ended = surface.detail?.ended === true || endedHere === taskId;
+  /**
+   * End it — the empty box's Stop, while it waits for the next message (`TaskSummary.waitsForMessage`).
+   * Absent while it cannot be ended: answering (Stop stops the turn then), or ended already. Enter on
+   * an empty box sends nothing and ends nothing.
+   */
+  const waitsForMessage = surface.conversations.find((task) => task.taskId === taskId)?.waitsForMessage === true;
+  const end =
+    waitsForMessage && !ended
+      ? (): void => {
+          setEndedHere(taskId);
+          surface.onEnd(taskId, project);
+        }
+      : undefined;
+
+  /**
    * What lets an artifact in this conversation RUN, and where a message from one lands.
    *
    * Built here because this is the first place that has all three things a grant needs: the task the
@@ -862,6 +883,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     confirmRewind,
     send,
     stranded,
+    ended,
+    end,
     stop: stopOrChoose,
     runningCalls,
     choosing,

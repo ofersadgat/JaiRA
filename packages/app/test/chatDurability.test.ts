@@ -574,6 +574,37 @@ describe("4. messages that arrive together", { timeout: 60_000 }, () => {
     expect(service.listQueued({ taskId }).items).toEqual([]);
     expect(said(taskId).filter((line) => line.startsWith("user:"))).toEqual(["user: one", "user: two", "user: three"]);
   });
+
+  it("keeps a queued message queued while the reply asks the person a question, and answers neither with the other", async () => {
+    // The reply's agent asks (`AskUserQuestion`) while a message waits in the queue: the question is
+    // the reply's own, parked inside its call, and the queue is for the program's next `input()` —
+    // so the message is not the question's answer, and answering the question does not send it. It
+    // goes to the wait after the reply, as any queued message does.
+    const taskId = await talking([ONE, { promptIncludes: "two", output: "second answer", hold: "interrupt" }, { promptIncludes: "three", output: "third answer" }]);
+    await service.sendChatMessage({ taskId, instanceId: "", message: "two" });
+    await eventually(() => inFlight(taskId), "the reply to be in flight", 20_000);
+    const questions = (service as unknown as { session(): { questions: { asker(o: { taskId: string }): (r: unknown) => Promise<unknown>; list(): Array<{ requestId: string }> } } }).session().questions;
+    const asked = questions.asker({ taskId })({ questions: [{ question: "Which one?", options: [] }], sessionId: "s" });
+
+    const sent = await service.sendChatMessage({ taskId, instanceId: "", message: "three" });
+    expect(sent.queued).toMatchObject({ taskId, text: "three" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(questions.list()).toHaveLength(1);
+    expect(service.listQueued({ taskId }).items.map((i) => i.text)).toEqual(["three"]);
+
+    // Answered in its own place: the message stays queued, the reply still going.
+    service.submitQuestion(questions.list()[0]!.requestId, { "Which one?": "the first" });
+    await asked;
+    expect(questions.list()).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(service.listQueued({ taskId }).items.map((i) => i.text)).toEqual(["three"]);
+    expect(said(taskId)).not.toContain("user: three");
+
+    // The turn ends: now the wait takes it.
+    expect(service.cancelChatTurn({ taskId })).toEqual({ canceled: true });
+    await eventually(() => said(taskId).includes("assistant: third answer") && parked(taskId), "the reply to 'three'", 20_000);
+    expect(service.listQueued({ taskId }).items).toEqual([]);
+  });
 });
 
 describe("6. the app closing while a reply is going", { timeout: 60_000 }, () => {

@@ -567,8 +567,14 @@ describe("reviewing a conversation at its end (decision 0029 §6)", { timeout: 6
         { promptIncludes: "## The lesson", output: { lesson: true, rule: "Answer in French", lever: "instructions", target: "instructions", why: "A preference.", summary: "One line.", files: [{ path: "instructions.md", content: "Answer in French.\n" }] } },
         { promptIncludes: "## Lessons on record", output: { lessons: [{ lesson: "Always answer in French", quote: "bonjour" }] } },
       ],
-      interactions: { choose_option: [{ decision: "apply" }] },
     });
+    await eventually(() => service.pendingInteractions().some((p) => p.taskId === taskId && p.component === "choose_option"), "the review to ask", 30_000);
+    const gate = service.pendingInteractions().find((p) => p.taskId === taskId && p.component === "choose_option")!;
+    // The prompt is the gate's heading: a short question, the proposal in the Markdown body under it.
+    const asked = gate.inputs as { prompt: string; body?: string };
+    expect(asked.prompt).toBe("Apply this change to instructions?");
+    expect(asked.body).toContain("Answer in French");
+    service.submitInteraction(gate.requestId, { decision: "apply" });
     await eventually(() => finished(taskId), "the review to finish", 30_000);
     expect(readFileSync(join(dir, ".jaira", "instructions.md"), "utf8")).toBe("Answer in French.\n");
     expect(existsSync(join(dir, ".jaira", "lessons", "answer-in-french.md"))).toBe(true);
@@ -602,8 +608,12 @@ describe("ending a conversation, and leaving it idle (decision 0029 §2, §6)", 
     expect(service.listTasks().find((t) => t.taskId === taskId)).toMatchObject({ waitsForMessage: true, status: "completed" });
     expect(service.listTasks().find((t) => t.taskId === taskId)?.answering).toBeUndefined();
     expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ running: 0, waiting: 0, live: [] });
+    // Waiting is not ended: the box takes a message, and its empty Stop ends it.
+    expect(service.taskDetail(taskId).ended).toBeUndefined();
     expect(await service.endConversation({ taskId })).toEqual({ ended: true });
     await eventually(() => finished(taskId), "the conversation to end", 20_000);
+    // Ended by the person: the box takes nothing more.
+    expect(service.taskDetail(taskId)).toMatchObject({ program: true, ended: true });
     const review = service.listTasks().find((t) => t.workflow === "improve/conversation")!;
     expect(review.origin).toMatchObject({ kind: "started", taskId });
     expect((meta(review.taskId).inputs as { context: { maybes: unknown } }).context.maybes).toEqual([{ lesson: "Keep poems short", quote: "shorter" }]);
@@ -647,6 +657,8 @@ describe("ending a conversation, and leaving it idle (decision 0029 §2, §6)", 
     await service.sendChatMessage({ taskId, instanceId: "", message: "one more", fake: RULES });
     await eventually(() => service.sessionHistory({ taskId }).length >= 2 && parked(taskId), "the reply after it ended", 20_000);
     expect(service.chatThread({ taskId })!.session.turns.map((t) => t.text)).toEqual(["write a haiku", "leaves fall slowly down", "one more", "snow"]);
+    // The rewind took the end out of the journal: taken up again, it is not ended.
+    expect(service.taskDetail(taskId).ended).toBeUndefined();
     service.cancelTask(taskId);
   });
 

@@ -386,11 +386,15 @@ export function ChatThread({
           onValue={m.setDraft}
           onSend={m.send}
           onStop={m.stop}
+          // The empty box's Stop ends it while it waits for the next message; ended, it takes nothing more.
+          onEnd={m.arming === null ? m.end : undefined}
           placeholder={replyPlaceholder(m.arming, m.stranded)}
           // Never disabled for being stranded: what is sent there starts a new conversation (`m.send`).
           {...(m.queued !== undefined
             ? { disabled: m.queued.phase === "waiting" ? "This conversation starts when a workspace has room." : "Finding somewhere for this conversation to run…" }
-            : {})}
+            : m.ended
+              ? { disabled: "This conversation has ended." }
+              : {})}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} automatic={env.automatic} asking={surface.taskId ?? undefined} />}
           head={m.status !== null && place === "composer" && runs.walkedIn === null && runs.walkedSub === null ? <LiveStatusLine status={m.status} {...jumpIf} /> : undefined}
           usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
