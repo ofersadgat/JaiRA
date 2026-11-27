@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PanelEntry } from "../src/renderer/panelStack";
+import { setItemEntryOf, shownEntryOf, shownSetOf, type PanelEntry } from "../src/renderer/panelStack";
 import {
   NO_SPLIT,
   ROOM,
@@ -33,6 +33,8 @@ import {
   roomMoved,
   roomPaneOf,
   routeOpen,
+  setOfEntry,
+  setPlacesOf,
   showTab,
   shownPlacesOf,
   splitFits,
@@ -395,6 +397,20 @@ describe("the place buttons", () => {
   it("has no split on a phone: split opens over the main view", () => {
     expect(placesOffered(true)).toEqual(["main", "panel"]);
     expect(placeMoveOf(["panel"], "split", true)).toEqual({ open: "main", close: ["panel"] });
+  });
+
+  it("lights a shown set where the set, or one of its items opened within it, is on top; a picture of it alone is not the set", () => {
+    const set = shownSetOf([ref("a"), ref("b"), ref("c")], { noun: "pages" });
+    const item = setItemEntryOf(set, 1);
+    expect(setOfEntry(item)?.key).toBe(set.key);
+    expect(setOfEntry(shownEntryOf(set))?.key).toBe(set.key);
+    expect(setOfEntry(artifactEntryOf(ref("b")))).toBeUndefined();
+    expect(setPlacesOf(set.key, { main: null, first: item, second: artifactEntryOf(ref("c")), panel: shownEntryOf(set) })).toEqual(["main", "panel"]);
+    expect(setPlacesOf(set.key, { main: ref("a"), first: ROOM, panel: undefined })).toEqual([]);
+    // The item in a pane is still that artifact: its own buttons light there too.
+    expect(shownPlacesOf("b", { main: null, second: item, panel: undefined })).toEqual(["split"]);
+    const other = shownSetOf([ref("a"), ref("d")]);
+    expect(setPlacesOf(other.key, { main: null, first: item, panel: undefined })).toEqual([]);
   });
 });
 

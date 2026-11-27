@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { close, openInSet, pop, push, type PanelEntry, type PanelStack, type ShownSet } from "@jaira/ui/panelStack";
+import { close, openInSet, pop, popTo, push, setItemEntryOf, type PanelEntry, type PanelStack, type ShownSet } from "@jaira/ui/panelStack";
 import {
   artifactEntryOf,
   followedEntry,
@@ -10,6 +10,8 @@ import {
   paneOfPlace,
   placeMoveOf,
   publishedOfEntry,
+  setOfEntry,
+  setPlacesOf,
   shownPlacesOf,
   topOfPath,
   type Place,
@@ -137,6 +139,71 @@ export function pressPlace(target: Place, lit: readonly Place[], ref: PublishedR
     return;
   }
   placeArtifact(target, ref, artifacts, phone, follows, within);
+}
+
+/** The places a shown set stands in, read as they change (`setPlacesOf`): what its own place buttons light. */
+export function useSetPlaces(key: string): Place[] {
+  const split = splitView.use();
+  const panel = panelTop.use();
+  const first = topOfPath(split.panes[0]);
+  const second = topOfPath(split.panes[1]);
+  return useMemo(() => setPlacesOf(key, { main: null, first, second, panel }), [key, first, second, panel]);
+}
+
+/** The item of a set on top of a place showing it, the first wherever none is: where a move takes it on from. */
+function setIndexNow(set: ShownSet): number {
+  const at = placesNow();
+  for (const entry of [at.first, at.second, at.panel]) {
+    if (setOfEntry(entry)?.key !== set.key) continue;
+    const id = publishedOfEntry(entry)?.ref.id;
+    const index = set.items.findIndex((item) => item.id === id);
+    if (index >= 0) return index;
+  }
+  return 0;
+}
+
+/** Take a shown set away from a place it was in: the side panel goes back to below the set, a pane a step. */
+function leaveSet(place: Place, key: string): void {
+  if (place === "panel") {
+    panelOnStack.get()?.((was) => {
+      const at = was.entries.findIndex((entry) => entry.kind === "shown" && entry.key === key);
+      if (at > 0) return popTo(was, at - 1);
+      if (at === 0) return close(was);
+      return was.entries.length > 1 ? pop(was) : close(was);
+    });
+    return;
+  }
+  const pane = paneOfPlace(place);
+  const split = splitView.get();
+  if (setOfEntry(topOfPath(split.panes[pane]))?.key === key) splitView.set(leavePane(split, pane));
+}
+
+/**
+ * A shown set to a place, MOVED there as an artifact is (the person, 2026-11-27): closed wherever else it
+ * stood, and opened on the item it was showing — the first, where it was nowhere — with the others
+ * beside it, in the side panel on the path conversation › the set › it (`openInSet`), in a pane as a
+ * step in its history (`SetItemBody`, ← → through the rest). Where there are no panes (a phone, the
+ * Debug room) the main view holds one artifact alone: that item.
+ */
+export function placeSet(target: Place, set: ShownSet, phone: boolean): void {
+  const index = setIndexNow(set);
+  const open = phone && target === "split" ? "main" : target;
+  for (const place of setPlacesOf(set.key, placesNow())) if (place !== open) leaveSet(place, set.key);
+  if (open === "panel") openSetInPanel(set, index);
+  else if (splitHere.get() && !phone) openAt(open, setItemEntryOf(set, index));
+  else {
+    const item = set.items[index]!;
+    placeArtifact("main", item, surfaceOf(item.taskId, set.project), phone);
+  }
+}
+
+/** A shown set's place button pressed: lit, the side panel closes and a pane stays as it is; unlit, it moves there (`placeSet`). */
+export function pressSetPlace(target: Place, lit: readonly Place[], set: ShownSet, phone: boolean): void {
+  if (lit.includes(target)) {
+    if (target === "panel") leaveSet("panel", set.key);
+    return;
+  }
+  placeSet(target, set, phone);
 }
 
 /**

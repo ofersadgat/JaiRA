@@ -33,12 +33,16 @@ import { useShell } from "./shell";
  *                    its Conversation tab, without the panel's head and tabs); one of its subagents,
  *                    the subagent's page (`SidechainConversation`), with what it asks
  *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`): its title bar, its places
+ *   one of a set     the set's item with the others beside it (`SetItemBody`, by its face), as the side
+ *                    panel draws it; a step to another is sideways, in place of it on the pane's path
  *   anything else    a value, a state, a re-run's form: its face's body alone, filling the pane or
  *                    scrolling in it (padding 12 12 18)
  *
  * `onOpen` puts something on THIS pane's path: a conversation the thread links to.
  */
 export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (entry: PanelEntry) => PanelFace; onOpen: (entry: PanelEntry) => void }): JSX.Element {
+  // One of a shown set, put here by the set's place buttons: the others beside it, as the side panel draws it.
+  if (entry.kind === "preview" && entry.within !== undefined) return <FaceBody face={face(entry)} />;
   const published = publishedOfEntry(entry);
   if (published !== undefined) {
     return (

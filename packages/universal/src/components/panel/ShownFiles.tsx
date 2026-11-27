@@ -7,20 +7,31 @@ import { shownSetOf, type ShownSet } from "@jaira/ui/panelStack";
 import { shownMimeOf, type PublishedRef, type ShownFiles } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useValuePanel } from "@jaira/ui/valuePanel";
-import { Press, Txt } from "../../primitives";
+import { PLACES } from "@jaira/ui/splitModel";
+import { usePhone } from "../../app/phone";
+import { pressPlace, pressSetPlace, surfaceOf, useLitPlaces, usePlacesHere, useSetPlaces } from "../../app/places";
+import { useCanHover } from "../../canHover";
+import { Press, Txt, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Picture } from "../Picture";
+import { PlaceButtons } from "./PlaceButtons";
 import { PublishedView } from "./PublishedView";
 
 /**
  * What one `show_artifact` call showed the person (2026-11-13), under its call:
  *
- *   the caption     the call's line over all of it, app 13.5, --text, padding 2 2 6
+ *   the caption     the call's line over all of it, app 13.5, --text, padding 2 2 6; several shown
+ *                   together, the set's three place buttons at its right (`SetPlaces`, the person,
+ *                   2026-11-27): the whole set to the main view, a split or the side panel, opened on the
+ *                   item it was showing with the others beside it, lit where it stands
  *   a gallery       several pictures in one call: tiles in rows of three (two under 640 wide, one under
  *                   380), gap 10; a tile is the picture in a --panel-2 frame 170 tall, radius 6, 1px
  *                   --line, its name and version under it (data 11.5, --dim), then its caption; pressing
  *                   it opens that picture in the side panel on the path conversation › the call's
- *                   pictures › it (`panelStack.ts`' `openInSet`), where ← and → step to the others
+ *                   pictures › it (`panelStack.ts`' `openInSet`), where ← and → step to the others.
+ *                   Its own place buttons over its top right, 6 in: that picture alone to a place —
+ *                   drawn while the tile is hovered or the picture is open somewhere (that place lit),
+ *                   and always where nothing hovers
  *   otherwise       one card per file (`PublishedView`), stacked, gap 10, each under its own caption;
  *                   several are a set too, of any kind: a card's "Open in the side panel" opens it on
  *                   the path conversation › the set › it, as a tile does
@@ -37,7 +48,14 @@ export function ShownFilesView({ shown, artifacts }: { shown: ShownFiles; artifa
   );
   return (
     <View gap={6} minWidth={0}>
-      {shown.caption !== undefined ? (
+      {set !== undefined ? (
+        <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>
+          <Txt spec={{ voice: "app", scale: 13.5 / 12.5 }} paddingTop={2} paddingHorizontal={2} flex={1} minWidth={0}>
+            {shown.caption ?? ""}
+          </Txt>
+          <SetPlaces set={set} />
+        </View>
+      ) : shown.caption !== undefined ? (
         <Txt spec={{ voice: "app", scale: 13.5 / 12.5 }} paddingTop={2} paddingHorizontal={2}>
           {shown.caption}
         </Txt>
@@ -114,14 +132,42 @@ export function useShownSrc(item: PublishedRef, project: string | undefined, tas
   return src;
 }
 
+/**
+ * The set's own place buttons (the person, 2026-11-27), at the right of the caption's line: the whole set
+ * to the main view, a split or the side panel, lit where it stands (`useSetPlaces`), a press moving it
+ * there (`pressSetPlace`) on the item it was showing, the others beside it.
+ */
+function SetPlaces({ set }: { set: ShownSet }): JSX.Element {
+  const phone = usePhone();
+  const here = usePlacesHere(phone);
+  const lit = useSetPlaces(set.key);
+  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
+  return <PlaceButtons offered={offered} lit={lit} onPlace={(place) => pressSetPlace(place, lit, set, phone)} />;
+}
+
 function Tile({ item, width, artifacts, set, index }: { item: PublishedRef; width: number; artifacts?: ArtifactSurface | undefined; set: ShownSet; index: number }): JSX.Element {
   const t = useTokens();
   const panel = useValuePanel();
+  const phone = usePhone();
+  const here = usePlacesHere(phone);
+  const canHover = useCanHover();
+  const [hovered, hover] = useHover();
+  const lit = useLitPlaces({ id: item.id, version: item.version, follows: item.version });
   const project = artifacts?.project !== undefined ? { project: artifacts.project } : {};
   const src = useShownSrc(item, artifacts?.project, artifacts?.taskId ?? item.taskId);
   const name = item.title ?? item.entry;
+  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
+  // The picture's own place buttons (the person, 2026-11-27): over its top right while it is hovered or
+  // open somewhere (that place lit), and always where nothing hovers (a phone).
+  const places =
+    hovered || lit.length > 0 || !canHover ? (
+      <View position="absolute" top={6} right={6}>
+        <PlaceButtons offered={offered} lit={lit} onPlace={(place) => pressPlace(place, lit, item, artifacts ?? surfaceOf(item.taskId, undefined), phone, item.version, { set, index })} />
+      </View>
+    ) : null;
   return (
     <View width={width} gap={5} minWidth={0}>
+      <View position="relative" {...(hover as object)}>
       <Press
         onPress={() => (panel?.openInSet !== undefined ? panel.openInSet(set, index) : panel?.open({ title: name, published: { ref: item, ...project } }))}
         title={`Open ${name} in the side panel, with the others beside it`}
@@ -137,6 +183,9 @@ function Tile({ item, width, artifacts, set, index }: { item: PublishedRef; widt
         {/* Stretched, not centred: the picture measures the width it is given, and a centred box gives it none. */}
         {src !== null ? <Picture src={src} alt={name} maxHeight={168} box={{ alignSelf: "center" }} /> : null}
       </Press>
+      {/* Over the picture, not in its press: a button inside a button is no button at all. */}
+      {places}
+      </View>
       <Txt spec={{ voice: "data", scale: 11.5 / 12.5, color: "dim" }} numberOfLines={1}>
         {name} · v{item.version}
       </Txt>

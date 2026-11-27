@@ -89,6 +89,9 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         const to = next.entries[next.entries.length - 1] as PaneEntry | undefined;
         if (to === undefined || from === undefined) return splitView.set(leavePane(now, pane));
         if (to.key === from.key) return splitView.set(setPath(now, pane, { entries: [...path.entries.slice(0, -1), to], ahead: path.ahead }));
+        // A step sideways (another item of a shown set, `stepInSet`): in place of the one on top, not a step in the history.
+        const sideways = next.entries.length === path.entries.length && next.entries.slice(0, -1).every((entry, i) => entry.key === path.entries[i]?.key);
+        if (sideways) return splitView.set(setPath(now, pane, { entries: [...path.entries.slice(0, -1), to], ahead: [] }));
         const walkedBack = next.entries.length < path.entries.length && next.entries.every((entry, i) => entry.key === path.entries[i]?.key);
         const up = walkedBack ? parentOf(from) : to;
         splitView.set(up === undefined ? leavePane(now, pane) : setPath(now, pane, pushPath(path, up)));

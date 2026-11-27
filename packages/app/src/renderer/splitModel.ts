@@ -23,7 +23,7 @@
  * Pure: a value in, a new value out. The shell holds the split (`viewState.ts`' `splitView`) and the
  * panes draw it (`SplitPane.tsx`); the rules are tested here without a window.
  */
-import type { PanelEntry, SubagentWalkStep } from "./panelStack";
+import type { PanelEntry, ShownSet, SubagentWalkStep } from "./panelStack";
 import type { PublishedRef } from "./transcriptRows";
 
 /** Where an artifact, or anything a pane can hold, can be put: the first pane (the main view), the second (a split), the side panel. */
@@ -468,6 +468,27 @@ export function shownPlacesOf(id: string, at: PlacesAt): Place[] {
  */
 export function litPlacesOf(shown: { id: string; version: number; follows?: number | undefined }, at: PlacesAt): Place[] {
   return placesWhere(at, ({ ref, follows }) => ref.id === shown.id && (ref.version === shown.version || (shown.follows !== undefined && follows === shown.follows)));
+}
+
+/**
+ * The set an entry shows, of what one `show_artifact` call showed together: the set itself (`shown`), or
+ * one of its items with the others beside it (a `preview` opened `within` it). A picture of it opened on
+ * its own is not the set's.
+ */
+export function setOfEntry(entry: PaneEntry | undefined | null): ShownSet | undefined {
+  if (entry?.kind === "shown") return entry.set;
+  if (entry?.kind === "preview") return entry.within;
+  return undefined;
+}
+
+/**
+ * Every place a shown set stands in now, by its key: the places whose top is the set, or one of its items
+ * with the others beside it — what the set's own place buttons light (the person, 2026-11-27). The main
+ * view drawn over a room with no panes holds one artifact alone, never a set.
+ */
+export function setPlacesOf(key: string, at: PlacesAt): Place[] {
+  const holds = (entry: PaneEntry | undefined): boolean => setOfEntry(entry)?.key === key;
+  return [...(holds(at.first) ? (["main"] as const) : []), ...(holds(at.second) ? (["split"] as const) : []), ...(holds(at.panel) ? (["panel"] as const) : [])];
 }
 
 function placesWhere(at: PlacesAt, is: (held: { ref: PublishedRef; follows?: number | undefined }) => boolean): Place[] {
