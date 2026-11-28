@@ -29,10 +29,11 @@ import {
   type TaskProjection,
   type WorkflowShape,
 } from "./projection";
-import { loadSnapshot, readWorkflowFiles } from "./snapshots";
+import { pinnedSnapshot, readWorkflowFiles } from "./snapshots";
 import { scriptContextOf } from "./userModules";
 import { EFFECTIVE_SEQ, EFFECTIVE_SESSION } from "./sessionStore";
 import { workflowShape } from "./shape";
+import { ASIDE_ROLE, RECORD_ROLE_PATH } from "./callRole";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.views");
@@ -154,14 +155,36 @@ function childrenByParent(metas: readonly TaskMeta[]): Map<string, string[]> {
 }
 
 /**
+ * The tasks these parents started from a call drawn aside (`renderUI`'s `role: "aside"`): the task id a
+ * `start_task` record so marked answered with. A review of a conversation, a lesson learned from it —
+ * work JaiRA does beside the conversation, whose moves are no news of it.
+ */
+function startedAsideBy(project: Project, parents: readonly string[]): Set<string> {
+  if (parents.length === 0) return new Set();
+  const rows = project.db
+    .prepare(
+      `SELECT json_extract(result_json, '$.value.task_id') AS child FROM operation_records
+        WHERE task_id IN (SELECT value FROM json_each(?))
+          AND json_extract(request_json, '$.functionRef') = 'start_task'
+          AND json_extract(request_json, '${RECORD_ROLE_PATH}') = '${ASIDE_ROLE}'`,
+    )
+    .all(JSON.stringify(parents)) as Array<{ child: unknown }>;
+  return new Set(rows.flatMap((r) => (typeof r.child === "string" ? [r.child] : [])));
+}
+
+/**
  * Each parent's newest clock UNDER it — the row's clock or newest reply of every task below it, at any
- * depth (`TaskSummary.childAt`). A task with nothing under it, or only tasks with no row, has none.
+ * depth (`TaskSummary.childAt`). A task with nothing under it, or only tasks with no row, has none. Nor
+ * does a task started aside (`startedAsideBy`), or anything under it: the review a conversation started
+ * finishing is not the conversation saying something. What such a task ASKS still reaches the person,
+ * as every ask does — it is only not news to read.
  */
 function newestUnderOf(project: Project, rows: ReadonlyArray<{ taskId: string; updatedAt: number }>, metas: readonly TaskMeta[]): Map<string, number> {
   const children = childrenByParent(metas);
   const out = new Map<string, number>();
   if (children.size === 0) return out;
-  const rowAt = new Map(rows.map((r) => [r.taskId, r.updatedAt] as const));
+  const aside = startedAsideBy(project, [...children.keys()]);
+  const rowAt = new Map(rows.flatMap((r) => (aside.has(r.taskId) ? [] : [[r.taskId, r.updatedAt] as const])));
   const replies = lastMessageTimes(project, [...new Set([...children.values()].flat())].filter((id) => rowAt.has(id)));
   const memo = new Map<string, number>();
   const newest = (taskId: string, path: Set<string>): number => {
@@ -306,29 +329,6 @@ function cutLabelOf(type: string, payloadJson: string): string {
 }
 
 /**
- * Pinned snapshots read for drawing, by folder and hash — the newest {@link KEEP_PINNED}. A snapshot is
- * named by its content's hash, so what is kept under a name is what is there for good: each board answer
- * read every card's snapshot again, every file of it, and hashed it whole to check it (2026-11-06: a
- * third of a window's launch in the main process). For reading only: what is handed out is shared.
- */
-const pinned = new Map<string, WorkflowBundle>();
-const KEEP_PINNED = 256;
-function pinnedBundle(snapshotsDir: string, hash: string): WorkflowBundle {
-  const key = `${snapshotsDir}\u0000${hash}`;
-  const kept = pinned.get(key);
-  if (kept !== undefined) {
-    // Most recently used last, so the oldest is first to go.
-    pinned.delete(key);
-    pinned.set(key, kept);
-    return kept;
-  }
-  const bundle = loadSnapshot(snapshotsDir, hash);
-  pinned.set(key, bundle);
-  if (pinned.size > KEEP_PINNED) pinned.delete(pinned.keys().next().value!);
-  return bundle;
-}
-
-/**
  * The bundle a board level is drawn from. A pinned snapshot wins — execution
  * reads the snapshot (DESIGN §5.3), so that is what the run being displayed
  * actually followed; live `workflows/` is the fallback before anything is pinned.
@@ -336,7 +336,7 @@ function pinnedBundle(snapshotsDir: string, hash: string): WorkflowBundle {
 export function bundleFor(project: Project, workflow: string, snapshotHash?: string): WorkflowBundle | undefined {
   if (snapshotHash !== undefined) {
     try {
-      return pinnedBundle(project.paths.snapshotsDir, snapshotHash);
+      return pinnedSnapshot(project.paths.snapshotsDir, snapshotHash);
     } catch {
       // A missing/corrupt snapshot shouldn't blank the board — fall back below.
     }
@@ -1106,6 +1106,11 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
  * that was waiting on the person as unread after each restart (2026-11-22: "the issue where a chat
  * gets marked as unseen even though it was seen is back"). The message that ends a wait is the call
  * that starts right after it, which is counted.
+ *
+ * Nor a call the script drew aside (`renderUI`'s `role: "aside"`, stamped on its record — `callRole.ts`):
+ * reading the conversation back, checking a message for a correction, starting its review after four
+ * idle hours. Those are work beside the conversation, not its turns, and the review's `start_task` lit
+ * every conversation idle that long as unread at once (2026-11-27).
  */
 export function lastMessageTimes(project: Project, taskIds: readonly string[]): Map<string, number> {
   if (taskIds.length === 0) return new Map();
@@ -1113,7 +1118,8 @@ export function lastMessageTimes(project: Project, taskIds: readonly string[]): 
     .prepare(
       `SELECT task_id, MAX(CASE WHEN status = 'completed' AND ended_at IS NOT NULL THEN ended_at ELSE started_at END) AS at
          FROM operation_records WHERE task_id IN (SELECT value FROM json_each(?))
-          AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input' GROUP BY task_id`,
+          AND COALESCE(json_extract(request_json, '$.functionRef'), '') <> 'input'
+          AND COALESCE(json_extract(request_json, '${RECORD_ROLE_PATH}'), '') <> '${ASIDE_ROLE}' GROUP BY task_id`,
     )
     .all(JSON.stringify(taskIds)) as Array<{ task_id: string; at: number | null }>;
   return new Map(rows.flatMap((r) => (r.at === null ? [] : [[r.task_id, r.at] as [string, number]])));

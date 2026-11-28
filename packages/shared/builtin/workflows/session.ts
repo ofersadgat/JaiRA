@@ -12,8 +12,10 @@
  * Everything here is ordinary code: change what is checked, when the improver runs, or turn it off, by
  * copying this file into a layer above and editing it — or let a lesson do that.
  *
- * `renderUI` says how a call is drawn, and nothing else (decision 0033): the check on each message is an
- * aside — folded in chat, open in the task view — and the reply and the wait are the conversation.
+ * `renderUI` says how a call is drawn (decision 0033): the check on each message, and the lesson and the
+ * review it starts, are asides — folded in chat, open in the task view — and the reply and the wait are
+ * the conversation. An aside is also no news of the conversation: a read conversation stays read while
+ * its review runs (`callRole.ts`, 2026-11-27).
  */
 import { llm, input, renderUI } from "@declarative-ai/hw/script";
 import { conversation_digest, start_task } from "$REGISTRY";
@@ -104,7 +106,7 @@ export default async function session(
           label: "notice",
         }), { role: "aside", title: "Checking for a correction" });
         if (seen.verdict === "clear") {
-          await start_task({ workflow: "improve/lesson", title: "Lesson: " + seen.lesson, inputs: { lesson: seen.lesson, workflow: "session", context: { task: recent.task, session: conv }, approval } });
+          await renderUI(start_task({ workflow: "improve/lesson", title: "Lesson: " + seen.lesson, inputs: { lesson: seen.lesson, workflow: "session", context: { task: recent.task, session: conv }, approval } }), { role: "aside", title: "Learning from a correction" });
           lessons = lessons + 1;
         } else if (seen.verdict === "maybe") {
           maybes = [...maybes, { lesson: seen.lesson, quote: seen.quote }];
@@ -116,7 +118,7 @@ export default async function session(
     const next = await input({ prompt: "Your next message", idle: "4h" });
     if (next !== null && next.idle === true) {
       if (improve && turns > since) {
-        await start_task({ workflow: "improve/conversation", title: "Review a conversation for lessons", inputs: { context: { session: conv, maybes }, approval } });
+        await renderUI(start_task({ workflow: "improve/conversation", title: "Review a conversation for lessons", inputs: { context: { session: conv, maybes }, approval } }), { role: "aside", title: "Reviewing the conversation" });
         since = turns;
         maybes = [];
       }
@@ -129,7 +131,7 @@ export default async function session(
     }
   }
   if (improve && turns > since) {
-    await start_task({ workflow: "improve/conversation", title: "Review a conversation for lessons", inputs: { context: { session: conv, maybes }, approval } });
+    await renderUI(start_task({ workflow: "improve/conversation", title: "Review a conversation for lessons", inputs: { context: { session: conv, maybes }, approval } }), { role: "aside", title: "Reviewing the conversation" });
   }
   return { turns, lessons };
 }

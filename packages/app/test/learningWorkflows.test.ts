@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { canonicalModulePath, initProject, mirrorStarted, userModules, type Project } from "@jaira/persistence";
+import { canonicalModulePath, initProject, loadSnapshot, mirrorStarted, userModules, type Project } from "@jaira/persistence";
 import { moduleHash } from "@declarative-ai/hw";
 import type { PushMessage } from "@jaira/shared";
 import type { FakeRule } from "@jaira/runtime";
@@ -59,6 +59,22 @@ describe("a conversation that is a program (decision 0029 §2)", { timeout: 60_0
     expect(new Set(history.map((h) => (h as { sessionId?: string }).sessionId)).size).toBe(1);
     // Waiting for the next message is not something waiting on the person.
     expect(service.pendingInteractions().filter((p) => p.taskId === taskId)).toEqual([]);
+  });
+
+  // The person, 2026-11-27: "this is the third time that the same bug has happened where I restart the
+  // client and every task is marked as unseen" — the review a conversation starts when idle moved its clock.
+  it("draws the lesson and the review it starts aside, and the reply as the conversation", async () => {
+    const { taskId } = service.createTask({ title: "Talk", workflow: "session", inputs: { message: "hello there", improve: false } });
+    await service.startTask({ taskId, fake: [{ promptIncludes: "hello there", output: "hi!" }] });
+    await eventually(() => service.sessionHistory({ taskId }).length >= 1, "the first reply", 20_000);
+    const project = (service as unknown as { session(): { project: Project } }).session().project;
+    const states = loadSnapshot(project.paths.snapshotsDir, project.runtime.get(taskId)!.snapshotHash!).states as Record<string, { label?: string; present?: { role?: string } }>;
+    const calls = Object.values(states).filter((s) => s.label === "start_task" || s.label === "reply");
+    expect(calls.filter((s) => s.label === "start_task").map((s) => s.present?.role)).toEqual(["aside", "aside", "aside"]);
+    expect(calls.find((s) => s.label === "reply")?.present?.role).toBeUndefined();
+    // The reply's record carries no role, so it is what the conversation's clock reads.
+    const roles = project.db.prepare(`SELECT json_extract(request_json, '$.present.role') AS role FROM operation_records WHERE task_id = ? AND json_extract(request_json, '$.kind') = 'prompt'`).all(taskId) as Array<{ role: unknown }>;
+    expect(roles.map((r) => r.role)).toEqual([null]);
   });
 });
 
@@ -481,12 +497,16 @@ describe("noticing a correction (decision 0029 §6)", { timeout: 60_000 }, () =>
     await eventually(() => finished(child.taskId), "the lesson to finish", 20_000);
     await eventually(() => service.listTasks().find((t) => t.taskId === taskId)?.status === "completed", "the conversation to read as idle", 20_000);
     expect(service.listProjects().find((p) => p.kind === "user")).toMatchObject({ waiting: 0 });
-    // The lesson moved, so the conversation is news too: its clock is held to the lesson's, here and in
-    // its project's ended row ("if a child task updates, it should also mark the parent as unseen").
+    // The lesson was started aside (`renderUI`'s `role: "aside"`), so its moving is no news of the
+    // conversation: its ask kept the conversation waiting, but its end does not mark it unread, here or in
+    // its project's ended row (2026-11-27: the review a conversation started lit every one unread). A task
+    // a conversation starts as itself still is ("if a child task updates, it should also mark the parent as
+    // unseen" — persistence's callRole.test.ts).
     const ended = service.listTasks().find((t) => t.taskId === child.taskId)!;
     const talk = service.listTasks().find((t) => t.taskId === taskId)!;
-    expect(talk.childAt).toBeGreaterThanOrEqual(ended.updatedAt);
-    expect(service.listProjects().find((p) => p.kind === "user")!.ended.find((t) => t.taskId === taskId)?.updatedAt).toBeGreaterThanOrEqual(ended.updatedAt);
+    expect(talk.childAt).toBeUndefined();
+    expect(talk.lastMessageAt ?? 0).toBeLessThan(ended.updatedAt);
+    expect(service.listProjects().find((p) => p.kind === "user")!.ended.find((t) => t.taskId === taskId)?.updatedAt).toBeLessThan(ended.updatedAt);
     service.cancelTask(taskId);
   });
 

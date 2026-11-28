@@ -69,6 +69,7 @@ import { uuidv7 } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
 import { dehydrate, hydrate, release } from "./blobStore";
 import { messagesOfRecord } from "./recordMessages";
+import { callRoleOf } from "./callRole";
 import type { MessageAuthor } from "@jaira/shared";
 
 /** Who wrote the message a record is made with, when the person did not — see `withAuthors`. */
@@ -153,6 +154,11 @@ interface Row {
  */
 export interface SessionScope {
   taskId?: string;
+  /**
+   * Where the task's pinned snapshot is, so a record opened for one of its calls carries the role the
+   * script drew that call in (`callRoleOf`). `sessionStoreFor` sets it; a store without it stamps none.
+   */
+  snapshotsDir?: string;
 }
 
 const log = createLogger("jaira.persistence.sessions");
@@ -1091,6 +1097,13 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // Who wrote the message it is made with, beside it — see `withAuthors`. Only on a request that has one.
     if (this.openingBy !== undefined && typeof ask["user"] === "string") ask[OPENING_BY] = this.openingBy;
     if (this.chatSettings !== undefined) ask[CHAT_SETTINGS] = this.chatSettings;
+    // How the script drew the call (`renderUI`'s role), beside the ask, so a call made aside is read as
+    // one without the workflow: a conversation's clock leaves it out (`lastMessageTimes`).
+    const role =
+      this.scope.taskId !== undefined && this.scope.snapshotsDir !== undefined && stub.scope?.instanceId !== undefined
+        ? callRoleOf(this.db, this.scope.snapshotsDir, this.scope.taskId, stub.scope.instanceId)
+        : undefined;
+    if (role !== undefined) ask["present"] = { role };
     if (at !== undefined) {
       ask["session"] = {
         id: at.id,

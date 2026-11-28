@@ -381,7 +381,7 @@ export function sessionStoreFor(project: Project, scope: SessionScope = {}, open
     filed && scope.taskId !== undefined
       ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId)
       : undefined;
-  return new SqliteSessionStore(project.db, scope, log, openingBy, chatSettings);
+  return new SqliteSessionStore(project.db, { snapshotsDir: project.paths.snapshotsDir, ...scope }, log, openingBy, chatSettings);
 }
 
 /**
